@@ -24,7 +24,7 @@ export function StageBoard({ automationId }: StageBoardProps) {
 
   if (stages.length === 0) {
     return (
-      <div className="flex h-32 items-center justify-center text-text-dim text-sm">
+      <div className="flex h-32 items-center justify-center text-fg-tertiary text-sm">
         No stage data available yet
       </div>
     )
@@ -36,7 +36,7 @@ export function StageBoard({ automationId }: StageBoardProps) {
         <div key={stage.stage_id} className="flex items-center gap-2">
           <StageColumn stage={stage} isFinal={i === stages.length - 1} />
           {i < stages.length - 1 && (
-            <ArrowRight className="h-4 w-4 text-text-dim shrink-0" />
+            <ArrowRight className="h-4 w-4 text-fg-tertiary shrink-0" />
           )}
         </div>
       ))}

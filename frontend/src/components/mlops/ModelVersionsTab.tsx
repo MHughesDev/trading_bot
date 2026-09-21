@@ -85,7 +85,7 @@ function PromoteModal({
         <h3 className="text-base font-semibold text-text mb-1">
           Promote v{version.version} to Production
         </h3>
-        <p className="text-sm text-text-muted mb-5">
+        <p className="text-sm text-fg-secondary mb-5">
           This will set the production alias to version {version.version}.
         </p>
 
@@ -94,14 +94,14 @@ function PromoteModal({
           {checks.map((check) => (
             <div key={check.label} className="flex items-center gap-2.5">
               {check.ok ? (
-                <CheckCircle2 className="h-4 w-4 text-pnl-up shrink-0" />
+                <CheckCircle2 className="h-4 w-4 text-pos shrink-0" />
               ) : (
-                <Circle className="h-4 w-4 text-text-dim shrink-0" />
+                <Circle className="h-4 w-4 text-fg-tertiary shrink-0" />
               )}
               <span
                 className={cn(
                   'text-sm',
-                  check.ok ? 'text-text' : 'text-text-muted line-through',
+                  check.ok ? 'text-text' : 'text-fg-secondary line-through',
                 )}
               >
                 {check.label}
@@ -111,9 +111,9 @@ function PromoteModal({
         </div>
 
         {!allPass && (
-          <div className="flex items-start gap-2 rounded-lg bg-warning/10 border border-warning/20 px-3 py-2.5 mb-4">
-            <AlertCircle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
-            <p className="text-xs text-warning">
+          <div className="flex items-start gap-2 rounded-lg bg-warn/10 border border-warn/20 px-3 py-2.5 mb-4">
+            <AlertCircle className="h-4 w-4 text-warn shrink-0 mt-0.5" />
+            <p className="text-xs text-warn">
               Some checks failed. Provide a reason to override.
             </p>
           </div>
@@ -121,14 +121,14 @@ function PromoteModal({
 
         <div className="mb-5">
           <label className="block text-sm font-medium text-text mb-1.5">
-            Reason {!allPass && <span className="text-pnl-down">*</span>}
+            Reason {!allPass && <span className="text-neg">*</span>}
           </label>
           <input
             type="text"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="Why is this version being promoted?"
-            className="w-full h-9 rounded-lg border border-border bg-surface px-3 text-sm text-text placeholder:text-text-dim focus:outline-none focus:border-accent"
+            className="w-full h-9 rounded-lg border border-border bg-surface px-3 text-sm text-text placeholder:text-fg-tertiary focus:outline-none focus:border-accent"
           />
         </div>
 
@@ -189,12 +189,12 @@ function VersionRow({
       <div
         className={cn(
           'border border-border rounded-xl bg-surface p-4 transition-shadow',
-          isProduction && 'border-pnl-up/40 bg-pnl-up/5',
+          isProduction && 'border-pos/40 bg-pos/5',
         )}
       >
         <div className="flex items-center gap-3">
           {/* Version badge */}
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-surface-2 font-mono text-sm font-bold text-text shrink-0">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sunken font-mono text-sm font-bold text-text shrink-0">
             v{version.version}
           </div>
 
@@ -202,17 +202,17 @@ function VersionRow({
             <div className="flex items-center gap-2 flex-wrap">
               <ModelStatusPill status={version.status} />
               {isProduction && (
-                <span className="inline-flex items-center rounded-full bg-pnl-up/15 px-2 py-0.5 text-xs font-medium text-pnl-up border border-pnl-up/30">
+                <span className="inline-flex items-center rounded-full bg-pos/15 px-2 py-0.5 text-xs font-medium text-pos border border-pos/30">
                   production
                 </span>
               )}
             </div>
             {version.version_note && (
-              <p className="text-xs text-text-muted mt-1 truncate">{version.version_note}</p>
+              <p className="text-xs text-fg-secondary mt-1 truncate">{version.version_note}</p>
             )}
           </div>
 
-          <div className="text-xs text-text-dim font-mono shrink-0">
+          <div className="text-xs text-fg-tertiary font-mono shrink-0">
             {format(new Date(version.created_at), 'MMM d, HH:mm')}
           </div>
 
@@ -220,7 +220,7 @@ function VersionRow({
           {metricEntries.length > 0 && (
             <div className="flex gap-2 shrink-0">
               {metricEntries.slice(0, 2).map(([k, v]) => (
-                <span key={k} className="text-xs font-mono text-text-muted">
+                <span key={k} className="text-xs font-mono text-fg-secondary">
                   {k}: <span className="text-text">{v.toFixed(3)}</span>
                 </span>
               ))}
@@ -257,7 +257,7 @@ function VersionRow({
             {metricEntries.length > 2 && (
               <button
                 onClick={() => setExpanded(!expanded)}
-                className="text-text-dim hover:text-text"
+                className="text-fg-tertiary hover:text-text"
               >
                 {expanded ? (
                   <ChevronUp className="h-4 w-4" />
@@ -280,8 +280,8 @@ function VersionRow({
             >
               <div className="mt-3 pt-3 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {metricEntries.map(([k, v]) => (
-                  <div key={k} className="rounded-lg bg-surface-2 p-2">
-                    <p className="text-xs text-text-muted">{k}</p>
+                  <div key={k} className="rounded-lg bg-sunken p-2">
+                    <p className="text-xs text-fg-secondary">{k}</p>
                     <p className="text-sm font-mono font-medium text-text mt-0.5">
                       {v.toFixed(4)}
                     </p>
@@ -316,7 +316,7 @@ export function ModelVersionsTab({ modelId }: Props) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-12 text-text-dim">
+      <div className="flex items-center justify-center py-12 text-fg-tertiary">
         <Loader2 className="h-5 w-5 animate-spin" />
       </div>
     )
@@ -326,7 +326,7 @@ export function ModelVersionsTab({ modelId }: Props) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <p className="text-sm font-medium text-text">No versions yet</p>
-        <p className="text-xs text-text-muted mt-1">
+        <p className="text-xs text-fg-secondary mt-1">
           Run a training job to create the first version.
         </p>
       </div>

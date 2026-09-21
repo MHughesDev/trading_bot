@@ -102,7 +102,7 @@ function CompareModal({
               </option>
             ))}
           </select>
-          <GitCompare className="h-5 w-5 text-text-dim shrink-0" />
+          <GitCompare className="h-5 w-5 text-fg-tertiary shrink-0" />
           <select
             value={versionB}
             onChange={(e) => setVersionB(e.target.value)}
@@ -124,21 +124,21 @@ function CompareModal({
           <div className="rounded-xl border border-border overflow-hidden">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-border bg-surface-2">
-                  <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Metric</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-text-muted">
+                <tr className="border-b border-border bg-sunken">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Metric</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-fg-secondary">
                     v{result.a.version}
                   </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-text-muted">
+                  <th className="px-4 py-3 text-right text-xs font-medium text-fg-secondary">
                     v{result.b.version}
                   </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-text-muted">Delta</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-fg-secondary">Delta</th>
                 </tr>
               </thead>
               <tbody>
                 {Object.entries(result.deltas).map(([key, { a, b, delta }]) => (
                   <tr key={key} className="border-b border-border last:border-0">
-                    <td className="px-4 py-2.5 text-sm text-text-muted">{key}</td>
+                    <td className="px-4 py-2.5 text-sm text-fg-secondary">{key}</td>
                     <td className="px-4 py-2.5 text-sm font-mono text-right text-text">
                       {a.toFixed(4)}
                     </td>
@@ -148,7 +148,7 @@ function CompareModal({
                     <td
                       className={cn(
                         'px-4 py-2.5 text-sm font-mono text-right font-medium',
-                        delta > 0 ? 'text-pnl-up' : delta < 0 ? 'text-pnl-down' : 'text-text-muted',
+                        delta > 0 ? 'text-pos' : delta < 0 ? 'text-neg' : 'text-fg-secondary',
                       )}
                     >
                       {delta > 0 ? '+' : ''}
@@ -177,7 +177,7 @@ export function ModelEvalsTab({ modelId }: Props) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-12 text-text-dim">
+      <div className="flex items-center justify-center py-12 text-fg-tertiary">
         <Loader2 className="h-5 w-5 animate-spin" />
       </div>
     )
@@ -187,7 +187,7 @@ export function ModelEvalsTab({ modelId }: Props) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <p className="text-sm font-medium text-text">No evaluations yet</p>
-        <p className="text-xs text-text-muted mt-1">
+        <p className="text-xs text-fg-secondary mt-1">
           Run an evaluation from the Versions tab.
         </p>
       </div>
@@ -209,13 +209,13 @@ export function ModelEvalsTab({ modelId }: Props) {
       <div className="rounded-xl border border-border bg-surface overflow-hidden">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-border bg-surface-2">
-              <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Version</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Dataset</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Status</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Primary metric</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Regression</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Date</th>
+            <tr className="border-b border-border bg-sunken">
+              <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Version</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Dataset</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Status</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Primary metric</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Regression</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Date</th>
             </tr>
           </thead>
           <tbody>
@@ -229,7 +229,7 @@ export function ModelEvalsTab({ modelId }: Props) {
                   <td className="px-4 py-3 text-sm font-mono font-medium text-text">
                     v{ev.version}
                   </td>
-                  <td className="px-4 py-3 text-xs text-text-muted font-mono">
+                  <td className="px-4 py-3 text-xs text-fg-secondary font-mono">
                     {ev.dataset_id ?? '—'}
                   </td>
                   <td className="px-4 py-3">
@@ -237,10 +237,10 @@ export function ModelEvalsTab({ modelId }: Props) {
                       className={cn(
                         'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
                         ev.status === 'completed'
-                          ? 'bg-pnl-up/10 text-pnl-up'
+                          ? 'bg-pos/10 text-pos'
                           : ev.status === 'failed'
-                            ? 'bg-pnl-down/10 text-pnl-down'
-                            : 'bg-surface-2 text-text-muted',
+                            ? 'bg-neg/10 text-neg'
+                            : 'bg-sunken text-fg-secondary',
                       )}
                     >
                       {ev.status}
@@ -249,23 +249,23 @@ export function ModelEvalsTab({ modelId }: Props) {
                   <td className="px-4 py-3 text-sm font-mono text-text">
                     {primaryMetric ? (
                       <>
-                        <span className="text-text-muted text-xs">{primaryMetric[0]}: </span>
+                        <span className="text-fg-secondary text-xs">{primaryMetric[0]}: </span>
                         {primaryMetric[1].toFixed(4)}
                       </>
                     ) : (
-                      <span className="text-text-dim">—</span>
+                      <span className="text-fg-tertiary">—</span>
                     )}
                   </td>
                   <td className="px-4 py-3">
                     {ev.regression_ok === true ? (
-                      <CheckCircle2 className="h-4 w-4 text-pnl-up" />
+                      <CheckCircle2 className="h-4 w-4 text-pos" />
                     ) : ev.regression_ok === false ? (
-                      <XCircle className="h-4 w-4 text-pnl-down" />
+                      <XCircle className="h-4 w-4 text-neg" />
                     ) : (
-                      <span className="text-text-dim text-xs">—</span>
+                      <span className="text-fg-tertiary text-xs">—</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-xs text-text-dim font-mono">
+                  <td className="px-4 py-3 text-xs text-fg-tertiary font-mono">
                     {format(new Date(ev.created_at), 'MMM d, HH:mm')}
                   </td>
                 </tr>

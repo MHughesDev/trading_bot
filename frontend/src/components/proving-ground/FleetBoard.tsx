@@ -16,9 +16,9 @@ function isRunning(p: SuiteProgress): boolean {
 }
 
 function barClass(p: SuiteProgress): string {
-  if (p.phase.endsWith('_failed')) return 'bg-pnl-down'
+  if (p.phase.endsWith('_failed')) return 'bg-neg'
   if (isRunning(p)) return 'bg-accent'
-  return 'bg-pnl-up'
+  return 'bg-pos'
 }
 
 export function FleetBoard({
@@ -40,16 +40,16 @@ export function FleetBoard({
     <Card>
       <CardHeader className="flex flex-row items-center justify-between py-3">
         <CardTitle className="flex items-center gap-2 text-sm">
-          <Activity className={`h-4 w-4 ${runningCount > 0 ? 'text-accent' : 'text-text-dim'}`} />
+          <Activity className={`h-4 w-4 ${runningCount > 0 ? 'text-accent' : 'text-fg-tertiary'}`} />
           Active Runs
         </CardTitle>
-        <span className="text-xs text-text-dim">
+        <span className="text-xs text-fg-tertiary">
           {runningCount > 0 ? `${runningCount} running` : 'idle'}
         </span>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {rows.length === 0 ? (
-          <p className="text-xs text-text-dim">
+          <p className="text-xs text-fg-tertiary">
             No tests running. Start one below — each appears here live while it executes.
           </p>
         ) : (
@@ -60,17 +60,17 @@ export function FleetBoard({
                   <span className="truncate font-medium text-text">{exp.experiment_id}</span>
                   <Badge variant="outline" className="font-mono text-[10px]">{p.phase}</Badge>
                 </span>
-                <span className="shrink-0 tabular-nums text-text-dim">
+                <span className="shrink-0 tabular-nums text-fg-tertiary">
                   {Math.round(p.progress)}% · {exp.trial_counter.toLocaleString()} searches used
                 </span>
               </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-sunken">
                 <div
                   className={`h-full rounded-full transition-all ${barClass(p)}`}
                   style={{ width: `${Math.min(100, Math.max(0, p.progress))}%` }}
                 />
               </div>
-              {p.detail && <span className="truncate text-[11px] text-text-dim">{p.detail}</span>}
+              {p.detail && <span className="truncate text-[11px] text-fg-tertiary">{p.detail}</span>}
             </div>
           ))
         )}

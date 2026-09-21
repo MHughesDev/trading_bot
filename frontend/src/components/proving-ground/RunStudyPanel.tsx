@@ -191,7 +191,7 @@ export function RunStudyPanel({ expId, onRan }: { expId: string; onRan?: () => v
               ))}
             </SelectContent>
           </Select>
-          <p className="mt-1 text-[11px] text-text-dim">
+          <p className="mt-1 text-[11px] text-fg-tertiary">
             {STUDY_KINDS.find((s) => s.value === kind)?.blurb}
           </p>
         </Field>
@@ -252,12 +252,12 @@ export function RunStudyPanel({ expId, onRan }: { expId: string; onRan?: () => v
         )}
 
         {needsNull && (
-          <p className="text-[11px] text-text-dim">
+          <p className="text-[11px] text-fg-tertiary">
             Null:{' '}
             {chosenNullId ? (
               <span className="font-mono text-text">{nulls.data?.chosen?.kind}</span>
             ) : (
-              <span className="text-pnl-down">none chosen</span>
+              <span className="text-neg">none chosen</span>
             )}
           </p>
         )}
@@ -294,7 +294,7 @@ export function RunStudyPanel({ expId, onRan }: { expId: string; onRan?: () => v
         </Field>
 
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-pnl-down">{invalid ?? ''}</span>
+          <span className="text-[11px] text-neg">{invalid ?? ''}</span>
           <Button size="sm" disabled={!!invalid || run.isPending} onClick={() => run.mutate()}>
             {run.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
             Run backtest
@@ -308,7 +308,7 @@ export function RunStudyPanel({ expId, onRan }: { expId: string; onRan?: () => v
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
-      <Label className="text-[11px] text-text-dim">{label}</Label>
+      <Label className="text-[11px] text-fg-tertiary">{label}</Label>
       {children}
     </div>
   )
@@ -343,7 +343,7 @@ function RangeEditor({
               value={r.start}
               onChange={(e) => set(i, { start: e.target.value })}
             />
-            <span className="text-text-dim">→</span>
+            <span className="text-fg-tertiary">→</span>
             <Input
               type="datetime-local"
               value={r.end}

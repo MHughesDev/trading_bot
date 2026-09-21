@@ -179,21 +179,21 @@ export function ModelTrainTab({ modelId }: Props) {
         <h3 className="text-sm font-medium text-text">Training config</h3>
 
         {/* Data selection */}
-        <div className="space-y-3 rounded-lg border border-border bg-surface-2 p-3">
+        <div className="space-y-3 rounded-lg border border-border bg-sunken p-3">
           <div className="flex items-center gap-1.5">
             <Database className="h-3.5 w-3.5 text-accent" />
             <span className="text-xs font-medium text-text">Training data</span>
           </div>
 
           {!marketInstruments || marketInstruments.length === 0 ? (
-            <p className="text-xs text-text-dim">
+            <p className="text-xs text-fg-tertiary">
               No stored market data found. Initialize an asset first so bars
               accumulate in ClickHouse.
             </p>
           ) : (
             <>
               <div>
-                <label className="block text-[11px] font-medium text-text-muted mb-1">
+                <label className="block text-[11px] font-medium text-fg-secondary mb-1">
                   Instrument
                 </label>
                 <select
@@ -219,7 +219,7 @@ export function ModelTrainTab({ modelId }: Props) {
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] font-medium text-text-muted mb-1">
+                  <label className="block text-[11px] font-medium text-fg-secondary mb-1">
                     Timeframe
                   </label>
                   <select
@@ -236,7 +236,7 @@ export function ModelTrainTab({ modelId }: Props) {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[11px] font-medium text-text-muted mb-1">
+                  <label className="block text-[11px] font-medium text-fg-secondary mb-1">
                     Lookback
                   </label>
                   <select
@@ -255,7 +255,7 @@ export function ModelTrainTab({ modelId }: Props) {
               </div>
 
               <div>
-                <label className="block text-[11px] font-medium text-text-muted mb-1">
+                <label className="block text-[11px] font-medium text-fg-secondary mb-1">
                   Label horizon (forward return)
                 </label>
                 <select
@@ -273,7 +273,7 @@ export function ModelTrainTab({ modelId }: Props) {
               </div>
 
               {selectedCoverage && (
-                <p className="text-[11px] text-text-dim leading-relaxed">
+                <p className="text-[11px] text-fg-tertiary leading-relaxed">
                   {selectedCoverage.bars.toLocaleString()} bars stored ·{' '}
                   {fmtDate(selectedCoverage.first_ms)} – {fmtDate(selectedCoverage.last_ms)}
                 </p>
@@ -283,7 +283,7 @@ export function ModelTrainTab({ modelId }: Props) {
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-text-muted mb-1.5">
+          <label className="block text-xs font-medium text-fg-secondary mb-1.5">
             Version note
           </label>
           <input
@@ -292,15 +292,15 @@ export function ModelTrainTab({ modelId }: Props) {
             onChange={(e) => setVersionNote(e.target.value)}
             placeholder="e.g. Added dropout layer"
             disabled={!!activeRun}
-            className="w-full h-8 rounded-lg border border-border bg-surface px-2.5 text-xs text-text placeholder:text-text-dim focus:outline-none focus:border-accent disabled:opacity-50"
+            className="w-full h-8 rounded-lg border border-border bg-surface px-2.5 text-xs text-text placeholder:text-fg-tertiary focus:outline-none focus:border-accent disabled:opacity-50"
           />
         </div>
 
         <div className="flex items-center gap-1.5 text-[11px]">
-          <span className="rounded-md bg-surface-2 px-2 py-0.5 font-mono text-text-muted">
+          <span className="rounded-md bg-sunken px-2 py-0.5 font-mono text-fg-secondary">
             {framework}
           </span>
-          <span className="rounded-md bg-surface-2 px-2 py-0.5 font-mono text-text-muted">
+          <span className="rounded-md bg-sunken px-2 py-0.5 font-mono text-fg-secondary">
             {runtime}
           </span>
         </div>
@@ -340,14 +340,14 @@ export function ModelTrainTab({ modelId }: Props) {
         </div>
 
         {startMut.isError && (
-          <p className="text-xs text-pnl-down">Failed to start training.</p>
+          <p className="text-xs text-neg">Failed to start training.</p>
         )}
       </div>
 
       {/* Center — Progress */}
       <div className="rounded-xl border border-border bg-surface p-6 flex flex-col items-center justify-center gap-4">
         {runsLoading ? (
-          <Loader2 className="h-8 w-8 animate-spin text-text-dim" />
+          <Loader2 className="h-8 w-8 animate-spin text-fg-tertiary" />
         ) : displayRun ? (
           <>
             <CircularProgress value={displayRun.progress} />
@@ -356,7 +356,7 @@ export function ModelTrainTab({ modelId }: Props) {
               <p className="text-sm font-medium text-text capitalize">
                 {displayRun.status === 'running' ? displayRun.phase : displayRun.status}
               </p>
-              <p className="text-xs text-text-muted mt-1">
+              <p className="text-xs text-fg-secondary mt-1">
                 Elapsed: <span className="font-mono">{elapsed(displayRun)}</span>
               </p>
             </div>
@@ -365,7 +365,7 @@ export function ModelTrainTab({ modelId }: Props) {
             <div className="w-full max-w-xs">
               <Progress.Root
                 value={displayRun.progress}
-                className="relative h-1.5 w-full overflow-hidden rounded-full bg-surface-2"
+                className="relative h-1.5 w-full overflow-hidden rounded-full bg-sunken"
               >
                 <Progress.Indicator
                   className="h-full bg-accent transition-transform duration-500 ease-out"
@@ -375,7 +375,7 @@ export function ModelTrainTab({ modelId }: Props) {
             </div>
 
             {displayRun.error && (
-              <p className="text-xs text-pnl-down text-center px-4">{displayRun.error}</p>
+              <p className="text-xs text-neg text-center px-4">{displayRun.error}</p>
             )}
 
             <div className="flex gap-2 flex-wrap justify-center">
@@ -385,9 +385,9 @@ export function ModelTrainTab({ modelId }: Props) {
                   .map(([k, v]) => (
                     <div
                       key={k}
-                      className="rounded-lg bg-surface-2 px-3 py-1.5 text-center"
+                      className="rounded-lg bg-sunken px-3 py-1.5 text-center"
                     >
-                      <p className="text-xs text-text-muted">{k}</p>
+                      <p className="text-xs text-fg-secondary">{k}</p>
                       <p className="text-sm font-mono font-medium text-text">
                         {typeof v === 'number' ? v.toFixed(3) : String(v)}
                       </p>
@@ -398,7 +398,7 @@ export function ModelTrainTab({ modelId }: Props) {
         ) : (
           <div className="text-center">
             <CircularProgress value={0} />
-            <p className="text-sm text-text-muted mt-4">
+            <p className="text-sm text-fg-secondary mt-4">
               No training runs yet. Configure and click Start.
             </p>
           </div>
@@ -407,10 +407,10 @@ export function ModelTrainTab({ modelId }: Props) {
 
       {/* Right — Event log */}
       <div className="rounded-xl border border-border bg-surface p-4 flex flex-col">
-        <h3 className="text-xs font-medium text-text-muted mb-3 shrink-0">Events</h3>
-        <div className="flex-1 overflow-y-auto font-mono text-xs text-text-muted space-y-1 min-h-[200px] max-h-[400px]">
+        <h3 className="text-xs font-medium text-fg-secondary mb-3 shrink-0">Events</h3>
+        <div className="flex-1 overflow-y-auto font-mono text-xs text-fg-secondary space-y-1 min-h-[200px] max-h-[400px]">
           {logLines.length === 0 ? (
-            <p className="text-text-dim italic">Waiting for events…</p>
+            <p className="text-fg-tertiary italic">Waiting for events…</p>
           ) : (
             logLines.map((line, i) => (
               <p key={i} className="leading-relaxed">
@@ -424,7 +424,7 @@ export function ModelTrainTab({ modelId }: Props) {
         {/* Recent runs list */}
         {runs && runs.length > 0 && (
           <div className="mt-4 pt-3 border-t border-border shrink-0">
-            <p className="text-xs text-text-dim mb-2">Recent runs</p>
+            <p className="text-xs text-fg-tertiary mb-2">Recent runs</p>
             <div className="space-y-1.5">
               {runs.slice(0, 4).map((run) => (
                 <div key={run.run_id} className="flex items-center gap-2 text-xs">
@@ -434,16 +434,16 @@ export function ModelTrainTab({ modelId }: Props) {
                       run.status === 'running'
                         ? 'bg-accent'
                         : run.status === 'succeeded'
-                          ? 'bg-pnl-up'
+                          ? 'bg-pos'
                           : run.status === 'failed'
-                            ? 'bg-pnl-down'
-                            : 'bg-text-dim',
+                            ? 'bg-neg'
+                            : 'bg-fg-tertiary',
                     )}
                   />
-                  <span className="font-mono text-text-dim truncate">
+                  <span className="font-mono text-fg-tertiary truncate">
                     {run.run_id.slice(0, 8)}
                   </span>
-                  <span className="text-text-muted ml-auto capitalize">{run.status}</span>
+                  <span className="text-fg-secondary ml-auto capitalize">{run.status}</span>
                 </div>
               ))}
             </div>

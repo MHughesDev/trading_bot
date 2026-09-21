@@ -22,7 +22,7 @@ export function SignificanceCard({ significance }: { significance: SignificanceV
         {significance ? (
           <SignificanceBody s={significance} />
         ) : (
-          <div className="rounded-md border border-dashed border-border-2 p-4 text-sm text-text-dim">
+          <div className="rounded-md border border-dashed border-border-2 p-4 text-sm text-fg-tertiary">
             {/*
               "not yet significance-tested", not "not yet tested". The strategy
               may well have been backtested; what has not happened is the
@@ -51,7 +51,7 @@ function SignificanceBody({ s }: { s: SignificanceView }) {
         <Stat label="vs null" value={s.null_kind} mono />
         <Stat label="trials at eval" value={s.trial_count_at_eval.toLocaleString()} />
       </div>
-      <div className="text-xs text-text-dim">
+      <div className="text-xs text-fg-tertiary">
         raw p = {s.raw_p_value.toFixed(4)} · selection-bias-corrected to{' '}
         {s.p_value.toFixed(4)} over {s.trial_count_at_eval.toLocaleString()} trials ·{' '}
         <span className="font-mono">{s.null_id}</span>
@@ -68,7 +68,7 @@ function SignificanceBody({ s }: { s: SignificanceView }) {
         <Badge variant="outline">DSR {s.deflated_sharpe.toFixed(3)}</Badge>
         <Badge variant="outline">PBO {s.pbo.toFixed(3)}</Badge>
         {s.corroborators_agree ? (
-          <span className="text-xs text-text-dim">corroborators agree</span>
+          <span className="text-xs text-fg-tertiary">corroborators agree</span>
         ) : (
           <Badge variant="warning" className="gap-1">
             <AlertTriangle className="h-3 w-3" />
@@ -92,11 +92,11 @@ function Stat({
   mono?: boolean
 }) {
   return (
-    <div className="rounded-md bg-surface-2 p-3">
-      <div className="text-[10px] uppercase tracking-wide text-text-dim">{label}</div>
+    <div className="rounded-md bg-sunken p-3">
+      <div className="text-[10px] uppercase tracking-wide text-fg-tertiary">{label}</div>
       <div
         className={`mt-1 text-lg font-semibold ${mono ? 'font-mono text-sm' : ''} ${
-          accent ? 'text-pnl-up' : 'text-text'
+          accent ? 'text-pos' : 'text-text'
         }`}
       >
         {value}
@@ -116,8 +116,8 @@ function Hypothesis({
 }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wide text-text-dim">{title}</div>
-      <ul className={`mt-1 space-y-0.5 text-xs ${tone === 'muted' ? 'text-text-muted' : ''}`}>
+      <div className="text-[10px] uppercase tracking-wide text-fg-tertiary">{title}</div>
+      <ul className={`mt-1 space-y-0.5 text-xs ${tone === 'muted' ? 'text-fg-secondary' : ''}`}>
         {items.map((it) => (
           <li key={it}>· {it}</li>
         ))}

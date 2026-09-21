@@ -25,13 +25,13 @@ export function DistributionViewer({ study }: { study: StudyView }) {
             <Badge variant="inactive">{study.kind}</Badge>
             <Badge variant="outline">{study.metric}</Badge>
           </span>
-          <span className="text-xs font-normal text-text-dim">
+          <span className="text-xs font-normal text-fg-tertiary">
             +{study.trial_delta} trials · sealed
           </span>
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <p className="text-xs italic text-text-dim">“{study.question}”</p>
+        <p className="text-xs italic text-fg-tertiary">“{study.question}”</p>
 
         {/* worst-5% is first and styled at least as prominently as the median. */}
         <div className="grid grid-cols-4 gap-3">
@@ -43,7 +43,7 @@ export function DistributionViewer({ study }: { study: StudyView }) {
 
         <Histogram values={d.dist} median={d.median} worst5={d.worst_5pct} />
 
-        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3 text-xs text-text-dim">
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3 text-xs text-fg-tertiary">
           <span>
             verdict:{' '}
             <Badge variant={study.verdict.positive_median ? 'active' : 'inactive'}>
@@ -59,9 +59,9 @@ export function DistributionViewer({ study }: { study: StudyView }) {
 
         {/* Carry-forward is the ONLY config promotion, and it is the pre-declared
             selection rule's output — never a metric-ranked pick. */}
-        <div className="text-xs text-text-dim">
+        <div className="text-xs text-fg-tertiary">
           carry-forward rule:{' '}
-          <span className="font-mono text-text-muted">
+          <span className="font-mono text-fg-secondary">
             {SELECTION_LABELS[study.selection_rule] ?? study.selection_rule}
           </span>
           {study.carried_forward
@@ -70,7 +70,7 @@ export function DistributionViewer({ study }: { study: StudyView }) {
         </div>
 
         {/* Provenance only: insertion order, no ranking, no open-peak control. */}
-        <details className="text-xs text-text-dim">
+        <details className="text-xs text-fg-tertiary">
           <summary className="cursor-pointer select-none">
             {study.members.length} member run ids (provenance, insertion order)
           </summary>
@@ -97,9 +97,9 @@ function DistStat({
   emphatic?: boolean
 }) {
   return (
-    <div className={`rounded-md p-3 ${emphatic ? 'bg-surface-2' : ''}`}>
-      <div className="text-[10px] uppercase tracking-wide text-text-dim">{label}</div>
-      <div className={`mt-1 font-semibold ${emphatic ? 'text-lg text-text' : 'text-sm text-text-muted'}`}>
+    <div className={`rounded-md p-3 ${emphatic ? 'bg-sunken' : ''}`}>
+      <div className="text-[10px] uppercase tracking-wide text-fg-tertiary">{label}</div>
+      <div className={`mt-1 font-semibold ${emphatic ? 'text-lg text-text' : 'text-sm text-fg-secondary'}`}>
         {typeof value === 'number' ? fmt(value) : value}
       </div>
     </div>
@@ -110,7 +110,7 @@ function DistStat({
 // exposes no interaction to pick or open an individual member.
 function Histogram({ values, median, worst5 }: { values: number[]; median: number; worst5: number }) {
   if (values.length === 0) {
-    return <div className="text-xs text-text-dim">no surviving members</div>
+    return <div className="text-xs text-fg-tertiary">no surviving members</div>
   }
   const bins = 16
   const min = Math.min(...values)
@@ -135,8 +135,8 @@ function Histogram({ values, median, worst5 }: { values: number[]; median: numbe
         ))}
       </div>
       {/* worst-5% marker — visually weighted equal to the median. */}
-      <Marker left={pos(worst5)} color="bg-pnl-down" label="worst-5%" />
-      <Marker left={pos(median)} color="bg-text-muted" label="median" />
+      <Marker left={pos(worst5)} color="bg-neg" label="worst-5%" />
+      <Marker left={pos(median)} color="bg-fg-secondary" label="median" />
     </div>
   )
 }
@@ -145,7 +145,7 @@ function Marker({ left, color, label }: { left: string; color: string; label: st
   return (
     <div className="absolute top-0 h-24" style={{ left }}>
       <div className={`h-24 w-px ${color}`} />
-      <div className="mt-0.5 -translate-x-1/2 text-[9px] text-text-dim">{label}</div>
+      <div className="mt-0.5 -translate-x-1/2 text-[9px] text-fg-tertiary">{label}</div>
     </div>
   )
 }

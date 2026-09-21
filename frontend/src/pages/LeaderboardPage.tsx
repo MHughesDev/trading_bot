@@ -66,13 +66,13 @@ function RankMedal({ rank }: { rank: number }) {
   if (rank === 1) return <span className="text-warn font-bold text-sm">🥇</span>
   if (rank === 2) return <span className="text-fg-secondary font-bold text-sm">🥈</span>
   if (rank === 3) return <span className="text-warn font-bold text-sm">🥉</span>
-  return <span className="text-xs text-text-muted font-mono w-5 text-right">{rank}</span>
+  return <span className="text-xs text-fg-secondary font-mono w-5 text-right">{rank}</span>
 }
 
 function DeltaIcon({ value }: { value?: number }) {
-  if (value == null) return <Minus className="h-3 w-3 text-text-muted" />
-  if (value > 0) return <TrendingUp className="h-3 w-3 text-pnl-up" />
-  return <TrendingDown className="h-3 w-3 text-pnl-down" />
+  if (value == null) return <Minus className="h-3 w-3 text-fg-secondary" />
+  if (value > 0) return <TrendingUp className="h-3 w-3 text-pos" />
+  return <TrendingDown className="h-3 w-3 text-neg" />
 }
 
 export function LeaderboardPage() {
@@ -96,7 +96,7 @@ export function LeaderboardPage() {
   const SortHeader = ({ col, label }: { col: SortKey; label: string }) => (
     <button
       onClick={() => toggleSort(col)}
-      className="flex items-center gap-1 text-xs font-medium text-text-muted hover:text-text transition-colors"
+      className="flex items-center gap-1 text-xs font-medium text-fg-secondary hover:text-text transition-colors"
     >
       {label}
       {sortKey === col
@@ -110,24 +110,24 @@ export function LeaderboardPage() {
   return (
     <div className="mx-auto w-full max-w-5xl px-6 py-6">
       <div className="flex items-center gap-3 mb-6">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-surface-2 text-accent">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sunken text-accent">
           <Trophy className="h-4.5 w-4.5" />
         </div>
         <div>
           <h1 className="text-lg font-semibold text-text">Model Leaderboard</h1>
-          <p className="text-xs text-text-muted">Ranked by composite forecast quality score</p>
+          <p className="text-xs text-fg-secondary">Ranked by composite forecast quality score</p>
         </div>
       </div>
 
       {isLoading && (
-        <div className="flex items-center gap-2 text-sm text-text-muted py-12 justify-center">
+        <div className="flex items-center gap-2 text-sm text-fg-secondary py-12 justify-center">
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading leaderboard…
         </div>
       )}
 
       {!isLoading && sorted.length === 0 && (
-        <div className="text-center py-16 text-text-muted text-sm">
+        <div className="text-center py-16 text-fg-secondary text-sm">
           No evaluated models yet. Train and evaluate a model to appear here.
         </div>
       )}
@@ -136,7 +136,7 @@ export function LeaderboardPage() {
         <div className="rounded-xl border border-border bg-surface overflow-hidden">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border bg-surface-2">
+              <tr className="border-b border-border bg-sunken">
                 <th className="px-4 py-3 text-left w-12">
                   <SortHeader col="rank" label="Rank" />
                 </th>
@@ -162,7 +162,7 @@ export function LeaderboardPage() {
                 <tr
                   key={entry.model_id}
                   className={cn(
-                    'hover:bg-surface-2 transition-colors cursor-pointer',
+                    'hover:bg-sunken transition-colors cursor-pointer',
                     selectedId === entry.model_id && 'bg-accent/5',
                   )}
                   onClick={() => setSelectedId(selectedId === entry.model_id ? null : entry.model_id)}
@@ -172,10 +172,10 @@ export function LeaderboardPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="font-medium text-text">{entry.display_name}</div>
-                    <div className="text-xs text-text-muted font-mono">{entry.slug}</div>
+                    <div className="text-xs text-fg-secondary font-mono">{entry.slug}</div>
                   </td>
                   <td className="px-4 py-3 hidden sm:table-cell">
-                    <span className="text-xs text-text-muted capitalize">{entry.model_kind.replace('_', ' ')}</span>
+                    <span className="text-xs text-fg-secondary capitalize">{entry.model_kind.replace('_', ' ')}</span>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <ScoreBadge score={entry.score} />
@@ -204,7 +204,7 @@ export function LeaderboardPage() {
                         e.stopPropagation()
                         navigate(`/mlops/${entry.model_id}`)
                       }}
-                      className="text-text-muted hover:text-accent transition-colors"
+                      className="text-fg-secondary hover:text-accent transition-colors"
                       title="Open model"
                     >
                       <ExternalLink className="h-3.5 w-3.5" />
@@ -236,14 +236,14 @@ function EvalReportPanel({ modelId, onClose }: { modelId: string; onClose: () =>
     <div className="mt-4 rounded-xl border border-accent/30 bg-surface p-5 relative">
       <button
         onClick={onClose}
-        className="absolute top-4 right-4 text-text-muted hover:text-text text-xs"
+        className="absolute top-4 right-4 text-fg-secondary hover:text-text text-xs"
       >
         Close ✕
       </button>
       <h3 className="text-sm font-medium text-text mb-3">Quality Report</h3>
       {quality ? (
         <div className="space-y-2">
-          <p className="text-xs text-text-muted">
+          <p className="text-xs text-fg-secondary">
             {quality.series.length} data points collected.{' '}
             {quality.alerts.length > 0
               ? `⚠ ${quality.alerts.length} active alert(s).`
@@ -260,7 +260,7 @@ function EvalReportPanel({ modelId, onClose }: { modelId: string; onClose: () =>
           </div>
         </div>
       ) : (
-        <div className="flex items-center gap-2 text-sm text-text-muted">
+        <div className="flex items-center gap-2 text-sm text-fg-secondary">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           Loading…
         </div>

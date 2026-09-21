@@ -16,7 +16,7 @@ export function fmtPct(value: number, decimals = 2): string {
 }
 
 export function pnlClass(value: number): string {
-  return value >= 0 ? 'text-pnl-up' : 'text-pnl-down'
+  return value >= 0 ? 'text-pos' : 'text-neg'
 }
 
 export function formatDate(iso: string): string {

@@ -29,9 +29,9 @@ export function NullPicker({
         <CardTitle className="text-sm">Randomized baseline</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <p className="text-xs text-text-dim">
+        <p className="text-xs text-fg-tertiary">
           We recommend this randomized baseline for your strategy type:{' '}
-          <span className="font-mono text-text-muted">{picker.recommended}</span>. Your strategy must beat
+          <span className="font-mono text-fg-secondary">{picker.recommended}</span>. Your strategy must beat
           this to show it has a real edge. Changing the recommendation requires a reason.
         </p>
 
@@ -48,7 +48,7 @@ export function NullPicker({
 
         {isOverride && (
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-text-dim" htmlFor="null-override-reason">
+            <label className="text-xs text-fg-tertiary" htmlFor="null-override-reason">
               Override reason (required — logged forever)
             </label>
             <textarea
@@ -64,12 +64,12 @@ export function NullPicker({
 
         <div className="flex items-center justify-between">
           {picker.chosen ? (
-            <span className="text-xs text-text-dim">
+            <span className="text-xs text-fg-tertiary">
               chosen: <span className="font-mono">{picker.chosen.kind}</span>
               {picker.chosen.was_override && ' (override logged)'}
             </span>
           ) : (
-            <span className="text-xs text-text-dim">no baseline chosen yet</span>
+            <span className="text-xs text-fg-tertiary">no baseline chosen yet</span>
           )}
           <Button
             size="sm"
@@ -98,7 +98,7 @@ function NullOption({
       type="button"
       onClick={onSelect}
       className={`flex flex-col gap-1 rounded-md border p-3 text-left transition-colors ${
-        selected ? 'border-accent bg-accent/10' : 'border-border-2 bg-surface-2 hover:bg-border'
+        selected ? 'border-accent bg-accent/10' : 'border-border-2 bg-sunken hover:bg-border'
       }`}
     >
       <div className="flex items-center gap-2 text-sm font-medium text-text">
@@ -113,12 +113,12 @@ function NullOption({
       </div>
       <div className="grid grid-cols-2 gap-2 text-[11px]">
         <div>
-          <span className="text-text-dim">preserves: </span>
-          <span className="text-text-muted">{entry.preserves.join(', ')}</span>
+          <span className="text-fg-tertiary">preserves: </span>
+          <span className="text-fg-secondary">{entry.preserves.join(', ')}</span>
         </div>
         <div>
-          <span className="text-text-dim">destroys: </span>
-          <span className="text-text-muted">{entry.destroys.join(', ')}</span>
+          <span className="text-fg-tertiary">destroys: </span>
+          <span className="text-fg-secondary">{entry.destroys.join(', ')}</span>
         </div>
       </div>
     </button>

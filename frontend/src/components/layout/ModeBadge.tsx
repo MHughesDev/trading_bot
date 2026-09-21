@@ -44,7 +44,7 @@ export function ModeBadge({ className }: { className?: string }) {
       </button>
       <button
         onClick={openOtherWindow}
-        className="rounded-full p-1 text-text-dim hover:text-text hover:bg-border transition-colors"
+        className="rounded-full p-1 text-fg-tertiary hover:text-text hover:bg-border transition-colors"
         title={`Open a new window pinned to ${other} — trade ${mode} and ${other} side by side`}
         aria-label={`Open new ${other} window`}
       >

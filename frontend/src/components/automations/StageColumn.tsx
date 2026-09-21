@@ -24,16 +24,16 @@ export function StageColumn({ stage, isFinal }: StageColumnProps) {
         'flex flex-col gap-3 shrink-0 w-44 rounded-xl border px-4 py-4',
         isFinal
           ? 'border-line-pos bg-pos-subtle'
-          : 'border-border bg-surface-2',
+          : 'border-border bg-sunken',
       )}
     >
       {/* Stage label */}
       <div>
-        <div className="text-xs font-semibold text-text-muted uppercase tracking-wider truncate">
+        <div className="text-xs font-semibold text-fg-secondary uppercase tracking-wider truncate">
           {isFinal ? '→ Execute' : stage.label}
         </div>
         {!isFinal && (
-          <div className="text-xs text-text-dim mt-0.5 truncate font-mono">
+          <div className="text-xs text-fg-tertiary mt-0.5 truncate font-mono">
             {stage.stage_id}
           </div>
         )}
@@ -41,11 +41,11 @@ export function StageColumn({ stage, isFinal }: StageColumnProps) {
 
       {/* Member count */}
       <div className="flex items-center gap-1.5">
-        <Users className="h-3.5 w-3.5 text-text-dim" />
+        <Users className="h-3.5 w-3.5 text-fg-tertiary" />
         <span className="text-lg font-mono font-bold text-text">
           {stage.member_count}
         </span>
-        <span className="text-xs text-text-dim">members</span>
+        <span className="text-xs text-fg-tertiary">members</span>
       </div>
 
       {/* Enter/exit deltas */}

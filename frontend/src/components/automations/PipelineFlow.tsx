@@ -108,27 +108,27 @@ export function PipelineFlow({ onArmed }: PipelineFlowProps) {
     <div className="space-y-5 p-4 max-w-lg">
       {/* Asset class */}
       <div>
-        <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
+        <label className="block text-xs font-semibold text-fg-secondary uppercase tracking-wider mb-2">
           Asset class
         </label>
         <div className="relative">
           <select
             value={assetClass}
             onChange={(e) => setAssetClass(e.target.value)}
-            className="w-full appearance-none rounded-lg px-3 py-2 pr-8 text-sm bg-surface-2 border border-border text-text focus:outline-none focus:ring-1 focus:ring-accent"
+            className="w-full appearance-none rounded-lg px-3 py-2 pr-8 text-sm bg-sunken border border-border text-text focus:outline-none focus:ring-1 focus:ring-accent"
           >
             <option value="">Select asset class…</option>
             {ASSET_CLASSES.map((ac) => (
               <option key={ac.value} value={ac.value}>{ac.label}</option>
             ))}
           </select>
-          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-dim" />
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-fg-tertiary" />
         </div>
       </div>
 
       {/* Universe */}
       <div>
-        <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
+        <label className="block text-xs font-semibold text-fg-secondary uppercase tracking-wider mb-2">
           Universe (one instrument per line or comma-separated)
         </label>
         <textarea
@@ -136,27 +136,27 @@ export function PipelineFlow({ onArmed }: PipelineFlowProps) {
           onChange={(e) => setUniverseInput(e.target.value)}
           placeholder="BTC-USD&#10;ETH-USD&#10;SOL-USD"
           rows={4}
-          className="w-full rounded-lg px-3 py-2 text-sm bg-surface-2 border border-border text-text placeholder:text-text-dim focus:outline-none focus:ring-1 focus:ring-accent resize-none font-mono"
+          className="w-full rounded-lg px-3 py-2 text-sm bg-sunken border border-border text-text placeholder:text-fg-tertiary focus:outline-none focus:ring-1 focus:ring-accent resize-none font-mono"
         />
-        <p className="mt-1 text-xs text-text-dim">{universe.length} instruments</p>
+        <p className="mt-1 text-xs text-fg-tertiary">{universe.length} instruments</p>
       </div>
 
       {/* Filter stages */}
       <div>
-        <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
+        <label className="block text-xs font-semibold text-fg-secondary uppercase tracking-wider mb-2">
           Filter stages (ordered)
         </label>
         <div className="space-y-2">
           {stages.map((stage, i) => (
             <div
               key={stage.stage_id}
-              className="flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2"
+              className="flex items-center gap-2 rounded-lg border border-border bg-sunken px-3 py-2"
             >
-              <span className="w-5 text-xs text-text-dim font-mono">{i + 1}.</span>
+              <span className="w-5 text-xs text-fg-tertiary font-mono">{i + 1}.</span>
               <span className="flex-1 text-sm text-text truncate">{stage.label}</span>
               <button
                 onClick={() => removeStage(stage.stage_id)}
-                className="rounded p-0.5 text-text-dim hover:text-neg transition-colors"
+                className="rounded p-0.5 text-fg-tertiary hover:text-neg transition-colors"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -171,19 +171,19 @@ export function PipelineFlow({ onArmed }: PipelineFlowProps) {
               value={newStageStrategyId}
               onChange={(e) => setNewStageStrategyId(e.target.value)}
               disabled={!assetClass}
-              className="w-full appearance-none rounded-lg px-3 py-1.5 pr-8 text-sm bg-surface-2 border border-border text-text focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+              className="w-full appearance-none rounded-lg px-3 py-1.5 pr-8 text-sm bg-sunken border border-border text-text focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
             >
               <option value="">Add discovery stage…</option>
               {discoveryStrategies.map((s) => (
                 <option key={s.id} value={s.id}>{s.strategy_id}</option>
               ))}
             </select>
-            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-dim" />
+            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-fg-tertiary" />
           </div>
           <button
             onClick={addStage}
             disabled={!newStageStrategyId}
-            className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm border border-border text-text-muted hover:text-text hover:bg-border disabled:opacity-40 transition-colors"
+            className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm border border-border text-fg-secondary hover:text-text hover:bg-border disabled:opacity-40 transition-colors"
           >
             <Plus className="h-3.5 w-3.5" />
             Add
@@ -193,7 +193,7 @@ export function PipelineFlow({ onArmed }: PipelineFlowProps) {
 
       {/* Final execution action */}
       <div>
-        <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
+        <label className="block text-xs font-semibold text-fg-secondary uppercase tracking-wider mb-2">
           Final execution action
         </label>
         <div className="relative">
@@ -201,20 +201,20 @@ export function PipelineFlow({ onArmed }: PipelineFlowProps) {
             value={execStrategyId}
             onChange={(e) => setExecStrategyId(e.target.value)}
             disabled={!assetClass}
-            className="w-full appearance-none rounded-lg px-3 py-2 pr-8 text-sm bg-surface-2 border border-border text-text focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+            className="w-full appearance-none rounded-lg px-3 py-2 pr-8 text-sm bg-sunken border border-border text-text focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
           >
             <option value="">Select execution strategy…</option>
             {executionStrategies.map((s) => (
               <option key={s.id} value={s.id}>{s.strategy_id}</option>
             ))}
           </select>
-          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-dim" />
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-fg-tertiary" />
         </div>
       </div>
 
       {/* Trigger */}
       <div>
-        <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
+        <label className="block text-xs font-semibold text-fg-secondary uppercase tracking-wider mb-2">
           Trigger
         </label>
         <TriggerStep value={trigger} onChange={setTrigger} />

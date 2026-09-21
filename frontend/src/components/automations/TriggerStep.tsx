@@ -49,7 +49,7 @@ interface TriggerStepProps {
 
 const selectClass = cn(
   'w-full appearance-none rounded-lg px-3 py-2 pr-8 text-sm',
-  'bg-surface-2 border border-border text-text',
+  'bg-sunken border border-border text-text',
   'focus:outline-none focus:ring-1 focus:ring-accent',
 )
 
@@ -72,7 +72,7 @@ export function TriggerStep({ value, onChange }: TriggerStepProps) {
           <option value="ohlcv_bar">On bar close (OHLCV)</option>
           <option value="timer">On timer interval</option>
         </select>
-        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-dim" />
+        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-fg-tertiary" />
       </div>
 
       {value.kind === 'ohlcv_bar' && (
@@ -89,10 +89,10 @@ export function TriggerStep({ value, onChange }: TriggerStepProps) {
                 </option>
               ))}
             </select>
-            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-dim" />
+            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-fg-tertiary" />
           </div>
           {value.timeframe !== 'minutes1' && (
-            <p className="text-xs text-text-dim">
+            <p className="text-xs text-fg-tertiary">
               HTF bars are built from 1m data — same window boundaries as the chart.
             </p>
           )}
@@ -114,7 +114,7 @@ export function TriggerStep({ value, onChange }: TriggerStepProps) {
               </option>
             ))}
           </select>
-          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-dim" />
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-fg-tertiary" />
         </div>
       )}
     </div>

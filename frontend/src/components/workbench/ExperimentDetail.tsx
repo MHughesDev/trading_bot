@@ -114,14 +114,14 @@ export function ExperimentDetail({ exp }: { exp: ExperimentView }) {
               </Badge>
             )}
           </div>
-          <div className="mt-0.5 truncate text-xs text-text-dim">
+          <div className="mt-0.5 truncate text-xs text-fg-tertiary">
             {exp.strategy_family} · {exp.strategy_type} · primary test{' '}
             <span className="font-mono">{exp.primary_test}</span>
           </div>
         </div>
         <div className="flex items-center gap-4">
           <div className="text-right">
-            <div className="text-[10px] uppercase tracking-wide text-text-dim">searches used</div>
+            <div className="text-[10px] uppercase tracking-wide text-fg-tertiary">searches used</div>
             <div className="text-xl font-bold tabular-nums text-text">
               {exp.trial_counter.toLocaleString()}
             </div>
@@ -174,7 +174,7 @@ export function ExperimentDetail({ exp }: { exp: ExperimentView }) {
       <div>
         <h3 className="mb-2 text-sm font-semibold text-text">Test runs</h3>
         {studies.isLoading ? (
-          <div className="text-sm text-text-dim">Loading…</div>
+          <div className="text-sm text-fg-tertiary">Loading…</div>
         ) : studies.data && studies.data.length > 0 ? (
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             {studies.data.map((s) => (
@@ -182,7 +182,7 @@ export function ExperimentDetail({ exp }: { exp: ExperimentView }) {
             ))}
           </div>
         ) : (
-          <div className="text-sm text-text-dim">
+          <div className="text-sm text-fg-tertiary">
             No test runs yet. Running the next checkpoint will execute the tests it needs.
           </div>
         )}
@@ -215,7 +215,7 @@ function ReconciliationPanel({ expId, onDone }: { expId: string; onDone: () => v
         <CardTitle className="text-sm">Reconciliation (live vs backtest)</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
-        <p className="text-xs text-text-dim">
+        <p className="text-xs text-fg-tertiary">
           Realized per-period returns. Drift below the planned worst-5% auto-transitions the
           experiment to decaying.
         </p>
@@ -232,13 +232,13 @@ function ReconciliationPanel({ expId, onDone }: { expId: string; onDone: () => v
           </Button>
         </div>
         {reconcile.data && (
-          <div className="text-xs text-text-dim">
+          <div className="text-xs text-fg-tertiary">
             {reconcile.data.data.verdict.points.length} periods · fraction below worst-5%:{' '}
             {(reconcile.data.data.verdict.fraction_below_worst5 * 100).toFixed(0)}% ·{' '}
             {reconcile.data.data.verdict.drifting ? (
-              <span className="text-pnl-down">drifting</span>
+              <span className="text-neg">drifting</span>
             ) : (
-              <span className="text-pnl-up">stable</span>
+              <span className="text-pos">stable</span>
             )}
           </div>
         )}

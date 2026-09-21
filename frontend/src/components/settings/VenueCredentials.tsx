@@ -127,7 +127,7 @@ function VenueCard({ venue }: { venue: VenueConfig }) {
   const hasInput = venue.fields.some((f) => fields[f.name])
 
   return (
-    <div className="rounded-xl border border-border bg-surface-2">
+    <div className="rounded-xl border border-border bg-sunken">
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center justify-between px-4 py-3 text-sm"
@@ -140,12 +140,12 @@ function VenueCard({ venue }: { venue: VenueConfig }) {
               Connected
             </span>
           ) : (
-            <span className="text-xs text-text-dim">Not connected</span>
+            <span className="text-xs text-fg-tertiary">Not connected</span>
           )}
           {open ? (
-            <ChevronDown className="h-4 w-4 text-text-dim" />
+            <ChevronDown className="h-4 w-4 text-fg-tertiary" />
           ) : (
-            <ChevronRight className="h-4 w-4 text-text-dim" />
+            <ChevronRight className="h-4 w-4 text-fg-tertiary" />
           )}
         </div>
       </button>
@@ -153,21 +153,21 @@ function VenueCard({ venue }: { venue: VenueConfig }) {
       {open && (
         <div className="border-t border-border px-4 pb-4 pt-3 space-y-3">
           {savedAt && (
-            <p className="text-xs text-text-dim">
+            <p className="text-xs text-fg-tertiary">
               Last connected {savedAt}. Enter new credentials to update.
             </p>
           )}
 
           {venue.fields.map((f) => (
             <div key={f.name}>
-              <label className="block text-xs text-text-dim mb-1">{f.label}</label>
+              <label className="block text-xs text-fg-tertiary mb-1">{f.label}</label>
               <input
                 type="password"
                 value={fields[f.name]}
                 onChange={(e) => setField(f.name, e.target.value)}
                 placeholder={f.placeholder}
                 autoComplete="off"
-                className="w-full rounded-lg px-3 py-1.5 text-sm bg-surface border border-border text-text placeholder:text-text-dim focus:outline-none focus:ring-1 focus:ring-accent"
+                className="w-full rounded-lg px-3 py-1.5 text-sm bg-surface border border-border text-text placeholder:text-fg-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
               />
             </div>
           ))}
@@ -204,7 +204,7 @@ function VenueCard({ venue }: { venue: VenueConfig }) {
               <button
                 disabled={disconnectMutation.isPending}
                 onClick={() => disconnectMutation.mutate()}
-                className="rounded-lg px-3 py-1.5 text-sm text-text-muted hover:text-neg hover:bg-neg-subtle border border-border transition-colors disabled:opacity-40"
+                className="rounded-lg px-3 py-1.5 text-sm text-fg-secondary hover:text-neg hover:bg-neg-subtle border border-border transition-colors disabled:opacity-40"
               >
                 {disconnectMutation.isPending ? 'Disconnecting…' : 'Disconnect'}
               </button>

@@ -81,17 +81,27 @@
      The pre-Meridian app themed itself through these names. They now resolve to
      Meridian semantics so untouched screens are correct in both themes while
      they are migrated. Do not introduce new usages.
+
+     Six were retired on 2026-09-21 (S-6.22), once their last consumer was
+     migrated. Each was declared as `var(…)` of a token that already had its own
+     name here, so the migration was a rename with no colour change:
+
+       --color-surface-2   → --color-sunken        (both var(--bg-sunken))
+       --color-text-muted  → --color-fg-secondary  (both var(--fg-secondary))
+       --color-text-dim    → --color-fg-tertiary   (both var(--fg-tertiary))
+       --color-pnl-up      → --color-pos           (both var(--fg-pos))
+       --color-pnl-down    → --color-neg           (both var(--fg-neg))
+       --color-warning     → --color-warn          (both var(--fg-warn))
+
+     The four below are still in use across the app and cannot follow yet. They
+     are left declared deliberately: deleting a name a screen still references
+     does not migrate the screen, it makes the colour silently resolve to
+     nothing, which is worse than the alias.
      ========================================================================= */
   --color-background:      var(--bg-canvas);
-  --color-surface-2:       var(--bg-sunken);
   --color-border:          var(--line-hairline);
   --color-border-2:        var(--line-default);
   --color-text:            var(--fg-primary);
-  --color-text-muted:      var(--fg-secondary);
-  --color-text-dim:        var(--fg-tertiary);
-  --color-pnl-up:          var(--fg-pos);
-  --color-pnl-down:        var(--fg-neg);
-  --color-warning:         var(--fg-warn);
 
   /* --- radii --------------------------------------------------------------- */
   --radius-xs:   var(--r-xs);

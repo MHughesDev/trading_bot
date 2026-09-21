@@ -45,7 +45,7 @@ function Select({ value, onChange, options, placeholder }: SelectProps) {
         onChange={(e) => onChange(e.target.value)}
         className={cn(
           'w-full appearance-none rounded-lg px-3 py-2 pr-8 text-sm',
-          'bg-surface-2 border border-border text-text',
+          'bg-sunken border border-border text-text',
           'focus:outline-none focus:ring-1 focus:ring-accent',
         )}
       >
@@ -56,7 +56,7 @@ function Select({ value, onChange, options, placeholder }: SelectProps) {
           </option>
         ))}
       </select>
-      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-dim" />
+      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-fg-tertiary" />
     </div>
   )
 }
@@ -67,7 +67,7 @@ function StepLabel({ n, children }: { n: number; children: React.ReactNode }) {
       <div className="flex h-5 w-5 items-center justify-center rounded-full bg-accent/20 text-xs font-bold text-accent shrink-0">
         {n}
       </div>
-      <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+      <span className="text-xs font-semibold text-fg-secondary uppercase tracking-wider">
         {children}
       </span>
     </div>
@@ -155,8 +155,8 @@ export function SingleInstrumentFlow({ onArmed }: SingleInstrumentFlowProps) {
           placeholder="e.g. BTC-USD"
           disabled={!assetClass}
           className={cn(
-            'w-full rounded-lg px-3 py-2 text-sm bg-surface-2 border border-border text-text',
-            'placeholder:text-text-dim focus:outline-none focus:ring-1 focus:ring-accent',
+            'w-full rounded-lg px-3 py-2 text-sm bg-sunken border border-border text-text',
+            'placeholder:text-fg-tertiary focus:outline-none focus:ring-1 focus:ring-accent',
             'disabled:opacity-50',
           )}
         />
@@ -175,7 +175,7 @@ export function SingleInstrumentFlow({ onArmed }: SingleInstrumentFlowProps) {
           placeholder={assetClass ? 'Select strategy…' : 'Select asset class first'}
         />
         {assetClass && executionStrategies.length === 0 && (
-          <p className="mt-1 text-xs text-text-dim">
+          <p className="mt-1 text-xs text-fg-tertiary">
             No compatible execution strategies found.
           </p>
         )}
@@ -193,7 +193,7 @@ export function SingleInstrumentFlow({ onArmed }: SingleInstrumentFlowProps) {
           ]}
         />
         {assetClass && (
-          <p className="mt-1 text-xs text-text-dim">
+          <p className="mt-1 text-xs text-fg-tertiary">
             {is24_7(assetClass)
               ? 'This asset class trades 24/7.'
               : 'This asset class has market sessions.'}

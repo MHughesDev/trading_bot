@@ -38,7 +38,7 @@ export function GateFunnelBoard({
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {!canAdvance && (
-          <p className="text-xs text-text-dim">
+          <p className="text-xs text-fg-tertiary">
             Choose a randomized baseline before running validation.
           </p>
         )}
@@ -56,20 +56,20 @@ function GateRow({ gate }: { gate: GateView }) {
   return (
     <div
       className={`flex items-start gap-3 rounded-md border p-3 ${
-        locked ? 'border-border bg-surface-2/40 opacity-60' : 'border-border-2 bg-surface-2'
+        locked ? 'border-border bg-sunken/40 opacity-60' : 'border-border-2 bg-sunken'
       }`}
       aria-disabled={locked}
     >
       <StatusIcon status={gate.status} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 text-sm font-medium text-text">
-          <span className="text-text-dim">Gate {meta.n}</span>
+          <span className="text-fg-tertiary">Gate {meta.n}</span>
           {meta.title}
           <StatusBadge status={gate.status} />
         </div>
-        <div className="text-xs text-text-dim">{gate.summary ?? meta.blurb}</div>
+        <div className="text-xs text-fg-tertiary">{gate.summary ?? meta.blurb}</div>
         {gate.evidence.length > 0 && (
-          <div className="mt-1 truncate font-mono text-[10px] text-text-dim" title={gate.evidence.join(', ')}>
+          <div className="mt-1 truncate font-mono text-[10px] text-fg-tertiary" title={gate.evidence.join(', ')}>
             evidence: {gate.evidence.join(', ')}
           </div>
         )}
@@ -82,11 +82,11 @@ function StatusIcon({ status }: { status: GateStatus }) {
   const cls = 'h-4 w-4 mt-0.5 shrink-0'
   switch (status) {
     case 'passed':
-      return <Check className={`${cls} text-pnl-up`} />
+      return <Check className={`${cls} text-pos`} />
     case 'failed':
-      return <X className={`${cls} text-pnl-down`} />
+      return <X className={`${cls} text-neg`} />
     case 'locked':
-      return <Lock className={`${cls} text-text-dim`} />
+      return <Lock className={`${cls} text-fg-tertiary`} />
     default:
       return <Circle className={`${cls} text-accent`} />
   }
@@ -94,9 +94,9 @@ function StatusIcon({ status }: { status: GateStatus }) {
 
 function StatusBadge({ status }: { status: GateStatus }) {
   const map: Record<GateStatus, string> = {
-    passed: 'text-pnl-up',
-    failed: 'text-pnl-down',
-    locked: 'text-text-dim',
+    passed: 'text-pos',
+    failed: 'text-neg',
+    locked: 'text-fg-tertiary',
     ready: 'text-accent',
   }
   return <span className={`text-[10px] uppercase tracking-wide ${map[status]}`}>{status}</span>

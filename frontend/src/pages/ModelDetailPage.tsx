@@ -99,7 +99,7 @@ function ScorecardRing({
           <span className="text-xs font-mono font-bold text-text">{Math.round(value)}</span>
         </div>
       </div>
-      <span className="text-xs text-text-muted text-center">{label}</span>
+      <span className="text-xs text-fg-secondary text-center">{label}</span>
     </div>
   )
 }
@@ -146,10 +146,10 @@ function InlineEdit({
           }}
           className="text-2xl font-semibold text-text bg-transparent border-b border-accent focus:outline-none"
         />
-        <button onClick={save} className="text-pnl-up hover:opacity-80">
+        <button onClick={save} className="text-pos hover:opacity-80">
           <Check className="h-4 w-4" />
         </button>
-        <button onClick={cancel} className="text-text-muted hover:opacity-80">
+        <button onClick={cancel} className="text-fg-secondary hover:opacity-80">
           <X className="h-4 w-4" />
         </button>
       </div>
@@ -162,7 +162,7 @@ function InlineEdit({
       className="group flex items-center gap-2 text-left"
     >
       <h1 className="text-2xl font-semibold text-text">{value}</h1>
-      <Pencil className="h-4 w-4 text-text-dim opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+      <Pencil className="h-4 w-4 text-fg-tertiary opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
     </button>
   )
 }
@@ -201,7 +201,7 @@ function OverviewTab({ modelId }: { modelId: string }) {
             { label: 'Slug', value: model.slug, mono: true },
           ].map(({ label, value, mono }) => (
             <div key={label} className="flex items-start justify-between gap-4">
-              <dt className="text-xs text-text-muted shrink-0">{label}</dt>
+              <dt className="text-xs text-fg-secondary shrink-0">{label}</dt>
               <dd
                 className={cn(
                   'text-sm text-text text-right truncate',
@@ -217,12 +217,12 @@ function OverviewTab({ modelId }: { modelId: string }) {
         {/* Aliases */}
         {aliasEntries.length > 0 && (
           <div className="mt-4 pt-4 border-t border-border">
-            <p className="text-xs text-text-muted mb-2">Aliases</p>
+            <p className="text-xs text-fg-secondary mb-2">Aliases</p>
             <div className="flex flex-wrap gap-2">
               {aliasEntries.map(([alias, version]) => (
                 <span
                   key={alias}
-                  className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-2 px-2 py-0.5 text-xs text-text-muted"
+                  className="inline-flex items-center gap-1 rounded-full border border-border bg-sunken px-2 py-0.5 text-xs text-fg-secondary"
                 >
                   {alias}
                   <span className="font-mono text-accent">→ v{version}</span>
@@ -247,7 +247,7 @@ function OverviewTab({ modelId }: { modelId: string }) {
           </div>
         ) : (
           <div className="flex items-center justify-center py-10">
-            <p className="text-sm text-text-dim">
+            <p className="text-sm text-fg-tertiary">
               No evaluation data yet. Run an evaluation to see health metrics.
             </p>
           </div>
@@ -262,13 +262,13 @@ function OverviewTab({ modelId }: { modelId: string }) {
             {usedBy.map((s) => (
               <span
                 key={s.id}
-                className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-xs text-text-muted"
+                className="inline-flex items-center rounded-full border border-border bg-sunken px-3 py-1 text-xs text-fg-secondary"
               >
                 {s.name}
                 <span
                   className={cn(
                     'ml-1.5 h-1.5 w-1.5 rounded-full',
-                    s.status === 'active' ? 'bg-pnl-up' : 'bg-text-dim',
+                    s.status === 'active' ? 'bg-pos' : 'bg-fg-tertiary',
                   )}
                 />
               </span>
@@ -281,7 +281,7 @@ function OverviewTab({ modelId }: { modelId: string }) {
       {model.description && (
         <div className="rounded-xl border border-border bg-surface p-5">
           <h3 className="text-sm font-medium text-text mb-3">Description</h3>
-          <p className="text-sm text-text-muted leading-relaxed">{model.description}</p>
+          <p className="text-sm text-fg-secondary leading-relaxed">{model.description}</p>
         </div>
       )}
     </div>
@@ -312,7 +312,7 @@ export function ModelDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-24 text-text-dim">
+      <div className="flex items-center justify-center py-24 text-fg-tertiary">
         <Loader2 className="h-8 w-8 animate-spin" />
       </div>
     )
@@ -335,7 +335,7 @@ export function ModelDetailPage() {
       {/* Back nav */}
       <button
         onClick={() => navigate('/mlops')}
-        className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text transition-colors mb-5"
+        className="flex items-center gap-1.5 text-sm text-fg-secondary hover:text-text transition-colors mb-5"
       >
         <ChevronLeft className="h-4 w-4" />
         ML Ops
@@ -348,7 +348,7 @@ export function ModelDetailPage() {
         className="rounded-xl border border-border bg-surface/80 backdrop-blur-sm p-5 mb-5"
       >
         <div className="flex items-start gap-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-2 text-accent shrink-0">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunken text-accent shrink-0">
             <Icon className="h-5 w-5" />
           </div>
 
@@ -359,11 +359,11 @@ export function ModelDetailPage() {
                 onSave={(name) => patchMut.mutate({ display_name: name })}
               />
               <ModelStatusPill status={model.status} />
-              <span className="inline-flex items-center rounded-md border border-border bg-surface-2 px-2 py-0.5 text-xs text-text-muted">
+              <span className="inline-flex items-center rounded-md border border-border bg-sunken px-2 py-0.5 text-xs text-fg-secondary">
                 {KIND_LABELS[model.model_kind]}
               </span>
             </div>
-            <p className="text-sm text-text-muted mt-1 font-mono">{model.slug}</p>
+            <p className="text-sm text-fg-secondary mt-1 font-mono">{model.slug}</p>
           </div>
 
           {/* Actions */}
@@ -394,7 +394,7 @@ export function ModelDetailPage() {
               'relative px-4 py-2.5 text-sm font-medium transition-colors',
               activeTab === tab.id
                 ? 'text-text'
-                : 'text-text-muted hover:text-text',
+                : 'text-fg-secondary hover:text-text',
             )}
           >
             {tab.label}

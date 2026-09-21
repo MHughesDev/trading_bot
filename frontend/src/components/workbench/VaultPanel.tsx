@@ -33,14 +33,14 @@ export function VaultPanel({
         )}
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <p className="text-xs text-text-dim">
+        <p className="text-xs text-fg-tertiary">
           One-time test on data that has been locked away and never touched by any run.
           {!vault.gate3_passed && ' Only available after passing all 4 checkpoints.'}
           {vault.unsafe && ' This strategy is flagged unsafe and cannot be validated here.'}
         </p>
 
         <div className="flex items-center justify-between">
-          <span className="text-xs text-text-dim">
+          <span className="text-xs text-fg-tertiary">
             {vault.spent
               ? 'Already used. Starting fresh requires a new strategy test with new data.'
               : vault.can_run
@@ -59,20 +59,20 @@ export function VaultPanel({
         </div>
 
         <div className="border-t border-border pt-3">
-          <div className="flex items-center gap-2 text-xs text-text-dim">
+          <div className="flex items-center gap-2 text-xs text-fg-tertiary">
             <ShieldCheck className="h-3.5 w-3.5" />
             Access log ({vault.access_log.length})
           </div>
           {vault.access_log.length === 0 ? (
-            <div className="mt-1 text-xs text-text-dim">never accessed</div>
+            <div className="mt-1 text-xs text-fg-tertiary">never accessed</div>
           ) : (
             <ul className="mt-2 space-y-1 text-xs">
               {vault.access_log.map((a, i) => (
                 <li key={`${a.run_id}-${i}`} className="flex items-center justify-between gap-2">
-                  <span className="truncate font-mono text-text-muted" title={a.run_id}>
+                  <span className="truncate font-mono text-fg-secondary" title={a.run_id}>
                     {a.run_id}
                   </span>
-                  <span className="shrink-0 text-text-dim">
+                  <span className="shrink-0 text-fg-tertiary">
                     {a.by} · {new Date(a.when).toLocaleString()}
                   </span>
                 </li>

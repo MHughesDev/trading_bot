@@ -70,7 +70,7 @@ function pct(v: number) {
 
 /** Sparkline of CRPS proxy over time */
 function CrpsSparkline({ series }: { series: QualitySeries[] }) {
-  if (series.length < 2) return <p className="text-xs text-text-muted">Not enough data</p>
+  if (series.length < 2) return <p className="text-xs text-fg-secondary">Not enough data</p>
   const W = 320,
     H = 80
   const vals = series.map((s) => s.crps_proxy)
@@ -98,7 +98,7 @@ function QuantileFan({ cf }: { cf: CalibratedForecast }) {
   const rets = cf.quantiles_return
 
   if (!levels || levels.length < 3) {
-    return <p className="text-xs text-text-muted">No quantile distribution available</p>
+    return <p className="text-xs text-fg-secondary">No quantile distribution available</p>
   }
 
   const W = 320,
@@ -182,7 +182,7 @@ function QuantileFan({ cf }: { cf: CalibratedForecast }) {
 /** Reliability diagram: buckets coverage targets vs actual */
 function ReliabilityDiagram({ series }: { series: QualitySeries[] }) {
   if (series.length === 0)
-    return <p className="text-xs text-text-muted">No calibration data yet</p>
+    return <p className="text-xs text-fg-secondary">No calibration data yet</p>
   const W = 280,
     H = 120
 
@@ -255,7 +255,7 @@ function ReliabilityDiagram({ series }: { series: QualitySeries[] }) {
 
 /** Coverage vs nominal bar chart */
 function CoverageVsNominal({ series }: { series: QualitySeries[] }) {
-  if (series.length === 0) return <p className="text-xs text-text-muted">No data yet</p>
+  if (series.length === 0) return <p className="text-xs text-fg-secondary">No data yet</p>
   const W = 280,
     H = 100
   const last = series.at(-1)!
@@ -328,7 +328,7 @@ export function ForecastChartsTab({ modelId }: { modelId: string }) {
 
   if (qLoading)
     return (
-      <div className="flex items-center gap-2 text-text-muted text-sm p-6">
+      <div className="flex items-center gap-2 text-fg-secondary text-sm p-6">
         <Loader2 className="h-4 w-4 animate-spin" />
         Loading quality data…
       </div>
@@ -355,7 +355,7 @@ export function ForecastChartsTab({ modelId }: { modelId: string }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Quantile Fan */}
         <div className="rounded-xl border border-border bg-surface p-4">
-          <h4 className="text-xs font-medium text-text-muted mb-3 uppercase tracking-wide">
+          <h4 className="text-xs font-medium text-fg-secondary mb-3 uppercase tracking-wide">
             Quantile Distribution Fan
           </h4>
           {forecast ? (
@@ -363,27 +363,27 @@ export function ForecastChartsTab({ modelId }: { modelId: string }) {
               <QuantileFan cf={forecast} />
               <div className="mt-3 grid grid-cols-2 gap-x-4 text-xs">
                 <div>
-                  <span className="text-text-muted">Median return </span>
+                  <span className="text-fg-secondary">Median return </span>
                   <span className="font-mono text-text">
                     {(forecast.median_return * 100).toFixed(3)}%
                   </span>
                 </div>
                 <div>
-                  <span className="text-text-muted">σ </span>
+                  <span className="text-fg-secondary">σ </span>
                   <span className="font-mono text-text">
                     {(forecast.sigma * 100).toFixed(3)}%
                   </span>
                 </div>
                 <div>
-                  <span className="text-text-muted">Direction </span>
+                  <span className="text-fg-secondary">Direction </span>
                   <span
-                    className={`font-medium ${forecast.direction === 'up' ? 'text-pnl-up' : forecast.direction === 'down' ? 'text-pnl-down' : 'text-text-muted'}`}
+                    className={`font-medium ${forecast.direction === 'up' ? 'text-pos' : forecast.direction === 'down' ? 'text-neg' : 'text-fg-secondary'}`}
                   >
                     {forecast.direction}
                   </span>
                 </div>
                 <div>
-                  <span className="text-text-muted">Confidence </span>
+                  <span className="text-fg-secondary">Confidence </span>
                   <span className="font-mono text-text">
                     {(forecast.confidence * 100).toFixed(1)}%
                   </span>
@@ -391,7 +391,7 @@ export function ForecastChartsTab({ modelId }: { modelId: string }) {
               </div>
             </>
           ) : (
-            <p className="text-xs text-text-muted">
+            <p className="text-xs text-fg-secondary">
               No live forecast — deploy a model version with the "production" alias.
             </p>
           )}
@@ -399,12 +399,12 @@ export function ForecastChartsTab({ modelId }: { modelId: string }) {
 
         {/* CRPS Sparkline */}
         <div className="rounded-xl border border-border bg-surface p-4">
-          <h4 className="text-xs font-medium text-text-muted mb-3 uppercase tracking-wide">
+          <h4 className="text-xs font-medium text-fg-secondary mb-3 uppercase tracking-wide">
             CRPS Proxy (rolling)
           </h4>
           <CrpsSparkline series={series} />
           {series.length > 0 && (
-            <p className="text-xs text-text-muted mt-2">
+            <p className="text-xs text-fg-secondary mt-2">
               Latest:{' '}
               <span className="font-mono text-text">
                 {series.at(-1)!.crps_proxy.toFixed(4)}
@@ -416,22 +416,22 @@ export function ForecastChartsTab({ modelId }: { modelId: string }) {
 
         {/* Reliability Diagram */}
         <div className="rounded-xl border border-border bg-surface p-4">
-          <h4 className="text-xs font-medium text-text-muted mb-3 uppercase tracking-wide">
+          <h4 className="text-xs font-medium text-fg-secondary mb-3 uppercase tracking-wide">
             Reliability Diagram
           </h4>
           <ReliabilityDiagram series={series} />
-          <p className="text-xs text-text-muted mt-2">
+          <p className="text-xs text-fg-secondary mt-2">
             Dots = realised; circles = nominal. Closer = better calibrated.
           </p>
         </div>
 
         {/* Coverage vs Nominal */}
         <div className="rounded-xl border border-border bg-surface p-4">
-          <h4 className="text-xs font-medium text-text-muted mb-3 uppercase tracking-wide">
+          <h4 className="text-xs font-medium text-fg-secondary mb-3 uppercase tracking-wide">
             Coverage vs Nominal
           </h4>
           <CoverageVsNominal series={series} />
-          <p className="text-xs text-text-muted mt-2">
+          <p className="text-xs text-fg-secondary mt-2">
             Grey = nominal; coloured = realised. Green ±10% of target.
           </p>
         </div>
@@ -440,7 +440,7 @@ export function ForecastChartsTab({ modelId }: { modelId: string }) {
       {/* Risk read-outs */}
       {forecast?.risk && (
         <div className="rounded-xl border border-border bg-surface p-4">
-          <h4 className="text-xs font-medium text-text-muted mb-3 uppercase tracking-wide">
+          <h4 className="text-xs font-medium text-fg-secondary mb-3 uppercase tracking-wide">
             Risk Read-outs (from distribution)
           </h4>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
@@ -470,8 +470,8 @@ export function ForecastChartsTab({ modelId }: { modelId: string }) {
                 value: `${(forecast.risk.spread_90 * 100).toFixed(3)}%`,
               },
             ].map((item) => (
-              <div key={item.label} className="rounded-lg bg-surface-2 p-3">
-                <div className="text-text-muted mb-1">{item.label}</div>
+              <div key={item.label} className="rounded-lg bg-sunken p-3">
+                <div className="text-fg-secondary mb-1">{item.label}</div>
                 <div className="font-mono text-text font-medium">{item.value}</div>
               </div>
             ))}

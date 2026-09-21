@@ -68,20 +68,20 @@ function ModelCardSkeleton() {
   return (
     <div className="panel p-5 animate-pulse">
       <div className="flex items-start gap-3 mb-4">
-        <div className="h-9 w-9 rounded-lg bg-surface-2" />
+        <div className="h-9 w-9 rounded-lg bg-sunken" />
         <div className="flex-1 space-y-2">
-          <div className="h-4 w-3/4 rounded bg-surface-2" />
-          <div className="h-3 w-1/2 rounded bg-surface-2" />
+          <div className="h-4 w-3/4 rounded bg-sunken" />
+          <div className="h-3 w-1/2 rounded bg-sunken" />
         </div>
-        <div className="h-5 w-16 rounded-full bg-surface-2" />
+        <div className="h-5 w-16 rounded-full bg-sunken" />
       </div>
       <div className="space-y-2">
-        <div className="h-3 w-full rounded bg-surface-2" />
-        <div className="h-3 w-2/3 rounded bg-surface-2" />
+        <div className="h-3 w-full rounded bg-sunken" />
+        <div className="h-3 w-2/3 rounded bg-sunken" />
       </div>
       <div className="mt-4 flex gap-2">
-        <div className="h-8 w-16 rounded bg-surface-2" />
-        <div className="h-8 w-24 rounded bg-surface-2" />
+        <div className="h-8 w-16 rounded bg-sunken" />
+        <div className="h-8 w-24 rounded bg-sunken" />
       </div>
     </div>
   )
@@ -105,41 +105,41 @@ function ModelCard({ model }: { model: AiModel }) {
     >
       {/* Header */}
       <div className="flex items-start gap-3 mb-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2 text-accent shrink-0">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sunken text-accent shrink-0">
           <Icon className="h-4.5 w-4.5" />
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-text truncate text-sm leading-5">
             {model.display_name}
           </h3>
-          <p className="text-xs text-text-muted font-mono">{model.slug}</p>
+          <p className="text-xs text-fg-secondary font-mono">{model.slug}</p>
         </div>
         <ModelStatusPill status={model.status} />
       </div>
 
       {/* Description */}
       {model.description && (
-        <p className="text-xs text-text-muted line-clamp-2 mb-3">{model.description}</p>
+        <p className="text-xs text-fg-secondary line-clamp-2 mb-3">{model.description}</p>
       )}
 
       {/* Badges */}
       <div className="flex flex-wrap gap-1.5 mb-4">
-        <span className="inline-flex items-center rounded-md bg-surface-2 px-2 py-0.5 text-xs text-text-muted border border-border">
+        <span className="inline-flex items-center rounded-md bg-sunken px-2 py-0.5 text-xs text-fg-secondary border border-border">
           {KIND_LABELS[model.model_kind]}
         </span>
         {model.asset_class && (
-          <span className="inline-flex items-center rounded-md bg-surface-2 px-2 py-0.5 text-xs text-text-muted border border-border">
+          <span className="inline-flex items-center rounded-md bg-sunken px-2 py-0.5 text-xs text-fg-secondary border border-border">
             {model.asset_class}
           </span>
         )}
         {model.definition.framework && (
-          <span className="inline-flex items-center rounded-md bg-surface-2 px-2 py-0.5 text-xs font-mono text-text-dim border border-border">
+          <span className="inline-flex items-center rounded-md bg-sunken px-2 py-0.5 text-xs font-mono text-fg-tertiary border border-border">
             {model.definition.framework}
           </span>
         )}
       </div>
 
-      <div className="text-xs text-text-dim mb-4">
+      <div className="text-xs text-fg-tertiary mb-4">
         Updated {format(new Date(model.updated_at), 'MMM d, yyyy')}
       </div>
 
@@ -180,7 +180,7 @@ function ModelTableRow({ model }: { model: AiModel }) {
 
   return (
     <tr
-      className="border-b border-border hover:bg-surface-2 cursor-pointer transition-colors"
+      className="border-b border-border hover:bg-sunken cursor-pointer transition-colors"
       onClick={() => navigate(`/mlops/${model.model_id}`)}
     >
       <td className="px-4 py-3">
@@ -188,16 +188,16 @@ function ModelTableRow({ model }: { model: AiModel }) {
           <Icon className="h-4 w-4 text-accent shrink-0" />
           <div>
             <div className="text-sm font-medium text-text">{model.display_name}</div>
-            <div className="text-xs text-text-dim font-mono">{model.slug}</div>
+            <div className="text-xs text-fg-tertiary font-mono">{model.slug}</div>
           </div>
         </div>
       </td>
-      <td className="px-4 py-3 text-sm text-text-muted">{KIND_LABELS[model.model_kind]}</td>
+      <td className="px-4 py-3 text-sm text-fg-secondary">{KIND_LABELS[model.model_kind]}</td>
       <td className="px-4 py-3">
         <ModelStatusPill status={model.status} />
       </td>
-      <td className="px-4 py-3 text-sm text-text-muted">{model.asset_class}</td>
-      <td className="px-4 py-3 text-xs text-text-dim font-mono">
+      <td className="px-4 py-3 text-sm text-fg-secondary">{model.asset_class}</td>
+      <td className="px-4 py-3 text-xs text-fg-tertiary font-mono">
         {format(new Date(model.updated_at), 'MMM d, yyyy')}
       </td>
     </tr>
@@ -249,13 +249,13 @@ export function MlOpsPage() {
       <div className="mb-5 flex flex-wrap items-center gap-3">
         {/* Search */}
         <div className="relative flex-1 min-w-[200px] max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-dim" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-fg-tertiary" />
           <input
             type="text"
             placeholder="Search models…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 h-8 rounded-lg border border-border bg-surface text-sm text-text placeholder:text-text-dim focus:outline-none focus:border-accent transition-colors"
+            className="w-full pl-8 pr-3 h-8 rounded-lg border border-border bg-surface text-sm text-text placeholder:text-fg-tertiary focus:outline-none focus:border-accent transition-colors"
           />
         </div>
 
@@ -294,8 +294,8 @@ export function MlOpsPage() {
             className={cn(
               'flex items-center justify-center w-8 h-8 transition-colors',
               viewMode === 'grid'
-                ? 'bg-surface-2 text-text'
-                : 'bg-surface text-text-muted hover:text-text',
+                ? 'bg-sunken text-text'
+                : 'bg-surface text-fg-secondary hover:text-text',
             )}
           >
             <LayoutGrid className="h-3.5 w-3.5" />
@@ -305,8 +305,8 @@ export function MlOpsPage() {
             className={cn(
               'flex items-center justify-center w-8 h-8 transition-colors border-l border-border',
               viewMode === 'table'
-                ? 'bg-surface-2 text-text'
-                : 'bg-surface text-text-muted hover:text-text',
+                ? 'bg-sunken text-text'
+                : 'bg-surface text-fg-secondary hover:text-text',
             )}
           >
             <List className="h-3.5 w-3.5" />
@@ -323,16 +323,16 @@ export function MlOpsPage() {
             ))}
           </div>
         ) : (
-          <div className="flex items-center justify-center py-20 text-text-dim">
+          <div className="flex items-center justify-center py-20 text-fg-tertiary">
             <Loader2 className="h-6 w-6 animate-spin" />
           </div>
         )
       ) : models.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border py-24 text-center">
-          <Brain className="h-12 w-12 text-text-dim" />
+          <Brain className="h-12 w-12 text-fg-tertiary" />
           <div>
             <p className="text-base font-medium text-text">No models yet</p>
-            <p className="mt-1 text-sm text-text-muted">
+            <p className="mt-1 text-sm text-fg-secondary">
               Create your first model to get started with AI-powered trading.
             </p>
           </div>
@@ -356,12 +356,12 @@ export function MlOpsPage() {
         <div className="rounded-xl border border-border bg-surface overflow-hidden">
           <table className="w-full">
             <thead>
-              <tr className="border-b border-border bg-surface-2">
-                <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Model</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Kind</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Asset Class</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Updated</th>
+              <tr className="border-b border-border bg-sunken">
+                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Model</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Kind</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Asset Class</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Updated</th>
               </tr>
             </thead>
             <tbody>
@@ -374,7 +374,7 @@ export function MlOpsPage() {
       )}
 
       {!isLoading && models.length > 0 && (
-        <p className="mt-4 text-xs text-text-dim text-right">
+        <p className="mt-4 text-xs text-fg-tertiary text-right">
           {data?.total ?? models.length} model{(data?.total ?? models.length) !== 1 ? 's' : ''}
         </p>
       )}

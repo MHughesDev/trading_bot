@@ -302,6 +302,91 @@ prose *to explain that it is unbuilt* made it read as built and failed the suite
 
 ---
 
+### The guard was narrower than its claim, and the claim was narrower than its goal, 2026-09-21
+
+**416 tests in 45 files** (floor was 395 in 44), `tsc -b` clean.
+
+S-6.22's guard was widened **first, and watched to fail**, before a single file
+was migrated — 216 files scanned instead of 63 plus five named ones. The exact
+counts at that moment: `text-text-dim` 25, `bg-surface-2` 21, `text-text-muted`
+20, `bg-pnl-up` 7, `bg-pnl-down` 6, `text-warning` 1 — **27 files in union**. The
+audit said 28; the 28th is the guard itself, which names the aliases in order to
+ban them.
+
+**Then the criterion turned out to be narrower than its own goal.** With all five
+class spellings clean, a grep for the *colour names* found **36 more usages
+across 16 files** reaching the same deprecated custom properties through other
+utility prefixes — `text-pnl-down`, `border-pnl-up/30`, `bg-text-dim`,
+`bg-warning/10`. **The acceptance grep would have returned clean with the
+aliases still in service.** They were migrated too, and then the six
+declarations were deleted from `tailwind.theme.css`, which is what the task body
+asked for all along. Four aliases stay because screens still reference them, and
+the file says why: deleting a name something still uses is worse than the alias.
+
+Every mapping was read off the theme file rather than guessed — each alias was
+declared as `var(…)` of a token that already had a modern name, so every
+migration is a rename with no colour change. **Nothing was left in the allow-list
+for want of an equivalent.**
+
+**Two narrowings, one lesson.** A guard whose scope is narrower than its claim
+turns an open question into a settled one. A *criterion* whose scope is narrower
+than its goal does the same thing one level up, and no amount of test discipline
+catches it — only somebody checking what the rule was for.
+
+**S-6.22 stays `PARTIAL`.** The alias clause is now met and exceeded, but two
+clauses of the same task are still unbuilt: browser-notification opt-in with
+quiet hours does not exist, and no `aria-live` region announces a new approval, a
+new question or a finished run — only the kill-switch banner has one.
+
+**`cost_usd`'s honest branch was unreachable in the only state this platform is
+in.** Its "not priced (OQ-16)" path requires `tokens > 0`, and the empty
+`llm_usage` table denies exactly that — so the live payload rendered
+**`$0.0000`**, a billing claim, from a table with no rows. The new
+`nothingRecordedInLlmUsage()` fires only when **all four** counters are zero: a
+single zero beside a non-zero one is a real measurement and still prints `0`.
+Five of the thirteen new tests fail without it.
+
+> **OPEN QUESTION (recorded, not silently resolved).** S-6.22's acceptance says
+> the grep must return nothing *"outside `compat.css`"*, but these aliases were
+> **never in `compat.css`** — the same task body says they live in
+> *"`tailwind.theme.css` lines 85-94"*, which is where they were, and
+> `compat.css` contains no alias and never did. The intent was implemented
+> (nothing outside the file that declares them, and now nothing anywhere) and
+> the discrepancy is recorded in the guard's own header rather than resolved by
+> allow-listing the wrong file.
+
+### The digest stopped lying to the operator, same day
+
+`kinds_not_covered` is **computed rather than constant**: a kind is named only
+when *that request* tried its source and failed, and the reason quotes the
+store's own error string. A constant cannot go stale if there is no constant.
+`finding` and `refuted` now come from the memory store with its archived and
+superseded filters; `monitor` comes from `monitor.events`, where `is_drill`
+prefixes **`DRILL —`**, because a rehearsal reading as a halt sends an operator
+to a position that was never at risk.
+
+**The budget line is a four-way truth table, not a `SUM`.** `agent_runs` carries
+`tokens_in`/`tokens_out` and **27 of 55 runs have them — 2,526,695 tokens in —**
+while `llm_usage` has no rows at all. So on this deployment **volume is measured
+and cost is not**: `TokensOnly` reports the real number and states that the
+dollar figure is absent; `Unmeasured` emits **no line**, because that is an
+absent measurement and not a spend of zero. The other **28 finished runs
+recorded no token count at all**, which is a third fact again, and gets its own
+sentence rather than being summed in as zero.
+
+Two refusals worth keeping. `rust_decimal` was declined for the
+`NUMERIC(38,18)` column — a 96-bit mantissa cannot hold what that column admits,
+and a decode error caught with `.ok()` turns a recorded observation into a
+silent absence; the value is cast to text in SQL instead. And the memory store's
+archived/superseded filter had to be duplicated against that file's explicit
+warning — paid for with **a CI test that reads both files and fails if either
+half drops out of either**, rather than with the comment the store asks for.
+
+**`/api/agent/usage` reads the wrong table**, which is the same defect one layer
+down and is now its own track: the tokens are in `agent_runs`, and the route
+selects `llm_usage`.
+
+
 ### The right panel, 2026-09-21 — two tabs were blaming the run for a missing route
 
 **395 tests in 44 files** (floor was 361 in 39), `tsc -b` clean.

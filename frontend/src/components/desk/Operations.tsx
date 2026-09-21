@@ -129,6 +129,40 @@ function numberOrNull(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
+/** The four counters `/api/agent/usage` sums straight out of `llm_usage`. */
+const LLM_USAGE_COUNTERS = ['input_tokens', 'output_tokens', 'cache_read', 'cache_write'] as const
+
+/**
+ * Whether `llm_usage` recorded anything at all for this desk.
+ *
+ * `get_usage` is four `COALESCE(SUM(…),0)` over one table. Every one of them
+ * coming back zero has exactly two readings — the desk spent nothing, or the
+ * table holds no row for it — and the response cannot tell them apart, because
+ * both produce the same four zeros.
+ *
+ * On this platform today it is the second reading: `llm_usage` holds **0 rows**
+ * while `agent_runs` holds 55, 27 of which recorded a non-zero `tokens_in`, for
+ * 2,526,695 prompt tokens and 27,512 output tokens in a column the endpoint does
+ * not read. Only the LLM proxy writes `llm_usage`, and the desk driver does not
+ * go through it.
+ *
+ * So this returning `true` does not license the surface to claim a number. It
+ * licenses it to stop printing `0`, which is the one thing that is certainly
+ * wrong: a zero here is *not recorded*, and the reader has no way to know that
+ * from the digit.
+ *
+ * A single counter of zero beside a non-zero one is a real measured zero and is
+ * printed as `0`, which is why this is all-four and not any-of-four.
+ */
+export function nothingRecordedInLlmUsage(raw: Record<string, unknown> | null | undefined): boolean {
+  if (!raw) return false
+  return LLM_USAGE_COUNTERS.every((k) => numberOrNull(raw[k]) === 0)
+}
+
+/** What a counter is allowed to say when the table behind it recorded nothing. */
+const NOT_RECORDED =
+  'not recorded — llm_usage holds nothing for this desk, and only the LLM proxy writes it. Not a measured zero.'
+
 /**
  * The spend totals, read so that three of them stop lying.
  *
@@ -144,6 +178,10 @@ function numberOrNull(v: unknown): number | null {
  * * `dollars_per_verdict` is `null` with no verdicts, and `String(null)` put the
  *   literal word **null** in the table.
  *
+ * And a fourth, added once the live platform was read: the four token counters
+ * fell through to `n.toLocaleString()`, so an `llm_usage` with no rows rendered
+ * as four honest-looking `0`s. See `nothingRecordedInLlmUsage`.
+ *
  * Returns `null` when nothing answered, which the caller must not confuse with a
  * request still in flight.
  */
@@ -155,14 +193,27 @@ export function usageRows(raw: Record<string, unknown> | null | undefined): Usag
   const verdicts = numberOrNull(raw.verdicts)
   const spentTokens = (input ?? 0) + (output ?? 0) > 0
   const billablePrompt = (input ?? 0) + (cacheRead ?? 0)
+  const unrecorded = nothingRecordedInLlmUsage(raw)
 
   return Object.keys(raw).map((key): UsageLine => {
     const v = raw[key]
     const label = USAGE_LABELS[key] ?? key
     const n = numberOrNull(v)
     switch (key) {
+      case 'input_tokens':
+      case 'output_tokens':
+      case 'cache_read':
+      case 'cache_write':
+        // A count is the one place a zero is invisible: `0` reads as a
+        // measurement whichever it is. When the whole table came back empty
+        // there is no measurement, and saying so is the only honest render.
+        if (n === null) return { key, label, value: 'not reported' }
+        return { key, label, value: unrecorded ? NOT_RECORDED : n.toLocaleString() }
       case 'cost_usd':
         if (n === null) return { key, label, value: 'not reported' }
+        // Nothing to price, because nothing was recorded to price. `$0.0000`
+        // here is the same claim the bare `0`s made.
+        if (unrecorded) return { key, label, value: NOT_RECORDED }
         if (n === 0 && spentTokens) {
           return {
             key,
@@ -173,6 +224,10 @@ export function usageRows(raw: Record<string, unknown> | null | undefined): Usag
         return { key, label, value: `$${n.toFixed(4)}` }
       case 'cache_hit_rate':
         if (n === null) return { key, label, value: 'not reported' }
+        // "no prompt has been billed yet" is a claim about billing. With an
+        // empty table nobody knows whether a prompt was billed — only that no
+        // row says so.
+        if (unrecorded) return { key, label, value: NOT_RECORDED }
         if (billablePrompt === 0) {
           return { key, label, value: 'not measured — no prompt has been billed yet' }
         }
@@ -195,7 +250,9 @@ export function Usage() {
     queryKey: ['desk', 'usage'],
     queryFn: () => deskApi.usage().then((r) => r.data),
   })
-  const rows = usageRows(usage.data as Record<string, unknown> | undefined)
+  const raw = usage.data as Record<string, unknown> | undefined
+  const rows = usageRows(raw)
+  const unrecorded = nothingRecordedInLlmUsage(raw)
 
   return (
     <div className="desk-scroll">
@@ -223,6 +280,19 @@ export function Usage() {
                 ))}
               </tbody>
             </table>
+          )}
+          {unrecorded && (
+            // Stated, not left to be inferred from four zeros. The reader
+            // cannot tell an empty table from an idle desk by looking at the
+            // numbers, so the surface has to say which question is open.
+            <p className="sub" data-testid="usage-unrecorded-note">
+              Every total <code>/api/agent/usage</code> sums came back zero. That endpoint reads one table,{' '}
+              <code>llm_usage</code>, which only the LLM proxy writes — and this desk's driver does not call
+              the agent through it. So this desk may have spent nothing, or it may have spent a great deal
+              that nothing recorded, and these totals cannot tell you which. Treat them as unread, not as
+              nil. The run's own <code>tokens_in</code>/<code>tokens_out</code> are kept on{' '}
+              <code>agent_runs</code>, which no endpoint exposes yet.
+            </p>
           )}
           <p className="sub">
             Spend by day, by conversation, by model and by layer, cost per finding and per gate, and budget

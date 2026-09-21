@@ -37,9 +37,9 @@ interface VersionResult {
 
 function DirectionPill({ direction }: { direction: string }) {
   const map = {
-    up: { icon: TrendingUp, cls: 'text-pnl-up bg-pnl-up/10 border-pnl-up/20' },
-    down: { icon: TrendingDown, cls: 'text-pnl-down bg-pnl-down/10 border-pnl-down/20' },
-    flat: { icon: Minus, cls: 'text-text-muted bg-surface-2 border-border' },
+    up: { icon: TrendingUp, cls: 'text-pos bg-pos/10 border-pos/20' },
+    down: { icon: TrendingDown, cls: 'text-neg bg-neg/10 border-neg/20' },
+    flat: { icon: Minus, cls: 'text-fg-secondary bg-sunken border-border' },
   } as const
   const m = map[direction as keyof typeof map] ?? map.flat
   const Icon = m.icon
@@ -60,7 +60,7 @@ function ConfidenceBar({ value }: { value: number }) {
   const pct = Math.round(Math.max(0, Math.min(1, value)) * 100)
   return (
     <div className="flex items-center gap-2">
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-2">
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-sunken">
         <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
       </div>
       <span className="font-mono text-xs text-text w-9 text-right">{pct}%</span>
@@ -292,7 +292,7 @@ export function ModelTestTab({ modelId }: Props) {
         <div className="space-y-4">
           <h3 className="text-sm font-medium text-text">Response</h3>
           {llmResult?.error && (
-            <div className="rounded-xl border border-pnl-down/20 bg-pnl-down/10 p-4 text-sm text-pnl-down">
+            <div className="rounded-xl border border-neg/20 bg-neg/10 p-4 text-sm text-neg">
               {llmResult.error}
             </div>
           )}
@@ -300,12 +300,12 @@ export function ModelTestTab({ modelId }: Props) {
             <div className="rounded-xl border border-border bg-surface p-4">
               <p className="text-sm text-text whitespace-pre-wrap">{llmResult.text}</p>
               {llmResult.latency_ms !== undefined && (
-                <p className="mt-3 text-xs text-text-muted">{llmResult.latency_ms} ms</p>
+                <p className="mt-3 text-xs text-fg-secondary">{llmResult.latency_ms} ms</p>
               )}
             </div>
           )}
           {!llmResult && (
-            <div className="rounded-xl border border-dashed border-border p-12 text-center text-sm text-text-dim">
+            <div className="rounded-xl border border-dashed border-border p-12 text-center text-sm text-fg-tertiary">
               Run a prompt to see the response.
             </div>
           )}
@@ -323,11 +323,11 @@ export function ModelTestTab({ modelId }: Props) {
 
         {/* Versions (multi-select for compare) */}
         <div>
-          <label className="block text-xs font-medium text-text-muted mb-1.5">
+          <label className="block text-xs font-medium text-fg-secondary mb-1.5">
             Versions {selectedVersions.length > 1 && '(compare)'}
           </label>
           {testableVersions.length === 0 ? (
-            <p className="text-xs text-text-dim">
+            <p className="text-xs text-fg-tertiary">
               No active or candidate versions yet. Train and promote a version first.
             </p>
           ) : (
@@ -340,11 +340,11 @@ export function ModelTestTab({ modelId }: Props) {
                     'rounded-lg border px-2.5 py-1 text-xs transition-colors',
                     selectedVersions.includes(v.version)
                       ? 'border-accent bg-accent/10 text-text'
-                      : 'border-border bg-surface text-text-muted hover:border-border-2',
+                      : 'border-border bg-surface text-fg-secondary hover:border-border-2',
                   )}
                 >
                   v{v.version}
-                  <span className="ml-1 text-text-dim">{v.status}</span>
+                  <span className="ml-1 text-fg-tertiary">{v.status}</span>
                 </button>
               ))}
             </div>
@@ -352,10 +352,10 @@ export function ModelTestTab({ modelId }: Props) {
         </div>
 
         {/* Instrument + timeframe + autofill */}
-        <div className="rounded-lg border border-border bg-surface-2 p-3 space-y-3">
+        <div className="rounded-lg border border-border bg-sunken p-3 space-y-3">
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="block text-[11px] font-medium text-text-muted mb-1">
+              <label className="block text-[11px] font-medium text-fg-secondary mb-1">
                 Instrument
               </label>
               <select
@@ -376,7 +376,7 @@ export function ModelTestTab({ modelId }: Props) {
               </select>
             </div>
             <div>
-              <label className="block text-[11px] font-medium text-text-muted mb-1">
+              <label className="block text-[11px] font-medium text-fg-secondary mb-1">
                 Timeframe
               </label>
               <select
@@ -405,26 +405,26 @@ export function ModelTestTab({ modelId }: Props) {
             )}
             Autofill from latest bar
           </Button>
-          {autofillInfo && <p className="text-[11px] text-text-dim">{autofillInfo}</p>}
+          {autofillInfo && <p className="text-[11px] text-fg-tertiary">{autofillInfo}</p>}
         </div>
 
         {/* Feature editor */}
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <label className="text-xs font-medium text-text-muted">
+            <label className="text-xs font-medium text-fg-secondary">
               Features{' '}
               {model?.definition.feature_set_ref ? (
-                <span className="text-text-dim font-mono">
+                <span className="text-fg-tertiary font-mono">
                   ({String(model.definition.feature_set_ref)})
                 </span>
               ) : null}
             </label>
-            <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-2 p-0.5">
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-sunken p-0.5">
               <button
                 onClick={() => setMode('form')}
                 className={cn(
                   'flex items-center gap-1 rounded-md px-2 py-1 text-[11px]',
-                  mode === 'form' ? 'bg-surface text-text shadow-sm' : 'text-text-muted',
+                  mode === 'form' ? 'bg-surface text-text shadow-sm' : 'text-fg-secondary',
                 )}
               >
                 <SlidersHorizontal className="h-3 w-3" />
@@ -437,7 +437,7 @@ export function ModelTestTab({ modelId }: Props) {
                 }}
                 className={cn(
                   'flex items-center gap-1 rounded-md px-2 py-1 text-[11px]',
-                  mode === 'json' ? 'bg-surface text-text shadow-sm' : 'text-text-muted',
+                  mode === 'json' ? 'bg-surface text-text shadow-sm' : 'text-fg-secondary',
                 )}
               >
                 <Code2 className="h-3 w-3" />
@@ -449,11 +449,11 @@ export function ModelTestTab({ modelId }: Props) {
           {mode === 'form' ? (
             <div className="space-y-1.5 max-h-[320px] overflow-y-auto pr-1">
               {featureOrder.length === 0 ? (
-                <p className="text-[11px] text-text-dim">Loading feature schema…</p>
+                <p className="text-[11px] text-fg-tertiary">Loading feature schema…</p>
               ) : (
                 featureOrder.map((name) => (
                   <div key={name} className="flex items-center gap-2">
-                    <label className="text-[11px] font-mono text-text-muted w-36 truncate">
+                    <label className="text-[11px] font-mono text-fg-secondary w-36 truncate">
                       {name}
                     </label>
                     <input
@@ -484,11 +484,11 @@ export function ModelTestTab({ modelId }: Props) {
               spellCheck={false}
               className={cn(
                 'w-full rounded-lg border bg-surface px-2.5 py-2 text-xs font-mono text-text focus:outline-none resize-none',
-                jsonError ? 'border-pnl-down' : 'border-border focus:border-accent',
+                jsonError ? 'border-neg' : 'border-border focus:border-accent',
               )}
             />
           )}
-          {jsonError && <p className="text-[11px] text-pnl-down mt-1">{jsonError}</p>}
+          {jsonError && <p className="text-[11px] text-neg mt-1">{jsonError}</p>}
         </div>
 
         <Button className="w-full text-sm" onClick={handleRun} disabled={running || !canRun}>
@@ -512,7 +512,7 @@ export function ModelTestTab({ modelId }: Props) {
             value={saveName}
             onChange={(e) => setSaveName(e.target.value)}
             placeholder="Name this case…"
-            className="flex-1 h-8 rounded-lg border border-border bg-surface px-2.5 text-xs text-text placeholder:text-text-dim focus:outline-none focus:border-accent"
+            className="flex-1 h-8 rounded-lg border border-border bg-surface px-2.5 text-xs text-text placeholder:text-fg-tertiary focus:outline-none focus:border-accent"
           />
           <Button
             variant="outline"
@@ -532,7 +532,7 @@ export function ModelTestTab({ modelId }: Props) {
 
         {results.length === 0 && !running && (
           <div className="rounded-xl border border-dashed border-border p-12 flex items-center justify-center">
-            <p className="text-sm text-text-dim">Run a test to see predictions here.</p>
+            <p className="text-sm text-fg-tertiary">Run a test to see predictions here.</p>
           </div>
         )}
 
@@ -545,51 +545,51 @@ export function ModelTestTab({ modelId }: Props) {
         {results.map((r) => (
           <div key={r.version} className="rounded-xl border border-border bg-surface p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-text-muted">Version v{r.version}</span>
+              <span className="text-xs font-medium text-fg-secondary">Version v{r.version}</span>
               {r.latency_ms !== undefined && (
-                <span className="font-mono text-xs text-text-dim">{r.latency_ms} ms</span>
+                <span className="font-mono text-xs text-fg-tertiary">{r.latency_ms} ms</span>
               )}
             </div>
             {r.error ? (
-              <p className="text-sm text-pnl-down">{r.error}</p>
+              <p className="text-sm text-neg">{r.error}</p>
             ) : r.forecast ? (
               <>
                 <div className="flex items-center justify-between">
                   <DirectionPill direction={r.forecast.direction} />
                   <span className="font-mono text-sm text-text">
                     {r.forecast.magnitude}
-                    <span className="text-text-dim ml-1 text-xs">{r.forecast.horizon}</span>
+                    <span className="text-fg-tertiary ml-1 text-xs">{r.forecast.horizon}</span>
                   </span>
                 </div>
                 <div>
-                  <p className="text-[11px] text-text-muted mb-1">Confidence</p>
+                  <p className="text-[11px] text-fg-secondary mb-1">Confidence</p>
                   <ConfidenceBar value={r.forecast.confidence} />
                 </div>
               </>
             ) : (
-              <p className="text-sm text-text-dim">No prediction returned.</p>
+              <p className="text-sm text-fg-tertiary">No prediction returned.</p>
             )}
           </div>
         ))}
 
         {/* Saved cases */}
         {testCases && testCases.length > 0 && (
-          <div className="rounded-xl border border-border bg-surface-2 p-4">
-            <p className="text-xs font-medium text-text-muted mb-2">Saved cases</p>
+          <div className="rounded-xl border border-border bg-sunken p-4">
+            <p className="text-xs font-medium text-fg-secondary mb-2">Saved cases</p>
             <div className="space-y-1.5">
               {testCases.map((c) => (
                 <div key={c.case_id} className="flex items-center gap-2 text-xs">
                   <span className="text-text truncate flex-1">{c.name}</span>
                   <button
                     onClick={() => replayCase(c.input)}
-                    className="flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-text-muted hover:text-text hover:border-border-2"
+                    className="flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-fg-secondary hover:text-text hover:border-border-2"
                   >
                     <RotateCcw className="h-3 w-3" />
                     Load
                   </button>
                   <button
                     onClick={() => deleteCase.mutate(c.case_id)}
-                    className="rounded-md border border-border px-1.5 py-0.5 text-text-dim hover:text-pnl-down"
+                    className="rounded-md border border-border px-1.5 py-0.5 text-fg-tertiary hover:text-neg"
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>

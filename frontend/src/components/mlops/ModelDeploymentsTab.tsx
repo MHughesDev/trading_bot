@@ -11,14 +11,14 @@ interface Props {
 }
 
 const ALIAS_COLORS: Record<string, string> = {
-  production: 'bg-pnl-up/15 text-pnl-up border-pnl-up/30',
+  production: 'bg-pos/15 text-pos border-pos/30',
   candidate: 'bg-info-subtle text-info border-line-info',
   staging: 'bg-accent-subtle text-fg-accent border-line-accent',
-  fallback: 'bg-surface-2 text-text-muted border-border',
+  fallback: 'bg-sunken text-fg-secondary border-border',
 }
 
 function aliasClass(alias: string) {
-  return ALIAS_COLORS[alias] ?? 'bg-surface-2 text-text-muted border-border'
+  return ALIAS_COLORS[alias] ?? 'bg-sunken text-fg-secondary border-border'
 }
 
 function CreateDeploymentModal({
@@ -145,7 +145,7 @@ export function ModelDeploymentsTab({ modelId }: Props) {
 
   if (aliasLoading || deploymentsLoading) {
     return (
-      <div className="flex items-center justify-center py-12 text-text-dim">
+      <div className="flex items-center justify-center py-12 text-fg-tertiary">
         <Loader2 className="h-5 w-5 animate-spin" />
       </div>
     )
@@ -197,7 +197,7 @@ export function ModelDeploymentsTab({ modelId }: Props) {
 
       {!deployments || deployments.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 rounded-xl border border-dashed border-border text-center">
-          <p className="text-sm text-text-dim">No deployments yet</p>
+          <p className="text-sm text-fg-tertiary">No deployments yet</p>
           <Button
             size="sm"
             variant="outline"
@@ -212,13 +212,13 @@ export function ModelDeploymentsTab({ modelId }: Props) {
         <div className="rounded-xl border border-border bg-surface overflow-hidden">
           <table className="w-full">
             <thead>
-              <tr className="border-b border-border bg-surface-2">
-                <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Version</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Alias</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Environment</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Traffic</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-text-muted">Deployed</th>
+              <tr className="border-b border-border bg-sunken">
+                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Version</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Alias</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Environment</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Traffic</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Deployed</th>
               </tr>
             </thead>
             <tbody>
@@ -237,14 +237,14 @@ export function ModelDeploymentsTab({ modelId }: Props) {
                       {dep.alias}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-sm text-text-muted">{dep.environment}</td>
+                  <td className="px-4 py-3 text-sm text-fg-secondary">{dep.environment}</td>
                   <td className="px-4 py-3">
                     <span
                       className={cn(
                         'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
                         dep.status === 'active'
-                          ? 'bg-pnl-up/10 text-pnl-up'
-                          : 'bg-surface-2 text-text-muted',
+                          ? 'bg-pos/10 text-pos'
+                          : 'bg-sunken text-fg-secondary',
                       )}
                     >
                       {dep.status}
@@ -253,7 +253,7 @@ export function ModelDeploymentsTab({ modelId }: Props) {
                   <td className="px-4 py-3 text-sm font-mono text-text">
                     {dep.traffic_pct}%
                   </td>
-                  <td className="px-4 py-3 text-xs text-text-dim font-mono">
+                  <td className="px-4 py-3 text-xs text-fg-tertiary font-mono">
                     {format(new Date(dep.deployed_at), 'MMM d, HH:mm')}
                   </td>
                 </tr>

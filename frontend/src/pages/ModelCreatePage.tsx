@@ -273,7 +273,7 @@ export function ModelCreatePage() {
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-semibold text-text">Create Model</h1>
-        <p className="mt-1 text-sm text-text-muted">
+        <p className="mt-1 text-sm text-fg-secondary">
           {STEP_LABELS[step]} — Step {step + 1} of {STEP_LABELS.length}
         </p>
         <div className="mt-4">
@@ -304,14 +304,14 @@ export function ModelCreatePage() {
                       'text-left rounded-xl border p-4 transition-all',
                       selectedKind === kind
                         ? 'border-accent bg-accent/5 shadow-sm'
-                        : 'border-border bg-surface hover:border-border-2 hover:bg-surface-2',
+                        : 'border-border bg-surface hover:border-border-2 hover:bg-sunken',
                     )}
                   >
                     <div className="flex items-center gap-3 mb-2">
                       <div
                         className={cn(
                           'flex h-8 w-8 items-center justify-center rounded-lg',
-                          selectedKind === kind ? 'bg-accent/15 text-accent' : 'bg-surface-2 text-text-muted',
+                          selectedKind === kind ? 'bg-accent/15 text-accent' : 'bg-sunken text-fg-secondary',
                         )}
                       >
                         <Icon className="h-4 w-4" />
@@ -321,7 +321,7 @@ export function ModelCreatePage() {
                         <Check className="h-4 w-4 text-accent ml-auto" />
                       )}
                     </div>
-                    <p className="text-xs text-text-muted">{desc}</p>
+                    <p className="text-xs text-fg-secondary">{desc}</p>
                   </button>
                 ))}
               </div>
@@ -342,7 +342,7 @@ export function ModelCreatePage() {
                       </div>
                       <div>
                         <p className="text-sm font-medium text-text">External API</p>
-                        <p className="text-xs text-text-muted">
+                        <p className="text-xs text-fg-secondary">
                           This model kind wraps an external provider — no in-house
                           training framework or runtime to choose.
                         </p>
@@ -357,7 +357,7 @@ export function ModelCreatePage() {
                     <h2 className="text-base font-medium text-text mb-1">
                       Training framework
                     </h2>
-                    <p className="text-xs text-text-muted mb-4">
+                    <p className="text-xs text-fg-secondary mb-4">
                       Which library trains the model. You can fine-tune its
                       hyperparameters later in the training playground.
                     </p>
@@ -371,7 +371,7 @@ export function ModelCreatePage() {
                               'text-left rounded-xl border p-4 transition-all',
                               framework === fw
                                 ? 'border-accent bg-accent/5 shadow-sm'
-                                : 'border-border bg-surface hover:border-border-2 hover:bg-surface-2',
+                                : 'border-border bg-surface hover:border-border-2 hover:bg-sunken',
                             )}
                           >
                             <div className="flex items-center gap-3 mb-2">
@@ -380,7 +380,7 @@ export function ModelCreatePage() {
                                   'flex h-8 w-8 items-center justify-center rounded-lg',
                                   framework === fw
                                     ? 'bg-accent/15 text-accent'
-                                    : 'bg-surface-2 text-text-muted',
+                                    : 'bg-sunken text-fg-secondary',
                                 )}
                               >
                                 <Icon className="h-4 w-4" />
@@ -392,7 +392,7 @@ export function ModelCreatePage() {
                                 <Check className="h-4 w-4 text-accent ml-auto" />
                               )}
                             </div>
-                            <p className="text-xs text-text-muted">{desc}</p>
+                            <p className="text-xs text-fg-secondary">{desc}</p>
                           </button>
                         ),
                       )}
@@ -403,7 +403,7 @@ export function ModelCreatePage() {
                     <h2 className="text-base font-medium text-text mb-1">
                       Runtime
                     </h2>
-                    <p className="text-xs text-text-muted mb-4">
+                    <p className="text-xs text-fg-secondary mb-4">
                       Where the model executes for training and inference.
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -419,7 +419,7 @@ export function ModelCreatePage() {
                                 ? 'border-border bg-surface opacity-50 cursor-not-allowed'
                                 : runtime === rt
                                   ? 'border-accent bg-accent/5 shadow-sm'
-                                  : 'border-border bg-surface hover:border-border-2 hover:bg-surface-2',
+                                  : 'border-border bg-surface hover:border-border-2 hover:bg-sunken',
                             )}
                           >
                             <div className="flex items-center gap-3 mb-2">
@@ -428,7 +428,7 @@ export function ModelCreatePage() {
                                   'flex h-8 w-8 items-center justify-center rounded-lg',
                                   !comingSoon && runtime === rt
                                     ? 'bg-accent/15 text-accent'
-                                    : 'bg-surface-2 text-text-muted',
+                                    : 'bg-sunken text-fg-secondary',
                                 )}
                               >
                                 <Icon className="h-4 w-4" />
@@ -437,7 +437,7 @@ export function ModelCreatePage() {
                                 {label}
                               </span>
                               {comingSoon ? (
-                                <span className="ml-auto rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-medium text-text-dim">
+                                <span className="ml-auto rounded-full bg-sunken px-2 py-0.5 text-[10px] font-medium text-fg-tertiary">
                                   Soon
                                 </span>
                               ) : (
@@ -446,7 +446,7 @@ export function ModelCreatePage() {
                                 )
                               )}
                             </div>
-                            <p className="text-xs text-text-muted">{desc}</p>
+                            <p className="text-xs text-fg-secondary">{desc}</p>
                           </button>
                         ),
                       )}
@@ -495,7 +495,7 @@ export function ModelCreatePage() {
                   >
                     Auto-retrain
                   </label>
-                  <p className="text-xs text-text-muted mt-0.5">
+                  <p className="text-xs text-fg-secondary mt-0.5">
                     Automatically schedule retraining when model performance degrades.
                   </p>
                 </div>
@@ -504,14 +504,14 @@ export function ModelCreatePage() {
               <div>
                 <label className="block text-sm font-medium text-text mb-1.5">
                   Version note{' '}
-                  <span className="text-text-dim font-normal">(optional)</span>
+                  <span className="text-fg-tertiary font-normal">(optional)</span>
                 </label>
                 <input
                   type="text"
                   value={versionNote}
                   onChange={(e) => setVersionNote(e.target.value)}
                   placeholder="e.g. Initial architecture v1"
-                  className="w-full h-9 rounded-lg border border-border bg-surface px-3 text-sm text-text placeholder:text-text-dim focus:outline-none focus:border-accent"
+                  className="w-full h-9 rounded-lg border border-border bg-surface px-3 text-sm text-text placeholder:text-fg-tertiary focus:outline-none focus:border-accent"
                 />
               </div>
             </div>
@@ -525,18 +525,18 @@ export function ModelCreatePage() {
 
               <div>
                 <label className="block text-sm font-medium text-text mb-1.5">
-                  Display name <span className="text-pnl-down">*</span>
+                  Display name <span className="text-neg">*</span>
                 </label>
                 <input
                   type="text"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   placeholder="e.g. BTC Price Forecaster"
-                  className="w-full h-9 rounded-lg border border-border bg-surface px-3 text-sm text-text placeholder:text-text-dim focus:outline-none focus:border-accent"
+                  className="w-full h-9 rounded-lg border border-border bg-surface px-3 text-sm text-text placeholder:text-fg-tertiary focus:outline-none focus:border-accent"
                   autoFocus
                 />
                 {slug && (
-                  <p className="mt-1.5 text-xs text-text-dim font-mono">
+                  <p className="mt-1.5 text-xs text-fg-tertiary font-mono">
                     slug: {slug}
                   </p>
                 )}
@@ -545,46 +545,46 @@ export function ModelCreatePage() {
               <div>
                 <label className="block text-sm font-medium text-text mb-1.5">
                   Description{' '}
-                  <span className="text-text-dim font-normal">(optional)</span>
+                  <span className="text-fg-tertiary font-normal">(optional)</span>
                 </label>
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Brief description of what this model does…"
                   rows={3}
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-dim focus:outline-none focus:border-accent resize-none"
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-fg-tertiary focus:outline-none focus:border-accent resize-none"
                 />
               </div>
 
               {/* Summary */}
-              <div className="rounded-lg border border-border bg-surface-2 p-4 space-y-2">
-                <p className="text-xs font-medium text-text-muted uppercase tracking-wide">
+              <div className="rounded-lg border border-border bg-sunken p-4 space-y-2">
+                <p className="text-xs font-medium text-fg-secondary uppercase tracking-wide">
                   Summary
                 </p>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
-                  <span className="text-text-muted">Kind</span>
+                  <span className="text-fg-secondary">Kind</span>
                   <span className="text-text font-medium">
                     {KIND_OPTIONS.find((k) => k.kind === selectedKind)?.label}
                   </span>
-                  <span className="text-text-muted">Framework</span>
+                  <span className="text-fg-secondary">Framework</span>
                   <span className="text-text font-mono text-xs">
                     {isExternalKind ? 'external_api' : framework}
                   </span>
                   {!isExternalKind && (
                     <>
-                      <span className="text-text-muted">Runtime</span>
+                      <span className="text-fg-secondary">Runtime</span>
                       <span className="text-text font-mono text-xs">{runtime}</span>
                     </>
                   )}
-                  <span className="text-text-muted">Asset class</span>
+                  <span className="text-fg-secondary">Asset class</span>
                   <span className="text-text font-mono text-xs">{assetClass}</span>
-                  <span className="text-text-muted">Auto-retrain</span>
+                  <span className="text-fg-secondary">Auto-retrain</span>
                   <span className="text-text">{autoRetrain ? 'Yes' : 'No'}</span>
                 </div>
               </div>
 
               {createMutation.isError && (
-                <div className="rounded-lg bg-pnl-down/10 border border-pnl-down/20 px-4 py-3 text-sm text-pnl-down">
+                <div className="rounded-lg bg-neg/10 border border-neg/20 px-4 py-3 text-sm text-neg">
                   Failed to create model. Please try again.
                 </div>
               )}

@@ -185,14 +185,14 @@ export function HyperparamEditor({ framework, disabled, onChange }: Props) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <label className="text-xs font-medium text-text-muted">Hyperparameters</label>
-        <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-2 p-0.5">
+        <label className="text-xs font-medium text-fg-secondary">Hyperparameters</label>
+        <div className="flex items-center gap-1 rounded-lg border border-border bg-sunken p-0.5">
           <button
             type="button"
             onClick={() => setMode('form')}
             className={cn(
               'flex items-center gap-1 rounded-md px-2 py-1 text-[11px] transition-colors',
-              mode === 'form' ? 'bg-surface text-text shadow-sm' : 'text-text-muted',
+              mode === 'form' ? 'bg-surface text-text shadow-sm' : 'text-fg-secondary',
             )}
           >
             <SlidersHorizontal className="h-3 w-3" />
@@ -206,7 +206,7 @@ export function HyperparamEditor({ framework, disabled, onChange }: Props) {
             }}
             className={cn(
               'flex items-center gap-1 rounded-md px-2 py-1 text-[11px] transition-colors',
-              mode === 'raw' ? 'bg-surface text-text shadow-sm' : 'text-text-muted',
+              mode === 'raw' ? 'bg-surface text-text shadow-sm' : 'text-fg-secondary',
             )}
           >
             <Code2 className="h-3 w-3" />
@@ -218,14 +218,14 @@ export function HyperparamEditor({ framework, disabled, onChange }: Props) {
       {mode === 'form' ? (
         <div className="space-y-3">
           {schema.length === 0 ? (
-            <p className="text-[11px] text-text-dim">
+            <p className="text-[11px] text-fg-tertiary">
               No tunable hyperparameters for this framework.
             </p>
           ) : (
             schema.map((p) => (
               <div key={p.key}>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-[11px] font-medium text-text-muted" title={p.help}>
+                  <label className="text-[11px] font-medium text-fg-secondary" title={p.help}>
                     {p.label}
                   </label>
                   <span className="font-mono text-[11px] text-text">
@@ -270,7 +270,7 @@ export function HyperparamEditor({ framework, disabled, onChange }: Props) {
                   </div>
                 )}
                 {p.help && (
-                  <p className="mt-0.5 text-[10px] text-text-dim leading-snug">{p.help}</p>
+                  <p className="mt-0.5 text-[10px] text-fg-tertiary leading-snug">{p.help}</p>
                 )}
               </div>
             ))
@@ -279,7 +279,7 @@ export function HyperparamEditor({ framework, disabled, onChange }: Props) {
             type="button"
             onClick={() => setValues(defaultsFor(framework))}
             disabled={disabled}
-            className="flex items-center gap-1 text-[11px] text-text-muted hover:text-text disabled:opacity-50"
+            className="flex items-center gap-1 text-[11px] text-fg-secondary hover:text-text disabled:opacity-50"
           >
             <RotateCcw className="h-3 w-3" />
             Reset to defaults
@@ -295,13 +295,13 @@ export function HyperparamEditor({ framework, disabled, onChange }: Props) {
             spellCheck={false}
             className={cn(
               'w-full rounded-lg border bg-surface px-2.5 py-2 text-xs font-mono text-text focus:outline-none resize-none disabled:opacity-50',
-              rawError ? 'border-pnl-down' : 'border-border focus:border-accent',
+              rawError ? 'border-neg' : 'border-border focus:border-accent',
             )}
           />
           {rawError ? (
-            <p className="text-[11px] text-pnl-down mt-1">{rawError}</p>
+            <p className="text-[11px] text-neg mt-1">{rawError}</p>
           ) : (
-            <p className="text-[10px] text-text-dim mt-1">
+            <p className="text-[10px] text-fg-tertiary mt-1">
               Raw object merged over the model definition. Any key the framework
               adapter reads is honored.
             </p>
