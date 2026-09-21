@@ -6,7 +6,7 @@
 // placeholder number somebody might believe.
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Badge } from '@/components/primitives/Badge'
+import { Badge, type BadgeTone } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
 import { Modal } from '@/components/primitives/Modal'
 import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'
@@ -312,6 +312,17 @@ export interface MonitorRow {
    * facts and they were one `?? 0` apart.
    */
   scale_pct: number | null
+  /**
+   * Which environment this strategy's orders were executed in, from
+   * `orders.execution_mode` — a recorded fact per order, never the strategy's
+   * name read as an environment.
+   *
+   * `null` is **unknown, not paper**: the strategy has placed no order, so
+   * nothing anywhere says where its orders would go. `mixed` is a strategy with
+   * orders in more than one mode, which the route refuses to collapse to one
+   * word because both answers are true.
+   */
+  environment: string | null
 }
 
 export function monitorRow(raw: Record<string, unknown>): MonitorRow {
@@ -321,7 +332,34 @@ export function monitorRow(raw: Record<string, unknown>): MonitorRow {
       typeof raw.strategy_id === 'string' ? raw.strategy_id : String(raw.strategy_id ?? 'unnamed'),
     state: typeof raw.state === 'string' ? raw.state : null,
     scale_pct: typeof scale === 'number' && Number.isFinite(scale) ? scale : null,
+    environment:
+      typeof raw.environment === 'string' && raw.environment ? raw.environment : null,
   }
+}
+
+/**
+ * The environment, as a badge, with the unknown one looking like neither.
+ *
+ * Three distinct readings, and the third is the one this exists for:
+ *
+ * * `paper` — recorded, and today the only mode the `orders_execution_mode_
+ *   paper_only` CHECK admits. Quiet, because it is the safe answer.
+ * * `live` / anything else the column starts holding — loud, because the day
+ *   that CHECK widens this word means real money and no code changes here.
+ * * `mixed` — orders in more than one mode; the route will not pick one.
+ * * `null` — **no order has ever been placed.** Not paper. A strategy that has
+ *   never traded rendered as paper is the platform answering a question nobody
+ *   asked the database, and on this page it is the difference between "safe"
+ *   and "nobody knows".
+ */
+export function environmentBadge(environment: string | null): { word: string; tone: BadgeTone } {
+  if (environment === null) return { word: 'no orders — environment unknown', tone: 'outline' }
+  if (environment === 'paper') return { word: 'paper', tone: 'neutral' }
+  if (environment === 'mixed') return { word: 'mixed — orders in both', tone: 'warn' }
+  if (environment === 'live') return { word: 'live', tone: 'neg' }
+  // A word this build does not know is shown as it was sent rather than folded
+  // into one of the four above: guessing is how a new mode reads as an old one.
+  return { word: environment, tone: 'warn' }
 }
 
 // ── The per-row controls (§11; COMP-007 §6) ──────────────────────────────────
@@ -860,6 +898,7 @@ export function Monitor() {
                   <th style={{ textAlign: 'left' }}>strategy</th>
                   <th>state</th>
                   <th>scale</th>
+                  <th>environment</th>
                   <th />
                 </tr>
               </thead>
@@ -873,6 +912,18 @@ export function Monitor() {
                       {/* 0% is "the monitor shut this down"; an absent scale is
                           "nobody said". They must not look the same. */}
                       <td>{row.scale_pct === null ? 'not reported' : `${row.scale_pct}%`}</td>
+                      {/* Read from the order journal, and `null` there means no
+                          order has ever been placed — unknown, not paper. */}
+                      <td>
+                        {(() => {
+                          const env = environmentBadge(row.environment)
+                          return (
+                            <Badge tone={env.tone} data-testid={`env-${row.strategy_id}`}>
+                              {env.word}
+                            </Badge>
+                          )
+                        })()}
+                      </td>
                       <td>
                         <Button
                           size="xs"

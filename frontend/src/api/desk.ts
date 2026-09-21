@@ -517,8 +517,32 @@ export interface SessionDetail {
   state: unknown
   runs_started: number | null
   charter_version: number | null
+  /**
+   * The `charter_amended` events behind `charter_version`, newest first, last
+   * 100. Optional on the type because a build of the route older than the read
+   * omits it — and an absent list is not an unamended charter.
+   */
+  amendments?: WireAmendment[]
   /** Events the fold could not replay. Reported rather than hidden. */
   anomalies?: unknown[]
+}
+
+/**
+ * One amendment, as `GET /api/research/sessions/{id}` serves it.
+ *
+ * `changed` is a field-level diff of the charter as it was against the charter
+ * the amendment wrote — and it is `null`, not `{}`, for an amendment appended
+ * before the route computed one. The two are different sentences: `{}` says the
+ * amendment moved nothing, `null` says nobody wrote down what it moved. The
+ * route keeps them apart (`payload.changed.filter(is_object)`), so this does
+ * too.
+ */
+export interface WireAmendment {
+  seq: number
+  version: number | null
+  by: string | null
+  changed: Record<string, unknown> | null
+  at: string
 }
 
 /**
@@ -610,6 +634,80 @@ export function charterView(s: SessionDetail | null | undefined): CharterView | 
   }
 }
 
+/**
+ * One amendment, decoded for the Charter tab.
+ *
+ * `silence` is the whole point of this type. A charter that has been amended
+ * three times and can show nothing about any of them is the tab reporting that
+ * decisions were taken and none of them can be read — and there are two ways to
+ * arrive at that screen, which must not print the same words:
+ *
+ * * `unrecorded` — the route sent `changed: null`. The amendment predates the
+ *   diff; what changed was never written down and cannot be recovered.
+ * * `none` — the route sent `{}`. Both charters were compared and nothing
+ *   differed, which is a measurement.
+ *
+ * Reading the first as the second would turn an absent record into a claim
+ * about what somebody decided.
+ */
+export interface AmendmentView {
+  seq: number
+  version: number | null
+  by: string | null
+  at: string
+  /** The fields this amendment moved, `from` → `to`, already in words. */
+  changes: Array<{ field: string; from: string; to: string }>
+  /** Why `changes` is empty, or `null` when it is not. */
+  silence: 'unrecorded' | 'none' | null
+}
+
+/**
+ * One side of one field of a diff, in words.
+ *
+ * `null`/absent reads as "not recorded" rather than as an empty string, and an
+ * empty list reads as "nothing named" rather than as a blank — the charter's own
+ * empty-is-everything reading is stated where the field is rendered, not
+ * guessed at here.
+ */
+export function amendmentValueWords(v: unknown): string {
+  if (v === null || v === undefined) return 'not recorded'
+  if (Array.isArray(v)) return v.length === 0 ? 'nothing named' : v.map((x) => amendmentValueWords(x)).join(', ')
+  if (typeof v === 'string') return v === '' ? 'empty' : v
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  return JSON.stringify(v)
+}
+
+/** The amendments a session read carries, newest first, decoded for the tab. */
+export function sessionAmendments(s: SessionDetail | null | undefined): AmendmentView[] {
+  const rows = Array.isArray(s?.amendments) ? (s as SessionDetail).amendments ?? [] : []
+  return rows.map((a) => {
+    const diff = a?.changed
+    // `null` and `{}` are told apart here and nowhere else. `typeof null` is
+    // `'object'`, so the null check comes first or every unrecorded amendment
+    // renders as one that changed nothing.
+    const legible = diff !== null && diff !== undefined && typeof diff === 'object' && !Array.isArray(diff)
+    const changes = legible
+      ? Object.entries(diff as Record<string, unknown>).map(([field, move]) => {
+          const m = (move ?? {}) as Record<string, unknown>
+          const hasSides = typeof move === 'object' && move !== null && ('from' in m || 'to' in m)
+          return {
+            field,
+            from: hasSides ? amendmentValueWords(m.from) : 'not recorded',
+            to: hasSides ? amendmentValueWords(m.to) : amendmentValueWords(move),
+          }
+        })
+      : []
+    return {
+      seq: typeof a?.seq === 'number' ? a.seq : 0,
+      version: typeof a?.version === 'number' ? a.version : null,
+      by: typeof a?.by === 'string' && a.by ? a.by : null,
+      at: typeof a?.at === 'string' ? a.at : '',
+      changes,
+      silence: changes.length > 0 ? null : legible ? 'none' : 'unrecorded',
+    }
+  })
+}
+
 // ── The digest, which renders as a card in the journal (AGENT-014 §2.4) ──────
 //
 // `GET …/{id}/digests` answers rows whose `body` is `research_session::digest::
@@ -688,9 +786,11 @@ export interface SessionDigestRow {
   body: SessionDigestBody | null
   created_at: string
   /**
-   * `session_digests.spend_unit` (migration 0139). **Optional on purpose:** the
-   * route does not select it today, and the moment it does this starts
-   * rendering. Absent is not `usd`.
+   * `session_digests.spend_unit` (migration 0139), NOT NULL in the table and
+   * CHECKed to `('trials','usd')`. `GET …/{id}/digests` selects it, so a row
+   * that arrives without one came from a build that did not — and absent is
+   * still not `usd`, which is why this stays optional and `readSpendUnit`
+   * refuses anything it does not recognise.
    */
   spend_unit?: string | null
 }
@@ -861,6 +961,17 @@ export interface NeedsYouRow {
   actions: Array<{ id: string; label: string; danger?: boolean }>
 }
 
+/**
+ * §2.2's Running-now row as the spec sketched it — **not** a served shape.
+ *
+ * Nothing calls this. It is kept as the spec's own list of columns, and three of
+ * them are why the served route is a different type: `usd_tenth_cents` and
+ * `cache_hit_pct` are numbers this platform cannot produce (there is no per-run
+ * USD anywhere, and a hit rate over a nullable `prompt_tokens` has no
+ * denominator), and `step` is the working state, whose route is unbuilt. What
+ * `GET /api/desk/running` answers is `DeskRunningRun`, and what it cannot answer
+ * it names in `not_recorded` rather than sending a zero.
+ */
 export interface RunningRow {
   run_id: string
   conversation_id: string
@@ -876,6 +987,61 @@ export interface RunningRow {
   next_item?: string | null
   agenda_depth?: number | null
   day_budget_used_pct?: number | null
+}
+
+/**
+ * One working run, as `GET /api/desk/running` answers it (AGENT-012 §2.2).
+ *
+ * One row per **run**, not per conversation: every column here is a fact about
+ * a run, and a conversation with three finished turns and one working one has
+ * one tier and one token count that matter. The conversation is carried along
+ * as the thing the row opens.
+ *
+ * **Every nullable field here is a real state.** Migration 0062 made the ten
+ * telemetry columns nullable so a run that crashed before filling them is still
+ * a run. `trials_spent: null` is "not recorded"; `0` is a run that searched
+ * nothing, and they are different facts about whether the money was spent.
+ */
+export interface DeskRunningRun {
+  run_id: string
+  conversation_id: string | null
+  title: string | null
+  status: string
+  mode: string
+  stage: string
+  model: string
+  /** `null` for a Chat turn, which is not doing one of the seven workflows. */
+  workflow: string | null
+  /** `null` for a run started before the tier was recorded; never guessed from the model string. */
+  tier: string | null
+  profile_name: string | null
+  iterations: number | null
+  /** Prompt size, not what was billed. `null` when the run recorded none. */
+  prompt_tokens: number | null
+  cache_read_tokens: number | null
+  trials_spent: number | null
+  outcome: string | null
+  created_at: string
+  started_at: string | null
+  /** The last entry in the run's own transcript — `null` for a run that has written none. */
+  last_transcript_entry: { seq: number | null; kind: string | null; at: string | null } | null
+}
+
+/**
+ * A column §2.2 asks for that nothing in this deployment records, and why.
+ *
+ * Rendered, never dropped. This array is the route saying what it cannot know;
+ * hiding it turns a stated absence back into a silent one, which is how a blank
+ * dollar column comes to be read as free.
+ */
+export interface NotRecordedNote {
+  field: string
+  why: string
+}
+
+export interface DeskRunning {
+  runs: DeskRunningRun[]
+  not_recorded: NotRecordedNote[]
 }
 
 export type DigestKind =
@@ -1169,6 +1335,18 @@ export const deskApi = {
     client.post(`/api/dossiers/${ticket}/comments`, { body, claim: claim ?? null }),
   monitor: () => optional<{ strategies: Array<Record<string, unknown>> }>(client.get('/api/monitor/strategies')),
 
+  /**
+   * The runs that are working right now (AGENT-012 §2.2).
+   *
+   * Desk home read `running` off the conversation list, which answers "is any
+   * turn active in this conversation" and none of §2.2's other columns. This
+   * route answers them per run — and names, in `not_recorded`, the two it
+   * deliberately does not send. **Do not compute a cache-hit percentage from
+   * these two token counts:** `prompt_tokens` is nullable, and a ratio with a
+   * missing denominator is an invented number.
+   */
+  running: () => optional<DeskRunning>(client.get('/api/desk/running')),
+
   // — Proposals (AGENT-013 section 7.5; S-10.9). The agent creates an inert row
   //   and a person decides here; the registry write happens at that moment, as
   //   that person. Distinct from `ApprovalsInbox`, which answers a *running*
@@ -1242,14 +1420,22 @@ export const deskApi = {
   /**
    * A drag on the board (AGENT-014 §9).
    *
-   * **`order` is the items the human moved up, not the board.** The route marks
-   * every id it is sent with the `user` source, and a `user` item bypasses
-   * scoring entirely (§4.2) — so posting the whole board would tell the session
-   * that every question on it is a priority, which is the same as telling it
-   * none is. `prioritisedBy` computes the short list.
+   * **`order` is the board's whole order, every id once, in the arrangement the
+   * board shows.** A `user` source bypasses scoring entirely (§4.2), so which
+   * cards earn one cannot be left to a client: the route compares the body
+   * against the board's own order, subtracts the longest run that is already in
+   * it and marks only the remainder — a card dragged down prioritises nothing.
+   * It refuses duplicates, and it refuses a body of one id, naming
+   * `POST …/{item}/prioritise` as the route for that intent. Sending the
+   * moved-up cards instead is both redundant (the route already subtracts the
+   * rest) and, for the single-card drag, a 400.
+   *
+   * `prioritised` is how many cards the route read as promoted and `considered`
+   * how many of the body were live agenda items, so a board posted with nothing
+   * moved is legible as such rather than as a request that was thrown away.
    */
   reorderAgenda: (sessionId: string, order: string[]) =>
-    optional<{ ok: boolean; prioritised?: number }>(
+    optional<{ ok: boolean; prioritised?: number; considered?: number }>(
       client.post(`/api/research/sessions/${sessionId}/agenda/order`, { order }),
     ),
   /**

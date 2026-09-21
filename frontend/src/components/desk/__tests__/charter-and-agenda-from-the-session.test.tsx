@@ -179,13 +179,15 @@ describe('the Charter tab says what the session will do, not the opposite of it'
   })
 
   it('does not contradict its own version number when it cannot list the amendments', () => {
-    // `PUT …/{id}/charter` bumps the version and no route reads the amendments
-    // back, so "amendments: none" under a version 3 charter is the panel
-    // disagreeing with the line above it.
+    // `PUT …/{id}/charter` bumps the version, and the session read lists the
+    // last hundred amendments — so an empty list under a version 3 charter is
+    // the read finding none, not the charter never having been amended.
+    // "amendments: none" there would be the panel disagreeing with the line
+    // above it.
     render(<CharterTab charter={charterView(detail({ charter_version: 3 }))} amendments={[]} />)
     const said = screen.getByTestId('amendments-unlistable').textContent ?? ''
     expect(said).toContain('amended 2 times')
-    expect(said).toContain('no route reads the amendments back')
+    expect(said).toContain('not on this screen')
   })
 
   it('still says none when the charter has never been amended', () => {

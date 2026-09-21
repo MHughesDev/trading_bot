@@ -18,6 +18,7 @@ import { EmptyState } from '@/components/primitives/States'
 import { Tooltip } from '@/components/primitives/Overlay'
 import type {
   AgendaItem,
+  AmendmentView,
   CharterView,
   DeskCard,
   Mode,
@@ -25,7 +26,7 @@ import type {
   WorkingState,
 } from '@/api/desk'
 import type { CallCost, ExposureNote, ToolSearch } from '@/lib/desk/events'
-import { applyOrder, dropOnto, moveInColumn, prioritisedBy, reconcileOrder } from '@/lib/desk/agenda'
+import { applyOrder, dropOnto, moveInColumn, reconcileOrder } from '@/lib/desk/agenda'
 import { toolsVisibleInMode, whyHidden } from '@/lib/desk/rings'
 import {
   BudgetMeter,
@@ -33,6 +34,7 @@ import {
   ProvenanceBadge,
   RiskBadge,
   StageStrip,
+  ago,
   type IdResolver,
 } from './Shared'
 
@@ -713,7 +715,7 @@ export function AgendaTab({
   onApprove,
   onAdd,
   onOpenChild,
-  onPrioritise,
+  onReorder,
   loading = false,
 }: {
   items: AgendaItem[] | null
@@ -722,14 +724,18 @@ export function AgendaTab({
   onAdd?: () => void
   onOpenChild?: (conversationId: string) => void
   /**
-   * The items the human moved **up**, in their new order (AGENT-014 §9).
+   * The board's whole order, as it reads after the move (AGENT-014 §9).
    *
-   * Not the board. `POST …/agenda/order` puts the `user` source on every id it
-   * is sent and a `user` item bypasses scoring, so sending the whole board
-   * would say every question is a priority — which says nothing. See
-   * `prioritisedBy`.
+   * The board, not a short list of the cards that went up. `POST …/agenda/order`
+   * is given the arrangement and works out for itself what moved: it subtracts
+   * the longest run already in board order, so a card dragged *down*
+   * prioritises nothing, and it refuses a body of one id by name — which is
+   * exactly the body a client that filtered to "the ones that moved up" sends
+   * when somebody drags one card to the top. The `user` source is a bypass of
+   * scoring, and which cards earn it is the route's decision, not this
+   * component's.
    */
-  onPrioritise?: (itemIds: string[]) => void
+  onReorder?: (order: string[]) => void
   loading?: boolean
 }) {
   // The order the human dragged into. It lives here and nowhere else: §9's drag
@@ -744,10 +750,13 @@ export function AgendaTab({
   const order = reconcileOrder(moved, (items ?? []).map((i) => i.item_id))
 
   function rearrange(next: string[]) {
-    const up = prioritisedBy(order, next)
-    if (up.length === 0) return
+    // No filtering, and no "did anything move?" test either: both were the
+    // client deciding what a drag meant, and the route decides that now. It is
+    // sent the board and answers with how many cards it read as promoted, so an
+    // arrangement that came back the way it went out marks nothing — while a
+    // client that worked it out here would post a one-id body the route refuses.
     setMoved(next)
-    onPrioritise?.(up)
+    onReorder?.(next)
   }
 
   if (loading) {
@@ -912,13 +921,15 @@ export function CharterTab({
   /** Decoded by `charterView`; `null` when the session has none or was not read. */
   charter: CharterView | null
   /**
-   * The amendment texts, when something can list them.
+   * The amendments behind the version number, newest first (`sessionAmendments`).
    *
-   * `PUT …/{id}/charter` appends an amendment and bumps the version, and there
-   * is no route that reads the amendments back — so this is `[]` from every
-   * caller today, and the version is what the tab reports instead.
+   * `GET …/sessions/{id}` reads the `charter_amended` events back and each one
+   * carries a field-level diff — so the tab shows what was decided rather than
+   * only how many times somebody decided something. An amendment whose `changed`
+   * is `null` predates the diff, and it says that rather than "no changes":
+   * unrecorded and unchanged are different sentences about somebody's decision.
    */
-  amendments: string[]
+  amendments: AmendmentView[]
   loading?: boolean
 }) {
   if (loading) {
@@ -1046,9 +1057,37 @@ export function CharterTab({
       <section>
         <span className="lbl">amendments</span>
         {amendments.length > 0 ? (
-          <ol style={{ paddingLeft: 'var(--s-4)', fontSize: 'var(--t-12)' }}>
-            {amendments.map((a, i) => (
-              <li key={i}>{a}</li>
+          <ol style={{ paddingLeft: 'var(--s-4)', fontSize: 'var(--t-12)' }} data-testid="amendments">
+            {amendments.map((a) => (
+              <li key={a.seq}>
+                <span className="lbl-t">
+                  {a.version === null ? 'version not recorded' : `version ${a.version}`} ·{' '}
+                  {a.by ?? 'by nobody recorded'}
+                  {a.at ? ` · ${ago(a.at)} ago` : ''}
+                </span>
+                {a.changes.length > 0 ? (
+                  <ul style={{ margin: 0, paddingLeft: 'var(--s-4)' }}>
+                    {a.changes.map((c) => (
+                      <li key={c.field}>
+                        {c.field}: {c.from} → {c.to}
+                      </li>
+                    ))}
+                  </ul>
+                ) : a.silence === 'unrecorded' ? (
+                  // Not "no changes". The diff did not exist when this
+                  // amendment was appended, so what it moved was never written
+                  // down — and printing "nothing changed" here would invent a
+                  // finding about a decision nobody recorded.
+                  <p className="sub" data-testid={`amendment-unrecorded-${a.seq}`}>
+                    recorded before amendments were legible — what this one changed was not written
+                    down, and it is not a claim that nothing changed
+                  </p>
+                ) : (
+                  <p className="sub" data-testid={`amendment-empty-${a.seq}`}>
+                    both charters were compared and no field differed
+                  </p>
+                )}
+              </li>
             ))}
           </ol>
         ) : charter.version !== null && charter.version > 1 ? (
@@ -1056,8 +1095,8 @@ export function CharterTab({
           // charter would be the panel contradicting the number above it.
           <p className="sub" data-testid="amendments-unlistable">
             this charter is at version {charter.version}, so it has been amended{' '}
-            {charter.version - 1} {charter.version === 2 ? 'time' : 'times'} — and no route reads
-            the amendments back, so the desk cannot show what changed.
+            {charter.version - 1} {charter.version === 2 ? 'time' : 'times'} — and the session read
+            listed none of them, so what changed is not on this screen.
           </p>
         ) : (
           <p className="sub">none</p>

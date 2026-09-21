@@ -14,11 +14,18 @@ import { Button } from '@/components/primitives/Button'
 import { ConfirmDialog } from '@/components/primitives/Modal'
 import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'
 import { EmptyState, ErrorState, PanelLoading } from '@/components/primitives/States'
-import { conversationsApi } from '@/api/agent'
-import { deskApi, type Charter, type Mode, type Workflow } from '@/api/desk'
+import { conversationsApi, type Conversation } from '@/api/agent'
+import {
+  deskApi,
+  type Charter,
+  type DeskRunningRun,
+  type Mode,
+  type NotRecordedNote,
+  type Workflow,
+} from '@/api/desk'
 import { AwayDigestPanel, readLastVisit, writeLastVisit } from './AwayDigest'
 import { Composer, type ComposerSubmission } from './Composer'
-import { killSwitchBadge, monitorRow, type MonitorRow } from './Operations'
+import { environmentBadge, killSwitchBadge, monitorRow, type MonitorRow } from './Operations'
 import { TierBadge, ago, tierTiles } from './Shared'
 
 /**
@@ -66,6 +73,160 @@ export function LastDecision({
 }
 
 /**
+ * A count the run recorded, or the words for one it did not.
+ *
+ * Migration 0062 made every telemetry column nullable so a run that crashed
+ * before filling them is still a run, and `null` there is *not recorded*. A
+ * `?? 0` would say the run used no context, spent no trials and took no step —
+ * three measurements nobody made.
+ */
+export function runCount(value: number | null, name: string): string {
+  return value === null || value === undefined
+    ? `${name} not recorded`
+    : `${value.toLocaleString()} ${name}`
+}
+
+/**
+ * "Running now" (AGENT-012 §2.2), from `GET /api/desk/running`.
+ *
+ * The panel used to read `running` off the conversation list, which answers one
+ * of §2.2's questions — is any turn active in this conversation — and none of
+ * the others. Every other column §2.2 asks for is a fact about a **run**, and a
+ * conversation with three finished turns and one working one has one tier and
+ * one token count that matter. So the rows are runs, joined here to the
+ * conversation list by `conversation_id` for the link and the stop control.
+ *
+ * Two things this panel deliberately does not do:
+ *
+ * * **No cache-hit percentage.** Both token counts are shown and the ratio is
+ *   the reader's to take. `prompt_tokens` is nullable, and a percentage computed
+ *   over a missing denominator is an invented number rather than a measured one.
+ * * **No hiding of `not_recorded`.** That array is the route naming the columns
+ *   §2.2 asks for that nothing in this deployment records — per-run dollars, and
+ *   the working-state step. Dropping it turns a stated absence into a silent
+ *   one, which is how a blank cost column comes to be read as free.
+ */
+export function RunningNow({
+  runs,
+  notRecorded,
+  loading,
+  conversations,
+  onRetry,
+}: {
+  /** `null` when `/api/desk/running` did not answer — unknown, not none. */
+  runs: DeskRunningRun[] | null
+  notRecorded: NotRecordedNote[]
+  loading: boolean
+  /** The conversation list this joins to; `null` when it did not answer either. */
+  conversations: Conversation[] | null
+  onRetry?: () => void
+}) {
+  const byId = new Map((conversations ?? []).map((c) => [c.conversation_id, c]))
+  const alsoWorking = (conversations ?? []).filter((c) => c.running).length
+  return (
+    <Panel>
+      <PanelHeader title="Running now" />
+      <PanelBody>
+        {loading ? (
+          <PanelLoading lines={2} />
+        ) : runs === null ? (
+          <ErrorState
+            message="The run list could not be read"
+            detail={
+              conversations === null
+                ? '/api/desk/running is served, so this is the request failing rather than nothing running. What is working is unknown, not none.'
+                : `/api/desk/running is served, so this is the request failing rather than nothing running. The conversation list says ${alsoWorking} conversation${alsoWorking === 1 ? ' is' : 's are'} working, which is all that is still known here.`
+            }
+            onRetry={onRetry}
+          />
+        ) : runs.length === 0 ? (
+          <EmptyState message="Nothing is running" detail="Start something below, or open a recent conversation." />
+        ) : (
+          <div data-testid="running-runs">
+            {runs.map((r) => {
+              const convo = r.conversation_id ? byId.get(r.conversation_id) : undefined
+              const title = r.title ?? convo?.title ?? r.run_id
+              const step = r.last_transcript_entry
+              return (
+                <div key={r.run_id} className="desk-card" data-testid={`run-${r.run_id}`}>
+                  <div className="desk-card-hd">
+                    {r.conversation_id ? (
+                      <Link to={`/desk/c/${r.conversation_id}`}>{title}</Link>
+                    ) : (
+                      // A run with no conversation cannot be opened, and a dead
+                      // link that looks like a link is worse than plain text.
+                      <span>{title}</span>
+                    )}
+                    <Badge tone="accent">{r.status}</Badge>
+                    <Badge tone="outline">{r.mode}</Badge>
+                    {/* A Chat turn is doing none of the seven workflows, and
+                        `null` here is that — not a workflow nobody named. */}
+                    <Badge tone="neutral">{r.workflow ?? 'no workflow — a chat turn'}</Badge>
+                    {/* The tier the run was dispatched at, as recorded. Never
+                        read off the model string, which would be a capability
+                        claim rather than a record. */}
+                    <Badge tone={r.tier === null ? 'warn' : 'info'}>
+                      {r.tier === null ? 'tier not recorded' : r.tier}
+                    </Badge>
+                  </div>
+                  <p className="sub">
+                    stage {r.stage} ·{' '}
+                    {step
+                      ? `last transcript entry: ${step.kind ?? 'kind not recorded'}${
+                          step.seq === null ? '' : ` #${step.seq}`
+                        }${step.at ? `, ${ago(step.at)} ago` : ''}`
+                      : 'no transcript entry yet'}
+                  </p>
+                  <p className="sub">
+                    {r.model} · {r.profile_name ?? 'profile not recorded'} ·{' '}
+                    {runCount(r.iterations, 'iterations')}
+                  </p>
+                  {/* Both counts, never their ratio: `prompt_tokens` is
+                      nullable, and a hit rate over a missing denominator is a
+                      number this panel would have invented. */}
+                  <p className="sub" data-testid={`tokens-${r.run_id}`}>
+                    {runCount(r.prompt_tokens, 'prompt tokens')} ·{' '}
+                    {runCount(r.cache_read_tokens, 'cache read tokens')}
+                  </p>
+                  <p className="sub">
+                    {/* 0 trials is a run that searched nothing; absent is a run
+                        that did not record what it searched. */}
+                    {runCount(r.trials_spent, 'trials spent')} ·{' '}
+                    {r.outcome ?? 'no outcome yet'} ·{' '}
+                    {r.started_at ? `started ${ago(r.started_at)} ago` : 'not started yet'}
+                  </p>
+                  {r.conversation_id && (
+                    <div className="desk-actions">
+                      <Button
+                        size="xs"
+                        variant="secondary"
+                        onClick={() => void deskApi.cancel(r.conversation_id as string)}
+                      >
+                        Stop
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+        {runs !== null && notRecorded.length > 0 && (
+          <div data-testid="running-not-recorded">
+            <span className="lbl">not recorded</span>
+            {notRecorded.map((n) => (
+              <p className="sub" key={n.field}>
+                <b>{n.field}</b>: {n.why}
+              </p>
+            ))}
+          </div>
+        )}
+      </PanelBody>
+    </Panel>
+  )
+}
+
+/**
  * The book (AGENT-012 §2.4) — a compact mirror of `/desk/monitor`.
  *
  * §2.4 asks for three things: the control-limit status **per strategy**, the
@@ -80,10 +241,12 @@ export function LastDecision({
  * not built yet — COMP-007 lands with Set S phase 7". A false explanation is
  * worse than none, because it tells the operator there is nothing to look at.
  *
- * `live / paper` is **not** shown: `list_strategies` sends `strategy_id`,
- * `state` and `scale_pct` and nothing else, so the environment of a row is not
- * something this page knows. §2.4 names it; inventing it from a naming
- * convention is how a paper strategy comes to be read as live.
+ * `live / paper` is shown now that `list_strategies` sends it — read from
+ * `orders.execution_mode`, which is a recorded fact per order and not the
+ * strategy's name read as an environment. The third state is the one that
+ * matters on this panel: a strategy that has placed **no order** is served as
+ * `null`, which is *unknown*, and rendering it as paper would be this page
+ * answering a question nobody asked the database.
  */
 export function TheBook({
   rows,
@@ -143,6 +306,17 @@ export function TheBook({
                 <span className="sub">
                   {r.scale_pct === null ? 'scale not reported' : `${r.scale_pct}% of full size`}
                 </span>
+                {/* Three readings, not two: live, paper, and a strategy that
+                    has never traded — which is unknown and must not read as
+                    the safe one. */}
+                {(() => {
+                  const env = environmentBadge(r.environment)
+                  return (
+                    <Badge tone={env.tone} data-testid={`book-env-${r.strategy_id}`}>
+                      {env.word}
+                    </Badge>
+                  )
+                })()}
               </li>
             ))}
           </ul>
@@ -214,15 +388,16 @@ export function DeskHome() {
     queryKey: ['desk', 'digest', lastVisit],
     queryFn: () => deskApi.awayDigest(new Date(lastVisit).toISOString()),
   })
+  // §2.2's own route, per run. The conversation list answers "is a turn active
+  // here" and none of the other columns.
+  const runningNow = useQuery({
+    queryKey: ['desk', 'running'],
+    queryFn: () => deskApi.running(),
+    refetchInterval: 10_000,
+  })
   const monitor = useQuery({ queryKey: ['desk', 'monitor'], queryFn: () => deskApi.monitor() })
   const kill = useQuery({ queryKey: ['desk', 'kill-switch'], queryFn: () => deskApi.killSwitch() })
 
-  const running = useMemo(
-    // `running` is on `Conversation`; the cast that used to be here was
-    // defensive access over a shape the compiler already knows.
-    () => (conversations.data?.conversations ?? []).filter((c) => c.running),
-    [conversations.data],
-  )
   const recent = useMemo(
     () => (conversations.data?.conversations ?? []).slice(0, 8),
     [conversations.data],
@@ -308,57 +483,13 @@ export function DeskHome() {
         onDismiss={() => writeLastVisit()}
       />
 
-      <Panel>
-        <PanelHeader title="Running now" />
-        <PanelBody>
-          {conversations.isPending ? (
-            <PanelLoading lines={2} />
-          ) : conversations.isError ? (
-            <ErrorState
-              message="The conversation list could not be read"
-              detail="Whether anything is running is unknown, not none."
-              onRetry={() => void conversations.refetch()}
-            />
-          ) : running.length === 0 ? (
-            <EmptyState message="Nothing is running" detail="Start something below, or open a recent conversation." />
-          ) : (
-            // `Conversation` is a typed interface, so read its fields. The cast to
-            // `Record<string, unknown>` that used to be here was defensive access
-            // over a shape the compiler already knows — and TypeScript refused
-            // it, which is why this file did not typecheck.
-            running.map((c) => {
-              const id = c.conversation_id
-              return (
-                <div key={id} className="desk-card">
-                  <div className="desk-card-hd">
-                    <Link to={`/desk/c/${id}`}>{c.title ?? id}</Link>
-                    <Badge tone="accent">working</Badge>
-                    {/* §2.2 asks for the tier badge on this row. Only shown
-                        when the profile list names this model: a tier guessed
-                        from a model string would be a capability claim, and
-                        `unmeasured` on a profile we could not find would read
-                        as a measurement that failed rather than a lookup that
-                        did. */}
-                    {(() => {
-                      const p = profileList.find((x) => x.id === c.model)
-                      return p ? (
-                        <TierBadge tier={p.tier} measured={p.measured} detail={c.model} />
-                      ) : (
-                        <span className="sub">{c.model}</span>
-                      )
-                    })()}
-                  </div>
-                  <div className="desk-actions">
-                    <Button size="xs" variant="secondary" onClick={() => void deskApi.cancel(id)}>
-                      Stop
-                    </Button>
-                  </div>
-                </div>
-              )
-            })
-          )}
-        </PanelBody>
-      </Panel>
+      <RunningNow
+        runs={runningNow.data?.runs ?? null}
+        notRecorded={runningNow.data?.not_recorded ?? []}
+        loading={runningNow.isPending}
+        conversations={conversations.data?.conversations ?? null}
+        onRetry={() => void runningNow.refetch()}
+      />
 
       <Panel>
         <PanelHeader title="Recent conclusions" />

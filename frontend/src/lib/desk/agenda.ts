@@ -2,19 +2,28 @@
 //
 // # A drag is a priority event, not a rank
 //
-// §9 says "drag = `user` priority event". `POST …/{id}/agenda/order` honours
-// that literally: it puts the `user` source on every item id it is sent, clears
-// that item's score and promotes a `proposed` item to `queued`. There is **no
-// rank column anywhere** — the session claims `user` items next (§4.2's bypass)
-// and scores the rest.
+// §9 says "drag = `user` priority event", and `POST …/{id}/agenda/order` is
+// where that is decided. The route is now given **the board's whole order** and
+// works out for itself which cards ended up earlier than they were: it
+// subtracts the longest run of ids already in board order and marks only what
+// is left, so a card dragged *down* prioritises nothing. What it marks, it marks
+// with the `user` source, which clears the item's score and promotes a
+// `proposed` item to `queued`. There is **no rank column anywhere** — the
+// session claims `user` items next (§4.2's bypass) and scores the rest.
 //
 // Two consequences, and both of them are the reason this file is pure functions
 // with tests rather than a `sort` inside a component:
 //
-// 1. **The client must post the items the human moved up, never the whole
-//    board.** The route marks everything it is sent, so posting the board would
-//    mark every question on it a priority — which tells the session exactly as
-//    much as marking none of them. `prioritisedBy` is that short list.
+// 1. **The client posts the arrangement, and the route says what it meant.**
+//    The client used to filter the body down to the cards that moved up. That
+//    is now both redundant and refused: the route subtracts the unmoved cards
+//    itself, rejects a body of one id (an order of one says nothing about what
+//    comes before what, and `POST …/{item}/prioritise` is the route for that
+//    intent) and rejects duplicates. One card dragged to the top of a board
+//    *is* a one-id filtered body, so the old client posted exactly the shape
+//    that draws a 400. The rule lives in the route because a client that
+//    filters is a discipline, and the next caller — a script, a replay, a
+//    second client — does not inherit it.
 // 2. **The order the human dragged into is the client's, not the server's.**
 //    Nothing persists it, so the board holds it for as long as the tab is open
 //    and says so on the card. A UI that silently reverted on the next poll
@@ -54,8 +63,9 @@ export function applyOrder<T>(rows: readonly T[], key: (row: T) => string, order
  *
  * The two ids swap their positions in the whole-board order, so no card outside
  * the column moves. Returns the order unchanged when the card is already at the
- * end it is being pushed towards — a no-op reorder must not post anything,
- * because posting it would mark the item `user` for a move that did not happen.
+ * end it is being pushed towards — the control for that direction is disabled,
+ * and an order that is the board's own is one the route answers by marking
+ * nothing.
  */
 export function moveInColumn(
   order: readonly string[],
@@ -97,20 +107,4 @@ export function dropOnto(
   const next = [...without]
   next.splice(before ? at + 1 : at, 0, dragged)
   return next
-}
-
-/**
- * The ids to post: everything that ends up **earlier** than it started, in its
- * new order.
- *
- * Only the ones that moved up, because the route reads the list as "these
- * matter". A card that moved down did not become a priority, and the card that
- * displaced it did.
- */
-export function prioritisedBy(before: readonly string[], after: readonly string[]): string[] {
-  const was = new Map(before.map((id, i) => [id, i]))
-  return after.filter((id, i) => {
-    const old = was.get(id)
-    return old !== undefined && i < old
-  })
 }

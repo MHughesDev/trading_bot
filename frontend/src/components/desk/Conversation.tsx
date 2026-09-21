@@ -9,7 +9,13 @@ import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
 import { StaleBadge } from '@/components/primitives/States'
 import type { DeskCard, SessionDigestRef, ProvenanceMark, WorkingState } from '@/api/desk'
-import { charterView, deskApi, sessionDigestTarget, sessionForConversation } from '@/api/desk'
+import {
+  charterView,
+  deskApi,
+  sessionAmendments,
+  sessionDigestTarget,
+  sessionForConversation,
+} from '@/api/desk'
 import { conversationsApi } from '@/api/agent'
 import { costCalls, latestExposure, mergeCards, toCards, toolSearches, type WireEvent } from '@/lib/desk/events'
 import { useDeskStream } from '@/hooks/useDeskStream'
@@ -510,11 +516,13 @@ export function Conversation({
                 if (!sessionId) return
                 void deskApi.approveAgendaItem(sessionId, id).then(() => void agenda.refetch())
               }}
-              // A drag is a `user` priority event, and the ids are the ones the
-              // human moved up — never the whole board.
-              onPrioritise={(ids) => {
+              // A drag is a `user` priority event, and what goes up is the
+              // board's whole order: the route subtracts the cards that did not
+              // move and refuses a one-id body, so the short list the client
+              // used to compute is the one shape it cannot post.
+              onReorder={(order) => {
                 if (!sessionId) return
-                void deskApi.reorderAgenda(sessionId, ids).then(() => void agenda.refetch())
+                void deskApi.reorderAgenda(sessionId, order).then(() => void agenda.refetch())
               }}
               onOpenChild={(cid) => onOpenConversation?.(cid)}
             />
@@ -522,7 +530,10 @@ export function Conversation({
           {tab === 'charter' && (
             <CharterTab
               charter={charterView(session.data)}
-              amendments={[]}
+              // The session read carries the `charter_amended` events with a
+              // diff on each. The tab reported the version number and said no
+              // route read them back, which stopped being true.
+              amendments={sessionAmendments(session.data)}
               loading={session.isPending && !!sessionId}
             />
           )}
