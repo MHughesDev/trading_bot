@@ -488,6 +488,10 @@ pub async fn bind_design(
     .bind(check.required_observations)
     .execute(&state.pg)
     .await;
+    // After the row is written, because a simplification finding must not be
+    // able to stop a design that the power check admitted. It is information,
+    // not a gate.
+    let simplification = simplification_for(&state, &body.strategy_version).await;
     match res {
         Ok(_) => (
             StatusCode::CREATED,
@@ -496,6 +500,7 @@ pub async fn bind_design(
                 "observations": check.observations,
                 "required_observations": check.required_observations,
                 "power": "adequate",
+                "simplification": simplification,
             })),
         )
             .into_response(),
@@ -542,6 +547,51 @@ async fn head_registration(
         Some(id) => load(state, id).await,
         None => Ok(None),
     }
+}
+
+/// What a simplification pass found on the version this design binds (S-10.5).
+///
+/// **Reported, never applied.** Removing a node rewrites the strategy, which is
+/// a ring-1 write to the registry and belongs behind the proposal door — not in
+/// a design request, and certainly not silently under a run that has already
+/// sealed a registration naming this exact version.
+///
+/// Reported *here* because this is the last moment it is free. A dead node costs
+/// nothing at run time and a great deal at design time: a parameter only it uses
+/// is still swept, and every member of that sweep is a counted trial spent moving
+/// a number nothing reads.
+///
+/// `None` when the version could not be read. Absent is not "nothing to
+/// simplify" — an unreadable definition is a fact about the platform, and
+/// reporting it as a clean bill would be the flattering reading.
+async fn simplification_for(state: &AppState, revision: &str) -> Option<Value> {
+    // The turbofish is load-bearing: `?` after `flatten()` strips the `Option`,
+    // so annotating the binding as `Option<_>` makes sqlx look for a row type of
+    // `Option<tuple>` and fail to find one. Same trap as `api::dossier::Sealed`.
+    let row: (Value,) = sqlx::query_as::<_, (Value,)>(
+        "SELECT definition_json FROM strategy_revision WHERE revision_hash = $1",
+    )
+    .bind(revision)
+    .fetch_optional(&state.pg)
+    .await
+    .ok()
+    .flatten()?;
+    let def: domain::strategy_def::StrategyDefinition = serde_json::from_value(row.0).ok()?;
+    let found = research::simplify::simplify(&def);
+    Some(json!({
+        "removable": found
+            .findings
+            .iter()
+            .filter(|(_, r)| r.removed())
+            .map(|(id, r)| json!({ "node": id, "why": r.as_str() }))
+            .collect::<Vec<_>>(),
+        // Unreferenced by the signal graph and deliberately left alone, with the
+        // reason: this pass does not model what reaches a universe-pipeline node.
+        "kept_unmodelled": found.kept(),
+        "note": "reported, not applied. Removing a node is a registry write and goes through \
+                 `lifecycle.propose`; this runs here because it is the last moment the \
+                 information is free.",
+    }))
 }
 
 /// What a hypothesis registry lookup asks.

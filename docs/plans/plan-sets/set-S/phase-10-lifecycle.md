@@ -415,7 +415,7 @@ carries a `why`.
 **Traces:** AGENT-013 P3, §5.4, §5.7, §6.2, §6.6, §6.7, §7.3, §8.1; §13.5.
 
 ### S-10.5 Design, the power check, and `simplify` before the first trial — M
-`PARTIAL` 2026-09-17 — **the power check is built and binding; `simplify` is not.**
+`DONE` 2026-09-21 - the power check is built and binding; `simplify` reports before the first trial
 
 `crates/research/src/power.rs` asks `min_track_record_length` about the
 *pre-registered effect size* rather than about an observed Sharpe, which turns it
@@ -442,7 +442,40 @@ bound to it produces a result nobody can reproduce a week later — and `0128`'s
 `a_design_names_an_exact_version` refuses it again where a second writer cannot
 route around it.
 
-**Not done:** `simplify()` over the draft, and the `Move` diff it records. The
+**`simplify` landed 2026-09-21.** `crates/research/src/simplify.rs`, reported by
+`lifecycle.design` and recorded as `Move::RemoveNode` - the same vocabulary a worker
+proposes a structural change in, because "we took this out" is the same kind of fact
+whoever did it.
+
+**The validator checks references forwards and not backwards.** Every `signal.when`
+must name a real condition and every `action.on_signal` a real emit; a condition no
+signal watches and a signal no action consumes are both *accepted*. They cost nothing
+at run time, which is why nobody noticed - and a great deal at design time: a
+parameter used only by a dead node is still swept, and every member of that sweep is a
+counted trial spent moving a number nothing reads.
+
+**Exits are roots, and that is the bug this would have been.** `ExitRule::OnSignal`
+consumes a signal, so a reachability walk starting only from `actions` would delete
+the signal a strategy exits on. `a_signal_only_an_exit_rule_consumes_is_not_dead` is
+the test; ADR-S5-02 records the mirror-image mistake.
+
+**Three deliberate limits, because a simplification must be a change that cannot be
+wrong.** Only condition and signal nodes are removed; the v1.5 universe-pipeline nodes
+are *reported* as unreferenced and never touched, since this pass does not model their
+reachability; and nothing is ever rewritten - no expression folded, no nodes merged.
+`is_behaviour_preserving` states the claim rather than implying it.
+
+**Reported, never applied.** Removing a node rewrites the strategy, which is a ring-1
+registry write and belongs behind the proposal door - not in a design request, and
+certainly not silently under a run that has sealed a registration naming that exact
+version. It runs at design because that is the last moment the information is free.
+
+**Evidence:** `research::simplify::tests` (8), including
+`a_signal_only_an_exit_rule_consumes_is_not_dead`,
+`a_chain_of_dead_nodes_goes_entirely` (fixed point, not one layer) and
+`surviving_nodes_are_untouched`.
+
+**Still not done:** The
 observation count also assumes 24/7 (crypto, which is what the platform's live
 venues are); an equities window would need a trading calendar, and that limitation
 is named in `observations_in`'s doc rather than left to be discovered.

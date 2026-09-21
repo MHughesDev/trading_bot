@@ -22,6 +22,7 @@ pub mod compare;
 pub mod power;
 pub mod propose;
 pub mod search;
+pub mod simplify;
 pub mod sampler;
 pub mod space;
 pub mod surface;
