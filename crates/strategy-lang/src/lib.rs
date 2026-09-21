@@ -70,6 +70,7 @@
 // entry point for no reader's benefit. Recorded rather than silenced blind.
 #![allow(clippy::result_large_err)]
 
+pub mod apply;
 pub mod ast;
 pub mod block;
 pub mod catalogue;
@@ -83,6 +84,7 @@ pub mod parse;
 pub mod skeleton;
 pub mod suggest;
 
+pub use apply::{apply_move, apply_move_with, Applied, ClausePath, Edit, EntryPath};
 pub use block::{blocking_profile, entry_clauses, BlockingProfile, EntryCounts, Verdict};
 pub use catalogue::Catalogue;
 pub use compile::{compile, compile_with};

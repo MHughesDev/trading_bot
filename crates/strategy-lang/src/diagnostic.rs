@@ -259,6 +259,21 @@ pub enum Code {
     /// carries a [`crate::form::Limitation`] saying which narrowing it hit and
     /// whether writing it as text would help.
     NotInTheForm,
+
+    // ── applying a move ──────────────────────────────────────────────────────
+    /// An [`crate::apply::Edit`] addressing a clause, an entry or an exit the
+    /// strategy does not have.
+    NoSuchClause,
+    /// A threshold edit on a clause with no single number to move, or one that
+    /// asked for the value already there. An edit that changes nothing is not a
+    /// move.
+    NothingToMove,
+    /// A removal that would leave an entry with no condition, or a strategy
+    /// with no exits.
+    MoveEmptiesClause,
+    /// One edit that fell out as more than one classified change. One move per
+    /// version, or the next run's result cannot be attributed to either.
+    MoveIsNotSingle,
 }
 
 impl Code {
@@ -297,6 +312,10 @@ impl Code {
             Self::BadStoredExpression => "bad_stored_expression",
             Self::ImpossibleTally => "impossible_tally",
             Self::NotInTheForm => "not_in_the_form",
+            Self::NoSuchClause => "no_such_clause",
+            Self::NothingToMove => "nothing_to_move",
+            Self::MoveEmptiesClause => "move_empties_clause",
+            Self::MoveIsNotSingle => "move_is_not_single",
         }
     }
 }
@@ -457,6 +476,10 @@ mod tests {
             Code::BadStoredExpression,
             Code::ImpossibleTally,
             Code::NotInTheForm,
+            Code::NoSuchClause,
+            Code::NothingToMove,
+            Code::MoveEmptiesClause,
+            Code::MoveIsNotSingle,
         ];
         assert!(all.len() >= 25, "the scan found {} codes", all.len());
         let mut seen: Vec<&str> = all.iter().map(|c| c.as_str()).collect();

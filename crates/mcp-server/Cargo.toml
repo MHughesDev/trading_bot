@@ -18,6 +18,11 @@ chrono = { workspace = true }
 dataplane = { workspace = true }
 skills = { workspace = true }
 features = { workspace = true }
+# SLv2 (AGENT-011). The language crate is pure — text in, a definition or a
+# diagnostic out, no database and no network — so `compile_strategy`,
+# `explain_strategy` and `diff_strategies` are answered here for the same reason
+# `list_features` is, and cost no round trip.
+strategy-lang = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

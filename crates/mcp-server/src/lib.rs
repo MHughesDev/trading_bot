@@ -848,6 +848,10 @@ async fn dispatch_untraced(
         "get_venue_constraints" => tools::venues::get_venue_constraints(params),
         "list_features" => tools::strategy::list_features(params),
         "preview_signals" => tools::strategy::preview_signals(&ctx.api, params).await,
+        "compile_strategy" => tools::strategy::compile_strategy(params),
+        "explain_strategy" => tools::strategy::explain_strategy(params),
+        "diff_strategies" => tools::strategy::diff_strategies(params),
+        "apply_move" => tools::strategy::apply_move(params),
 
         // ── Discovery ──────────────────────────────────────────────────────────
         "list_lanes" => {

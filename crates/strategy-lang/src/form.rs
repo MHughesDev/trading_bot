@@ -95,6 +95,16 @@ impl<T> NonEmpty<T> {
         std::iter::once(&self.first).chain(self.rest.iter())
     }
 
+    /// Edit in place. There is deliberately no `push`, `remove` or `retain`:
+    /// this type's whole job is that the collection cannot become empty, and a
+    /// `remove` would hand that guarantee back to the caller's arithmetic.
+    /// Adding or dropping a member goes through [`Self::any`], which refuses
+    /// the empty case where it happens (`crate::apply` is the caller that
+    /// does).
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        std::iter::once(&mut self.first).chain(self.rest.iter_mut())
+    }
+
     #[must_use]
     pub fn len(&self) -> usize {
         1 + self.rest.len()

@@ -13,7 +13,9 @@
 > indicators uses two indicators. `list_features` now serves the registry the simulator reads,
 > and the instructions point at it.
 >
-> `crates/strategy-lang` does not exist, so S-5.5 … S-5.9, S-5.12, S-5.13 and S-5.15 are
+> **This line was false.** `crates/strategy-lang` exists and always did; what
+> was true is that nothing depended on it. The original read: ~~`crates/strategy-lang`
+> does not exist, so S-5.5 … S-5.9, S-5.12, S-5.13 and S-5.15 are~~
 > genuinely not started. The highest-value task that needed no language was **S-5.4,
 > `preview_signals`**, and it shipped 2026-09-16: a model can now look at what a draft does on
 > a window without buying a backtest, and a window reaching into the sealed holdout is refused
@@ -77,6 +79,112 @@ the test's own header says never to widen the allowlist without recording why.
 in `AGENT.md` ("same builder code live and in replay") and it is not negotiable.
 
 ---
+
+### The crate existed all along, and nothing imported it, 2026-09-21
+
+**`strategy-lang` 129 → 141 tests; `mcp-server-lib` 197 → 209.**
+
+Seven task entries in this file said *"`crates/strategy-lang` does not exist"*.
+It exists, at **13,877 lines over 129 passing tests**, with `diff`, `lineage`,
+`suggest_moves` and `blocking_profile` already built. **And `grep strategy-lang
+crates/*/Cargo.toml` matched only its own manifest** — nothing in the workspace
+depended on it. Thirteen thousand lines of built-but-unreached, described in the
+plan as absent. Four tools now reach it: `compile_strategy`, `explain_strategy`,
+`diff_strategies`, `apply_move`.
+
+**`apply_move` genuinely did not exist** and is new (~900 lines, 12 tests). Two
+decisions are worth keeping:
+
+- **`Edit` does not name a `MoveKind`.** The differ is the arbiter of what a
+  change *is*; an applier that accepted a kind could disagree with it, and a
+  caller asking for `swap_signal` while supplying a threshold tweak would get a
+  lineage saying something its author does not believe.
+- **The single-move guarantee is the type.** `Applied` has private fields and no
+  public constructor; `apply_move` runs the differ on its own output and refuses
+  `0` changes or `n > 1`. `Applied::kind()` is a **measurement**, never an
+  unchecked claim. Addresses are newtypes, so `entry.long.0` is an error rather
+  than a silent clause zero.
+
+### The one that stops the whole authoring path
+
+**The validator refuses every document the language can compile, and the fix
+text attached to the refusal names the version it refuses.**
+
+`strategy-validator/src/schema.rs:22` accepts only `"1.0" | "1.2"`. The fix in
+`teach.rs:94` for that same code reads: *"1.0 is the base, 1.2 adds typed
+parameters, **1.3 adds the exits block**."* And the compiler targets **v1.3** —
+it must, because `exits` is the only schema that can hold
+`exit stop 2 % from entry`, which `domain` documents REQUIRED at 1.3.
+`routes/strategies.rs` runs `validate()` before it persists. **So the SLv2
+authoring path is dead at its last step**, and `create_strategy(text)` cannot be
+built until it is decided. Pinned by a test asserting the version is the *only*
+complaint — which will fail the day it is fixed, and the repair then is to
+delete the test, not widen it. **Neither reading implemented.**
+
+### What the live registry says, and one correction to the track's own figure
+
+The decompiler was run over **all 32 stored definitions**, which S-5.7's note
+said nobody had ever done:
+
+```
+TOTAL 32 | READABLE 1 | UNREADABLE 13 | NOT A StrategyDefinition 18
+```
+
+**One stored strategy in the entire database has a readable SLv2 form.** The 13
+refusals are honest and named; the dominant one — *"an action fires on the
+signal …"*, 7 of 13 — is a single shape SLv2 cannot express, **and it is what
+this platform's existing strategies actually look like**.
+
+**The track reported "all 32 are `definition_version = 1.0`". That is wrong, and
+the real distribution is more interesting:** 18 have no version key at all (the
+empty rows), **9 are 1.0, 4 are 1.2, and 1 is `1.1`**. Zero are 1.3 and zero
+carry an `exits` block, so the substantive point stands — nothing the language
+can produce has ever reached the store — but there is **a live row at `1.1` that
+the validator's own `matches!("1.0" | "1.2")` refuses**, which no one has
+noticed.
+
+**18 of the 32 rows are test garbage — 56% of the live strategy registry.**
+`definition_json = '{}'`, `head_revision IS NULL`, slugs shaped `s_<32 hex>`:
+residue from `crates/ledger/tests/pg_strategy_revision.rs`, which connects with
+`DATABASE_URL` from `.env` — **the platform's own database** — and never tears
+down. The tests are using the `head_revision IS NULL` escape hatch that
+migration `0058` left open for its own backfill **as a normal write path**, and
+all of it is visible to `list_strategies`.
+
+### Two more open questions, neither implemented
+
+**Lineage.** `parent_version` does not exist anywhere in the repo. Lineage is
+`strategy_revision.parent_hash`, derived server-side from the `head_revision` of
+**the same `strategy_id`** — while `create_strategy`'s own description advises
+*"mint versioned slugs (`my_strat_v2`) when iterating"*. A new slug has no head,
+so `parent_hash` is NULL; the only way to get a parent is to reuse the slug,
+which overwrites the head the advice warns about. **Measured: 40 agent-authored
+revisions across 34 slugs, 6 with a parent — 85% of the agent's authoring
+history has no lineage at all.**
+
+**Authorship.** `routes/strategies.rs` binds `actor_kind = "human"`
+unconditionally, while migration `0058` says that column *"distinguishes a human
+author from the research agent, which is the difference between a hypothesis and
+a sample"*. The live table holds 40 `'agent'` rows, so a second writer exists
+and the two paths disagree about who wrote a revision.
+
+### Blocked, with the exact missing symbol
+
+**`suggest_moves` (S-5.11) is built and tested, and all three of its inputs have
+no producer.** `blocking` needs `ClauseCounts { bars_true, bars_sole_blocker }`
+per clause — `SignalPreview` emits none. `regimes` needs `by_regime`, documented
+*"Empty until a regime engine supplies labelled windows"*, and the nearest
+alternative carries a free-form `detail: String`. `exit_reasons` needs a symbol
+that **does not appear anywhere in `crates/backtest`**. A `suggest_moves` tool
+would return zero suggestions on every real run, for ever. Not shipped.
+
+**S-5.15 is blocked, and this file's reason was the wrong one.** It says intent
+surviving the round trip "needs the round trip". **The round trip works** — six
+green tests including a corpus-wide pass and a text fixpoint. The real blocker:
+`domain::strategy_def` has **no comment field on anything**. The parser already
+attaches comments and the compiler drops them because there is nowhere to put
+them.
+
 
 ## The feature engine
 
@@ -190,7 +298,7 @@ is refused naming the partition. Adversarial: the refusal is asserted.
 ### S-5.5 The parser — L
 `DONE`
 
-`crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
+~~`crates/strategy-lang` **does not exist**.~~ **False as of 2026-09-21, and it was false when it was written under seven separate tasks.** The crate is **13,877 lines over 129 passing tests** — `lex, ast, parse, compile, decompile, diff, suggest, block, form, skeleton, catalogue, diagnostic`. What was true is worse and more specific: **nothing in the workspace depended on it.** `grep strategy-lang crates/*/Cargo.toml` matched only its own manifest. Thirteen thousand lines of the built-but-unreached shape. See the note at the head of this file.
 
 New crate `crates/strategy-lang`. FEAT-004 §3.1's grammar with the AGENT-011 §3 amendments,
 all of which point one way — a small model writing it correctly: every clause on its own
@@ -220,7 +328,7 @@ whole argument of AGENT-011 §3.
 ### S-5.6 The compiler — M
 `PARTIAL`
 
-`crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
+~~`crates/strategy-lang` **does not exist**.~~ **False as of 2026-09-21, and it was false when it was written under seven separate tasks.** The crate is **13,877 lines over 129 passing tests** — `lex, ast, parse, compile, decompile, diff, suggest, block, form, skeleton, catalogue, diagnostic`. What was true is worse and more specific: **nothing in the workspace depended on it.** `grep strategy-lang crates/*/Cargo.toml` matched only its own manifest. Thirteen thousand lines of the built-but-unreached shape. See the note at the head of this file.
 
 AST → the canonical `StrategyDefinition` (`crates/domain/src/strategy_def/mod.rs:64`). JSON
 remains the storage and runtime form (ADR-0010); it stops being what a model is asked to
@@ -273,7 +381,7 @@ sets name by name and parameter by parameter.
 ### S-5.7 The decompiler and the round trip — M
 `PARTIAL`
 
-`crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
+~~`crates/strategy-lang` **does not exist**.~~ **False as of 2026-09-21, and it was false when it was written under seven separate tasks.** The crate is **13,877 lines over 129 passing tests** — `lex, ast, parse, compile, decompile, diff, suggest, block, form, skeleton, catalogue, diagnostic`. What was true is worse and more specific: **nothing in the workspace depended on it.** `grep strategy-lang crates/*/Cargo.toml` matched only its own manifest. Thirteen thousand lines of the built-but-unreached shape. See the note at the head of this file.
 
 JSON → canonical text, so every stored strategy has a readable form and the v1 expression
 grammar remains a subset the decompiler emits when nothing newer is used.
@@ -304,7 +412,7 @@ has yet run the decompiler over the stored set.
 ### S-5.8 The authoring tools — M
 `NOT STARTED` — `explain_strategy` is not in the catalogue, and `create_strategy` recording lineage needs the compiler.
 
-`crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
+~~`crates/strategy-lang` **does not exist**.~~ **False as of 2026-09-21, and it was false when it was written under seven separate tasks.** The crate is **13,877 lines over 129 passing tests** — `lex, ast, parse, compile, decompile, diff, suggest, block, form, skeleton, catalogue, diagnostic`. What was true is worse and more specific: **nothing in the workspace depended on it.** `grep strategy-lang crates/*/Cargo.toml` matched only its own manifest. Thirteen thousand lines of the built-but-unreached shape. See the note at the head of this file.
 
 `compile_strategy` (never persists), `explain_strategy` (reads a strategy back in words),
 `create_strategy(text)` recording `parent_version`, and the upgraded `validate_strategy`
@@ -317,7 +425,7 @@ bars; `create_strategy` records lineage for `family_test`.
 ### S-5.9 A grammar for the small tiers — M
 `PARTIAL`
 
-`crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
+~~`crates/strategy-lang` **does not exist**.~~ **False as of 2026-09-21, and it was false when it was written under seven separate tasks.** The crate is **13,877 lines over 129 passing tests** — `lex, ast, parse, compile, decompile, diff, suggest, block, form, skeleton, catalogue, diagnostic`. What was true is worse and more specific: **nothing in the workspace depended on it.** `grep strategy-lang crates/*/Cargo.toml` matched only its own manifest. Thirteen thousand lines of the built-but-unreached shape. See the note at the head of this file.
 
 A clause-level JSON-Schema grammar (one clause per fill) rather than the EBNF, so a
 `select_fill` tier writes SLv2 under constrained decoding and the compiler assembles the
@@ -390,7 +498,7 @@ only on capable tiers. Motivated moves only — exploration belongs in the Exper
 ### S-5.12 Skeletons — S
 `PARTIAL`
 
-`crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
+~~`crates/strategy-lang` **does not exist**.~~ **False as of 2026-09-21, and it was false when it was written under seven separate tasks.** The crate is **13,877 lines over 129 passing tests** — `lex, ast, parse, compile, decompile, diff, suggest, block, form, skeleton, catalogue, diagnostic`. What was true is worse and more specific: **nothing in the workspace depended on it.** `grep strategy-lang crates/*/Cargo.toml` matched only its own manifest. Thirteen thousand lines of the built-but-unreached shape. See the note at the head of this file.
 
 `strategy_skeleton(hypothesis_family)` for trend, mean reversion, breakout, carry,
 vol target and model signal, so a first version is never a syntax lesson.
@@ -469,7 +577,7 @@ the same family on the same window.
 ### S-5.15 Intent survives, and the preview says which clause blocked — M
 `NOT STARTED` — Intent surviving the round trip needs the round trip.
 
-`crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
+~~`crates/strategy-lang` **does not exist**.~~ **False as of 2026-09-21, and it was false when it was written under seven separate tasks.** The crate is **13,877 lines over 129 passing tests** — `lex, ast, parse, compile, decompile, diff, suggest, block, form, skeleton, catalogue, diagnostic`. What was true is worse and more specific: **nothing in the workspace depended on it.** `grep strategy-lang crates/*/Cargo.toml` matched only its own manifest. Thirteen thousand lines of the built-but-unreached shape. See the note at the head of this file.
 
 **Comments are part of the language.** A strategy is read by a reviewer, by the model on its
 next turn, and by whoever opens the dossier in six months, and none of them can recover why a
