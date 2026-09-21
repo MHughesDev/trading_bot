@@ -609,9 +609,52 @@ thing), and — before the button, not in the result — whether approving would
 actually do anything. A rejection is recorded as a decision, because an approval
 rate over a queue where rejections vanish is not a rate.
 
+**`change_limits` performs now (2026-09-21).** It could not before, and the reason
+was not a missing function: `monitor::limits::declare_limit` has always existed. A
+proposal carried `kind`, `subject` and `subject_id` - enough to *arm* an automation,
+whose whole content is "this row, on" - and a control limit is eight fields, none of
+them derivable from a name. So the approval had nothing to write and said so.
+
+Migration `0137` gives a proposal a `payload`, and three rules decide what goes in it:
+
+* **The shape is checked by `ledger::proposal`** - a kind that carries one must, and a
+  kind that reads none may not. A payload nothing applies is refused rather than
+  ignored, because ignoring it leaves a caller believing it said something and the
+  first person to find out is whoever wondered why the approval did not do what the
+  payload described.
+* **The type is checked by the crate that owns it**, at *creation*, against the same
+  parsers `declare_limit` uses. A proposal that reaches a human, gets approved, and
+  only then turns out to be unwritable is the worst possible ordering.
+* **Three fields the proposal does not get to state**: `declared_by` is the human,
+  `declared_at` is the moment of the decision, and `strategy_id` is `subject_id`.
+  `ProposedLimit` has no field for any of them - a payload that could carry
+  `declared_by` would be an agent writing somebody else's name on its own change.
+
+**And a hand-written copy of `performable()` was about to go stale.** The queue's
+`actionable` flag - the one that tells a person, before the button, whether approving
+would do anything - was a `matches!` naming `deploy_paper`, sitting beside a function
+that answers the same question. It now reads that function. A stale "approving this
+changes nothing" is worse than none: it teaches a reader to ignore the warning.
+
+`promote_strategy` still reports `not_performed`, and that is unchanged and correct:
+the promoted set has no writer, so there is no shape to validate a payload against and
+no table to write it to. `ProposalKind::carries_a_payload` returns `false` for it
+**today**, and the doc says why, so building one is a deliberate edit rather than a
+surprise.
+
+**Evidence:** `ledger::proposal::tests::{a_kind_that_writes_more_than_a_row_id_must_say_what,
+a_payload_nothing_will_read_is_refused_rather_than_dropped,
+a_payload_that_is_not_an_object_is_refused, the_payload_reaches_the_proposal_unchanged,
+only_a_limit_change_carries_a_payload_today}`;
+`api::routes::proposals::tests::{the_performable_set_is_the_one_with_a_writer,
+a_kind_that_demands_a_payload_can_perform_one, a_proposal_cannot_state_who_approved_it,
+an_unwritable_limit_is_refused_with_the_reason,
+creation_and_approval_agree_on_what_a_method_is,
+every_kind_is_performable_or_says_why_not}`.
+
 **Still not done:** a ring-1 approval-side writer for
-`promote_strategy` and `change_limits` (the approval reports both as not performed,
-by name), and — the large one — **removing the remaining ring-1 write paths from an
+`promote_strategy` (the approval reports it as not performed, by name - and the
+blocker is the decision below rather than the function), and — the large one — **removing the remaining ring-1 write paths from an
 agent token**. That last one is a product change rather than a refactor: the ring-1
 write set is thirty-five tools and is the agent's entire working surface, so
 "removing every other write path" cannot mean all of them and the narrowing needs a

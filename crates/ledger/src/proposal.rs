@@ -31,6 +31,7 @@
 //! when somebody resets the switch an hour later.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::audit::Envelope;
@@ -50,6 +51,20 @@ pub enum ProposalKind {
 }
 
 impl ProposalKind {
+    /// Whether an approval of this kind needs more than [`Proposal::subject_id`].
+    ///
+    /// `deploy_paper` does not: arming an automation is "this row, on", and the
+    /// row is the target. `change_limits` does, because a limit is eight fields
+    /// and a name describes none of them. `promote_strategy` does **not**
+    /// today, and that is not a claim that promotion needs nothing - it is that
+    /// the promoted set has no writer and therefore no shape to validate
+    /// against, which is the decision S-10.9 is still waiting on. When it has
+    /// one, this returns `true` for it and `propose` starts demanding it.
+    #[must_use]
+    pub fn carries_a_payload(self) -> bool {
+        matches!(self, ProposalKind::ChangeLimits)
+    }
+
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -124,6 +139,8 @@ pub enum ProposalError {
     NoDossier,
     #[error("a proposal must name the row the approval will act on. The subject is what the human reads; the id is what the platform writes to, and resolving the one into the other at approval time would put a guess at the moment the platform acts on somebody's authority.")]
     NoTarget,
+    #[error("{0}")]
+    BadPayload(String),
 }
 
 /// A request for a human decision (§7.5).
@@ -157,6 +174,19 @@ pub struct Proposal {
     pub subject_id: Uuid,
     /// One line, in the run's words, on why.
     pub rationale: String,
+    /// What the approval would write (migration `0137`).
+    ///
+    /// Per kind, because the shape is: `deploy_paper` needs nothing beyond
+    /// [`Self::subject_id`] — arming a row is "this row, on" — and
+    /// `change_limits` needs the whole limit, which has eight fields and none of
+    /// them derivable from a name.
+    ///
+    /// Shape-checked here and **type**-checked by the caller that owns the
+    /// target type, at creation. The alternative is letting the approval invent
+    /// what the proposal did not carry, which is the failure ADR-S10-09 records
+    /// for `subject_id`, sited at the one moment the platform acts on somebody
+    /// else's authority.
+    pub payload: Value,
 }
 
 /// Create one, or say why not (§6.8).
@@ -172,6 +202,7 @@ pub fn propose(
     subject: &str,
     subject_id: Uuid,
     rationale: &str,
+    payload: Value,
     pre: Preconditions,
 ) -> Result<Proposal, ProposalError> {
     // The kill switch first, and for every kind. A tripped switch is the
@@ -198,6 +229,33 @@ pub fn propose(
     if subject_id.is_nil() {
         return Err(ProposalError::NoTarget);
     }
+    // Shape only. This crate does not know what a risk limit is, and a second
+    // opinion about its fields here would be a second standard - the caller
+    // that owns `ControlLimit` checks it against the real type. What is checked
+    // here is the pairing of kind and payload, which is this type's business.
+    if !payload.is_object() {
+        return Err(ProposalError::BadPayload(
+            "a payload is an object; `{}` is how a kind says it carries nothing".into(),
+        ));
+    }
+    let empty = payload.as_object().is_none_or(serde_json::Map::is_empty);
+    if kind.carries_a_payload() && empty {
+        return Err(ProposalError::BadPayload(format!(
+            "`{}` changes something a name does not describe, so the proposal has to carry \
+             what would be written. Approving one that does not would mean inventing it.",
+            kind.as_str()
+        )));
+    }
+    if !kind.carries_a_payload() && !empty {
+        // Not ignored. A payload nothing reads is a caller believing it said
+        // something, and the first person to find out would be whoever wondered
+        // why the approval did not do what the payload described.
+        return Err(ProposalError::BadPayload(format!(
+            "`{}` acts on `subject_id` and reads no payload; remove it rather than sending a \
+             value nothing will apply",
+            kind.as_str()
+        )));
+    }
     Ok(Proposal {
         proposal_id: Uuid::new_v4(),
         run_id,
@@ -208,6 +266,7 @@ pub fn propose(
         subject: subject.trim().to_string(),
         subject_id,
         rationale: rationale.trim().to_string(),
+        payload,
     })
 }
 
@@ -249,6 +308,16 @@ mod tests {
         Preconditions::default()
     }
 
+    /// The payload a kind requires, so a test about something *else* does not
+    /// have to know the rule.
+    fn payload_for(kind: ProposalKind) -> Value {
+        if kind.carries_a_payload() {
+            serde_json::json!({ "metric": "max_drawdown", "upper": 0.2 })
+        } else {
+            serde_json::json!({})
+        }
+    }
+
     #[test]
     fn a_proposal_changes_nothing_and_cites_what_the_decision_rests_on() {
         let p = propose(
@@ -258,6 +327,7 @@ mod tests {
             "ema_cross_v3",
             Uuid::new_v4(),
             "survived the battery on two venues",
+            payload_for(ProposalKind::PromoteStrategy),
             clear(),
         )
         .expect("clear preconditions");
@@ -277,6 +347,7 @@ mod tests {
             "ema_cross_v3",
             Uuid::new_v4(),
             "it looks good",
+            payload_for(ProposalKind::PromoteStrategy),
             clear(),
         )
         .expect_err("refused");
@@ -291,8 +362,17 @@ mod tests {
             ..clear()
         };
         for kind in ProposalKind::ALL {
-            let err = propose(Uuid::new_v4(), *kind, "d_1", "s", Uuid::new_v4(), "r", pre)
-                .expect_err("refused");
+            let err = propose(
+                Uuid::new_v4(),
+                *kind,
+                "d_1",
+                "s",
+                Uuid::new_v4(),
+                "r",
+                payload_for(*kind),
+                pre,
+            )
+            .expect_err("refused");
             assert_eq!(err, ProposalError::KillSwitchTripped, "{kind:?}");
         }
         let text = ProposalError::KillSwitchTripped.to_string();
@@ -310,7 +390,16 @@ mod tests {
             ..clear()
         };
         assert_eq!(
-            propose(Uuid::new_v4(), ProposalKind::DeployPaper, "d", "s", Uuid::new_v4(), "r", rejected),
+            propose(
+                Uuid::new_v4(),
+                ProposalKind::DeployPaper,
+                "d",
+                "s",
+                Uuid::new_v4(),
+                "r",
+                payload_for(ProposalKind::DeployPaper),
+                rejected
+            ),
             Err(ProposalError::BatteryRejected)
         );
         let no_go = Preconditions {
@@ -318,7 +407,16 @@ mod tests {
             ..clear()
         };
         assert_eq!(
-            propose(Uuid::new_v4(), ProposalKind::DeployPaper, "d", "s", Uuid::new_v4(), "r", no_go),
+            propose(
+                Uuid::new_v4(),
+                ProposalKind::DeployPaper,
+                "d",
+                "s",
+                Uuid::new_v4(),
+                "r",
+                payload_for(ProposalKind::DeployPaper),
+                no_go
+            ),
             Err(ProposalError::ReadinessNoGo)
         );
     }
@@ -341,6 +439,7 @@ mod tests {
             "s",
             Uuid::new_v4(),
             "r",
+            payload_for(ProposalKind::PromoteStrategy),
             rejected,
         )
         .expect("ring 1 does not ask the battery");
@@ -357,6 +456,7 @@ mod tests {
             "ema_cross_v3",
             Uuid::nil(),
             "it survived",
+            payload_for(ProposalKind::DeployPaper),
             clear(),
         )
         .expect_err("the nil uuid names no row");
@@ -392,7 +492,17 @@ mod tests {
     #[test]
     fn the_stored_ring_is_the_derived_one() {
         for kind in ProposalKind::ALL {
-            let p = propose(Uuid::new_v4(), *kind, "d", "s", Uuid::new_v4(), "r", clear()).unwrap();
+            let p = propose(
+                Uuid::new_v4(),
+                *kind,
+                "d",
+                "s",
+                Uuid::new_v4(),
+                "r",
+                payload_for(*kind),
+                clear(),
+            )
+            .unwrap();
             assert_eq!(p.ring, kind.ring());
             assert_eq!(p.envelope, kind.envelope());
         }
@@ -408,4 +518,123 @@ mod tests {
         assert!(!Decision::Pending.permits_write());
         assert!(!Decision::Rejected.permits_write());
     }
+
+    /// A kind that changes something a name does not describe has to carry what
+    /// would be written.
+    ///
+    /// The alternative is an approval that invents the fields the proposal did
+    /// not carry — at the one moment the platform acts on somebody else's
+    /// authority, which is exactly where ADR-S10-09 says a guess must not be.
+    #[test]
+    fn a_kind_that_writes_more_than_a_row_id_must_say_what() {
+        let err = propose(
+            Uuid::new_v4(),
+            ProposalKind::ChangeLimits,
+            "d_1",
+            "max_drawdown on ema_cross_v3",
+            Uuid::new_v4(),
+            "the paper session ran tighter than the backtest",
+            serde_json::json!({}),
+            clear(),
+        )
+        .expect_err("a limit change with no limit");
+        assert!(
+            matches!(err, ProposalError::BadPayload(ref m) if m.contains("inventing")),
+            "{err:?}"
+        );
+    }
+
+    /// And a payload on a kind that reads none is refused rather than ignored.
+    ///
+    /// Ignoring it would leave a caller believing it had said something, and the
+    /// first person to find out would be whoever wondered why the approval did
+    /// not do what the payload described.
+    #[test]
+    fn a_payload_nothing_will_read_is_refused_rather_than_dropped() {
+        for kind in ProposalKind::ALL.iter().filter(|k| !k.carries_a_payload()) {
+            let err = propose(
+                Uuid::new_v4(),
+                *kind,
+                "d_1",
+                "s",
+                Uuid::new_v4(),
+                "r",
+                serde_json::json!({ "upper": 0.9 }),
+                clear(),
+            )
+            .expect_err("a payload nothing applies");
+            assert!(
+                matches!(err, ProposalError::BadPayload(ref m) if m.contains("remove it")),
+                "{kind:?}: {err:?}"
+            );
+        }
+    }
+
+    /// `{}` is how a kind says it carries nothing, and a non-object is not that.
+    #[test]
+    fn a_payload_that_is_not_an_object_is_refused() {
+        for bad in [serde_json::json!(null), serde_json::json!([1]), serde_json::json!("limit")] {
+            let err = propose(
+                Uuid::new_v4(),
+                ProposalKind::DeployPaper,
+                "d_1",
+                "s",
+                Uuid::new_v4(),
+                "r",
+                bad.clone(),
+                clear(),
+            )
+            .expect_err("not an object");
+            assert!(matches!(err, ProposalError::BadPayload(_)), "{bad}: {err:?}");
+        }
+    }
+
+    /// The payload survives onto the proposal unchanged. It is what the approval
+    /// writes, so a proposal that altered it would be approving one thing and
+    /// performing another.
+    #[test]
+    fn the_payload_reaches_the_proposal_unchanged() {
+        let limit = serde_json::json!({
+            "metric": "max_drawdown",
+            "family": "behaviour",
+            "severity": "breach",
+            "version": 3,
+            "upper": 0.2,
+            "method": "paper_ewma_3sigma",
+            "declared_from": "bt_991"
+        });
+        let p = propose(
+            Uuid::new_v4(),
+            ProposalKind::ChangeLimits,
+            "d_1",
+            "max_drawdown on ema_cross_v3",
+            Uuid::new_v4(),
+            "the paper session ran tighter",
+            limit.clone(),
+            clear(),
+        )
+        .expect("a complete limit change");
+        assert_eq!(p.payload, limit);
+        assert_eq!(p.ring, 1);
+        assert_eq!(p.envelope, Envelope::Promotion);
+    }
+
+    /// `promote_strategy` carries nothing **today**, and the reason is not that
+    /// promotion needs nothing — it is that the promoted set has no writer, so
+    /// there is no shape to validate against. This pins the answer so that
+    /// building one is a deliberate change here rather than a surprise.
+    #[test]
+    fn only_a_limit_change_carries_a_payload_today() {
+        let carrying: Vec<&str> = ProposalKind::ALL
+            .iter()
+            .filter(|k| k.carries_a_payload())
+            .map(|k| k.as_str())
+            .collect();
+        assert_eq!(
+            carrying,
+            vec!["change_limits"],
+            "the set changed; `perform` in api::routes::proposals must gain the writer"
+        );
+    }
+
 }

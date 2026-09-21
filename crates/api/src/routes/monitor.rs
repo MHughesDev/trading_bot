@@ -56,6 +56,18 @@ fn store(state: &AppState) -> MonitorStore {
     MonitorStore::new(state.pg.clone())
 }
 
+/// The same store, for the one caller outside this module.
+///
+/// `proposals::write_limit` writes a control limit as the human who approved it,
+/// and it goes through this rather than building its own `MonitorStore` — a
+/// second way to reach the limit table is a second place the store's own rules
+/// could be bypassed, which is the argument `arm_by_id` already makes for
+/// arming.
+#[must_use]
+pub fn limit_store(state: &AppState) -> MonitorStore {
+    store(state)
+}
+
 fn bad_request(detail: impl std::fmt::Display) -> Response {
     (
         StatusCode::BAD_REQUEST,

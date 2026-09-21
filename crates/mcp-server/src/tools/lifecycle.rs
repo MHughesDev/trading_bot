@@ -286,6 +286,26 @@ pub async fn propose(api: &crate::ApiClient, params: &Value) -> Value {
     if text(params, "subject").is_none() {
         return missing("subject", "what is being promoted, armed or changed");
     }
+    // A limit is eight fields and a name describes none of them, so the
+    // proposal has to carry the limit itself (migration `0137`). Refused here
+    // rather than at the approval: a proposal that reaches a human, gets
+    // approved and only then turns out to be unwritable is the worst possible
+    // ordering, because somebody has already decided.
+    if kind == "change_limits"
+        && params
+            .get("payload")
+            .and_then(Value::as_object)
+            .is_none_or(serde_json::Map::is_empty)
+    {
+        return missing(
+            "payload",
+            "the limit the approval would write: `metric`, `family`, `version`, `upper` \
+             and/or `lower`, `method`, and `declared_from` naming the backtest or paper run \
+             the baseline came from. You do not send `declared_by` or `declared_at` — the \
+             human who approves it is the one who declared it, and that is the point of \
+             asking.",
+        );
+    }
     // The row the approval acts on. Separate from `subject`, which is what the
     // human reads: resolving a name to a row at approval time would put a guess
     // at the one moment the platform acts on somebody's authority, and the
@@ -486,6 +506,14 @@ pub fn specs() -> Vec<ToolSpec> {
                     "subject_id": {
                         "type": "string",
                         "description": "The id of that thing. The approval writes to this row, so a proposal without one is approved and then cannot be performed."
+                    },
+                    "payload": {
+                        "type": "object",
+                        "description": "For `change_limits`, the limit to write: metric, \
+                                        family, version, lower and/or upper, method, and \
+                                        declared_from naming the run the baseline came from. \
+                                        Omit for other kinds — a payload nothing applies is \
+                                        refused rather than ignored."
                     },
                     "dossier_ref": {
                         "type": "string",

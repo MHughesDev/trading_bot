@@ -20,7 +20,7 @@
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -567,6 +567,92 @@ pub struct ProposalBody {
     battery_rejected: bool,
     #[serde(default)]
     readiness_no_go: bool,
+    /// What the approval would write (migration `0137`).
+    ///
+    /// `{}` for a kind that acts on `subject_id` alone. For `change_limits` it
+    /// is the limit itself, and it is checked against the real type **here**,
+    /// at creation — a proposal that reaches a human, gets approved and only
+    /// then turns out to be unwritable is the worst possible ordering.
+    #[serde(default)]
+    payload: Value,
+}
+
+/// The limit a `change_limits` proposal would write.
+///
+/// The fields `monitor::limits::ControlLimit` needs, minus the three the
+/// *approval* supplies: `declared_at` is the moment of the decision and
+/// `declared_by` is the human who made it — a proposal that carried either
+/// would be letting the agent state who approved it — and `strategy_id` comes
+/// from `subject_id`, which is already the row the approval acts on.
+#[derive(Debug, Deserialize)]
+pub struct ProposedLimit {
+    pub metric: String,
+    pub family: String,
+    #[serde(default)]
+    pub severity: Option<String>,
+    pub version: i32,
+    #[serde(default)]
+    pub lower: Option<f64>,
+    #[serde(default)]
+    pub upper: Option<f64>,
+    pub method: String,
+    /// The backtest or paper run the baseline came from.
+    pub declared_from: String,
+}
+
+/// Check a proposed limit against the types that will store it.
+///
+/// Every parse here is the one `declare_limit` performs, called from the same
+/// crate on the same strings. A second opinion about what a family or a method
+/// is would be a second standard, and the looser one is the one a limit would
+/// be admitted under.
+///
+/// # Errors
+/// The field and why, so the refusal is actionable at the moment it is cheap.
+pub fn check_proposed_limit(payload: &Value) -> Result<(), String> {
+    let limit: ProposedLimit = serde_json::from_value(payload.clone())
+        .map_err(|e| format!("this is not a limit: {e}"))?;
+    if limit.declared_from.trim().is_empty() {
+        return Err("declared_from must name the backtest or paper run the baseline came                     from: a baseline whose provenance is unrecorded is a number somebody                     typed"
+            .to_string());
+    }
+    if limit.metric.trim().is_empty() {
+        return Err("a limit names the metric it bounds".to_string());
+    }
+    limit
+        .family
+        .parse::<monitor::family::Family>()
+        .map_err(|e| format!("family: {e}"))?;
+    limit
+        .severity
+        .as_deref()
+        .unwrap_or("breach")
+        .parse::<monitor::limits::LimitSeverity>()
+        .map_err(|e| format!("severity: {e}"))?;
+    method_from(&limit.method).map(|_| ())
+}
+
+/// The method vocabulary, in one place.
+///
+/// Shared by the creation check and the approval, so a method the proposal was
+/// accepted under is a method the approval can write. Two copies would let a
+/// proposal be admitted and then fail at the decision, which is the ordering
+/// this whole design exists to avoid.
+///
+/// # Errors
+/// The name, when it is not one.
+pub fn method_from(name: &str) -> Result<monitor::limits::LimitMethod, String> {
+    use monitor::limits::LimitMethod;
+    Ok(match name {
+        "paper_ewma_3sigma" => LimitMethod::PaperEwma3Sigma,
+        "backtest_3sigma" => LimitMethod::Backtest3Sigma,
+        "venue_rate_ceiling" => LimitMethod::VenueRateCeiling,
+        "risk_gate_mirror" => LimitMethod::RiskGateMirror,
+        "declared_absolute" => LimitMethod::DeclaredAbsolute,
+        "mc_p95_drawdown" => LimitMethod::McP95Drawdown,
+        "cusum" => LimitMethod::Cusum,
+        other => return Err(format!("unknown method {other:?}")),
+    })
 }
 
 /// `POST /api/lifecycle/proposals` — ask for a decision that reaches ring 1 or 2.
@@ -592,6 +678,20 @@ pub async fn create_proposal(
         }
     };
 
+    // Checked against the real type before anything is written, and before the
+    // human ever sees it. `ledger::proposal::propose` checks the *pairing* of
+    // kind and payload; this checks that a limit is a limit.
+    if kind == ProposalKind::ChangeLimits {
+        if let Err(why) = check_proposed_limit(&body.payload) {
+            return bad_request(
+                "bad_limit",
+                why,
+                "send the limit the approval would write: metric, family, version, bounds,                  method and the run the baseline came from",
+            )
+            .into_response();
+        }
+    }
+
     // The kill switch is the platform's state, never the request's. A run that
     // could say the switch was clear would say it.
     let pre = ledger::proposal::Preconditions {
@@ -606,6 +706,7 @@ pub async fn create_proposal(
         &body.subject,
         body.subject_id,
         &body.rationale,
+        body.payload.clone(),
         pre,
     ) {
         Ok(p) => p,
@@ -614,6 +715,7 @@ pub async fn create_proposal(
                 ledger::proposal::ProposalError::KillSwitchTripped => "kill_switch_tripped",
                 ledger::proposal::ProposalError::NoDossier => "no_dossier",
                 ledger::proposal::ProposalError::NoTarget => "no_target",
+                ledger::proposal::ProposalError::BadPayload(_) => "bad_payload",
                 _ => "precondition_failed",
             };
             return bad_request(
@@ -628,8 +730,8 @@ pub async fn create_proposal(
     let res = sqlx::query(
         "INSERT INTO agent_lifecycle.proposal
              (proposal_id, run_id, kind, ring, envelope, dossier_ref, subject,
-              subject_id, rationale)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+              subject_id, rationale, payload)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
     )
     .bind(proposal.proposal_id)
     .bind(proposal.run_id)
@@ -640,6 +742,7 @@ pub async fn create_proposal(
     .bind(&proposal.subject)
     .bind(proposal.subject_id)
     .bind(&proposal.rationale)
+    .bind(&proposal.payload)
     .execute(&state.pg)
     .await;
     match res {
