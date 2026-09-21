@@ -285,12 +285,27 @@ cost while they wait.
 |---|---|---|---|
 | H-1 | **Deploy one hand-authored strategy to paper** | The evidence clock. DONE-3 is the only condition with a calendar in it, and this is the day it starts | T-0.4 |
 | H-2 | **A frontier provider credential** | No live agent session has ever run. Two Set S acceptance criteria sit behind it, and Set L phases 3–4 are "built, never run live" for the same reason | S-4.14, Set L §4 |
-| H-3 | Sort the working tree | Set S phase 0 exit | S-0.1 |
+| ~~H-3~~ | ~~Sort the working tree~~ | **Discharged 2026-09-21.** The ~20-file tree the triage describes is gone — every file has been landed in a commit. `git status --short` now shows one file that is not an agent's in-flight work, and it is the one the user has confirmed is theirs. No decision was needed in the end | S-0.1 |
 | H-4 | Decide the capital gate | Stage 6 | ROADMAP §8 |
 
-**H-1 and H-2 are the two that matter.** Everything else on this page is work I
-can do; those two are work only you can do, and both of them gate conditions that
-no amount of building satisfies.
+**H-1 and H-2 are the two that matter**, and H-4 is the third. Everything else on
+this page is work I can do; those are work only you can do, and each gates a
+condition that no amount of building satisfies.
+
+**What is deliberately *not* on this list any more.** On 2026-09-21 the user asked
+for the open engineering questions to be **answered rather than carried**, and all
+26 were — 19 standing in `OPEN-QUESTIONS.md` and 7 raised that day — recorded as
+**ADR-D-01 … ADR-D-26** with the alternative considered and the reasoning. The
+mechanism is the one already used for ADR-P2-24…27 and OQ-05/OQ-08: delegated,
+decided, written down. A question carried is a question somebody re-derives, and
+this programme had accumulated a year's worth of them in six days. The three that
+changed behaviour in a safety direction are ADR-D-11 (a hard-stale feed halts
+rather than scaling, because a quarter-size position priced off a dead feed is the
+same error at 25% of the size), ADR-D-05 (there will be no
+`preregistration_required` boolean — a field whose only purpose is to be set to
+the unsafe value should not exist) and ADR-D-03 (`ask_above_usd` fires on an
+unverified price, and *only* that gate does, because it can pause and cannot
+spend).
 
 ---
 
@@ -300,6 +315,8 @@ Newest first. One line per closing, with the evidence.
 
 | date | what | evidence |
 |---|---|---|
+| 2026-09-21 | **Every open engineering question answered rather than carried — 26 of them, ADR-D-01…D-26.** Three change behaviour in a safety direction; two spec sentences are struck as having **no referent** (“last clause to fail” over a condition whose operands both evaluate; a per-run tool pin the router has no fourth source for); two are **provably wrong rather than ambiguous** — §7.1's cost-drift median cannot fire at any cost ratio, and the validator whitelist refuses the version its own error text recommends, which left the SLv2 authoring path dead at its last step | `OPEN-QUESTIONS.md` has no `Status: open` entries left outside its own template |
+| 2026-09-21 | **Waves seven to ten: the audit that wrote no code, and the tracks that shipped nothing.** A read-only track checked every marker in phase 6 against the running platform and moved it 47% → 36% **in both directions** — five tasks done and marked `PARTIAL`, one marked `DONE` failing its own acceptance by 28 files. A catalogue track shipped **no tools** and found that `/api/evidence/trades` had never returned a trade, because `0026` renamed the table out from under its query and the error was swallowed into a 404. A reconciliation track **refused to wire the sweep** it was asked for: the only broker in the process is the paper engine, so the sweep would compare a value with itself and log “reconciliation OK” for a check that cannot fail | frontend 361 → 416 tests in 45 files; `monitor` 167 → 198; `strategy-lang` 129 → 141; `mcp-server-lib` 197 → 209 |
 | 2026-09-21 | **Waves three to six: sixteen agents, one worktree, no collisions.** The planted-corpus judgement suite (an answer key that is generated and never stored — no `expected.json`, no `Deserialize`, redacted `Debug`); the four continuous-research modules wired; the desk's three orphan server fields given readers; `/api/desk/running` given a caller. **The worst finding was a reconciliation halt that erased itself within five seconds**, because `KillSwitch::replace_halted` replaces the scoped view every refresh; the second worst was `reorder` marking every id `user`, which switches the scorer off for the session on one drag. **A rule removed in one place and left in two** joined built-but-unreached as a named defect shape: the route learned the new drag rule and the client did not, so one drag posted one id and got a 400 | frontend 193 → 361 tests in 39 files; `harness` 722 → 747; eight spec contradictions opened, none implemented either way |
 | 2026-09-21 | **Two waves of parallel tracks, seven agents, one worktree.** Wave one: the strategy language's parser/compiler/decompiler, the stall detector, the digest, the desk's honest-rendering sweep. Wave two: schedule windows, the harvest, the `={null}` audit. **The most dangerous thing found was a kill-switch badge that rendered green *armed* when its endpoint did not answer** — an unknown safety state shown as the safe one, on the control that stops money moving. Also: a flaky test I had shipped (2 failures in 8 runs), a 61-family registry transcription, and four spec contradictions, none implemented either way | frontend 103 → 193 tests; `research-session` 39 → 108; `strategy-lang` 0 → 75 |
 | 2026-09-21 | **Documentation audit: the specs were lying about themselves.** Thirteen specs said `Proposed … not implemented` about code that was serving traffic — AGENT-005…014, COMP-005, COMP-007, DATA-006. All now say what is built and what is not, and **point at the phase file for the count instead of restating one**, because a number written into a spec is a number nobody recomputes. Two phase headlines were stale (phase 6 said 1/24 with 2 done; phase 10 said 5/16 with 6). Set S MASTER's status column was stale for eleven of twelve rows. ROADMAP §2 said Set S was untouched | `the_plan_counts_what_the_plans_say` now fails the build on any of it |

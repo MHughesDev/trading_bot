@@ -1,6 +1,6 @@
 # Phase 0 — Ground rules
 
-**Completion: 17% (1 / 6 tasks). 2 partial, 2 `BLOCKED:HUMAN` on gate H-1, 1 not started.**
+**Completion: 17% (1 / 6 tasks). 3 partial, 1 `BLOCKED:HUMAN` on gate H-1, 1 not started.**
 
 **Requirement IDs:** GR-01…GR-06.
 **Spec:** none directly — this phase makes the other eight executable.
@@ -19,7 +19,22 @@ sections.
 ## Tasks
 
 ### S-0.1 Sort the working tree with the user — S
-`BLOCKED:HUMAN` — roadmap gate **H-1**. Triage below; the decision is the user's.
+`PARTIAL` — **the human gate is discharged as of 2026-09-21; one mechanical clause
+is left.** The triage below describes a tree with ~20 modified files and several
+untracked. That tree is gone: every one of them has been landed in a commit over
+the course of this programme, and `git status --short` now shows exactly one file
+that is not an agent's in-flight work — `docs/specs/README.MD`, which the user has
+explicitly confirmed is theirs and instructed is neither to be added nor removed.
+That is the acceptance's first clause, met, and it needed no decision from them in
+the end.
+
+What is left is the second clause — *"`main` builds and `just test-unit` is green
+at the same commit the tracks branch from"* — which cannot be evidenced while
+parallel tracks are editing the tree, because a workspace run mid-edit describes a
+state that never existed. It is a single clean run at a quiet commit, not a
+decision, so this is `PARTIAL` rather than blocked.
+
+**Superseded marker:** `BLOCKED:HUMAN` — roadmap gate H-1.
 
 ~20 files are modified on `main` and several are untracked. `BS-007/HANDOFF.MD` §6 names
 files an agent must not commit: `Cargo.lock`, `Cargo.toml`, `apps/platform/src/main.rs`,
