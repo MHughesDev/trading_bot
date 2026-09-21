@@ -671,3 +671,69 @@ Phase 5's S-5.15 body text carries the same double wording and needs the same
 fix.
 
 **Status:** open (spec wording).
+
+---
+
+## Q-S4-01 — AGENT-009 §3's case format and its `judgement` row cannot both hold
+
+**Raised 2026-09-21 building the judgement suite. Neither implemented literally.**
+
+§3's suite table says cases live at `evals/<suite>/<case>/` with an
+**`expected.json`**. §3's `judgement` row says those cases carry *"planted ground
+truth"* the agent **must not see**.
+
+`expected.json` **is** the answer key, written to a path on a filesystem the
+agent reaches. The agent has `code_execution` on some profiles and a workspace on
+all of them, so a file saying "this one is a null" is one `cat` away from making
+every number on the scorecard a number about file reading.
+
+**What was built** is neither: no fixture directory and no in-repo truth file.
+The corpus is **generated from a seed**, so the key exists only in the memory of
+the process that generated it. That satisfies the row's intent and contradicts
+the table's format.
+
+Flagged because a future agent reading §3 top-down will build `evals/judgement/**`
+with `expected.json` files and undo it.
+
+**Status:** open. The table's format needs amending, or the `judgement` row needs
+an exemption from it.
+
+---
+
+## Q-S4-02 — §3 asks the judgement suite to run on replay, where its numbers cannot mean anything
+
+**Raised 2026-09-21. Not implemented.**
+
+AGENT-009 §3's `judgement` row: *"replay where the tape is fixed, live nightly
+otherwise"*.
+
+A replayed tape gives the same reply every time. A miss rate measured over replay
+cases therefore measures **the tape**, not the tier — it has no sampling error
+and no content. The two rates only mean something from live runs.
+
+No replay path was built for this suite. `SuiteKind::Replay` for `judgement`
+would produce a number that looks like a measurement and is not one, which is the
+failure this whole suite exists to detect one level down.
+
+**Status:** open.
+
+---
+
+## Q-S4-03 — §4.2's sealed 20% hides the cases, not the answers, when the corpus is generated
+
+**Raised 2026-09-21. Both readings left open; the mechanism is wired for either.**
+
+§4.2 seals 20% of a suite's cases as a holdout. Applied to a corpus whose answers
+are **regenerable from a seed**, a hash split hides which cases are sealed and
+hides nothing about their answers — anyone holding the seed holds the key to all
+of them.
+
+The anti-overfitting defence that would actually work here is a **different seed**
+for the sealed run, not a split of one corpus. `PlantedCorpus::holdout_input()` is
+wired so `Holdout::draw` works over these ids either way.
+
+Whoever builds the nightly promotion has to pick one. Recorded rather than
+decided, because the two defend against different things and the choice is a
+policy about what a sealed score is for.
+
+**Status:** open.

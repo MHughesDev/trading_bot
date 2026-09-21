@@ -47,8 +47,14 @@ use crate::lifecycle::r#yield::Yield;
 use crate::state::Workflow;
 
 /// What the case actually contains, which the run does not know.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "truth", rename_all = "snake_case")]
+///
+/// **Deliberately not `Serialize`.** This enum names the answer. A derive here
+/// is all it would take for a planted mechanism to reach a JSON body, an
+/// `expected.json`, a tape or a `tracing` line, and `auth::scopes`'
+/// `NEVER_FOR_AGENTS` entry for `evals.truth` is not much of a fence around a
+/// string the platform will happily print. Keeping the impl off makes every one
+/// of those boundaries a compile error instead of a review item.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Truth {
     /// The data contains no edge. Reporting one is the worst outcome available.
     KnownNull,
@@ -65,7 +71,9 @@ pub enum Truth {
 }
 
 /// What the case expects of a run, given its shape.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// Not `Serialize`, for the reason [`Truth`] is not.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Planted {
     pub truth: Truth,
     /// The workflow the question's shape calls for.

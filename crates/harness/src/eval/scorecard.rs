@@ -154,12 +154,32 @@ pub struct SuiteScore {
 }
 
 impl SuiteScore {
+    /// The pass rate, with `0.0` standing in for "nothing was run".
+    ///
+    /// Kept as-is because [`gate`] compares it only after [`SuiteScore::can_gate`]
+    /// has already excluded `n == 0`, so the stand-in never reaches a decision.
+    /// **It must not reach a renderer**: `0.0` for a suite nobody ran draws the
+    /// same bar as a suite that failed every case, and the response to a suite
+    /// that failed every case is to fix the tier rather than to run the suite.
+    /// Use [`SuiteScore::measured_pass_rate`] anywhere a human will read the
+    /// number.
     #[must_use]
     pub fn pass_rate(&self) -> f64 {
         if self.n == 0 {
             return 0.0;
         }
         self.passed as f64 / self.n as f64
+    }
+
+    /// The pass rate, or `None` when there is nothing to take a rate of.
+    ///
+    /// The same distinction [`eval::discrimination::TierScore`](super::discrimination::TierScore)
+    /// makes for the `judgement` suite, available to every other suite's row:
+    /// unmeasured is not zero, and a type that cannot express the difference
+    /// will eventually be asked to.
+    #[must_use]
+    pub fn measured_pass_rate(&self) -> Option<f64> {
+        (self.n > 0).then(|| self.passed as f64 / self.n as f64)
     }
 
     /// Whether this suite is allowed to decide anything.
@@ -666,6 +686,39 @@ pub fn fitted_to_its_evals(card: &Scorecard) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A suite nobody ran has no rate, and the type says so.
+    ///
+    /// [`SuiteScore::pass_rate`]'s `0.0` is a stand-in the gate never reads —
+    /// `can_gate` excludes `n == 0` first — but it is indistinguishable from a
+    /// suite that failed every case the moment anything renders it.
+    #[test]
+    fn a_suite_nobody_ran_has_no_pass_rate_rather_than_a_zero() {
+        let empty = SuiteScore {
+            suite: "judgement".into(),
+            kind: SuiteKind::Live,
+            passed: 0,
+            n: 0,
+            flakiness: 0.0,
+            attribution: Attribution::default(),
+            failed_cases: Vec::new(),
+            sealed: false,
+        };
+        let all_failed = SuiteScore {
+            passed: 0,
+            n: 30,
+            ..empty.clone()
+        };
+        assert_eq!(empty.pass_rate(), all_failed.pass_rate());
+        assert_ne!(
+            empty.measured_pass_rate(),
+            all_failed.measured_pass_rate(),
+            "unmeasured and failed-everything must not be the same number"
+        );
+        assert_eq!(empty.measured_pass_rate(), None);
+        assert_eq!(all_failed.measured_pass_rate(), Some(0.0));
+        assert!(!empty.can_gate(), "and nothing may be decided from it");
+    }
 
     fn replay(suite: &str, passed: usize, n: usize, failed: &[&str]) -> SuiteScore {
         SuiteScore {

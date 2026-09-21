@@ -33,6 +33,31 @@
 //! spec that demands a deflated Sharpe ratio of a strategy gating *itself* on a
 //! number with no interval.
 //!
+//! # The `judgement` suite measures something none of the others can
+//!
+//! Every suite above scores whether the harness *behaved*. None of them can tell
+//! a run that found a real effect from a run that reported noise, because there
+//! is nothing to compare an answer against: "no edge" and "an edge" both look
+//! like a run that reported something. A tier that completes every workflow and
+//! cannot tell those apart is a tier that will confidently report noise.
+//!
+//! [`planted`] generates data whose answer is **known and verified** — an edge of
+//! a declared size, or a null — from a seed, so a score is reproducible and a
+//! regression is attributable. [`discrimination`] scores a tier on it, and
+//! reports **two rates that are never combined**: how often it missed a planted
+//! edge, and how often it called a planted null real. A single accuracy over a
+//! mixed corpus can be gamed by answering the same thing every time, and would
+//! be. A tier the suite has not been run on reports
+//! [`discrimination::TierScore::Unmeasured`], which has no numeric form at all —
+//! `0.0` for a tier nobody measured reads as "measured, and bad".
+//!
+//! **The answer key never leaves the scoring process.** It is generated rather
+//! than stored, [`planted::AnswerKey`] implements no `Serialize`, its fields are
+//! private, its `Debug` is redacted, and the only operation it offers is scoring
+//! a run. `auth::scopes::NEVER_FOR_AGENTS` lists `evals.truth` because an agent
+//! that can read the planted mechanism does not have to find it, and every
+//! number on the scorecard stops meaning what it says.
+//!
 //! # This is not a second eval harness
 //!
 //! `evals/runner/run.py` and `evals/tests` exist and gate CI. This module holds
@@ -42,12 +67,20 @@
 //! the split is by *what needs the loop*, not by language preference.
 
 pub mod cases;
+pub mod discrimination;
 pub mod holdout;
 pub mod judgement;
+pub mod planted;
 pub mod scorecard;
 pub mod tape;
 
+pub use discrimination::{
+    done_4, score_tier, Called, Discrimination, Done4, Measurement, NotMeasured, Threshold,
+    TierScore,
+};
 pub use holdout::{Holdout, HoldoutDraw};
+pub use judgement::{Criterion, Judgement, Observed, Planted, Score, Truth};
+pub use planted::{CaseBrief, PlantedCase, PlantedCorpus};
 pub use scorecard::{
     gate, Attribution, GateVerdict, Rung, Scorecard, SuiteKind, SuiteScore, SuiteVerdict,
 };

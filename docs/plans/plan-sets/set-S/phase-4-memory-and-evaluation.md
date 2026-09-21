@@ -12,6 +12,62 @@
 >
 > The other half of the remainder is the evaluation side (S-4.8 onward), which depends on phase 2's `agent_events` for real trajectories.
 
+> **The judgement suite: the planted corpus is built, 2026-09-21, and it found this
+> file wrong a second time.**
+>
+> This file says the evaluation half "waits on phase 2's `agent_events` for real
+> trajectories". `crates/harness/src/eval/judgement.rs` — the scoring for all six
+> criteria, with tests — **has been in the tree since S-10.16**, recorded in
+> `phase-10-lifecycle.md`. The evaluation work is split across two phase files and
+> neither cross-references the other, so each reads as though the other half does
+> not exist.
+>
+> New: `eval/planted.rs` (a seeded generator, the answer key, a reference
+> detector) and `eval/discrimination.rs` (the two rates, `TierScore`, a declared
+> `Threshold`, `done_4`). **722 → 747 tests.**
+>
+> **Three rules are types rather than conventions.** `Discrimination` reports
+> `miss_rate()` and `false_positive_rate()` and **has no method that combines
+> them** — no accuracy, no F-score — because a single number over a mixed set is
+> gamed by a constant answer, and `a_constant_answer_fails_whichever_constant_it_is`
+> proves both constants fail. `TierScore` is `Unmeasured(NotMeasured)` or
+> `Measured(Measurement)`, and `Measurement` is reachable only through the second
+> variant, so **rendering an unmeasured tier as a number is a compile error**.
+> `Threshold`'s only constructor is a *private* `const fn` and it derives
+> `Serialize` but **not** `Deserialize`, so a bar cannot be built from a
+> measurement or reconstituted from data — a suite that sets its bar from the
+> scores it is judging never fails anybody.
+>
+> **The answer key is generated and never stored.** No `expected.json`, no table,
+> no fixture; no `Serialize`/`Deserialize` on `AnswerKey`, `PlantKind` or
+> `judgement::Truth`, so every JSON body, tool result and tape is a compile error
+> rather than a review item; `Debug` is redacted, because `{:?}` in a `tracing`
+> line is the ordinary route from a private field to a public string. The
+> agent-visible surface is **tested**, and the test proves its search tokens are
+> real discriminators by asserting they appear in the key's own rendering — a
+> search for a string that appears nowhere passes trivially.
+>
+> **The residual exposure, stated rather than hidden:** the seed reconstructs the
+> corpus, key included. Keeping it out of the runner's environment is a deployment
+> property this crate cannot enforce.
+>
+> **Every tier is honestly `Unmeasured(NeverRun)` today**, and that is DONE-4's
+> second clause being satisfied rather than evaded: generating ≥30 verified cases
+> per tier is done, *running* them needs a recorded trajectory through the planted
+> data, which needs the live-run credential (S-4.14, gate H-2).
+>
+> One criterion is **refused by name**: "a dead idea already in memory is refused
+> at intake" has its answer in the semantic memory store, not in data, so no case
+> was planted whose answer could not be verified. And the workflow-shape,
+> chain-stopping, falsifier-evaluability and yield criteria are properties of the
+> *run* rather than of the data — asserted against a label, not measured against a
+> planted mechanism, and the module header says so.
+>
+> Three spec contradictions found, none implemented: Q-S4-01 (§3's `expected.json`
+> format is the answer key on a filesystem the agent reaches), Q-S4-02 (a miss rate
+> over a replayed tape measures the tape), Q-S4-03 (§4.2's sealed 20% hides the
+> cases and not the answers when the corpus is generated).
+
 > **This file was wrong, and the correction matters more than any single task in it.** Until
 > 2026-09-16 it recorded all seventeen tasks as `NOT STARTED`. S-4.2 was picked up to be
 > built and was found already implemented, with its adversarial acceptance test passing under
