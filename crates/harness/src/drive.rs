@@ -674,7 +674,12 @@ pub enum Degradation {
 }
 
 /// How the task ended.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// `PartialEq` and **not** `Eq`: [`Outcome::Offered`] carries an estimated cost
+/// in dollars, and a float has no total equality. Dropping `Eq` rather than
+/// storing cents, because the desk reads `est_usd` as a number of dollars and a
+/// unit that differs between the wire and the type is a unit that gets
+/// multiplied by a hundred somewhere.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum Outcome {
     Finished {
@@ -723,7 +728,50 @@ pub enum Outcome {
         /// waited for rather than only that something is.
         tool: String,
     },
+    /// A Chat turn was asked something that needs a Research run, and offered
+    /// one (AGENT-013 §2.2; S-10.2).
+    ///
+    /// **Not `Refused`.** The two would render as the same card and mean
+    /// opposite things: a refusal is the platform declining, and this is the
+    /// platform saying it can answer and asking whether to spend. The desk turns
+    /// one into an apology and the other into a button.
+    ///
+    /// The turn spends nothing getting here — the classification is a function
+    /// of the goal text and happens before the first model call.
+    Offered(ResearchOffer),
     Cancelled,
+}
+
+/// What a Chat turn offers instead of answering a question it cannot answer
+/// (AGENT-013 §2.2; Set S task S-10.2).
+///
+/// # Why an offer and not a refusal
+///
+/// A Chat turn forces [`GoalKind::Lookup`] and is refused at the trial gate, so
+/// a question that needs evidence produced gets a "no" and nothing else. That is
+/// correct and useless: the person asked a real question, and the platform can
+/// answer it — in a Research run, which costs money and trials and is therefore
+/// theirs to start rather than the platform's to start for them.
+///
+/// So the turn ends with what a Research run *would* do, and one action.
+///
+/// # What it does not carry
+///
+/// No estimate the harness cannot make. `est_trials` and `est_usd` are the
+/// caller's, from `estimate_cost`, and are `None` when nobody asked — the desk
+/// renders "trial count not estimated" rather than a zero, because a zero is a
+/// claim that the run is free.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ResearchOffer {
+    /// The question, as it was asked.
+    pub question: String,
+    /// What the classifier made of it — the reason this is being offered.
+    pub kind: GoalKind,
+    /// The stage skeleton a Research run would follow.
+    pub workflow: crate::state::Workflow,
+    /// What it would cost, when the caller estimated it.
+    pub est_trials: Option<u32>,
+    pub est_usd: Option<f64>,
 }
 
 /// One step of a harness-owned plan.
@@ -990,6 +1038,9 @@ pub struct Loop {
     /// it is called from inside the assembler's argument list, and threading one
     /// through would put a side effect in the middle of an expression.
     last_selection: Option<Note>,
+    /// Set when a Chat turn was asked a question a Research run answers
+    /// (S-10.2). Consumed at admission.
+    offer: Option<ResearchOffer>,
     /// The run's body-token account (§20; S-9.7).
     ///
     /// A step about to spend a trial and a step listing instruments get
@@ -1062,6 +1113,30 @@ impl Loop {
                 RunMode::Research,
             ),
         };
+        // What the goal text says, even when the demand has pinned `Lookup`
+        // (S-10.2).
+        //
+        // The classification is computed for a Chat turn too and not thrown
+        // away. A Chat turn asked "does the funding leg survive costs" is
+        // pinned to a lookup that cannot answer it, and until now the only thing
+        // that happened next was a refusal at the trial gate — after the run had
+        // spent steps discovering it. Classifying up front costs nothing: it is
+        // a function of the goal text and runs before the first model call.
+        let offer = if working.mode == RunMode::Chat {
+            GoalKind::classify(&task.goal, &[])
+                .workflow()
+                .map(|workflow| ResearchOffer {
+                    question: task.goal.clone(),
+                    kind: GoalKind::classify(&task.goal, &[]),
+                    workflow,
+                    // The harness does not estimate cost; `estimate_cost` does,
+                    // and the caller is the one that can call it.
+                    est_trials: None,
+                    est_usd: None,
+                })
+        } else {
+            None
+        };
         // The ring the run starts in (AGENT-013 §4; S-10.1).
         //
         // **A Chat turn is ring 0 and cannot be widened.** That is the property
@@ -1090,6 +1165,7 @@ impl Loop {
             ..BudgetView::default()
         };
         Self {
+            offer,
             profile,
             registry,
             task,
@@ -1761,6 +1837,13 @@ impl Loop {
     fn on_admission(&mut self, a: Admission, fx: &mut Vec<Effect>) {
         match a {
             Admission::Admit => {
+                // Before the first model call and before a single step. A Chat
+                // turn that worked for four steps and *then* offered would have
+                // spent four steps not answering the question.
+                if let Some(offer) = self.offer.take() {
+                    self.finish_into(Outcome::Offered(offer), State::Refused, fx);
+                    return;
+                }
                 if self.profile.orchestration.mode == Mode::PlannerExecutor {
                     self.enter(State::Planning, fx);
                     let schema = self.plan_schema();
@@ -4210,6 +4293,131 @@ pub fn renders_flat(p: &Profile) -> bool {
 
 #[cfg(test)]
 mod tests {
+    // ── S-10.2: the Research offer ──────────────────────────────────────────
+    //
+    // A Chat turn forces `GoalKind::Lookup` and is refused at the trial gate, so
+    // a question that needs evidence produced got a "no" and nothing else —
+    // after spending steps discovering it. The classification was already being
+    // computed for a Research run and thrown away for a Chat one.
+
+    /// A Chat turn asked a question that needs evidence produced ends with the
+    /// offer, **before the first model call**.
+    ///
+    /// Before this, the turn was pinned to a lookup, exposed read tools, worked
+    /// for several steps, reached for something that spends a trial and was
+    /// refused at the gate. Every one of those steps was spent not answering the
+    /// question.
+    #[test]
+    fn a_chat_turn_asked_a_research_question_is_offered_a_research_run() {
+        let mut task = task();
+        task.demand = TaskDemand::SingleLookup;
+        // The classifier's own `Research` example.
+        task.goal = "find whether BTC-USD has momentum at 1h".into();
+        let mut l = Loop::new(local(), registry(), task);
+        let fx = l.next(Input::Admission(Admission::Admit));
+
+        let outcome = done(&fx).expect("the turn ends at admission");
+        let Outcome::Offered(offer) = outcome else {
+            panic!("expected an offer, got {outcome:?}");
+        };
+        assert_eq!(offer.kind, GoalKind::Research);
+        assert_eq!(offer.workflow, crate::state::Workflow::Investigate);
+        assert!(offer.question.contains("momentum"));
+        // Nothing was asked of a model on the way here.
+        assert!(
+            !fx.iter().any(|e| matches!(e, Effect::CallModel(_))),
+            "the offer cost a model call: {fx:?}"
+        );
+    }
+
+    /// And a Chat turn asked an actual lookup is not offered anything.
+    ///
+    /// The complement matters as much as the rule: an offer on every Chat turn
+    /// would be a platform that refuses to answer questions it can answer.
+    #[test]
+    fn a_chat_turn_asked_a_lookup_is_not_offered_a_research_run() {
+        let mut task = task();
+        task.demand = TaskDemand::SingleLookup;
+        task.goal = "find whether we hold 1m bars for BTC-USD".into();
+        let mut l = Loop::new(local(), registry(), task);
+        let fx = l.next(Input::Admission(Admission::Admit));
+        assert!(
+            !matches!(done(&fx), Some(Outcome::Offered(_))),
+            "a lookup was offered a research run"
+        );
+    }
+
+    /// A Research run is never offered one — it *is* one.
+    #[test]
+    fn a_research_run_is_not_offered_a_research_run() {
+        let mut l = Loop::new(local(), registry(), task());
+        let fx = l.next(Input::Admission(Admission::Admit));
+        assert!(!matches!(done(&fx), Some(Outcome::Offered(_))));
+        assert_eq!(l.working().mode, RunMode::Research);
+    }
+
+    /// The three kinds that need evidence produced each map to the workflow a
+    /// Research run would follow, and a lookup maps to none.
+    ///
+    /// `None` rather than a default: handing a lookup `Investigate` would make
+    /// the offer card describe work nobody asked for.
+    #[test]
+    fn only_a_question_that_needs_evidence_has_a_workflow() {
+        use crate::state::Workflow;
+        assert_eq!(GoalKind::Lookup.workflow(), None);
+        assert_eq!(GoalKind::Research.workflow(), Some(Workflow::Investigate));
+        assert_eq!(GoalKind::Diagnose.workflow(), Some(Workflow::Diagnose));
+        assert_eq!(GoalKind::Compare.workflow(), Some(Workflow::Compare));
+    }
+
+    /// `Research` offers `Investigate` and not `Survey`.
+    ///
+    /// A survey takes no trials and answers "what is out there". A question the
+    /// classifier called `Research` needs evidence produced, and offering the
+    /// cheap neighbour would be offering not to answer it.
+    #[test]
+    fn a_research_question_is_not_offered_the_free_workflow() {
+        use crate::state::Workflow;
+        assert_ne!(GoalKind::Research.workflow(), Some(Workflow::Survey));
+    }
+
+    /// An offer is not a refusal, and the type keeps them apart.
+    ///
+    /// They would render as the same card and mean opposite things: one is the
+    /// platform declining, the other is the platform saying it can answer and
+    /// asking whether to spend.
+    #[test]
+    fn an_offer_is_not_a_refusal() {
+        let offer = Outcome::Offered(ResearchOffer {
+            question: "does the funding leg survive costs".into(),
+            kind: GoalKind::Research,
+            workflow: crate::state::Workflow::Investigate,
+            est_trials: None,
+            est_usd: None,
+        });
+        assert!(!matches!(offer, Outcome::Refused { .. }));
+        let tag = serde_json::to_value(&offer).expect("serialises");
+        assert_eq!(tag["outcome"], "offered");
+    }
+
+    /// The estimate is absent rather than zero when nobody made one.
+    ///
+    /// A zero is a claim that the run is free, which is the one number a person
+    /// deciding whether to spend must not be given by accident.
+    #[test]
+    fn an_unestimated_offer_says_nothing_rather_than_zero() {
+        let offer = ResearchOffer {
+            question: "q".into(),
+            kind: GoalKind::Compare,
+            workflow: crate::state::Workflow::Compare,
+            est_trials: None,
+            est_usd: None,
+        };
+        let v = serde_json::to_value(&offer).expect("serialises");
+        assert!(v["est_trials"].is_null());
+        assert!(v["est_usd"].is_null());
+    }
+
     // ── S-9.19: the clause reaches the timeline ──────────────────────────────
     //
     // The mechanism was built end to end except the last hop: selection wrote a
@@ -4635,6 +4843,12 @@ mod tests {
     fn a_chat_turn_cannot_see_a_tool_that_writes() {
         let mut task = task();
         task.demand = TaskDemand::SingleLookup;
+        // A goal that is genuinely a lookup, so this turn *proceeds* and the
+        // thing under test is the ring filter. The shared fixture's goal is the
+        // classifier's own `Research` example, and since S-10.2 a Chat turn
+        // asked one of those ends at admission with an offer — which is correct
+        // and is a different test.
+        task.goal = "find whether we hold 1m bars for BTC-USD".into();
         task.namespaces = vec!["data".into(), "strategy".into(), "portfolio".into()];
         let mut l = Loop::new(local(), ringed_registry(), task)
             .with_paper_tools(["arm_automation"]);
@@ -4663,6 +4877,8 @@ mod tests {
     fn search_cannot_surface_a_tool_beyond_the_ring() {
         let mut task = task();
         task.demand = TaskDemand::SingleLookup;
+        // A lookup, so the turn proceeds; see the test above.
+        task.goal = "find whether we hold 1m bars for BTC-USD".into();
         task.namespaces = vec!["data".into()];
         let mut l = Loop::new(local(), ringed_registry(), task)
             .with_paper_tools(["arm_automation"]);

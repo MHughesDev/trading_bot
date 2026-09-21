@@ -587,6 +587,11 @@ fn outcome_tag(o: &Outcome) -> String {
         Outcome::Escalated { .. } => "escalated",
         Outcome::Fenced(_) => "fenced",
         Outcome::Suspended { .. } => "suspended",
+        // Its own tag, not "refused": a refusal is the platform declining and an
+        // offer is the platform saying it can answer and asking whether to
+        // spend. A suite that counted them together would read a working door
+        // as a failure rate.
+        Outcome::Offered(_) => "offered",
         Outcome::Cancelled => "cancelled",
     }
     .to_string()

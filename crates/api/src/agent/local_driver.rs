@@ -187,6 +187,11 @@ fn outcome_word(o: &Outcome) -> &'static str {
         Outcome::Escalated { .. } => "escalated",
         Outcome::Fenced(_) => "fenced",
         Outcome::Suspended { .. } => "suspended",
+        // Its own word, for the same reason `escalated` is not folded into
+        // `refused`: one is the run declining and the other is the run asking
+        // whether to spend. A rate that counted offers as refusals would read a
+        // working door as a failure.
+        Outcome::Offered(_) => "offered",
         Outcome::Cancelled => "cancelled",
     }
 }
@@ -714,6 +719,7 @@ impl Recorder {
             Outcome::Escalated { .. } => "escalated",
             Outcome::Fenced(_) => "fenced",
             Outcome::Suspended { .. } => "suspended",
+            Outcome::Offered(_) => "offered",
             Outcome::Cancelled => "cancelled",
         };
 
@@ -780,6 +786,26 @@ impl Recorder {
             self.compile_dossier(result, evidence).await;
         }
 
+        // The card that had no producer (S-10.2). `ResearchOffer` is the offer
+        // and this is the event the desk turns into it: `Cards.tsx` has rendered
+        // an `offer` card with a *Start* action since S-10.15, and nothing on
+        // this platform had ever emitted one.
+        if let Outcome::Offered(offer) = outcome {
+            self.append(
+                "offer",
+                json!({
+                    "question": offer.question,
+                    "workflow": offer.workflow.as_str(),
+                    "kind": offer.kind,
+                    // Absent rather than zero. The desk prints "trial count not
+                    // estimated", because a zero is a claim that the run is free.
+                    "est_trials": offer.est_trials,
+                    "est_usd": offer.est_usd,
+                }),
+            )
+            .await;
+        }
+
         let (status, summary, error) = match outcome {
             Outcome::Finished { result, evidence } => (
                 "completed",
@@ -803,6 +829,18 @@ impl Recorder {
                 None,
             ),
             Outcome::Cancelled => ("cancelled", None, None),
+            // Not an error and not a refusal. The turn ended because the
+            // question needs a Research run, and the summary says what would be
+            // run rather than what was not.
+            Outcome::Offered(offer) => (
+                "offered",
+                Some(format!(
+                    "this needs a research run ({}): {}",
+                    offer.workflow.as_str(),
+                    offer.question
+                )),
+                None,
+            ),
         };
         let json = serde_json::to_value(outcome).unwrap_or_else(|_| json!({}));
         // Trials are counted at dispatch, in the effect loop; the yield reads

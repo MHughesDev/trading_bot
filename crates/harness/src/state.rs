@@ -179,6 +179,31 @@ pub enum Mode {
     Research,
 }
 
+impl GoalKind {
+    /// The workflow a Research run would follow for this kind of question
+    /// (AGENT-013 §3).
+    ///
+    /// Only meaningful for the three kinds that need evidence produced.
+    /// `Lookup` returns `None` rather than a default: a lookup does not need a
+    /// Research run, and handing it `Investigate` would make the offer card
+    /// describe work nobody asked for.
+    ///
+    /// `Research` maps to `Investigate` rather than to `Survey`, which is the
+    /// cheaper neighbour: a survey takes no trials and answers "what is out
+    /// there", and a question the classifier called `Research` is one that needs
+    /// evidence produced. Offering the cheap one would be offering to not answer
+    /// it.
+    #[must_use]
+    pub fn workflow(self) -> Option<Workflow> {
+        match self {
+            GoalKind::Lookup => None,
+            GoalKind::Research => Some(Workflow::Investigate),
+            GoalKind::Diagnose => Some(Workflow::Diagnose),
+            GoalKind::Compare => Some(Workflow::Compare),
+        }
+    }
+}
+
 /// What shape of work this run is doing (AGENT-013 §3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

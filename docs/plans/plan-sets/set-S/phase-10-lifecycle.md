@@ -108,7 +108,7 @@ carry mode, workflow, ring, stage; conformance reads every new field.
 **Traces:** AGENT-013 §2.1, §4, §5; §13.1. ADR-0037 §6.
 
 ### S-10.2 Chat: `Lookup` forced, no ticket, and the Research offer — M
-`PARTIAL` 2026-09-16 — **the refusal is built; the offer is not.**
+`PARTIAL` 2026-09-21 - **the refusal and the offer are built; the preference that skips it is not, and the front door still runs as `research`.**
 
 Done: `CallGate::for_chat_turn` refuses every trial-spending tool at the door,
 before the registrar, so no row is written and no budget is consumed; the code is
@@ -132,6 +132,55 @@ question as understood, the workflow, estimated cost and trials, the pre-registr
 seal, one *Start* action). The ticket path (`crates/ledger`) refuses any ticket request whose
 run has `mode = chat` — belt and braces with S-10.1, because exposure is a routing property and
 the ledger is a ledger property. A `user_preference` "always start" per scope skips the offer.
+
+**The offer landed 2026-09-21.** `Outcome::Offered(ResearchOffer)` - its own
+variant, not a `Refused`, because the two would render as the same card and mean
+opposite things: a refusal is the platform declining, and this is the platform
+saying it can answer and asking whether to spend. The desk turns one into an
+apology and the other into a button.
+
+**The card had no producer.** `Cards.tsx` has rendered an `offer` card with a
+*Start* action since S-10.15, `events.ts` has mapped the kind, and
+`Conversation.tsx` has wired `onStartResearch` to open a Research run with the same
+question - and nothing on this platform had ever emitted one. The producer is the
+missing piece, and it is small: the classification was already being computed for a
+Research run and *thrown away* for a Chat one.
+
+**It fires at admission, before the first model call.** The turn spends nothing
+getting there - `GoalKind::classify` is a function of the goal text. Before this, a
+Chat turn asked a research question was pinned to a lookup, exposed read tools,
+worked for several steps, reached for something that spends a trial and was refused
+at the gate; every one of those steps was spent not answering the question.
+
+**`GoalKind::workflow()` returns `Option`**, and `Lookup` gets `None` rather than a
+default - handing a lookup `Investigate` would make the offer card describe work
+nobody asked for. `Research` maps to `Investigate` and not to `Survey`, the cheaper
+neighbour: a survey takes no trials and answers "what is out there", so offering it
+for a question that needs evidence produced would be offering not to answer it.
+
+**The estimate is absent rather than zero.** `est_trials` and `est_usd` are the
+caller's, from `estimate_cost`, and the desk prints "trial count not estimated" - a
+zero is a claim that the run is free, which is the one number a person deciding
+whether to spend must not be handed by accident.
+
+**Two existing tests changed fixture, not contract.** `a_chat_turn_cannot_see_a_tool_that_writes`
+and `search_cannot_surface_a_tool_beyond_the_ring` test the *ring filter*, and both
+used the shared fixture's goal - which is the classifier's own `Research` example. A
+Chat turn asked one of those now ends at admission, so they would have been testing
+the offer by accident. Both now use the classifier's own `Lookup` example and test
+what they are named for.
+
+**Still not done:** the `user_preference` "always start" that skips the offer, which
+needs the memory read in the driver and a Research run started in place of the turn;
+and flipping the conversation front door from `research` to `chat`, which is the one
+constant this task was waiting on and is a product decision rather than a refactor.
+
+**Evidence:** `harness::drive::tests::{a_chat_turn_asked_a_research_question_is_offered_a_research_run,
+a_chat_turn_asked_a_lookup_is_not_offered_a_research_run,
+a_research_run_is_not_offered_a_research_run,
+only_a_question_that_needs_evidence_has_a_workflow,
+a_research_question_is_not_offered_the_free_workflow, an_offer_is_not_a_refusal,
+an_unestimated_offer_says_nothing_rather_than_zero}`.
 
 **Files:** `crates/harness/src/drive.rs`, `crates/ledger/src/ticket.rs`,
 `crates/api/src/agent/manager.rs`, `frontend/src/components/desk/cards/ResearchOffer.tsx`.
