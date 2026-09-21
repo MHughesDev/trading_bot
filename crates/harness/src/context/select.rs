@@ -644,7 +644,7 @@ fn percentile_rank(raw: &[Signals]) -> Vec<Signals> {
     let mut out = vec![Signals::default(); raw.len()];
     let n = raw.len() as f32;
     for (get, set) in getters.iter().zip(setters.iter()) {
-        let values: Vec<f32> = raw.iter().map(|s| get(s)).collect();
+        let values: Vec<f32> = raw.iter().map(get).collect();
         for (i, v) in values.iter().enumerate() {
             // Fraction of the set this value is at least as large as. A signal
             // every record shares ranks 1.0 for all of them, which is correct:

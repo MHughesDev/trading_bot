@@ -1086,7 +1086,7 @@ impl Loop {
     pub fn new(profile: Profile, registry: ToolRegistry, task: Task) -> Self {
         let retries = RetryBudget::new(profile.output.max_retries_per_call);
         let profile_input_budget = profile.input_budget_tokens();
-        let profile_max_steps = u32::try_from(profile.orchestration.max_steps).unwrap_or(u32::MAX);
+        let profile_max_steps = profile.orchestration.max_steps;
         // The state is built from what the loop actually knows at construction, not
         // left at its defaults: a card that says `lookup` on a multi-step research
         // task is a card telling the model something false. `demand` is the only
@@ -1159,9 +1159,21 @@ impl Loop {
         // Derived, never asked for: the model is a poor judge of when it is
         // finished, and a criterion it wrote is one it can rewrite.
         working.acceptance = working.kind.acceptance_for(&task.goal);
+        // Two caps exist and one of them was not on the wire. `max_steps` is the
+        // step ceiling the loop enforces; `budgets.max_tokens_per_task` is a real
+        // token ceiling that the desk was left to guess at, and it guessed the
+        // remainder — see [`BudgetView`].
+        //
+        // A declared `0` is not a ceiling of zero, it is a profile that did not
+        // set one, so it travels as absent. The other two axes (dollars, trials)
+        // have no cap to send and say so by staying `None`: the dollar cap is
+        // refused until ADR-D-03's price table exists, and no trials cap exists in
+        // `profile::Budgets` at all.
         working.budget = BudgetView {
             steps_remaining: profile.orchestration.max_steps,
             steps_total: profile.orchestration.max_steps,
+            tokens_cap: (profile.budgets.max_tokens_per_task > 0)
+                .then_some(profile.budgets.max_tokens_per_task),
             ..BudgetView::default()
         };
         Self {
@@ -1272,12 +1284,6 @@ impl Loop {
         &self.exposed
     }
 
-    /// The working state, as the model reads it (AGENT-008 §2).
-    ///
-    /// Exposed so a driver can persist a `state_snapshot` at each step boundary and
-    /// so an escalation can carry it — not so anything outside can mutate it. There
-    /// is exactly one of these per run and the loop owns it.
-    #[must_use]
     /// Attach the memory brief this run starts with.
     ///
     /// A builder rather than a `new` parameter so every existing call site and
@@ -1418,6 +1424,12 @@ impl Loop {
         &self.summary_findings
     }
 
+    /// The working state, as the model reads it (AGENT-008 §2).
+    ///
+    /// Exposed so a driver can persist a `state_snapshot` at each step boundary and
+    /// so an escalation can carry it — not so anything outside can mutate it. There
+    /// is exactly one of these per run and the loop owns it.
+    #[must_use]
     pub fn working(&self) -> &WorkingState {
         &self.working
     }
@@ -1620,17 +1632,13 @@ impl Loop {
         (left as usize).saturating_mul(4)
     }
 
-    /// Record something a tool actually returned.
+    /// Record something a tool actually returned, saying what kind of record it
+    /// is and what it is about.
     ///
     /// The counterpart to rewriting state: an observation is evidence, it is kept in
     /// order, and it is droppable. Anything the harness merely *decided* belongs in
     /// [`Self::working`] instead, where it replaces the previous decision rather
     /// than sitting beside it.
-    fn observe(&mut self, tagged: Tagged, priority: u8, reference: Option<String>) {
-        self.observe_as(tagged, priority, reference, RecordKind::Note, Subject::default());
-    }
-
-    /// [`Self::observe`], saying what kind of record it is and what it is about.
     ///
     /// The kind is passed rather than inferred from the `Tagged`, because
     /// inferring it would mean reading the source string — and a tool named
@@ -3464,15 +3472,20 @@ impl Loop {
 
         let b = &self.working.budget;
         lines.push(format!(
-            "budget: {}/{} steps left, {} trials spent{}. Tokens and dollars are NOT tracked \
-             by this run — the fields exist and nothing writes them (OQ-16), so treat them as \
-             unknown rather than as remaining.",
+            "budget: {}/{} steps left, {} trials spent{}. Token cap {}, tokens spent NOT \
+             counted by this run. Dollars have neither a cap nor a count — there is no price \
+             table on this platform (OQ-16). Trials have no cap here either. Treat every \
+             uncounted axis as unknown, not as zero and not as remaining.",
             b.steps_remaining,
             b.steps_total,
             b.trials_spent,
             match b.n_eff {
                 Some(n) => format!(", n_eff {n:.1}"),
                 None => String::new(),
+            },
+            match b.tokens_cap {
+                Some(c) => format!("{c}"),
+                None => "not set by this profile".to_string(),
             }
         ));
 
@@ -5031,7 +5044,7 @@ mod tests {
         assert!(!l.context_policy().is_retrieval());
         one_result(&mut l);
         let store = l.context_store();
-        assert!(store.len() >= 1, "the tool result is a record");
+        assert!(!store.is_empty(), "the tool result is a record");
         let result = store
             .all()
             .find(|r| r.kind == crate::context::store::RecordKind::ToolResult)
@@ -5769,13 +5782,24 @@ mod tests {
             .expect("a self-status note");
 
         // It reports the budget that is actually tracked, and says so about the
-        // two that are not. Reporting an untracked budget as remaining is the
+        // axes that are not. Reporting an untracked budget as remaining is the
         // failure this tool exists to avoid.
+        //
+        // Since ADR-D-08 the token *cap* is a fact the loop holds — it comes from
+        // the profile — while the token *burn* is still counted nowhere, so the
+        // two are reported separately. A tool that folded them into one sentence
+        // would be back to letting a reader infer a burn from a ceiling.
         assert!(detail.contains("steps left"), "{detail}");
+        assert!(detail.contains("Token cap 20000000"), "{detail}");
         assert!(
-            detail.contains("Tokens and dollars are NOT tracked"),
+            detail.contains("tokens spent NOT counted by this run"),
             "{detail}"
         );
+        assert!(
+            detail.contains("Dollars have neither a cap nor a count"),
+            "{detail}"
+        );
+        assert!(detail.contains("Trials have no cap here"), "{detail}");
         // And it does not invent a monitor state it has not seen.
         assert!(detail.contains("not visible from here"), "{detail}");
         assert!(detail.contains("no tool has tripped its breaker"), "{detail}");
@@ -5960,6 +5984,9 @@ mod tests {
         }
     }
 
+    /// Carried no `#[test]` since it was written, so it had never run once —
+    /// `dead_code` was the only thing reporting it, as a warning among twenty.
+    #[test]
     fn a_task_too_big_for_the_tier_escalates_rather_than_running() {
         let mut l = Loop::new(local(), registry(), task());
         let fx = l.next(Input::Admission(Admission::Escalate {

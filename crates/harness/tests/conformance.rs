@@ -274,7 +274,7 @@ fn every_profile_field_is_enforced_somewhere() {
         // every shipped profile rather than for one, because the direction is
         // the whole rule.
         for id in set.ids() {
-            let profile = set.get(&id).expect("listed");
+            let profile = set.get(id).expect("listed");
             assert!(
                 profile.max_prereg_amendments >= 1,
                 "{id} may never amend, so a run that finds a real problem with its own \
@@ -1540,7 +1540,7 @@ fn the_tiers_that_may_not_drive_a_campaign_do_not_offer_optimise() {
     let set = load();
     let mut saw_a_tier_that_hides_it = false;
     for id in set.ids() {
-        let p = set.get(&id).expect("listed");
+        let p = set.get(id).expect("listed");
         let offers = p.may_run(Workflow::Optimise);
         if offers {
             assert!(
@@ -1592,7 +1592,7 @@ fn the_tiers_that_cannot_author_freely_are_handed_a_grammar() {
     let set = load();
     let mut saw_a_grammar_tier = false;
     for id in set.ids() {
-        let p = set.get(&id).expect("listed");
+        let p = set.get(id).expect("listed");
         match p.prereg_authoring {
             PreregAuthoring::Free => assert!(
                 p.tier >= Tier::LocalHigh,

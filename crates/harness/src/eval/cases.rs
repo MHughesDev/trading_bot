@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::context::estimate_tokens;
-use crate::drive::{Effect, Input, Loop, Note, Outcome};
+use crate::drive::{Effect, Loop, Note, Outcome};
 use crate::hardware::ToolCalling;
 use crate::profile::{
     ExposureScope,
@@ -1233,14 +1233,6 @@ mod tests {
             let back: Case = serde_json::from_str(&s).unwrap();
             assert_eq!(back, c);
         }
-    }
-
-    fn harness_reflect() -> &'static str {
-        crate::registry::REFLECT
-    }
-
-    fn harness_self_status() -> &'static str {
-        crate::registry::SELF_STATUS
     }
 
     #[test]

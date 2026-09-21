@@ -135,13 +135,26 @@ impl GoalKind {
     /// What "done" means for a goal of this kind, in the run's own words.
     ///
     /// Derived rather than asked for: the model is a poor judge of when it is
-    /// finished, and a criterion it wrote is one it can rewrite. These are the
-    /// criteria `finish_task` is checked against.
+    /// finished, and a criterion it wrote is one it can rewrite.
+    ///
+    /// Every criterion comes back [`Met::Unevaluated`], and stays that way for the
+    /// whole run. **Nothing in this harness evaluates an acceptance criterion.**
+    /// The nearest thing is [`Loop::on_finish`](crate::drive::Loop), which checks
+    /// that `finish_task`'s `evidence` cites ids the session actually produced —
+    /// a check on attribution, not on whether the question was answered — and
+    /// [`report::critic`](crate::report::critic), which checks that criteria *the
+    /// model's own draft claims to have met* name evidence. Neither decides
+    /// whether a criterion holds, and the second reads model prose, which is the
+    /// class of claim this platform keeps pulling out of free-form output.
+    ///
+    /// So the honest status of every criterion here is "not yet evaluated", and
+    /// [`Met`] has a variant that says exactly that rather than a `bool` that
+    /// would have to say `false`.
     #[must_use]
-    pub fn acceptance_for(self, goal: &str) -> Vec<String> {
+    pub fn acceptance_for(self, goal: &str) -> Vec<AcceptanceCriterion> {
         let goal = goal.trim();
         let cite = "every number reported is in a tool result this run cited".to_string();
-        match self {
+        let texts: Vec<String> = match self {
             GoalKind::Lookup => vec![
                 format!("the question \"{goal}\" is answered in one sentence"),
                 cite,
@@ -163,8 +176,141 @@ impl GoalKind {
                     .to_string(),
                 cite,
             ],
+        };
+        texts
+            .into_iter()
+            .map(AcceptanceCriterion::unevaluated)
+            .collect()
+    }
+}
+
+// ── Acceptance: three states, because two of them would be a lie ────────────
+
+/// Whether an acceptance criterion holds.
+///
+/// AGENT-012 §3.5 asks the desk to render "acceptance criteria **with ticks**".
+/// A tick is a measurement, and this platform has exactly one thing to say about
+/// most criteria for most of a run: nobody has looked yet. `Unevaluated` is that
+/// third state, and it is **structural, not a convenience**.
+///
+/// # Why not `Option<bool>`
+///
+/// Because `Option<bool>` has `unwrap_or(false)`, and the shortest path from
+/// "not yet evaluated" to a rendered red cross is one method call that reads as
+/// defensive programming. Collapsing the third state into `false` reports every
+/// criterion nobody has looked at as *failing*, which is the same defect class
+/// as an unwritten counter rendering as a measured zero — it shipped twice on
+/// this platform in one day.
+///
+/// # The compile-time part
+///
+/// There is deliberately **no** `bool` anywhere on this type: no `From<Met> for
+/// bool`, no `is_met()`, no `PartialEq<bool>`, no accessor returning
+/// `Option<bool>`. The only way to get a value out is [`Met::fold`], which takes
+/// one argument per state, so "render an unevaluated criterion as failed" cannot
+/// be written by omission — a caller has to type the word `unevaluated` and
+/// choose it on purpose. `met_never_grows_a_bool_escape_hatch` in
+/// `tests/acceptance_and_budget_are_honest.rs` keeps it that way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub enum Met {
+    /// Nobody has checked. The honest default, and the status of every criterion
+    /// this harness produces today.
+    #[default]
+    Unevaluated,
+    /// Checked, and it holds.
+    Met,
+    /// Checked, and it does not hold. **Checked** is the load-bearing word: this
+    /// is a measurement that came back negative, never an absence of one.
+    NotMet,
+}
+
+impl Met {
+    /// Collapse to one value per state. Three arguments, no default, no `bool`.
+    pub fn fold<T>(self, met: T, not_met: T, unevaluated: T) -> T {
+        match self {
+            Met::Met => met,
+            Met::NotMet => not_met,
+            Met::Unevaluated => unevaluated,
         }
     }
+
+    /// How the card says it. Words rather than `[x]`/`[ ]`, because a blank box
+    /// beside a ticked one reads as "failed" and two of these three states are
+    /// not that.
+    #[must_use]
+    pub fn mark(self) -> &'static str {
+        self.fold("met", "NOT met", "not yet evaluated")
+    }
+}
+
+/// `met: true | false | null` on the wire. `null` is [`Met::Unevaluated`], and it
+/// is sent rather than skipped: an absent key would let a consumer's `??` invent
+/// the state that a missing measurement does not have.
+impl Serialize for Met {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Met::Unevaluated => s.serialize_none(),
+            Met::Met => s.serialize_some(&true),
+            Met::NotMet => s.serialize_some(&false),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Met {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(match Option::<bool>::deserialize(d)? {
+            None => Met::Unevaluated,
+            Some(true) => Met::Met,
+            Some(false) => Met::NotMet,
+        })
+    }
+}
+
+/// One thing that has to be true for the run to be done, and whether it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcceptanceCriterion {
+    pub text: String,
+    /// `null` on the wire until something evaluates it. Nothing does yet — see
+    /// [`GoalKind::acceptance_for`].
+    #[serde(default)]
+    pub met: Met,
+}
+
+impl AcceptanceCriterion {
+    /// A criterion nobody has checked, which is every criterion this harness
+    /// currently produces.
+    #[must_use]
+    pub fn unevaluated(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            met: Met::Unevaluated,
+        }
+    }
+}
+
+/// Accepts the old wire shape — a bare `"string"` — as an unevaluated criterion.
+///
+/// Working states were persisted as `acceptance: ["…", "…"]` before `met`
+/// existed. Those rows carry no evaluation, so they deserialize to exactly what
+/// they are: text with no status. The alternative is a deploy that cannot read
+/// yesterday's rows, which is how a schema change becomes an outage.
+fn de_acceptance<'de, D>(d: D) -> Result<Vec<AcceptanceCriterion>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Wire {
+        Text(String),
+        Full(AcceptanceCriterion),
+    }
+    Ok(Vec::<Wire>::deserialize(d)?
+        .into_iter()
+        .map(|w| match w {
+            Wire::Text(t) => AcceptanceCriterion::unevaluated(t),
+            Wire::Full(c) => c,
+        })
+        .collect())
 }
 
 /// Chat or Research (AGENT-013 §2, ADR-0037). Two modes, not three.
@@ -543,15 +689,85 @@ pub struct Decision {
     pub step: u32,
 }
 
-/// What is left to spend.
+/// What is left to spend, and out of what.
+///
+/// # A cap and a remainder are two different facts
+///
+/// AGENT-012 §6.2 wants four bars, each showing "used of cap". `used` is
+/// `cap - remaining`, so a bar needs **both** numbers and a consumer handed only
+/// one will reach for the other. It did: the desk computed
+/// `tokensCap = tokens_remaining`, made `used` identically zero, and printed
+/// `0 / 40,000` for a run that had burned half a million tokens. The trials bar
+/// did the same trick backwards and printed `4 / 4 · 90%+` for a run nothing had
+/// capped.
+///
+/// Neither was the desk's invention to make: a cap that exists belongs on the
+/// wire, and a cap that does not exist has to be **visibly** absent so nothing
+/// downstream can substitute a number that is lying around.
+///
+/// So every axis here is two fields, and every one that is not measured or not
+/// capped is `Option::None` — `null` on the wire, never `0`.
+///
+/// # What is actually known
+///
+/// | axis | cap | burn |
+/// |---|---|---|
+/// | steps | `orchestration.max_steps`, enforced by the loop | written every step |
+/// | tokens | `budgets.max_tokens_per_task` | **not counted anywhere** (OQ-16) |
+/// | dollars | refused: no price table (ADR-D-03 / OQ-16) | not counted |
+/// | trials | **does not exist** in [`profile::Budgets`](crate::profile::Budgets) | written by whoever owns the state; not by this loop |
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct BudgetView {
     pub steps_remaining: u32,
+    /// The step cap (`orchestration.max_steps`). Not an `Option`: the loop
+    /// refuses to run without one and enforces it every step, so a step budget is
+    /// the one axis that is always both capped and counted.
     pub steps_total: u32,
-    pub tokens_remaining: u32,
-    /// Tenths of a cent, so the budget is integer arithmetic. Money is never
-    /// `f64` here or anywhere (SC-1).
-    pub usd_tenth_cents_remaining: i64,
+    /// `budgets.max_tokens_per_task`, or `None` when the profile declares no
+    /// usable ceiling.
+    ///
+    /// A real cap, which is why it is here — but see `tokens_remaining`: knowing
+    /// the ceiling is not knowing the burn, and a renderer must not derive one
+    /// from the other.
+    #[serde(default)]
+    pub tokens_cap: Option<u64>,
+    /// Tokens left of that cap, and **always `None` today**.
+    ///
+    /// Nothing in this loop counts tokens (OQ-16). It was a `u32` that no code
+    /// path ever assigned, so it read `0` — and `0` next to a cap means "the
+    /// whole budget is spent", which is the opposite of what an uncounted axis
+    /// should say. `None` is the measurement that was not taken.
+    #[serde(default)]
+    pub tokens_remaining: Option<u64>,
+    /// The dollar cap. **Refused**, so always `None`.
+    ///
+    /// `budgets.max_usd_per_task` is declared in every profile and nothing on
+    /// this platform converts tokens or seconds into money (OQ-16). ADR-D-03
+    /// settles that with a static, versioned price table where an unverified or
+    /// stale row is treated as absent everywhere a cap is *reported*; until a
+    /// fresh row exists for the model in question there is no dollar figure to
+    /// send, and a number sent anyway would be read as a measurement.
+    #[serde(default)]
+    pub usd_tenth_cents_cap: Option<i64>,
+    /// Dollars left, in tenths of a cent so the budget is integer arithmetic —
+    /// money is never `f64` here or anywhere (SC-1). **Always `None`**: same
+    /// missing price table, and nothing counts spend per run either.
+    #[serde(default)]
+    pub usd_tenth_cents_remaining: Option<i64>,
+    /// The trials cap. **Always `None`, because no such cap exists here.**
+    ///
+    /// ADR-D-08 assumed one in [`profile::Budgets`](crate::profile::Budgets);
+    /// that struct holds `max_usd_per_task`, `max_wall_clock_s` (dead),
+    /// `max_tokens_per_task` and `ask_above_usd`, and nothing else. The trial
+    /// ceilings on this platform are session- and campaign-scoped and live in the
+    /// API, not in a profile, so a `Loop` built from a profile has not been told
+    /// one. The field is here to say that in the one place the desk looks, so the
+    /// bar renders uncapped instead of reaching for `trials_spent` and printing
+    /// `4 / 4`.
+    #[serde(default)]
+    pub trials_cap: Option<u32>,
+    /// Trials this run has spent. Written by whoever owns the state — **not by
+    /// this loop**, which has no trial counter of its own.
     pub trials_spent: u32,
     /// Effective sample size after selection-bias correction. Not money and not a
     /// size: a statistic, so a float is the right type.
@@ -573,8 +789,13 @@ pub struct WorkingState {
     pub ring: Ring,
     pub stage: Stage,
     pub prereg: Option<PreregRef>,
-    /// What "done" means for this run, derived from the goal and the constraints.
-    pub acceptance: Vec<String>,
+    /// What "done" means for this run, derived from the goal and the
+    /// constraints, each carrying its status.
+    ///
+    /// Every status is [`Met::Unevaluated`] today — see
+    /// [`GoalKind::acceptance_for`] for what does and does not evaluate these.
+    #[serde(default, deserialize_with = "de_acceptance")]
+    pub acceptance: Vec<AcceptanceCriterion>,
     pub hypothesis: Option<Hypothesis>,
     pub plan: Vec<PlannedStep>,
     pub evidence: Vec<EvidenceRef>,
@@ -821,7 +1042,7 @@ impl WorkingState {
         if !self.acceptance.is_empty() {
             out.push_str("\nDONE MEANS:\n");
             for a in &self.acceptance {
-                out.push_str(&format!("  - {}\n", clamp(a, 200)));
+                out.push_str(&format!("  - [{}] {}\n", a.met.mark(), clamp(&a.text, 200)));
             }
         }
         if !self.plan.is_empty() {
@@ -1021,7 +1242,7 @@ mod tests {
             .map(|i| format!("question {i} ").repeat(40))
             .collect();
         s.acceptance = (0..50)
-            .map(|i| format!("criterion {i} ").repeat(40))
+            .map(|i| AcceptanceCriterion::unevaluated(format!("criterion {i} ").repeat(40)))
             .collect();
         let card = s.card(Detail::Flat);
         assert!(

@@ -446,7 +446,6 @@ mod tests {
             found_the_leak: false,
             ranked_first: None,
             yielded: productive(),
-            ..Observed::default()
         }
     }
 

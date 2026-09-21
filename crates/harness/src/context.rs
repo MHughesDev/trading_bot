@@ -317,7 +317,7 @@ pub fn assemble_reserving(
 /// floor computed against a window nobody was using.
 #[must_use]
 pub fn assemble_within(
-    profile: &Profile,
+    _profile: &Profile,
     blocks: Vec<Block>,
     reserved_tokens: u32,
     window: u32,
@@ -976,7 +976,6 @@ mod tests {
         assert_eq!(estimate_tokens(""), 0);
     }
 
-    #[test]
     /// The cap that matters is the smaller of the two, and the reason is the
     /// asymmetry: a result too large evicts the run's own findings, which are the
     /// compressed form of everything earlier and the least replaceable thing in

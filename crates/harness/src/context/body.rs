@@ -656,7 +656,7 @@ pub fn format_sig(v: f64, sig: u32) -> String {
         return "0".into();
     }
     let magnitude = v.abs().log10().floor() as i32;
-    let decimals = (sig as i32 - 1 - magnitude).max(0).min(12) as usize;
+    let decimals = (sig as i32 - 1 - magnitude).clamp(0, 12) as usize;
     let s = format!("{v:.decimals$}");
     if s.contains('.') {
         s.trim_end_matches('0').trim_end_matches('.').to_string()

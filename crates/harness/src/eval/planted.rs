@@ -953,7 +953,7 @@ mod tests {
                 .t_stat
         };
 
-        let leaks = of_kind(&c, PlantKind::Leak);
+        let leaks = of_kind(c, PlantKind::Leak);
         assert!(!leaks.is_empty(), "no leak cases to separate");
         for case in &leaks {
             assert!(

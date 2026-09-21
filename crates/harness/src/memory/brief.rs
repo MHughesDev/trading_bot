@@ -47,7 +47,7 @@ use serde::{Deserialize, Serialize};
 use crate::context::{estimate_tokens, Block, Section};
 use crate::provenance::Tagged;
 
-use super::{Confidence, Entry, Kind};
+use super::{Entry, Kind};
 
 /// Which slot an item was retrieved into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -286,6 +286,9 @@ fn retry_met(entry: &Entry, met_conditions: &[String]) -> bool {
 /// * `met_conditions` — retry conditions the platform can see are now satisfied.
 /// * `scopes` — the user-preference scopes in play for this goal.
 #[must_use]
+// Eight, and every one is a separate fact the brief needs. Bundling them into a
+// struct would move the argument list rather than shorten it.
+#[allow(clippy::too_many_arguments)]
 pub fn assemble_brief(
     run_id: &str,
     goal: &str,
@@ -401,7 +404,7 @@ pub fn assemble_brief(
 
         let slot_budget = (reference_budget_tokens as f32 * slot.share()) as u32;
         let mut used = 0u32;
-        let mut admitted = 0usize;
+        let mut any_admitted = false;
         for (rank, (_, e)) in candidates.iter().enumerate() {
             let why = why_for(*slot, e, &terms, met_conditions);
             let line = render(e, detail);
@@ -409,13 +412,13 @@ pub fn assemble_brief(
             // §4's floor: a negative result that matched is ALWAYS admitted, even
             // when its slot has no room. Crowding out the entry most likely to
             // save the budget is the one failure this slot exists to prevent.
-            let forced = *slot == Slot::NegativeResult && admitted == 0;
+            let forced = *slot == Slot::NegativeResult && !any_admitted;
             if !forced && used + cost > slot_budget {
                 brief.elided += candidates.len() - rank;
                 break;
             }
             used += cost;
-            admitted += 1;
+            any_admitted = true;
             push(&mut brief, run_id, e, *slot, rank, why, detail);
         }
     }
@@ -505,7 +508,7 @@ fn push(
 mod tests {
     use super::*;
     use crate::memory::{
-        DataWindow, Direction, Entry, Kind, Measurement, Provenance,
+        Confidence, DataWindow, Direction, Entry, Kind, Measurement, Provenance,
     };
 
     fn prov() -> Provenance {

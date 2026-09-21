@@ -34,7 +34,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::drive::{Effect, Input, Loop, Outcome, State, Task};
+use crate::drive::{Input, Loop, Outcome, State, Task};
 use crate::hardware::{Admission, TaskDemand};
 use crate::profile::Profile;
 use crate::registry::ToolRegistry;
@@ -273,10 +273,10 @@ impl Replay {
         self.steps
             .iter()
             .flat_map(|s| {
-                s.effects.iter().filter_map(|e| {
-                    (e.get("note").and_then(Value::as_str) == Some("rejected"))
-                        .then(|| e.get("code").and_then(Value::as_str).unwrap_or("").to_string())
-                })
+                s.effects
+                    .iter()
+                    .filter(|e| e.get("note").and_then(Value::as_str) == Some("rejected"))
+                    .map(|e| e.get("code").and_then(Value::as_str).unwrap_or("").to_string())
             })
             .collect()
     }
@@ -287,8 +287,10 @@ impl Replay {
         self.steps
             .iter()
             .flat_map(|s| {
-                s.effects.iter().filter_map(|e| {
-                    (e.get("note").and_then(Value::as_str) == Some("core_tool")).then(|| {
+                s.effects
+                    .iter()
+                    .filter(|e| e.get("note").and_then(Value::as_str) == Some("core_tool"))
+                    .map(|e| {
                         (
                             e.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
                             e.get("detail")
@@ -297,7 +299,6 @@ impl Replay {
                                 .to_string(),
                         )
                     })
-                })
             })
             .collect()
     }

@@ -642,7 +642,7 @@ fn the_loop_classifies_the_goal_and_derives_acceptance_before_the_first_call() {
         l.working()
             .acceptance
             .iter()
-            .any(|a| a.contains("every number reported is in a tool result")),
+            .any(|a| a.text.contains("every number reported is in a tool result")),
         "and every kind carries the citation criterion: {:?}",
         l.working().acceptance
     );
@@ -661,7 +661,7 @@ fn the_loop_classifies_the_goal_and_derives_acceptance_before_the_first_call() {
 fn the_system_the_schemas_and_the_body_fit_the_window_together() {
     use harness::context::estimate_tokens;
 
-    let (mut l, fx) = started();
+    let (mut l, _) = started();
     let p = profile();
 
     // A long run, so compaction has actually had to make choices.

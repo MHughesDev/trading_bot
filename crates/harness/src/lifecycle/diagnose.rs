@@ -244,10 +244,13 @@ mod tests {
         }
     }
 
+    /// What one case does to a bundle to make its class the answer.
+    type Plant = Box<dyn Fn(&mut DiagnosticBundle)>;
+
     /// Each of §8.2's four classes has exactly one producer.
     #[test]
     fn each_new_class_comes_from_its_own_ticket() {
-        let cases: Vec<(FailureClass, Box<dyn Fn(&mut DiagnosticBundle)>, &str)> = vec![
+        let cases: Vec<(FailureClass, Plant, &str)> = vec![
             (
                 FailureClass::Leakage,
                 Box::new(|b: &mut DiagnosticBundle| {
