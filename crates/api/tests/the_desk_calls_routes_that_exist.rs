@@ -101,6 +101,20 @@ const UNBUILT: &[(&str, &str)] = &[
     // oldest rows on this list — the desk's composer has posted a charter to
     // `/api/research/sessions` since it was written — which is the case this
     // test was added for.
+    // S-6.11 — a per-run tool pin. This path reaches the scan from a frontend
+    // *test* rather than from a component: the Pin button was removed on
+    // 2026-09-21 because it was passed no handler and there was nothing to
+    // call, and the test that holds it removed names the route it would have
+    // needed. So the row is here for the honest reason — the route is unbuilt —
+    // and the scan is right to have caught the string. See the OQ on S-6.11:
+    // `Driver::route` builds `pinned` from `discovered_tools`, the plan step's
+    // named tool, and a search over that step's goal text, and a human message
+    // is none of the three. Either a per-run pin the router reads gets built, or
+    // §3.5's clause is struck and this row goes with it.
+    (
+        "/api/agent/runs/{}/pins",
+        "a per-run tool pin, which S-6.11 refused to fake; the router reads three sources and a human message is not one of them",
+    ),
     // Phase 10 — lifecycle. `crates/harness/src/lifecycle/` does not exist.
     (
         "/api/agent/runs/{}/lifecycle",
