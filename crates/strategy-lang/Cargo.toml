@@ -6,6 +6,11 @@ description = "SLv2: the text a model writes a strategy in, and the parser, vali
 
 [dependencies]
 domain = { workspace = true }
+# The one registry. `catalogue.rs` reads it rather than transcribing it: a
+# second list of the same 61 families is the defect this repository keeps
+# finding, and a language that disagrees with the engine about what a
+# feature is called would refuse valid strategies and accept invalid ones.
+features = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

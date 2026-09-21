@@ -1,6 +1,6 @@
 # Phase 5 — The language
 
-**Completion: 13% (2 / 15 tasks), plus 3 `PARTIAL` — the feature engine is built; the language is not.**
+**Completion: 20% (3 / 15 tasks), plus 7 `PARTIAL` — the feature engine is built; the language is not.**
 
 > **This file was wrong about the engine and right about the language.** Until 2026-09-16 it
 > recorded all fifteen tasks as `NOT STARTED`. `crates/features` is in fact about 5,100 lines
@@ -24,6 +24,25 @@
 > **Two implementations, nothing comparing them.** S-5.14's acceptance already asks for that
 > comparison; it is now a reconciliation test this repository needs rather than a future
 > nicety.
+
+> **Two things found on 2026-09-21 that are worth reading before touching this
+> crate.**
+>
+> **`FormStrategy` is now the only writer of SLv2 text that no human reads before
+> it compiles**, so every document-level rule in `parse::lint` needs a matching
+> pass in `to_text`. `used_twice` was one, and it cost a model two fills to
+> produce a refusal it could not have avoided from inside either fill. Nothing
+> proves the form can only produce documents the language accepts — that is the
+> gap to watch.
+>
+> **The constraint clause was a free-form string.** `compile` stored a
+> `constraint` clause's text verbatim and never read it, so `constraint blah`
+> compiled into a stored definition and failed much later inside
+> `domain::strategy_def::params::parse_constraint` — at sweep time, on a strategy
+> somebody had already committed to, with the error naming a place the author was
+> no longer looking. `domain` now exports `check_constraint` (the answer, not the
+> parse tree — `Operand` stays internal) and the compiler refuses it where it is
+> written, against the same reader the sweep uses.
 
 **Requirement IDs:** SA-01…SA-16.
 **Spec:** [AGENT-011](../../../specs/AGENT-011-strategy-authoring-for-models.md), which
@@ -169,7 +188,7 @@ is refused naming the partition. Adversarial: the refusal is asserted.
 ## SLv2
 
 ### S-5.5 The parser — L
-`NOT STARTED` — The parser.
+`DONE`
 
 `crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
 
@@ -186,8 +205,20 @@ Turing-ish is `run_python`.
 an inline expression over 120 characters is refused with "bind it as an input".
 **Traces:** AGENT-011 §3, P1, P7.
 
+**Built 2026-09-21.** `crates/strategy-lang/src/{lex,ast,parse}.rs`. Clause per
+line, comments attached to the clause below them, and **line-level recovery**, so
+three bad clauses come back as three diagnostics rather than as the first one.
+
+Both acceptance criteria are tested rather than described: a bare number in a
+distance returns `distance_without_unit` whose `expected` list is exactly
+``["`%`", "`atr`", "`sigma`"]``, and an over-long inline expression returns
+`expression_too_long` with `fix: "bind it as an input, then reference it by
+name"`. Every failure names its span and what was expected — a parser whose
+errors do not teach is a parser a model cannot iterate against, which is the
+whole argument of AGENT-011 §3.
+
 ### S-5.6 The compiler — M
-`NOT STARTED` — The compiler.
+`PARTIAL`
 
 `crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
 
@@ -199,8 +230,48 @@ produce.
 for the three skeletons.
 **Traces:** AGENT-011 §3, P1.
 
+**Built 2026-09-21, and the gaps are named rather than approximated.**
+`crates/strategy-lang/src/compile.rs` targets
+`domain::strategy_def::StrategyDefinition` at v1.3; the trend skeleton compiles to
+a definition structurally equal to the hand-written JSON
+(`the_trend_skeleton_compiles_to_the_definition_a_human_would_have_written`).
+
+**The load-bearing discovery: booleans are already numbers in this platform**, and
+it is the only reason `and`/`or`/`not` compile without touching `domain`. The
+frozen v1 grammar is `expr = comparison` with no combinators, but
+`strategy-validator::expressions::check_primary` accepts a parenthesised
+comparison and both the bytecode and the interpreter push exactly `1.0`/`0.0` for
+every comparison operator. So `and → (A * B)`, `or → ((A + B) > 0)`,
+`not → (1 - A)` — **no new bytecode op and no schema change**.
+
+The normalisation is what makes it correct: every compiled condition must
+evaluate to exactly `0.0` or `1.0`. `or` is `((A + B) > 0)` rather than the
+shorter `(A + B)` because the short form is truthy at the top level and wrong one
+level in — `not (a or b)` with both true becomes `1 - 2 = -1`, which the runtime
+reads as **true**. `normalises_or_so_that_not_of_it_is_correct` pins it.
+
+**What is refused by name rather than guessed at**, each naming the missing
+mechanism: `atr`/`sigma` exit distances (Q-S5-01), `crossed_above`/`below` and
+`rising`/`falling` (Q-S5-02 — the runtime has no previous-value register and
+`bytecode::Op` has no cross op), state predicates, several maths builtins,
+`cooldown`, `vol_target`/`kelly` sizing and `max_daily_loss`.
+
+**What is genuinely missing:** FEAT-004 §3.1's `order` clauses hit
+`unknown_clause` rather than a named refusal, and the acceptance asks for three
+skeletons where only AGENT-011 §3's trend skeleton exists — the other two are
+S-5.12.
+
+**One defect found and removed at integration.** `catalogue.rs` shipped from the
+track carrying its own 61-family transcription of `features::registry` — the
+two-implementations shape this repository keeps finding, and the track flagged it
+itself. It now reads `features::registry::families()` directly, aliases dropped
+(`resolve` rewrites them before construction, so admitting both spellings would
+make the decompiler guess which the author wrote), with
+`the_catalogue_is_the_engine_s_registry_and_holds_nothing_else` comparing the two
+sets name by name and parameter by parameter.
+
 ### S-5.7 The decompiler and the round trip — M
-`NOT STARTED` — The decompiler and the round trip.
+`PARTIAL`
 
 `crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
 
@@ -209,6 +280,26 @@ grammar remains a subset the decompiler emits when nothing newer is used.
 
 **Acceptance:** SLv2 → JSON → text → JSON yields an identical definition (round-trip test).
 **Traces:** AGENT-011 §3; §8.3.
+
+**Built 2026-09-21.** `crates/strategy-lang/src/decompile.rs` plus
+`tests/round_trip.rs`. `compile(parse(decompile(d))) == d` over 9 text-derived and
+4 hand-built definitions, **and a text fixpoint**: `decompile` is stable on the
+second pass, so a stored strategy's readable form does not churn between reads.
+
+`REQUIRED_SHAPES` (30 entries) fails the build if the corpus stops exercising any
+exit-rule kind, size mode, side, parameter type, boolean operator, or the
+non-default version/asset-class/trust paths — the guard against a round-trip
+suite that passes because it stopped covering anything.
+
+Decompilation **refuses by name and never silently lies** for AI/universe/LLM
+node kinds, `SizeMode::Model`, per-signal sizing, a declared-versus-used feature
+mismatch, unknown lanes and dead condition nodes. `deencode` reads the three
+boolean shapes back exactly and refuses to rewrite `(A > 1) * 2`, because a
+definition that really multiplies a flag by two means that.
+
+**What is not covered:** "every stored strategy has a readable form" is true of
+every shape the corpus holds, not of every definition in the registry — nothing
+has yet run the decompiler over the stored set.
 
 ### S-5.8 The authoring tools — M
 `NOT STARTED` — `explain_strategy` is not in the catalogue, and `create_strategy` recording lineage needs the compiler.
@@ -224,7 +315,7 @@ bars; `create_strategy` records lineage for `family_test`.
 **Traces:** AGENT-011 §4.
 
 ### S-5.9 A grammar for the small tiers — M
-`NOT STARTED` — A grammar for the small tiers.
+`PARTIAL`
 
 `crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
 
@@ -235,6 +326,44 @@ text.
 **Acceptance:** on `qwen2.5-7b`, a research goal produces a compiled SLv2 strategy in ≤ 6
 fills with no `unknown_feature` error, on the eval dataset.
 **Traces:** AGENT-011 §3, P7; §8.7.
+
+**Built 2026-09-21.** `crates/strategy-lang/src/form.rs`: typed clause fills with
+serde, a JSON Schema for a constrained decoder, `to_text()`, and
+`FormStrategy::from_strategy` — the projection of free-form SLv2 back into the
+form.
+
+**One compiler, asserted.** `FormStrategy::compile()` is `to_text()` +
+`text_to_definition`, and
+`the_form_compiles_through_the_language_and_not_beside_it` holds the two paths
+equal. Two compilers would mean a strategy that validates in the form and not in
+the language.
+
+**The schema emits one branch per family, read from `Catalogue::engine()`**, each
+carrying its own arity and each parameter's range — so `unknown_feature` and
+`wrong_arity` are *unreachable* for a constrained decoder rather than
+discouraged. `every_family_in_the_schema_compiles_when_the_form_uses_it` walks all
+57 branches.
+
+**13 narrowings are named** with a typed `Limitation`, each carrying an SLv2
+document and a `Reach` saying what the language does with it — `Compiles` (the
+form is strictly narrower) or `RefusedByTheCompiler(code)` (writing it as text
+will not help). `every_limitation_is_real_and_reachable` checks **both halves
+against the live compiler**, so an entry that stopped being true fails the build.
+
+**One spec conflict resolved a third way, flagged so it can be overruled.** §3
+gives the "anything used twice must be an input" rule to the compiler *and* gives
+a `select_fill` tier one clause per fill — and a fill has no view of the other
+fills, so two independently correct fills can each name `ema(close, 7)` and the
+assembled text is refused **after both fills are spent**, on the tier least able
+to afford it. The assembler **binds** rather than failing: a call matching a
+declared input is written as that input's name, and a call written twice is
+hoisted into a generated one. It is the substitution `decompile` already performs
+in the other direction, so it changes nothing about what the strategy means.
+
+**What keeps it `PARTIAL`:** the acceptance is "on `qwen2.5-7b`, ≤ 6 fills, no
+`unknown_feature`, on the eval dataset". The mechanical half is proved — a whole
+strategy is 4 fills and the schema cannot name a feature the engine does not
+serve — but nothing here ran a model.
 
 ### S-5.10 Moves, diffs, lineage — M
 `NOT STARTED` — `apply_move` and `diff_strategies` are not in the catalogue.
@@ -259,7 +388,7 @@ only on capable tiers. Motivated moves only — exploration belongs in the Exper
 **Traces:** AGENT-011 §4, §10.
 
 ### S-5.12 Skeletons — S
-`NOT STARTED` — The three skeletons need the compiler and `preview_signals`.
+`PARTIAL`
 
 `crates/strategy-lang` **does not exist**. Every task that parses, compiles or decompiles SLv2 is genuinely not started, and this one is among them.
 
@@ -269,6 +398,34 @@ vol target and model signal, so a first version is never a syntax lesson.
 **Acceptance:** the trend, mean-reversion and vol-target skeletons compile, validate and
 preview on BTC-USD 1h with non-zero entries and no warm-up violation.
 **Traces:** AGENT-011 §4; §8.2.
+
+**Built 2026-09-21.** `crates/strategy-lang/src/skeleton.rs`: four of §4's six
+families — trend, mean_reversion, breakout, vol_target — each a **compiling,
+round-tripping definition rather than a text template**, because a skeleton that
+does not compile is a worked example teaching a model something false.
+`HypothesisFamily` is a closed enum whose body table matches it exhaustively, so
+a new family cannot be added without deciding what it writes, and
+`Skeleton::params()` reads the parameters off the compiled definition rather than
+listing them a second time.
+
+**`carry` and `model_signal` are refused by name**, listing the families the
+engine does not have (`funding_rate`/`basis`; `prediction`/`regime`/`text` —
+DATA-006 F3/F4, unbuilt). The refusal is checked against the **live registry**:
+`a_refused_family_names_features_the_engine_really_does_not_have` fails the build
+the day `crates/features` gains one of those names, and what it then asks for is
+the skeleton, not a wider allowlist.
+
+**The `vol_target` skeleton is not the textbook rule, and its own notes say so in
+the first line.** `size vol_target 0.15` has no `SizeMode`, so it uses
+`risk_per_trade`, and the volatility gate is a level on `bb_width` rather than
+`pct_rank(rv(close,20), 200)` because a feature cannot take another feature as
+its input. A test asserts the notes name `size_mode_not_representable` and that
+the text does not claim the sizing it cannot do.
+
+**What keeps it `PARTIAL`:** §8.2 asks the skeletons to "preview on BTC-USD 1h
+with non-zero entries and no warm-up violation". This crate has no bars and no
+`preview_signals` — they are proved to compile, declare exits and round-trip; they
+are not proved to fire.
 
 ### S-5.13 Rewrite the guide around the language — M
 `NOT STARTED` — The guide is not rewritten around SLv2, which does not exist. Its `## Tool notes` section did grow this phase — `list_features` has an entry — but that is the catalogue's documentation, not the language's.

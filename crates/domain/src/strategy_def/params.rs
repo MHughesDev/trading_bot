@@ -410,6 +410,28 @@ fn parse_operand(tok: &str) -> Result<Operand, String> {
         .map_err(|_| format!("operand '{t}' is neither param(...) nor a number"))
 }
 
+/// Whether a string is a constraint, for anything that needs to know **before**
+/// a sweep does.
+///
+/// The authoring surface has to refuse a bad constraint where it is written.
+/// `strategy-lang` used to store a `constraint` clause's text verbatim, so
+/// `constraint blah` compiled into a stored definition and failed at sweep time
+/// instead — on a strategy somebody had already committed to, with the error
+/// naming a place the author was no longer looking.
+///
+/// This exports the *answer* rather than the parse tree: the caller wants to
+/// know whether it may store the string, and `Operand` is an internal shape that
+/// would become a public commitment the moment it left this module. One reader,
+/// so the authoring surface and the sweep cannot disagree about what a
+/// constraint is.
+///
+/// # Errors
+///
+/// The same `ParamError` the sweep would have raised, which is the point.
+pub fn check_constraint(c: &str) -> Result<(), ParamError> {
+    parse_constraint(c).map(|_| ())
+}
+
 fn parse_constraint(c: &str) -> Result<(Operand, &'static str, Operand), ParamError> {
     let bad = |reason: String| ParamError::BadConstraint {
         constraint: c.to_string(),
