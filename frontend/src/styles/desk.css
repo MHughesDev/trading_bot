@@ -167,6 +167,13 @@
   font-size: var(--t-12); font-weight: var(--w-semibold);
 }
 
+/* A kill-switch read that did not answer. Not the red one — an unknown state is
+   not a trip — and not nothing either, which is what it used to render as. */
+.kill-banner.unknown {
+  background: var(--bg-warn-subtle); color: var(--fg-primary);
+  border-bottom: 1px solid var(--fg-warn);
+}
+
 /* --- composer ---------------------------------------------------------------- */
 .desk-composer { display: flex; flex-direction: column; gap: var(--s-2); }
 .desk-composer .row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }

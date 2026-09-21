@@ -7,6 +7,7 @@
 // that is signalled with colour also carries the word or the number.
 import type { ReactNode } from 'react'
 import { Badge } from '@/components/primitives/Badge'
+import type { AgentProfile } from '@/api/agent'
 import { Tooltip } from '@/components/primitives/Overlay'
 import type {
   BudgetView,
@@ -19,6 +20,53 @@ import type {
 import { STAGE_ORDER } from '@/api/desk'
 
 // ── §6.1 Tier badge ──────────────────────────────────────────────────────────
+
+/**
+ * Whether the platform holds a calibration row for this profile.
+ *
+ * `multi_step_evidence` is the only measurement this platform records today. No
+ * evidence means unmeasured; it never means "probably fine".
+ *
+ * Three surfaces drew this badge and **all three** spelled the rule out
+ * themselves as `p.multi_step_evidence !== null || !p.is_local`, so every hosted
+ * profile was declared measured on the strength of being hosted. S-6.20 fixed
+ * the Models page; desk home and the conversation header kept it, and the badge
+ * is the half a person reads at a glance. It lives beside `TierBadge` now
+ * because the badge is the only thing that consumes it, and a rule restated per
+ * caller is a rule that gets fixed per caller.
+ *
+ * Whether a model is hosted is an argument about whether it *needs* measuring.
+ * It is not evidence that it was.
+ */
+export function profileIsMeasured(p: Pick<AgentProfile, 'multi_step_evidence'>): boolean {
+  return p.multi_step_evidence !== null
+}
+
+export interface TierTile {
+  id: string
+  label: string
+  tier: AgentProfile['tier']
+  measured: boolean
+  frontier: boolean
+}
+
+/**
+ * The profile tiles desk home and the conversation header both render.
+ *
+ * `undefined` in means the profile list has not answered, and the answer is an
+ * empty list rather than an invented row — the callers own the difference
+ * between "no profile is configured" and "nobody could read the list", which are
+ * opposite claims about a platform that cannot run anything without one.
+ */
+export function tierTiles(profiles: AgentProfile[] | undefined): TierTile[] {
+  return (profiles ?? []).map((p) => ({
+    id: p.model_id,
+    label: p.model_id,
+    tier: p.tier,
+    measured: profileIsMeasured(p),
+    frontier: p.tier === 'frontier',
+  }))
+}
 
 /**
  * `unmeasured` is not a styling variant, it is the truth about a profile nobody

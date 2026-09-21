@@ -23,7 +23,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
-import { EmptyState } from '@/components/primitives/States'
+import { EmptyState, ErrorState, PanelLoading } from '@/components/primitives/States'
 import { deskApi, type Proposal, type ProposalDecision } from '@/api/desk'
 
 const KIND_LABELS: Record<string, string> = {
@@ -123,6 +123,21 @@ export function ProposalsQueue() {
 
   return (
     <div className="desk-scroll">
+      {/* Four states, not two. `optional()` only folds 404/405/501 into `null`
+          and rethrows everything else, so a 500 or a dropped connection left
+          `data.data` `undefined` — and `undefined` matched neither the `null`
+          branch nor the `data.data && pending.length === 0` one, so the queue
+          rendered **nothing at all**: no rows, no error, no empty state. A
+          blank panel on a decisions queue is the reassuring reading of a failure,
+          and this queue is where rings 1 and 2 are licensed. */}
+      {data.isPending && <PanelLoading lines={2} />}
+      {!data.isPending && data.data === undefined && (
+        <ErrorState
+          message="The proposals queue could not be read"
+          detail="This is not the same as nothing waiting to be decided. A proposal into ring 1 or ring 2 stays undecided."
+          onRetry={() => void data.refetch()}
+        />
+      )}
       {data.data === null && (
         <EmptyState
           message="Proposals are unavailable"

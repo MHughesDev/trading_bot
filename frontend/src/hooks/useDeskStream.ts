@@ -21,8 +21,18 @@ export interface DeskStream {
   state: StreamState
   /** The last event id the server sent, resumed from on reconnect. */
   cursor: string | null
-  /** Seconds since the last event, while stale. */
+  /**
+   * Seconds since the last event, while stale.
+   *
+   * `null` when the stream dropped **before it ever delivered an event**, and
+   * the caller must not print it as a number. `lastEventAt` starts at mount, so
+   * folding the two together produced "3s old" over a conversation whose state
+   * had never arrived at all — an age is a claim that there is something that
+   * old, and there was not.
+   */
   staleForSecs: number | null
+  /** Whether any event has ever arrived on this stream. */
+  everReceived: boolean
   error: string | null
   /** Forces a reconnect, for the "retry" affordance on a closed stream. */
   reconnect: () => void
@@ -50,12 +60,15 @@ export function useDeskStream({ url, onEvent }: Options): DeskStream {
   const [error, setError] = useState<string | null>(null)
   const [cursor, setCursor] = useState<string | null>(null)
   const [staleForSecs, setStaleForSecs] = useState<number | null>(null)
+  const [everReceived, setEverReceived] = useState(false)
   const [nonce, setNonce] = useState(0)
 
   const onEventRef = useRef(onEvent)
   onEventRef.current = onEvent
   const cursorRef = useRef<string | null>(null)
   const lastEventAt = useRef<number>(Date.now())
+  const everReceivedRef = useRef(false)
+  const urlOfStream = useRef<string | null>(null)
 
   const reconnect = useCallback(() => setNonce((n) => n + 1), [])
 
@@ -63,6 +76,18 @@ export function useDeskStream({ url, onEvent }: Options): DeskStream {
     if (!url) {
       setState('closed')
       return
+    }
+    // A different conversation is a different stream: what the previous one had
+    // received is not evidence about this one. Keyed on the url rather than on
+    // this effect running, because a manual reconnect re-runs it and resumes the
+    // *same* stream from its cursor — the events it already delivered are still
+    // on the screen, so it has not stopped having received them.
+    if (urlOfStream.current !== url) {
+      urlOfStream.current = url
+      everReceivedRef.current = false
+      setEverReceived(false)
+      setStaleForSecs(null)
+      lastEventAt.current = Date.now()
     }
     const controller = new AbortController()
     let closed = false
@@ -79,6 +104,8 @@ export function useDeskStream({ url, onEvent }: Options): DeskStream {
       try {
         const parsed = JSON.parse(data) as WireEvent
         lastEventAt.current = Date.now()
+        everReceivedRef.current = true
+        setEverReceived(true)
         setStaleForSecs(null)
         onEventRef.current(parsed)
       } catch {
@@ -129,9 +156,13 @@ export function useDeskStream({ url, onEvent }: Options): DeskStream {
           setError('the event stream dropped; reconnecting')
         }
         if (closed) return
-        // Stale, not empty: the last state stays on screen with its age.
+        // Stale, not empty: the last state stays on screen with its age — and
+        // only when there is a last state. A stream that dropped before its
+        // first frame has nothing to age.
         setState('stale')
-        setStaleForSecs(Math.round((Date.now() - lastEventAt.current) / 1000))
+        setStaleForSecs(
+          everReceivedRef.current ? Math.round((Date.now() - lastEventAt.current) / 1000) : null,
+        )
         await new Promise((r) => setTimeout(r, backoffMs))
         backoffMs = Math.min(backoffMs * 2, 15_000)
       }
@@ -148,11 +179,12 @@ export function useDeskStream({ url, onEvent }: Options): DeskStream {
   // frozen at the moment the socket dropped.
   useEffect(() => {
     if (state !== 'stale') return
+    if (!everReceivedRef.current) return
     const t = setInterval(() => {
       setStaleForSecs(Math.round((Date.now() - lastEventAt.current) / 1000))
     }, 1_000)
     return () => clearInterval(t)
   }, [state])
 
-  return { state, cursor, staleForSecs, error, reconnect }
+  return { state, cursor, staleForSecs, everReceived, error, reconnect }
 }

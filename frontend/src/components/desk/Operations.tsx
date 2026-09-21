@@ -8,7 +8,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
-import { ConfirmDialog, Modal } from '@/components/primitives/Modal'
+import { Modal } from '@/components/primitives/Modal'
 import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'
 import { Field, Input, TextArea } from '@/components/primitives/Field'
 import { EmptyState } from '@/components/primitives/States'
@@ -427,6 +427,155 @@ export function strategyActionRefusal(e: unknown): string {
   return 'The request never reached the monitor. Nothing was changed.'
 }
 
+/**
+ * The global scope's confirmation word, which is not ours to choose either.
+ *
+ * `Scope::Global` displays as the bare word `global`, and the same
+ * `ResetRequest::validate` compares it literally.
+ */
+export const GLOBAL_SCOPE = 'global'
+
+export type GlobalAction = 'halt' | 'resume'
+
+export type BuiltGlobal =
+  | { ok: true; action: 'halt'; reason: string }
+  | { ok: true; action: 'resume'; body: { confirm_scope: string; reason: string } }
+  | { ok: false; refusal: string }
+
+/**
+ * What the global halt and its reset need before the request is worth sending.
+ *
+ * `Halt all` used to be a `ConfirmDialog` typing `HALT` and then
+ * `void api.post('/api/trading/kill')` — no reason, so the monitor's event log
+ * recorded `manual kill from /api/trading/kill` against a human's name, and no
+ * error handling, so a session without `permits_monitor_control` got a 403 that
+ * reached nobody. `Reset (logged)` was worse: `reset_kill_switch` takes
+ * `Json<ResumeBody>` by value and the call sent no body, so the extractor
+ * rejected it every time. The button had never once reset anything.
+ *
+ * The word for the halt is the scope's, not a friendlier one, so the two
+ * controls on this panel ask for the same thing.
+ */
+export function globalActionBody(
+  action: GlobalAction,
+  input: { reason: string; typed: string },
+): BuiltGlobal {
+  const reason = input.reason.trim()
+  if (!reason) {
+    return {
+      ok: false,
+      refusal:
+        action === 'halt'
+          ? 'A halt needs a reason. It is written into the monitor log against your name.'
+          : 'A resume is a reset, and a reset needs a reason.',
+    }
+  }
+  if (input.typed !== GLOBAL_SCOPE) {
+    return {
+      ok: false,
+      refusal: `Type ${GLOBAL_SCOPE} exactly — the monitor compares it literally.`,
+    }
+  }
+  return action === 'halt'
+    ? { ok: true, action: 'halt', reason }
+    : { ok: true, action: 'resume', body: { confirm_scope: GLOBAL_SCOPE, reason } }
+}
+
+/**
+ * The two-step confirm for the global halt and the global reset (Meridian §5.5).
+ *
+ * Prop-driven for the same reason `StrategyActionDialog` is: the refusal rules
+ * are the part worth testing and they should not need a query client to reach.
+ */
+export function GlobalActionDialog({
+  action,
+  halted,
+  busy = false,
+  error = null,
+  onCancel,
+  onConfirm,
+}: {
+  action: GlobalAction | null
+  /** The scopes the monitor says are halted, or `null` when it did not answer. */
+  halted: string[] | null
+  busy?: boolean
+  error?: string | null
+  onCancel: () => void
+  onConfirm: (built: BuiltGlobal & { ok: true }) => void
+}) {
+  const [reason, setReason] = useState('')
+  const [typed, setTyped] = useState('')
+
+  if (action === null) return null
+  const built = globalActionBody(action, { reason, typed })
+
+  // A global reset is refused outright while any venue is still halted
+  // (`ResetRefusal::VenuesNotReconciled`). Said here rather than discovered as a
+  // 409, and said as "unknown" when the scope read did not answer — the desk
+  // does not get to promise this will go through on a list it has not seen.
+  const venueNote =
+    action === 'resume'
+      ? halted === null
+        ? 'The halted scopes could not be read, so whether a venue still blocks this reset is unknown.'
+        : halted.some((s) => s.startsWith('venue:'))
+          ? `The monitor will refuse while a venue is halted: ${halted
+              .filter((s) => s.startsWith('venue:'))
+              .join(', ')}.`
+          : null
+      : null
+
+  return (
+    <Modal
+      open
+      onClose={onCancel}
+      dismissible={false}
+      title={action === 'halt' ? 'Halt all trading?' : 'Reset the global kill switch?'}
+      footer={
+        <>
+          <span className="spacer" />
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button
+            variant={action === 'halt' ? 'danger' : 'primary'}
+            disabled={!built.ok || busy}
+            loading={busy}
+            data-testid="global-action-confirm"
+            onClick={() => built.ok && onConfirm(built)}
+          >
+            {action === 'halt' ? 'Halt all' : 'Reset'}
+          </Button>
+        </>
+      }
+    >
+      <div className="callout neg" style={{ marginBottom: 'var(--s-4)' }} data-testid="global-action-consequence">
+        {action === 'halt'
+          ? 'Every strategy stops placing orders immediately, on every venue. Open positions are held, not closed. Only a reset — which is rate-limited and typed — undoes it.'
+          : 'Order flow resumes across every scope that is not separately halted. The reset is rate-limited, logged against your name, and refused if another reset was made too recently.'}
+      </div>
+      {venueNote && (
+        <p className="sub" data-testid="global-venue-note">
+          {venueNote}
+        </p>
+      )}
+      <Field label="Reason (required)">
+        <TextArea rows={2} aria-label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} />
+      </Field>
+      <Field label={`Type ${GLOBAL_SCOPE} to confirm`}>
+        <Input aria-label="Typed confirmation" value={typed} onChange={(e) => setTyped(e.target.value)} />
+      </Field>
+      {!built.ok && (
+        <p className="sub" data-testid="global-action-refusal">
+          {built.refusal}
+        </p>
+      )}
+      {error && (
+        <p className="sub" data-testid="global-action-error" role="alert">
+          The monitor refused: {error}
+        </p>
+      )}
+    </Modal>
+  )
+}
+
 const ACTION_TITLE: Record<StrategyAction, string> = {
   scale: 'Scale down',
   halt: 'Halt',
@@ -564,7 +713,7 @@ export function StrategyActionDialog({
 }
 
 export function Monitor() {
-  const [halting, setHalting] = useState(false)
+  const [global, setGlobal] = useState<GlobalAction | null>(null)
   const [pending, setPending] = useState<{ action: StrategyAction; row: MonitorRow } | null>(null)
   const qc = useQueryClient()
   const strategies = useQuery({ queryKey: ['desk', 'monitor'], queryFn: () => deskApi.monitor() })
@@ -594,6 +743,19 @@ export function Monitor() {
       // for would show a change a refusal may have undone.
       void qc.invalidateQueries({ queryKey: ['desk', 'monitor'] })
       void qc.invalidateQueries({ queryKey: ['desk', 'kill-switch'] })
+    },
+  })
+
+  const globalAct = useMutation({
+    mutationFn: async (built: BuiltGlobal & { ok: true }) =>
+      built.action === 'halt'
+        ? (await deskApi.haltAll(built.reason)).data
+        : (await deskApi.resumeAll(built.body)).data,
+    onSuccess: () => {
+      setGlobal(null)
+      void qc.invalidateQueries({ queryKey: ['desk', 'kill-switch'] })
+      void qc.invalidateQueries({ queryKey: ['desk', 'monitor'] })
+      void qc.invalidateQueries({ queryKey: ['desk', 'monitor', 'kill-switch'] })
     },
   })
 
@@ -638,26 +800,42 @@ export function Monitor() {
                 .join('; ')}
             </p>
           )}
-          {tripped ? (
-            <Button size="xs" variant="secondary" onClick={() => void api.post('/api/trading/resume')}>
+          {/* Both controls, always — the badge above may say `state unknown`,
+              and an operator who cannot tell whether trading is halted still
+              needs to be able to halt it. Gating the halt on a read that did not
+              answer would make the failure of the read disable the response to
+              it. */}
+          <div className="desk-actions">
+            <Button
+              size="xs"
+              variant="danger"
+              disabled={tripped}
+              onClick={() => {
+                globalAct.reset()
+                setGlobal('halt')
+              }}
+            >
+              {tripped ? 'Halted' : 'Halt all'}
+            </Button>
+            <Button
+              size="xs"
+              variant="secondary"
+              onClick={() => {
+                globalAct.reset()
+                setGlobal('resume')
+              }}
+            >
               Reset (logged)
             </Button>
-          ) : (
-            <Button size="xs" variant="danger" onClick={() => setHalting(true)}>
-              Halt all
-            </Button>
-          )}
-          <ConfirmDialog
-            open={halting}
-            onCancel={() => setHalting(false)}
-            title="Halt all trading?"
-            consequence="Every strategy stops placing orders immediately, on every venue. Open positions are not closed. The reset is logged and requires typing HALT."
-            typeToConfirm="HALT"
-            confirmLabel="Halt all"
-            onConfirm={() => {
-              setHalting(false)
-              void api.post('/api/trading/kill')
-            }}
+          </div>
+          <GlobalActionDialog
+            key={global ?? 'closed'}
+            action={global}
+            halted={scopes.data ? scopes.data.halted_scopes : null}
+            busy={globalAct.isPending}
+            error={globalAct.isError ? strategyActionRefusal(globalAct.error) : null}
+            onCancel={() => setGlobal(null)}
+            onConfirm={(built) => globalAct.mutate(built)}
           />
         </PanelBody>
       </Panel>

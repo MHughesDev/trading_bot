@@ -1015,6 +1015,35 @@ export const deskApi = {
       body,
     ),
 
+  /**
+   * The global halt and its reset (COMP-007 §5; AGENT-012 §2.4, §11).
+   *
+   * Both were posted from the Monitor panel with **no body at all**. `Halt all`
+   * survived it — `trip_kill_switch` takes `Option<Json<KillBody>>` and invents
+   * the reason "manual kill from /api/trading/kill" — but `reset_kill_switch`
+   * takes `Json<ResumeBody>` by value, so a bodiless POST is rejected by the
+   * extractor before the handler runs. `Reset (logged)` could not ever have
+   * worked, and because the call was a bare `void api.post(…)` it said nothing
+   * when it did not: the operator clicks the control that lets trading start
+   * again, sees no change, and has no way to tell a refusal from a switch that
+   * is simply slow to clear.
+   *
+   * Deliberately outside `optional()`, like `strategyAction` and for the same
+   * reason: the 403 from `permits_monitor_control` and the 409 `reset_refused`
+   * from the rate limit are answers a person has to read, and folding them into
+   * `null` puts "it worked" and "it did not" on the same screen.
+   */
+  haltAll: (reason: string) =>
+    client.post<Record<string, unknown>>('/api/trading/kill', { reason }),
+
+  /**
+   * `confirm_scope` is compared byte for byte against `Scope::Global`'s
+   * `Display`, which is the literal word `global`, and `reason` must be
+   * non-empty. Both refusals are stated in the dialog before the request.
+   */
+  resumeAll: (body: { confirm_scope: string; reason: string }) =>
+    client.post<Record<string, unknown>>('/api/trading/resume', body),
+
   // — Controls. Pause/resume/escalate are ✗; steer and cancel exist. —
   steer: (sessionId: string, body: { kind: 'steer' | 'interrupt' | 'stop' | 'answer'; text?: string }) =>
     client.post(`/api/agent/sessions/${sessionId}/steer`, body),

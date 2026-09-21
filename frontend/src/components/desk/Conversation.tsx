@@ -28,7 +28,7 @@ import {
   pendingApprovals,
   type PanelTab,
 } from './RightPanel'
-import { StageStrip, TierBadge, type IdResolver } from './Shared'
+import { StageStrip, TierBadge, tierTiles, type IdResolver } from './Shared'
 
 /**
  * The set of ids the platform can actually open.
@@ -46,6 +46,21 @@ import { StageStrip, TierBadge, type IdResolver } from './Shared'
  * the platform measured for itself. The resolver is the one place that knows
  * which tool produced which id, so it is the place the mark has to travel from.
  */
+/**
+ * The age to put on the stale badge, or `null` when there is no age to give.
+ *
+ * The header rendered `` `${stream.staleForSecs ?? 0}s` ``, and `staleForSecs`
+ * is measured from a clock that starts at mount — so a stream that dropped
+ * before delivering a single frame showed **"0s old"**, which is what a
+ * perfectly fresh stream shows. §14 asks a disconnected desk to keep the last
+ * known state "marked stale with age"; where there is no last known state there
+ * is no age, and the `??` made the two readings identical.
+ */
+export function staleAge(secs: number | null): string | null {
+  if (secs === null || !Number.isFinite(secs)) return null
+  return `${Math.max(0, Math.round(secs))}s`
+}
+
 export function makeResolver(state: WorkingState | null, cards: DeskCard[]): IdResolver {
   const known = new Map<string, { label: string; kind: string; mark?: ProvenanceMark | null }>()
   for (const e of state?.evidence ?? []) known.set(e.id, { label: `from ${e.tool}, step ${e.step}`, kind: 'evidence' })
@@ -102,6 +117,11 @@ export function Conversation({
 
   const latestTurn = convo.data?.turns?.[convo.data.turns.length - 1] ?? null
   const runId = latestTurn?.run_id ?? null
+  // Three readings, because `=== true` gave a conversation that could not be
+  // read the same badge as one sitting idle. `idle` is the calm word on a header
+  // whose other words are `working` and `paused`, and a run nobody can see the
+  // state of is not calm.
+  const convoKnown = convo.data !== undefined && convo.data !== null
   const running = convo.data?.conversation.running === true
 
   // The live stream, with the polling fallback behind it. `useDeskStream`
@@ -276,13 +296,13 @@ export function Conversation({
     void conversationsApi.send(conversationId, `${preamble}\n${s.question}`)
   }
 
-  const profileList = (profiles.data?.profiles ?? []).map((p) => ({
-    id: p.model_id,
-    label: p.model_id,
-    tier: p.tier,
-    measured: p.multi_step_evidence !== null || !p.is_local,
-    frontier: p.tier === 'frontier',
-  }))
+  // `tierTiles`, shared with desk home, shared in turn with the Models page's
+  // `profileIsMeasured`. This was the **third** copy of
+  // `p.multi_step_evidence !== null || !p.is_local`: S-6.20 removed it from the
+  // Models page and the two surfaces that draw the same badge kept it. This one
+  // is the badge in the conversation header — the one beside a running turn,
+  // and the one the composer's "unmeasured" warning is supposed to agree with.
+  const profileList = tierTiles(profiles.data?.profiles)
   const chosen = profileList.find((p) => p.id === model) ?? profileList[0]
 
   return (
@@ -298,8 +318,8 @@ export function Conversation({
             <StageStrip stage={workingState.stage} />
           </>
         )}
-        <Badge tone={running ? 'accent' : 'neutral'}>
-          {paused ? 'paused' : running ? 'working' : 'idle'}
+        <Badge tone={running ? 'accent' : convoKnown ? 'neutral' : 'warn'} data-testid="convo-status">
+          {paused ? 'paused' : running ? 'working' : convoKnown ? 'idle' : 'status unknown'}
         </Badge>
         {/* §2b: a session's journal says so in the header, with its agenda
             depth. The depth is the list's `agenda_open`, which is `null` when
@@ -316,7 +336,14 @@ export function Conversation({
             </span>
           </>
         )}
-        {stream.state === 'stale' && <StaleBadge age={`${stream.staleForSecs ?? 0}s`} />}
+        {stream.state === 'stale' &&
+          (staleAge(stream.staleForSecs) === null ? (
+            <Badge tone="warn" data-testid="stream-never-connected">
+              disconnected · nothing received
+            </Badge>
+          ) : (
+            <StaleBadge age={staleAge(stream.staleForSecs) as string} />
+          ))}
         {workingState && (
           <span className="sub">
             trials {workingState.budget.trials_spent} · n_eff{' '}

@@ -16,9 +16,10 @@ import { Field, Input } from '@/components/primitives/Field'
 import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'
 import { EmptyState } from '@/components/primitives/States'
 import { LLM_PROVIDERS, conversationsApi, llmApi, type AgentProfile, type LlmProvider } from '@/api/agent'
-import { TierBadge } from './Shared'
+import { TierBadge, profileIsMeasured } from './Shared'
 
-function ProviderCard({
+/** Exported so its three credential states can be exercised without a network. */
+export function ProviderCard({
   provider,
   label,
   needsKey,
@@ -29,7 +30,15 @@ function ProviderCard({
   provider: LlmProvider
   label: string
   needsKey: boolean
-  configured: boolean
+  /**
+   * `null` when `/api/llm/credentials` did not answer.
+   *
+   * Never folded into `false`. "not configured" is a statement about the
+   * platform's stored keys, and it was being made from a request that may never
+   * have come back — with a **Connect** button beside it inviting somebody to
+   * paste a key the platform may already hold.
+   */
+  configured: boolean | null
   keyLast4: string | null
   baseUrl: string | null
 }) {
@@ -67,7 +76,9 @@ function ProviderCard({
     <details className="desk-card">
       <summary className="desk-card-hd" style={{ cursor: 'pointer' }}>
         <strong style={{ fontSize: 'var(--t-12)' }}>{label}</strong>
-        {configured ? (
+        {configured === null ? (
+          <Badge tone="warn">state unknown</Badge>
+        ) : configured ? (
           <Badge tone="pos">connected{keyLast4 ? ` ····${keyLast4}` : ''}</Badge>
         ) : (
           <Badge tone="neutral">not configured</Badge>
@@ -99,9 +110,9 @@ function ProviderCard({
           loading={save.isPending}
           onClick={() => save.mutate()}
         >
-          {configured ? 'Update' : 'Connect'}
+          {configured === null ? 'Save' : configured ? 'Update' : 'Connect'}
         </Button>
-        {configured && (
+        {configured === true && (
           <Button size="xs" variant="secondary" loading={remove.isPending} onClick={() => remove.mutate()}>
             Remove
           </Button>
@@ -111,25 +122,11 @@ function ProviderCard({
   )
 }
 
-/**
- * Whether the platform holds a calibration row for this profile.
- *
- * `multi_step_evidence` is the only measurement this platform records today.
- * No evidence means unmeasured; it never means "probably fine".
- *
- * The badge used to be given `measured || !p.is_local`, so **every hosted
- * profile was declared measured** on the strength of being hosted — a default
- * standing in for a measurement, which is the one thing S-6.20's acceptance
- * names. The card then printed "calibration: unmeasured" three lines below the
- * badge saying it was measured, and the badge is the half a person reads at a
- * glance.
- *
- * Whether a model is hosted is an argument about whether it *needs* measuring.
- * It is not evidence that it was.
- */
-export function profileIsMeasured(p: Pick<AgentProfile, 'multi_step_evidence'>): boolean {
-  return p.multi_step_evidence !== null
-}
+// The measurement rule lives beside the badge it feeds (`Shared.tsx`), because
+// three surfaces drew this badge and all three had spelled it out themselves.
+// Re-exported here so `profileIsMeasured` stays importable from the page whose
+// acceptance names it.
+export { profileIsMeasured } from './Shared'
 
 export function ProfileCard({ p }: { p: AgentProfile }) {
   const measured = profileIsMeasured(p)
@@ -203,7 +200,7 @@ export function Models() {
                 provider={p.id}
                 label={p.label}
                 needsKey={p.needsKey}
-                configured={s?.configured ?? false}
+                configured={creds.data === undefined ? null : (s?.configured ?? false)}
                 keyLast4={s?.key_last4 ?? null}
                 baseUrl={s?.base_url ?? null}
               />

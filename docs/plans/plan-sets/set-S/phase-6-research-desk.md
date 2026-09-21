@@ -136,9 +136,79 @@ sentence agrees for the kill switch. The server's requirement was implemented an
 §11's sentence was not read as licence to ship a one-click resume.
 
 
+### The fourth track swept for the pattern, and found the two worst instances
+
+Three tracks had each found the same shape by accident — an unknown state
+rendered as the safe one. The fourth went looking for it on purpose, across
+`components/desk/` and `pages/`, asking one question of every `?? 0`,
+`?? false`, `=== true` and `data?.`: **what does this render when the request
+failed, versus when the answer was genuinely empty?**
+
+**The kill-switch banner rendered nothing at all on a failed read.**
+
+```ts
+export function killSwitchTripped(s: KillSwitchState | null | undefined): boolean {
+  if (!s) return false
+```
+
+The banner appears on every route, so **its absence is the claim that trading is
+fine**. A `/api/trading/status` that 500'd, dropped or was never reachable
+produced exactly the same screen as a healthy platform. There is a third outcome
+now, and it says so in those words: *"Trading state unknown — this is not the
+same as trading being armed."* Silent only while the first read is in flight.
+
+**`Reset (logged)` had never once reset anything.** The client posted
+`/api/trading/resume` with **no body**; `reset_kill_switch` takes
+`Json(body): Json<ResumeBody>` *by value*, so axum's extractor rejected every
+click before the handler ran, into a dropped promise. `Halt all` had the kinder
+signature (`Option<Json<KillBody>>`) and the same silence — a 403 from
+`permits_monitor_control` reached nobody, and it logged the reason *"manual kill
+from /api/trading/kill"* against a human's name. Both now refuse **here** what
+the route refuses **there**, with `confirm_scope` compared case-sensitively
+against `Scope::Global`'s own `Display`.
+
+**And a third copy of an expression that had already been deleted once.**
+`measured: p.multi_step_evidence !== null || !p.is_local` — removed from
+`Models.tsx` by an earlier track — was still in `DeskHome.tsx` **and**
+`Conversation.tsx`, so a hosted profile read as calibrated on two surfaces.
+Removing one instance of a rule and leaving two is the same shape as the feature
+registry that was "removed" while its table stayed behind. It is one shared
+function now, beside the only thing that consumes it.
+
+Six more, each with a test that would have failed before: the book said *"the
+monitor is not built yet"* about a monitor that ships; "No capability profile is
+configured" was printed from a request that may never have returned; a
+conversation nobody could read showed `idle`, the calm word; a stream that
+dropped before delivering a frame showed **"0s old"**; the proposals queue — which
+licenses rings 1 and 2 — went **completely blank** on any non-404 failure; and
+every provider read *not configured*, with **Connect** beside it, from a
+credential list that never answered.
+
+**Frontend: 239 → 287 tests in 32 files.** Nine more surfaces were checked and
+found correct, and the checking is recorded beside the fixes — a sweep that only
+reports what it changed cannot be reviewed.
+
+### What this track did *not* do, and why it matters more than what it did
+
+It reported **no task finished to `DONE`**, and named the reason: the two closest
+candidates, S-6.3 and S-6.13, already meet their written acceptance line by line.
+Changing them would have counted verification as a fix, which an earlier track
+was flagged for.
+
+That is the honest read of this phase now. **It is not short of frontend effort;
+it is short of server fields.** Environment (live/paper) is not in
+`list_strategies`, so §2.4's distinction cannot be drawn without inferring it
+from a naming convention — which is how a paper strategy comes to be read as
+live. Tier, current step, tokens and cache are not on
+`GET /api/agent/conversations`, so four of §2.2's Running-now columns have no
+source. Per-row Pause is in `UNBUILT`.
+
+Until those exist, phase 6's remaining `PARTIAL`s cannot close from this side.
+
+
 ---
 
-## Three desk tracks, 2026-09-21 — and what they found
+## Four desk tracks, 2026-09-21 — and what they found
 
 **The desk's failure mode is a `null` literal with a phase number attached to
 it.** `Conversation.tsx` handed six tabs `={null}` or `={[]}`, each explaining its
