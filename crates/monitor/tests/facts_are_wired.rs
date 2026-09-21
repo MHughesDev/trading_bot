@@ -235,6 +235,100 @@ fn every_table_a_fact_writes_to_is_one_the_order_gate_is_refreshed_from() {
     }
 }
 
+/// The `monitor::<module>::…::<function>` paths named in a string.
+///
+/// A `needs` answer is a set of instructions for somebody in another crate, and
+/// the half of those instructions that lives *here* is checkable.
+fn monitor_paths(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("monitor::") {
+        rest = &rest[i + "monitor::".len()..];
+        let path: String = rest
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
+            .collect();
+        let segments: Vec<&str> = path.split("::").filter(|s| !s.is_empty()).collect();
+        if let (Some(module), Some(function)) = (segments.first(), segments.last()) {
+            if segments.len() >= 2 {
+                out.push(((*module).to_owned(), (*function).to_owned()));
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn the_receiving_half_a_blocked_fact_names_exists_in_this_crate() {
+    // A blocker is only actionable if the thing it tells the other crate to call
+    // is there to be called. `Fact::ReconciliationMismatch` spent a day naming
+    // `MonitorStore::carry_out_fact` — which exists, but which asks its caller to
+    // build a `FactAction` and a `DependencyMap` first, three concepts a crate
+    // reconciling positions has no reason to know. So the instruction is checked
+    // against this crate's source: a `needs` that names a function nobody wrote
+    // is a blocker nobody can clear, which is the same defect one level up.
+    let mut checked = 0;
+    for kind in FactKind::all() {
+        let Wiring::Unwired { needs, .. } = kind.wiring() else {
+            continue;
+        };
+        for (module, function) in monitor_paths(needs) {
+            let file = format!("src/{module}.rs");
+            let source = production_source(&file);
+            assert!(
+                source.contains(&format!("fn {function}")),
+                "Fact::{} says to call monitor::{module}::…::{function}, and {file} has no \
+                 such function outside its tests",
+                kind.as_str()
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked > 0,
+        "no `needs` answer named a function in this crate; the scan is broken, not satisfied"
+    );
+}
+
+#[test]
+fn a_maintenance_window_is_consulted_by_something_that_runs() {
+    // COMP-007 §4.3 in the same shape as §4.1's facts, and for the same reason.
+    // On 2026-09-21 `MaintenanceWindow` was built, persisted, opened by one route
+    // and listed by another, and **nothing consulted one**: `suppresses` had no
+    // caller outside its own tests and `MonitorEvent::suppressed_by` had none at
+    // all, though migration 0075 added `monitor.events.suppressed_by_window` to
+    // hold the answer. Every test passed. A window that suppresses nothing is a
+    // form the operator fills in while the deploy halts trading anyway.
+    let platform = production_source("src/platform.rs");
+    assert!(
+        platform.contains("suppressing_window("),
+        "nothing in src/platform.rs asks whether a window is open; §4.3 is decorative again"
+    );
+    let service = production_source("src/service.rs");
+    assert!(
+        service.contains("suppressed_by("),
+        "no production path records `suppressed_by_window`, so a deploy that swallowed a \
+         platform fault would leave nobody able to tell that it had"
+    );
+    // And the suppression must be reachable from the loop that actually runs,
+    // rather than from a public function nothing calls — this crate's dominant
+    // defect shape.
+    let run = function_body(&service, "pub async fn run(self) {");
+    assert!(
+        run.len() > 200,
+        "the run body did not parse; the guard is broken, not satisfied"
+    );
+    assert!(
+        run.contains("assess_platform("),
+        "MonitorService::run does not assess platform health, so the only family a window \
+         may suppress is never judged and the window has nothing to suppress"
+    );
+    assert!(
+        run.contains("run_scheduled_drill("),
+        "MonitorService::run never rehearses: COMP-007 §4.2's monthly drill has no caller"
+    );
+}
+
 /// `monitor::service::LeaseWatcher` → `src/service.rs`.
 ///
 /// The path names a module and a type; only the module segment maps to a file.

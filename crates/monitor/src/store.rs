@@ -18,6 +18,7 @@ use crate::facts::FactAction;
 use crate::family::{Fact, Family};
 use crate::lease::{Lease, LeaseStatus, LeaseTerms};
 use crate::limits::{ControlLimit, LimitBook, LimitMethod};
+use crate::platform::ComponentBeat;
 use crate::precision::{FamilyPrecision, PrecisionLabel};
 use crate::window::MaintenanceWindow;
 
@@ -140,6 +141,42 @@ impl MonitorStore {
         Ok(())
     }
 
+    /// Every component's heartbeat, with staleness decided per row against that
+    /// row's own declared cadence (COMP-007 §3 "Platform").
+    ///
+    /// Every row rather than only the stale ones, because the question
+    /// [`platform::assess`][a] answers is about *components* and not about rows:
+    /// nothing deletes heartbeats, so a restarted process leaves a permanently
+    /// stale row beside its live one, and a caller given only the stale rows
+    /// cannot tell the difference between a component that is down and one that
+    /// has ever been redeployed. That distinction is the difference between an
+    /// ordinary deploy and a global halt.
+    ///
+    /// [a]: crate::platform::assess
+    pub async fn component_beats(&self, missed: i64) -> Result<Vec<ComponentBeat>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT component, instance,
+                    beat_at < now() - (cadence_ms * $1 || ' milliseconds')::interval AS stale
+               FROM monitor.heartbeat
+              ORDER BY component, instance",
+        )
+        .bind(missed)
+        .fetch_all(&self.pg)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| ComponentBeat {
+                component: r.get("component"),
+                instance: r.get("instance"),
+                // A row whose staleness the database could not decide — a null
+                // `beat_at` cannot happen under the schema, but the expression is
+                // nullable to Postgres — counts as stale. The safe direction for
+                // a liveness question is "not seen".
+                stale: r.get::<Option<bool>, _>("stale").unwrap_or(true),
+            })
+            .collect())
+    }
+
     /// Components that have missed `missed` consecutive beats as of `now`.
     pub async fn stale_components(&self, missed: i64) -> Result<Vec<String>, StoreError> {
         let rows = sqlx::query(
@@ -249,9 +286,13 @@ impl MonitorStore {
             action.scope(),
             fact.family(),
             match action {
-                FactAction::Halt(_) => EventKind::Halted,
+                // The same kind for two actions, and deliberately: a lease gap
+                // *is* a halt from the order path's side — every order is refused
+                // with `monitor_unavailable` — and the timeline is what the
+                // operator reads to find out why. What differs is which table
+                // carried the decision, which `FactAction::gate_table` answers.
+                FactAction::Halt(_) | FactAction::RecordLeaseGap => EventKind::Halted,
                 FactAction::Scale { .. } => EventKind::ScaledDown,
-                FactAction::RecordLeaseGap => EventKind::Halted,
             },
             action.actor(),
         )
@@ -277,6 +318,72 @@ impl MonitorStore {
             // `FactAction::RecordLeaseGap`. What was missing is this row.
             FactAction::RecordLeaseGap => self.record_event(&event).await,
         }
+    }
+
+    /// The receiving half of a venue reconciliation mismatch (COMP-007 §4, §8.3;
+    /// S-7.6).
+    ///
+    /// One call, because the alternative is four: `facts::decide`, a
+    /// `DependencyMap`, a state vector and a loop, in a crate whose author is
+    /// reconciling positions and has no reason to know what any of them are. A
+    /// caller assembling its own [`FactAction`] could pair a mismatch with a
+    /// scale-down, or with the wrong venue, and every test on this side would
+    /// still pass.
+    ///
+    /// **The order is the whole point.** `reconciliation::divergence::
+    /// check_divergence` today calls `KillSwitch::trip_scope` and writes no row.
+    /// The mirror is refreshed from `monitor.kill_switch` by
+    /// [`KillSwitch::replace_halted`][rh], which **replaces** — so that halt is
+    /// not merely unrecorded, it is erased within one refresh cadence and the
+    /// venue that disagrees with our book about what is owned resumes trading
+    /// about five seconds later. Here the durable row is written first and the
+    /// mirror second, so the venue is halted before this returns and stays halted
+    /// after the next refresh.
+    ///
+    /// If the durable write fails, the mirror is left alone and the error is
+    /// returned. That is not a gap: the database this could not write is the same
+    /// database [`LeaseWatcher::refresh`][r] reads the lease from, so the lease
+    /// gate has already refused every order platform-wide (§4 "fail closed"). An
+    /// in-memory trip with nothing behind it would add five seconds of protection
+    /// and then silently resume, which is the failure this method exists to
+    /// remove.
+    ///
+    /// Returns the scope that is now halted, so the caller logs the venue it
+    /// halted rather than the venue it meant to.
+    ///
+    /// [rh]: risk::KillSwitch::replace_halted
+    /// [r]: crate::service::LeaseWatcher::refresh
+    pub async fn carry_out_mismatch(
+        &self,
+        venue: &str,
+        gate: &risk::KillSwitch,
+    ) -> Result<Scope, StoreError> {
+        if venue.trim().is_empty() {
+            return Err(StoreError::Invalid(
+                "a reconciliation mismatch must name the venue it is at".to_owned(),
+            ));
+        }
+        let fact = Fact::ReconciliationMismatch {
+            venue: venue.to_owned(),
+        };
+        // Through `facts::decide` rather than naming the halt here, so the venue
+        // scoping and the "that venue and no other" rule stay in one place for
+        // every raise site.
+        let actions = crate::facts::decide(&fact, &crate::evaluate::DependencyMap::new(), &[]);
+        let mut halted = None;
+        for action in &actions {
+            self.carry_out_fact(&fact, action).await?;
+            halted = Some(action.scope());
+        }
+        let halted = halted.ok_or_else(|| {
+            StoreError::Invalid(format!(
+                "a reconciliation mismatch at {venue} decided nothing at all"
+            ))
+        })?;
+        // Durable first, mirror second. Now, rather than at the next refresh, so
+        // there is no window in which the row says halted and the gate does not.
+        gate.trip_scope(&halted);
+        Ok(halted)
     }
 
     /// When this scope was last reset, for the rate limit.
@@ -605,8 +712,8 @@ impl MonitorStore {
         sqlx::query(
             "INSERT INTO monitor.drill
                (drill_id, scope, trigger_kind, started_at, cadence_ms, detection_ms,
-                propagation_ms, notification_ms, passed, refused_real, operator)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                propagation_ms, notification_ms, passed, refused_real, operator, notes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
         )
         .bind(drill.drill_id)
         .bind(drill.scope.to_string())
@@ -619,8 +726,77 @@ impl MonitorStore {
         .bind(drill.passed())
         .bind(drill.refused_real)
         .bind(&drill.operator)
+        .bind(drill.notes.as_deref())
         .execute(&self.pg)
         .await?;
+        Ok(())
+    }
+
+    /// When a drill last ran, for the monthly schedule (COMP-007 §4.2).
+    ///
+    /// `None` means no drill has ever been recorded, which the scheduler must
+    /// treat as **overdue** rather than as recent: a platform that has never
+    /// rehearsed the kill switch is the case §4.2 is about.
+    pub async fn last_drill_at(&self) -> Result<Option<DateTime<Utc>>, StoreError> {
+        let row = sqlx::query("SELECT max(started_at) AS last FROM monitor.drill")
+            .fetch_optional(&self.pg)
+            .await?;
+        Ok(row.and_then(|r| r.get::<Option<DateTime<Utc>>, _>("last")))
+    }
+
+    /// Whether an event is readable on the surface the operator reads.
+    ///
+    /// Used by [`Rehearsal`][r] to measure notification latency over the channel
+    /// that exists. A plain existence check rather than a scan of
+    /// [`Self::recent_events`], so the answer does not depend on how busy the
+    /// timeline was when the drill ran.
+    ///
+    /// [r]: crate::rehearsal::Rehearsal
+    pub async fn event_is_visible(&self, event_id: Uuid) -> Result<bool, StoreError> {
+        let row = sqlx::query("SELECT 1 AS present FROM monitor.events WHERE event_id = $1")
+            .bind(event_id)
+            .fetch_optional(&self.pg)
+            .await?;
+        Ok(row.is_some())
+    }
+
+    /// Put a rehearsed scope back, and record that the rehearsal ended.
+    ///
+    /// **Refuses any scope that can refuse a real order.** This is the one method
+    /// here that arms a halt without the §5 reset ritual — no typed confirmation,
+    /// no reason, no rate limit — and the only thing that makes that safe is that
+    /// it cannot be pointed at anything real. So that is a type check on
+    /// [`Scope::affects_real_flow`], not a convention: a `global`, `venue:` or
+    /// `strategy:` scope is rejected before a statement is prepared.
+    ///
+    /// A drill that left a halted row behind would be indistinguishable from a
+    /// real trip on the kill-switch page, and the first thing anyone would do is
+    /// reset it — which is the habit §4.3 exists to avoid teaching.
+    pub async fn end_drill(&self, scope: &Scope) -> Result<(), StoreError> {
+        if scope.affects_real_flow() {
+            return Err(StoreError::Invalid(format!(
+                "{scope} is not a drill scope; ending a rehearsal may never arm a real halt"
+            )));
+        }
+        let event = MonitorEvent::new(
+            scope.clone(),
+            Family::Platform,
+            EventKind::Drill,
+            crate::service::MONITOR_ACTOR,
+        )
+        .map_err(|e| StoreError::Invalid(e.to_string()))?
+        .with_reason("drill ended; the rehearsed scope is armed again");
+
+        let mut tx = self.pg.begin().await?;
+        insert_event(&mut tx, &event).await?;
+        sqlx::query(
+            "UPDATE monitor.kill_switch SET state = 'armed', updated_at = now()
+              WHERE scope = $1",
+        )
+        .bind(scope.to_string())
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -858,6 +1034,92 @@ async fn insert_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A store whose database cannot be reached, which is the failure the
+    /// ordering rule is about. `connect_lazy` never dials, so every statement
+    /// fails on use and nothing here touches a real platform.
+    fn unreachable_store() -> MonitorStore {
+        MonitorStore::new(
+            sqlx::postgres::PgPoolOptions::new()
+                // Short, so the suite measures the rule rather than sqlx's default
+                // half-minute wait for a host that is not there.
+                .acquire_timeout(std::time::Duration::from_millis(200))
+                .connect_lazy("postgres://nobody@127.0.0.1:1/none")
+                .expect("lazy pool"),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_mismatch_that_could_not_be_recorded_does_not_trip_the_mirror() {
+        // The rule S-7.6 exists for, in the direction that is easy to get wrong.
+        //
+        // `KillSwitch::replace_halted` *replaces* the scoped view from
+        // `monitor.kill_switch` on every refresh, so an in-memory trip with no
+        // durable row behind it is erased within one cadence: the venue reads as
+        // halted for about five seconds and then silently resumes trading. That
+        // is strictly worse than not halting, because the five seconds are the
+        // ones anybody watching would see.
+        //
+        // And nothing is lost by declining: the database this could not write is
+        // the same one the lease lives in, so `LeaseWatcher::refresh` is already
+        // failing to read it and the lease gate is refusing every order platform
+        // -wide (§4 "fail closed").
+        let gate = risk::KillSwitch::new(false);
+        let err = unreachable_store()
+            .carry_out_mismatch("kraken", &gate)
+            .await
+            .expect_err("an unreachable database cannot record a halt");
+        assert!(matches!(err, StoreError::Db(_)), "{err}");
+        assert!(
+            !gate.is_active_scope(&Scope::venue("kraken")),
+            "a mirror trip with no durable row behind it is erased within one refresh"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_mismatch_must_name_the_venue_it_is_at() {
+        // §4 halts the venue that disagrees and leaves the others trading. A blank
+        // venue would produce `venue:` — a scope the kill-switch CHECK rejects and
+        // `Scope::from_str` refuses, so the halt would be lost at the database
+        // rather than misapplied. Refusing here says so where the caller is.
+        let gate = risk::KillSwitch::new(false);
+        let err = unreachable_store()
+            .carry_out_mismatch("   ", &gate)
+            .await
+            .expect_err("an unnamed venue must be refused");
+        assert!(matches!(err, StoreError::Invalid(_)), "{err}");
+    }
+
+    #[tokio::test]
+    async fn ending_a_rehearsal_can_never_arm_a_real_halt() {
+        // `end_drill` is the one method here that arms a scope with none of §5's
+        // ritual — no typed confirmation, no reason, no rate limit. The only thing
+        // that makes that safe is that it cannot be pointed at anything real, so
+        // the refusal is checked before a statement is prepared, over every scope
+        // shape that can refuse an order.
+        let store = unreachable_store();
+        for scope in [Scope::Global, Scope::venue("kraken"), Scope::strategy("s-1")] {
+            let err = store
+                .end_drill(&scope)
+                .await
+                .expect_err("a real scope must be refused");
+            assert!(
+                matches!(err, StoreError::Invalid(_)),
+                "{scope} was refused for the wrong reason: {err}"
+            );
+        }
+        // And the anti-vacuity half: a drill scope gets as far as the database,
+        // which is where this store fails. A refusal that rejected everything
+        // would pass the loop above and protect nothing.
+        let err = store
+            .end_drill(&Scope::drill("rehearsal"))
+            .await
+            .expect_err("this store has no database");
+        assert!(
+            matches!(err, StoreError::Db(_)),
+            "a drill scope must be accepted by the check and fail at the database: {err}"
+        );
+    }
 
     #[test]
     fn a_non_finite_reading_stores_no_value_rather_than_zero() {

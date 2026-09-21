@@ -371,7 +371,9 @@ mod tests {
             PromotionRefusal::FamilyUnmeasured { families, .. } => {
                 assert_eq!(families, vec![Family::Behaviour, Family::Pnl]);
             }
-            other => panic!("wrong refusal: {other:?}"),
+            other @ PromotionRefusal::NoLimitsDeclared { .. } => {
+                panic!("wrong refusal: {other:?}")
+            }
         }
     }
 

@@ -65,6 +65,15 @@ pub struct DrillOutcome {
     /// [`DrillOutcome::record`].
     pub refused_real: bool,
     pub operator: String,
+    /// What the three latencies were measured over.
+    ///
+    /// §4.2 names detection, propagation and *notification*, and the notification
+    /// channel it describes — a desk banner and a notification rule — does not
+    /// exist (ADR-S7-11). A number in that column with nothing saying what it
+    /// measured is a number that will be read as the thing §4.2 described, so
+    /// [`crate::rehearsal::Rehearsal`] writes down which channel it timed.
+    /// `None` for a drill whose numbers were supplied rather than measured.
+    pub notes: Option<String>,
 }
 
 /// Why a drill could not be recorded.
@@ -132,7 +141,15 @@ impl DrillOutcome {
             notification_ms,
             refused_real,
             operator: operator.to_owned(),
+            notes: None,
         })
+    }
+
+    /// Say what the latencies were measured over.
+    #[must_use]
+    pub fn with_notes(mut self, notes: impl Into<String>) -> Self {
+        self.notes = Some(notes.into());
+        self
     }
 
     /// The verdict, which is arithmetic rather than opinion: propagation within one

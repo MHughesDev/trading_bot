@@ -62,6 +62,14 @@ pub const RUNTIME_ACTOR: &str = "runtime";
 /// condition* rather than independent samples.
 pub const MEASUREMENT_WINDOW_MINUTES: i64 = 60;
 
+/// How often the monitor rehearses its own kill switch (COMP-007 §4.2:
+/// "monthly regardless").
+///
+/// Thirty days rather than a calendar month, because a rehearsal schedule that
+/// depends on which month it is has an edge case nobody tests and the whole
+/// mechanism exists to remove the path nobody exercises.
+pub const DRILL_INTERVAL_DAYS: i64 = 30;
+
 /// What one cadence decided about one strategy.
 ///
 /// The events are in the order they must be written, which always begins with the
@@ -404,6 +412,94 @@ impl MonitorService {
         Ok(())
     }
 
+    /// Judge the platform's own health, and let an open window speak (§3, §4,
+    /// §4.3).
+    ///
+    /// The half of §4's platform row that decides; [`crate::platform::assess`] is
+    /// the half that judges, and it is pure. Three outcomes and each writes
+    /// something:
+    ///
+    /// - **Halt** — `monitor.kill_switch` at `global`, through [`MonitorStore::trip`]
+    ///   so the record is in the same transaction and comes first (§8.5). This is
+    ///   the one automatic action in the crate that stops the whole book, which is
+    ///   why the rules in `platform` about *which* components count are enforced
+    ///   by tests rather than by care.
+    /// - **Suppressed** — an event carrying `suppressed_by_window`, and no halt.
+    ///   The row is the difference between a maintenance window and a hole: a
+    ///   deploy that swallowed a platform fault silently would leave nobody able
+    ///   to tell afterwards that it had.
+    /// - **Recovered** — an event, and **no reset**. §5 keeps the reset human:
+    ///   the components beating again is a fact about the components, not a
+    ///   decision to trade.
+    ///
+    /// Only on the edges. A verdict repeated every cadence through an outage
+    /// writes nothing after the first, for the reason [`lease_note`] exists.
+    pub async fn assess_platform(
+        &self,
+        watch: &mut crate::platform::PlatformWatch,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<crate::platform::PlatformVerdict, crate::store::StoreError> {
+        let beats = self
+            .store
+            .component_beats(crate::platform::MISSED_BEATS_BEFORE_HALT)
+            .await?;
+        let windows = self.store.open_windows().await?;
+        let verdict = crate::platform::assess(&beats, &windows, now);
+
+        let Some(note) = watch.observe(&verdict) else {
+            return Ok(verdict);
+        };
+        let reason = verdict.reason();
+        match (note, &verdict) {
+            (crate::platform::PlatformNote::Lost, crate::platform::PlatformVerdict::Halt { .. }) => {
+                let event = MonitorEvent::new(
+                    risk::Scope::Global,
+                    Family::Platform,
+                    EventKind::Tripped,
+                    MONITOR_ACTOR,
+                )
+                .map_err(|e| crate::store::StoreError::Invalid(e.to_string()))?
+                .with_reason(reason.clone());
+                self.store.trip(&event, &reason).await?;
+            }
+            (
+                crate::platform::PlatformNote::Lost,
+                crate::platform::PlatformVerdict::Suppressed { window_id, .. },
+            ) => {
+                // A warning rather than a trip, because nothing was tripped. The
+                // window id is on the row, so "which deploy decided this" is a
+                // question the timeline answers without anyone reconstructing it.
+                let event = MonitorEvent::new(
+                    risk::Scope::Global,
+                    Family::Platform,
+                    EventKind::Warning,
+                    MONITOR_ACTOR,
+                )
+                .map_err(|e| crate::store::StoreError::Invalid(e.to_string()))?
+                .with_reason(reason.clone())
+                .suppressed_by(*window_id);
+                self.store.record_event(&event).await?;
+            }
+            (crate::platform::PlatformNote::Recovered, _) => {
+                let event = MonitorEvent::new(
+                    risk::Scope::Global,
+                    Family::Platform,
+                    EventKind::Resumed,
+                    MONITOR_ACTOR,
+                )
+                .map_err(|e| crate::store::StoreError::Invalid(e.to_string()))?
+                .with_reason(
+                    "every platform component is beating again; any halt taken for this \
+                     fault stands until a human resets it",
+                );
+                self.store.record_event(&event).await?;
+            }
+            // `Lost` with a healthy verdict cannot be produced by `observe`.
+            (crate::platform::PlatformNote::Lost, crate::platform::PlatformVerdict::Healthy) => {}
+        }
+        Ok(verdict)
+    }
+
     /// One whole cadence over the book: measure, judge, record, move.
     ///
     /// The limits are reloaded first, every cadence, so a limit declared or
@@ -515,6 +611,69 @@ impl MonitorService {
         Ok(decision)
     }
 
+    /// Whether a drill is due (COMP-007 §4.2: "monthly regardless").
+    ///
+    /// `None` — nothing has ever been rehearsed — is **due**, not recent. A
+    /// platform that has never exercised its kill switch is exactly the case §4.2
+    /// is about: the most important path is the one path never taken, and it is
+    /// first taken on the day it matters, by someone under pressure.
+    #[must_use]
+    pub fn drill_is_due(last: Option<chrono::DateTime<Utc>>, now: chrono::DateTime<Utc>) -> bool {
+        match last {
+            None => true,
+            Some(t) => now - t >= chrono::Duration::days(DRILL_INTERVAL_DAYS),
+        }
+    }
+
+    /// How long a scheduled rehearsal may block the monitor's loop.
+    ///
+    /// Half the renewal interval, because the rehearsal runs **on the loop that
+    /// renews the lease**. A rehearsal allowed to wait a cadence or two would
+    /// lapse the lease of the process running it, and the platform would halt —
+    /// for real, on every order — while the monitor rehearsed how it halts the
+    /// platform. Half an interval leaves a whole renewal of slack for the
+    /// cleanup, the record and the next `tick`.
+    ///
+    /// This bounds *waiting*, not the verdict: `DrillOutcome::passed` still
+    /// compares propagation against the full cadence, and a rehearsal that runs
+    /// out of time reports no verdict rather than a failure.
+    #[must_use]
+    pub fn drill_deadline_ms(terms: &LeaseTerms) -> i64 {
+        (terms.renew_interval_ms() / 2).max(1)
+    }
+
+    /// Run the monthly drill if one is due, and say whether it passed.
+    ///
+    /// Failure to *run* one and failure to *pass* one are different answers and
+    /// the caller gets both: `Ok(None)` means none was due, `Ok(Some(outcome))`
+    /// means one ran and `outcome.passed()` says what it found.
+    ///
+    /// # Errors
+    /// Anything that stopped the rehearsal completing. A rehearsal that could not
+    /// measure its propagation returns an error rather than a failed drill; see
+    /// [`crate::rehearsal::RehearsalError::PropagationNotObserved`].
+    pub async fn run_scheduled_drill(
+        &self,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<Option<crate::drill::DrillOutcome>, crate::rehearsal::RehearsalError> {
+        let last = self.store.last_drill_at().await?;
+        if !Self::drill_is_due(last, now) {
+            return Ok(None);
+        }
+        // `MONITOR_ACTOR`, because no human asked: the schedule did. It is not an
+        // `agent:` actor and the drill table's CHECK agrees.
+        let rehearsal = crate::rehearsal::Rehearsal::new(
+            self.store.clone(),
+            self.terms.cadence_ms,
+            MONITOR_ACTOR,
+        )?
+        .within(Self::drill_deadline_ms(&self.terms));
+        let outcome = rehearsal
+            .run(crate::drill::DrillTrigger::Scheduled, "scheduled")
+            .await?;
+        Ok(Some(outcome))
+    }
+
     /// Run until cancelled.
     ///
     /// The lease comes first and the measurement second, in that order and never
@@ -535,6 +694,10 @@ impl MonitorService {
         // consecutive evaluations different from three separate ones, and a
         // cadence rebuilt each loop would never reach the third.
         let mut cadence = Cadence::default();
+        // Likewise one platform watch: its whole job is to tell one cadence from
+        // the next, and one rebuilt each loop would report every cadence of an
+        // outage as the first.
+        let mut platform = crate::platform::PlatformWatch::new();
         loop {
             if let Err(e) = self.tick().await {
                 // Not fatal, and not silent. The lease will lapse on its own and
@@ -576,6 +739,47 @@ impl MonitorService {
                 Err(e) => {
                     tracing::error!(error = %e, "the book went unjudged this cadence");
                 }
+            }
+            match self.assess_platform(&mut platform, Utc::now()).await {
+                Ok(verdict) if verdict.is_unhealthy() => {
+                    tracing::warn!(
+                        lost = ?verdict.lost(),
+                        reason = %verdict.reason(),
+                        "platform health"
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    // The platform went unjudged. Not fatal and not silent: the
+                    // database this could not read is the one the lease lives in,
+                    // so the lease gate is closing on its own if this persists.
+                    tracing::error!(error = %e, "platform health went unassessed this cadence");
+                }
+            }
+            match self.run_scheduled_drill(Utc::now()).await {
+                Ok(Some(outcome)) => {
+                    if outcome.passed() {
+                        tracing::info!(
+                            drill_id = %outcome.drill_id,
+                            propagation_ms = outcome.propagation_ms,
+                            "scheduled drill passed"
+                        );
+                    } else {
+                        // §4.2: a drill whose propagation exceeds one cadence is
+                        // the fail-closed design failing to hold. It blocks no
+                        // deploy — nothing is deploying — but it is the loudest
+                        // thing the monitor has to say short of losing its lease.
+                        tracing::error!(
+                            drill_id = %outcome.drill_id,
+                            propagation_ms = outcome.propagation_ms,
+                            cadence_ms = outcome.cadence_ms,
+                            "scheduled drill FAILED — the kill switch did not reach the gate \
+                             within one cadence"
+                        );
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => tracing::error!(error = %e, "the scheduled drill could not be run"),
             }
             tokio::time::sleep(interval).await;
         }

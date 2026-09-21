@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 use domain::{
-    money::Size,
+    money::{Price, Size},
     order::{OrderIntent, OrderType, Side},
     RiskRejection,
 };
@@ -54,10 +54,23 @@ macro_rules! db {
     };
 }
 
+/// A context an order can actually pass on.
+///
+/// The mark price is not decoration. `GateContext::for_manual_order` turns a
+/// `None` here into `Measured::No`, and `RiskGate::check` refuses such an order
+/// with `MarketDataUnavailable` **before** it ever reaches the kill switch — so
+/// with `None` every `is_ok()` assertion in this file was false and every
+/// `Err(..)` assertion was true for the wrong reason.
+///
+/// That went unnoticed because these drills return early without
+/// `MONITOR_TEST_DATABASE_URL`: they were green and vacuous, and COMP-007 §8.1,
+/// §8.2 and §8.3 named them as their verification. Four of them failed the first
+/// time they met a database, on 2026-09-21. The number is arbitrary; that it
+/// exists is not.
 fn ctx() -> GateContext {
     GateContext::for_manual_order(
         Decimal::ZERO,
-        None,
+        Some(Price::from_str("50000").unwrap()),
         Decimal::from_str("0.01").unwrap(),
         Decimal::from_str("0.001").unwrap(),
         Decimal::ZERO,
@@ -127,7 +140,8 @@ async fn killing_the_monitor_stops_order_flow_within_one_cadence() {
 
     watcher.refresh().await;
     assert!(ks.monitor_available(), "a live lease opens the gate");
-    assert!(gate.check(intent(), &ctx()).is_ok());
+    let first = gate.check(intent(), &ctx());
+    assert!(first.is_ok(), "{first:?}");
 
     // The monitor dies here. Nothing tells the runtime; the renewal simply stops.
     tokio::time::sleep(Duration::from_millis(
@@ -149,7 +163,8 @@ async fn killing_the_monitor_stops_order_flow_within_one_cadence() {
     // And restarting does not resume orders until the lease is valid again.
     service.tick().await.expect("the monitor comes back");
     watcher.refresh().await;
-    assert!(gate.check(intent(), &ctx()).is_ok());
+    let first = gate.check(intent(), &ctx());
+    assert!(first.is_ok(), "{first:?}");
 }
 
 #[tokio::test]
@@ -166,9 +181,10 @@ async fn a_database_the_runtime_cannot_read_closes_the_gate() {
         .await
         .expect("renew");
 
-    let (ks, gate, watcher) = runtime(&store);
+    let (_ks, gate, watcher) = runtime(&store);
     watcher.refresh().await;
-    assert!(gate.check(intent(), &ctx()).is_ok());
+    let first = gate.check(intent(), &ctx());
+    assert!(first.is_ok(), "{first:?}");
 
     pg.close().await;
     watcher.refresh().await;
@@ -423,7 +439,16 @@ async fn a_second_reset_within_five_minutes_is_refused_by_the_store() {
     store.reset(&request).await.expect("the first reset is allowed");
 
     // Trip again — a flapping fault — and try to reset straight back into it.
-    store.trip(&event, "flapped").await.expect("trip");
+    //
+    // A *new* event, because that is what a second incident is. Re-tripping with
+    // the same `MonitorEvent` reuses its `event_id` and the insert fails on
+    // `events_pkey`, which is the primary key doing its job: one row per thing
+    // that happened. The original of this test re-used it and never found out,
+    // because it returned early without a database.
+    let again = MonitorEvent::new(scope.clone(), Family::Pnl, EventKind::Halted, "monitor")
+        .expect("monitor")
+        .with_reason("flapped");
+    store.trip(&again, "flapped").await.expect("trip");
     let err = store.reset(&request).await;
     assert!(
         matches!(err, Err(monitor::store::StoreError::Reset(_))),
@@ -579,6 +604,247 @@ async fn a_slow_drill_cannot_be_recorded_as_having_passed() {
 
     sqlx::query("DELETE FROM monitor.drill WHERE drill_id = $1")
         .bind(slow.drill_id)
+        .execute(&pg)
+        .await
+        .ok();
+}
+
+// ── S-7.6 — the receiving half of a reconciliation mismatch ──────────────────
+
+#[tokio::test]
+async fn a_mismatch_halt_survives_the_refresh_that_erases_an_in_memory_one() {
+    // The defect, demonstrated side by side rather than described.
+    //
+    // `reconciliation::divergence::check_divergence` halts a venue by calling
+    // `KillSwitch::trip_scope` and writing nothing. `LeaseWatcher::refresh` calls
+    // `KillSwitch::replace_halted`, which **replaces** the scoped view with what
+    // `monitor.kill_switch` says — so that halt is not merely unrecorded, it is
+    // erased on the next refresh and the venue that disagrees with our book about
+    // what is owned resumes trading about five seconds later.
+    //
+    // Two venues, halted one way each, one refresh between them.
+    let pg = db!();
+    let store = MonitorStore::new(pg.clone());
+
+    let recorded = format!("kraken-{}", Uuid::new_v4());
+    let in_memory_only = format!("alpaca-{}", Uuid::new_v4());
+    let untouched = format!("coinbase-{}", Uuid::new_v4());
+
+    let terms = LeaseTerms::new(format!("drill-{}", Uuid::new_v4()), 60_000);
+    MonitorService::new(store.clone(), terms).tick().await.expect("renew");
+
+    let (ks, gate, watcher) = runtime(&store);
+    watcher.refresh().await;
+
+    // The way `crates/reconciliation` does it today.
+    ks.trip_scope(&Scope::venue(&in_memory_only));
+    // The way the receiving half does it: durable row first, mirror second.
+    let halted = store
+        .carry_out_mismatch(&recorded, &ks)
+        .await
+        .expect("the mismatch is recorded and the venue halted");
+    assert_eq!(halted, Scope::venue(&recorded));
+
+    // Before the refresh the two are indistinguishable from the gate's side,
+    // which is why this defect passes every test that stops here.
+    assert!(matches!(
+        gate.check(intent(), &ctx().on_venue(&recorded)),
+        Err(RiskRejection::KillSwitchActive)
+    ));
+    assert!(matches!(
+        gate.check(intent(), &ctx().on_venue(&in_memory_only)),
+        Err(RiskRejection::KillSwitchActive)
+    ));
+
+    // One refresh — the thing that happens every few seconds in production.
+    watcher.refresh().await;
+
+    assert!(
+        matches!(
+            gate.check(intent(), &ctx().on_venue(&recorded)),
+            Err(RiskRejection::KillSwitchActive)
+        ),
+        "a recorded mismatch must still be halted after the refresh that reads the table"
+    );
+    assert!(
+        gate.check(intent(), &ctx().on_venue(&in_memory_only)).is_ok(),
+        "this is the defect: an in-memory trip with no durable row is erased by \
+         replace_halted, and the venue silently resumes"
+    );
+    assert!(
+        gate.check(intent(), &ctx().on_venue(&untouched)).is_ok(),
+        "a mismatch at one venue says nothing about the others"
+    );
+
+    // §8.5: the record exists, it names the venue, and there is one of it.
+    let reason: String = sqlx::query_scalar(
+        "SELECT reason FROM monitor.kill_switch WHERE scope = $1 AND state = 'halted'",
+    )
+    .bind(halted.to_string())
+    .fetch_one(&pg)
+    .await
+    .expect("the durable row is there");
+    assert!(reason.contains(&recorded), "{reason}");
+    let events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM monitor.events WHERE scope = $1 AND kind = 'halted'",
+    )
+    .bind(halted.to_string())
+    .fetch_one(&pg)
+    .await
+    .expect("count");
+    assert_eq!(events, 1, "one incident, one trip record");
+
+    clear_scope(&pg, &halted.to_string()).await;
+}
+
+// ── S-7.13 — a drill that measures, and a window that suppresses ─────────────
+
+#[tokio::test]
+async fn a_drill_measures_its_own_propagation_and_leaves_nothing_behind() {
+    // COMP-007 §4.2. Until now the three latencies came from the request body of
+    // `POST /api/monitor/drill`, so "a drill whose propagation exceeds one cadence
+    // fails the deploy" was arithmetic over numbers the caller typed. These are
+    // measured: a real trip, a real read of `monitor.kill_switch`, a real
+    // `replace_halted` and a real `is_active_scope`.
+    let pg = db!();
+    let store = MonitorStore::new(pg.clone());
+
+    let rehearsal = monitor::Rehearsal::new(store.clone(), 60_000, "human:test")
+        .expect("a human may rehearse");
+    let outcome = rehearsal
+        .run(monitor::DrillTrigger::Manual, "track-d4")
+        .await
+        .expect("the rehearsal completes");
+
+    assert!(outcome.passed(), "propagation {}ms", outcome.propagation_ms);
+    assert!(!outcome.refused_real);
+    assert!(
+        matches!(outcome.scope, Scope::Drill(_)),
+        "a rehearsal runs against a drill scope and nothing else"
+    );
+    assert!(
+        outcome
+            .notes
+            .as_deref()
+            .is_some_and(|n| n.contains("monitor.events")),
+        "the notification number must say which channel it measured"
+    );
+
+    // It is a measurement, so it is in the table with its verdict.
+    let stored: (i64, bool) =
+        sqlx::query_as("SELECT propagation_ms, passed FROM monitor.drill WHERE drill_id = $1")
+            .bind(outcome.drill_id)
+            .fetch_one(&pg)
+            .await
+            .expect("the drill was recorded");
+    assert_eq!(stored.0, outcome.propagation_ms);
+    assert!(stored.1);
+
+    // And nothing is left halted: a drill row still sitting in
+    // `monitor.kill_switch` is indistinguishable from a real trip on every page
+    // that lists them, and the first thing anyone would do is reset it.
+    let still_halted: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM monitor.kill_switch WHERE scope = $1 AND state = 'halted'",
+    )
+    .bind(outcome.scope.to_string())
+    .fetch_one(&pg)
+    .await
+    .expect("count");
+    assert_eq!(still_halted, 0, "the rehearsed scope is armed again");
+
+    sqlx::query("DELETE FROM monitor.drill WHERE drill_id = $1")
+        .bind(outcome.drill_id)
+        .execute(&pg)
+        .await
+        .ok();
+    clear_scope(&pg, &outcome.scope.to_string()).await;
+}
+
+#[tokio::test]
+async fn a_platform_fault_inside_a_window_is_recorded_and_halts_nothing() {
+    // COMP-007 §4.3, against the database. A rolling deploy looks exactly like a
+    // heartbeat loss; without the window the deploy halts trading and the operator
+    // learns to pre-emptively reset the switch.
+    let pg = db!();
+    let store = MonitorStore::new(pg.clone());
+
+    let component = format!("api-{}", Uuid::new_v4());
+    sqlx::query(
+        "INSERT INTO monitor.heartbeat (component, instance, beat_at, cadence_ms)
+         VALUES ($1, 'only', now() - interval '1 hour', 1000)",
+    )
+    .bind(&component)
+    .execute(&pg)
+    .await
+    .expect("seed a lost component");
+
+    let window = monitor::MaintenanceWindow::open("human:test", "rolling deploy", 15, Utc::now())
+        .expect("a bounded, reasoned window");
+    store.open_window(&window).await.expect("open");
+
+    let beats = store
+        .component_beats(monitor::platform::MISSED_BEATS_BEFORE_HALT)
+        .await
+        .expect("read the heartbeats");
+    let mine: Vec<monitor::ComponentBeat> = beats
+        .into_iter()
+        .filter(|b| b.component == component)
+        .collect();
+    assert_eq!(mine.len(), 1, "the seeded component is there to be judged");
+    assert!(mine[0].stale, "an hour-old beat at a 1s cadence is stale");
+
+    let open = store.open_windows().await.expect("read the windows");
+    let verdict = monitor::platform::assess(&mine, &open, Utc::now());
+    match &verdict {
+        monitor::PlatformVerdict::Suppressed { lost, window_id } => {
+            assert_eq!(lost, std::slice::from_ref(&component));
+            assert_eq!(*window_id, window.window_id);
+        }
+        other => panic!("a lost component inside an open window must be suppressed: {other:?}"),
+    }
+
+    // The row §4.3 asks for: a window nobody can see is a hole nobody can audit.
+    let event = MonitorEvent::new(Scope::Global, Family::Platform, EventKind::Warning, "monitor")
+        .expect("monitor")
+        .with_reason(verdict.reason())
+        .suppressed_by(window.window_id);
+    store.record_event(&event).await.expect("record");
+    let recorded: Option<Uuid> =
+        sqlx::query_scalar("SELECT suppressed_by_window FROM monitor.events WHERE event_id = $1")
+            .bind(event.event_id)
+            .fetch_one(&pg)
+            .await
+            .expect("the suppressed event is there");
+    assert_eq!(recorded, Some(window.window_id));
+
+    // The adversarial half: the same fault with the window closed halts. Without
+    // this the test would pass just as well if `assess` suppressed everything.
+    store.close_window(window.window_id).await.expect("close");
+    let open = store.open_windows().await.expect("read the windows");
+    assert!(
+        !open.iter().any(|w| w.window_id == window.window_id),
+        "the closed window is gone"
+    );
+    assert_eq!(
+        monitor::platform::assess(&mine, &open, Utc::now()),
+        monitor::PlatformVerdict::Halt {
+            lost: vec![component.clone()]
+        },
+        "with no window open, a lost component is a global halt (§4)"
+    );
+
+    sqlx::query("DELETE FROM monitor.events WHERE event_id = $1")
+        .bind(event.event_id)
+        .execute(&pg)
+        .await
+        .ok();
+    sqlx::query("DELETE FROM monitor.maintenance_window WHERE window_id = $1")
+        .bind(window.window_id)
+        .execute(&pg)
+        .await
+        .ok();
+    sqlx::query("DELETE FROM monitor.heartbeat WHERE component = $1")
+        .bind(&component)
         .execute(&pg)
         .await
         .ok();
