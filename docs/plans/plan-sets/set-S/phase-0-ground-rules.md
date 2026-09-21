@@ -337,8 +337,13 @@ already false.**
 
 * **"No index row points at a missing file" already held.** A link scan over
   `set-S/MASTER.md`, `docs/plans/README.md`, `docs/adr/README.md` and
-  `docs/FOLDER_MAP.md` resolves **84 of 84** relative links. The acceptance was met
-  before anybody worked the task; saying so is worth more than re-deriving it.
+  `docs/FOLDER_MAP.md` resolves **84 of 84** relative links. It is now
+  `crates/invariants/tests/every_index_link_resolves.rs` rather than a scan
+  somebody ran once: a list maintained by looking is wrong by exactly the amount
+  nobody looked, which is the argument `the_desk_calls_routes_that_exist` already
+  makes for the API surfaces. Installed **while it passes**, because installing a
+  check that already fails means fixing and installing at once and never learning
+  which change did it.
 * **`docs/adr/README.md` was already correct** - rows for 0034 through 0038, which the
   task asked to "verify". Verified.
 * **Two things were genuinely stale and are fixed.** `FOLDER_MAP.md` described the ADR
