@@ -162,6 +162,67 @@ then the human decision gate at capital.
 
 ---
 
+## 3a. Running agents in parallel — **in one worktree**
+
+The [Execution Board](EXECUTION-BOARD.md) was written for agents on separate
+worktrees, where the hazard is the merge. In **one** worktree there is no merge
+and the hazard is the opposite: two agents editing the same file, and one agent's
+half-written file breaking another's build.
+
+So the partition is by **file territory**, and it has three rules.
+
+### Rule 1 — every track owns a disjoint tree, and touches nothing outside it
+
+| track | owns | builds with |
+|---|---|---|
+| **A — the desk** | `frontend/**` | `npx tsc -b --noEmit`, `npx vitest run` |
+| **B — the language** | `crates/strategy-lang/**` | `cargo test -p strategy-lang -j 2` |
+| **C — the session** | `crates/research-session/**` | `cargo test -p research-session -j 2` |
+
+Chosen so the trees are disjoint *and* the builds barely interact: track A runs
+no cargo at all, and B and C are leaf crates that nothing else in the workspace
+depends on yet. A broken file in one cannot fail the other's test run, which is
+the failure mode that makes same-worktree parallelism miserable.
+
+### Rule 2 — the shared files belong to the orchestrator, not to any track
+
+Nobody but the integrating session touches these, and a track that needs one
+**stops and reports the one line it needs** rather than editing it:
+
+`Cargo.toml` · `Cargo.lock` · `apps/platform/src/main.rs` ·
+`crates/api/src/lib.rs` · `crates/api/src/routes/mod.rs` ·
+`crates/mcp-server/src/taxonomy.rs` · `crates/mcp-server/src/spec.rs` ·
+`migrations/**` · `frontend/src/App.tsx` · every file under `docs/plans/` ·
+`docs/specs/README.MD` (the user's — never stage it)
+
+Migration numbers are pre-allocated when a track needs one, before it starts.
+
+### Rule 3 — tracks do not commit, and do not run the workspace suite
+
+One index, several writers, is a race nobody needs. Tracks leave their work in
+the tree and report; the orchestrator reads, verifies and commits.
+
+`cargo test --workspace` from a track would serialise every other track behind
+it on one `target/` and one cargo lock. **`-p <your crate>` only.** The single
+workspace run happens once, at integration. `.cargo/config.toml` pins `jobs = 2`
+and raising it OOMs the page file — this is not negotiable and is not about
+politeness.
+
+### What each track is for
+
+- **A** finishes phase 6. 22 of its 24 tasks are `PARTIAL`, so it is finishing
+  surfaces that already render, not starting them. It must **not** add a call to
+  a route that does not exist — `every_client_path_is_served` fails the build for
+  it, and correctly.
+- **B** builds phase 5's missing half. `crates/strategy-lang` exists as an empty
+  registered crate; everything in it is new code, which is why it is the safest
+  thing to parallelise.
+- **C** builds phase 11's pure halves — the stall detector (§7.1) and the digest
+  (§2.4). Both are functions over fixtures with no database in them, which is the
+  same reason `charter.rs`, `agenda.rs`, `fold.rs` and `select.rs` are testable.
+
+---
+
 ## 4. How the work is done
 
 These are not preferences. Each one is here because breaking it cost something.

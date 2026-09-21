@@ -67,6 +67,42 @@
 //! look exactly like a measured one in the decision log — the log every
 //! off-policy estimate later reads.
 //!
+//! # Layer two, and where it is performed
+//!
+//! AGENT-014 P3 refuses duplicate work three times: at agenda insert (the
+//! dedupe key), at intake (`hypothesis_precheck`), and at the ledger (the
+//! family's trial count reducing `novelty`). One and three are in
+//! `research_session::agenda::offer` and in the scorer above.
+//!
+//! §4's table says layer two is "**the child's** `hypothesis_precheck`". It is
+//! performed here instead, by the driver, *before* the child is started — and
+//! that is stricter rather than looser. The spec's own sentence about it is
+//! "marks the item `superseded{by}` and **charges no trial**"; a child that had
+//! to run the precheck itself would already have started a turn, spent tokens
+//! and held a lease before it could find out. Doing it at the door costs
+//! nothing and the item never becomes a run.
+//!
+//! What the driver reads is the same two facts the battery's `precheck` reads,
+//! from the same columns, and it applies no rule of its own:
+//!
+//! * a `negative_result` on the item's subject whose `retry_condition` is
+//!   **absent**. That field is derived by the platform from the failure class at
+//!   the moment the negative is written, and `None` is the load-bearing half: a
+//!   weak effect has no retry condition, so an idea that died of one does not
+//!   come back because a venue changed. The item is `expired`, because "blocked"
+//!   is not "duplicate" — there is nothing to go and read that would change the
+//!   answer;
+//! * a hypothesis in the registry with the same normalised statement **and a
+//!   decided status**. `open` is not an answer and neither is `inconclusive` —
+//!   the schema's comment for that column says "we could not tell is not an
+//!   answer unless it says why not", and a question the platform could not
+//!   settle is one worth asking again. The item is `superseded`.
+//!
+//! The subject half is inert for an item with no subject, and says so on the
+//! log rather than passing quietly: the charter form's seeds are sentences, not
+//! subjects (see `routes::desk_charter`), so most seeded items reach here
+//! without one.
+//!
 //! Not here, and not pretended to be: budget leases (§6.3), the harvest of
 //! open questions and proposals (§6.5), the stall detector (§7.1), schedule
 //! windows (§7), the digest (§2.4), and sources 4.3–4.9. Each is its own task
@@ -83,7 +119,7 @@ use std::time::Duration;
 
 use jobs::{JobContext, JobError, JobKind, JobOutput, Progress, Worker};
 use research_session::{
-    agenda::{AgendaItem, ItemStatus, Source},
+    agenda::{AgendaItem, DedupeLayer, ItemStatus, Source},
     fold::EventKind,
     select::{self, Inputs, Scored, Signal},
     Folded, ResearchSession,
@@ -414,6 +450,97 @@ impl SessionWorker {
         })
     }
 
+    /// Layer two: has this already been answered, or closed for good?
+    ///
+    /// Returns the status the item should take, and `None` when it may proceed.
+    /// No verdict logic of its own — both branches read a field the platform
+    /// derived and persisted.
+    async fn intake_check(
+        &self,
+        user_id: Uuid,
+        item: &AgendaItem,
+    ) -> Result<Option<(ItemStatus, DedupeLayer, String)>, JobError> {
+        // A door the platform closed. Checked first because it is the stronger
+        // answer: a duplicate says "go and read it", a closed negative says
+        // there is nothing to read that would change it.
+        if !item.subject.trim().is_empty() {
+            let negatives: Vec<(String, Value)> = sqlx::query_as(
+                "SELECT claim, extra FROM agent_memory.entry
+                  WHERE user_id = $1 AND kind = 'negative_result' AND subject = $2",
+            )
+            .bind(user_id)
+            .bind(&item.subject)
+            .fetch_all(&self.pg)
+            .await
+            .map_err(|e| Self::infra("reading negative results", e))?;
+
+            let closed: Vec<String> = negatives
+                .iter()
+                .filter(|(_, extra)| {
+                    extra
+                        .get("retry_condition")
+                        .and_then(Value::as_str)
+                        .is_none_or(|c| c.trim().is_empty())
+                })
+                .map(|(claim, _)| claim.clone())
+                .collect();
+            if !closed.is_empty() {
+                let why = format!(
+                    "`{}` has {} negative result(s) with no retry condition ({}). The platform \
+                     derived those classes; nothing reopens them, and a run would spend the \
+                     budget to learn what is already written down",
+                    item.subject,
+                    closed.len(),
+                    closed.join("; ")
+                );
+                return Ok(Some((
+                    ItemStatus::Expired { why: why.clone() },
+                    DedupeLayer::Intake,
+                    why,
+                )));
+            }
+        }
+
+        // Asked and answered. `open` and `inconclusive` are not answers — the
+        // schema says so about the second in as many words — so a question the
+        // platform could not settle is one worth asking again.
+        let needle = crate::routes::lifecycle::normalise_statement(&item.question);
+        if needle.is_empty() {
+            return Ok(None);
+        }
+        let decided: Vec<(Uuid, String, String)> = sqlx::query_as(
+            "SELECT h.hypothesis_id, h.statement, h.status
+               FROM agent_lifecycle.hypothesis h
+               JOIN agent_runs r ON r.run_id = h.run_id
+              WHERE r.user_id = $1 AND h.status IN ('supported', 'refuted')
+              LIMIT 2000",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pg)
+        .await
+        .map_err(|e| Self::infra("reading the hypothesis registry", e))?;
+
+        let Some((id, _, status)) = decided
+            .into_iter()
+            .find(|(_, st, _)| crate::routes::lifecycle::normalise_statement(st) == needle)
+        else {
+            return Ok(None);
+        };
+        let why = format!(
+            "this exact question is already in the registry as {id}, {status}. Read it rather \
+             than spending a trial on it"
+        );
+        Ok(Some((
+            // `superseded{by_item}` wants an agenda item and this was superseded
+            // by a *hypothesis*, so the id goes in the reason where a reader
+            // will find it and the status carries the item's own id — which is
+            // honest about what the column can hold.
+            ItemStatus::Superseded { by_item: item.id },
+            DedupeLayer::Intake,
+            why,
+        )))
+    }
+
     /// Score the agenda and choose, recording both.
     ///
     /// # §5.4, and what "recompute only when a source changes" means here
@@ -512,6 +639,43 @@ impl SessionWorker {
                     "the scorer returned an item that is not on the agenda it was given",
                 )
             })?;
+
+        // Layer two, at the door. A duplicate caught here costs nothing: no
+        // conversation, no turn, no lease, no trial. The selection is still
+        // logged below, because the decision log's job is to record what the
+        // policy chose — including a choice the intake then refused, which is
+        // exactly the case an off-policy estimate needs to see.
+        if let Some((status, layer, why)) = self.intake_check(user_id, &chosen).await? {
+            self.log_selection(session, &scored, &selection, &chosen, share, seed)
+                .await?;
+            sessions::set_status(&self.pg, chosen.id, &status)
+                .await
+                .map_err(|e| Self::infra("recording the intake refusal", e))?;
+            let kind = if matches!(status, ItemStatus::Expired { .. }) {
+                EventKind::AgendaItemExpired
+            } else {
+                EventKind::AgendaItemSuperseded
+            };
+            sessions::append(
+                &self.pg,
+                session.id,
+                kind,
+                json!({
+                    "item": chosen.id,
+                    "why": why,
+                    // P3: the scorecard reports which of the three layers caught
+                    // each duplicate, which only works if the layer is recorded
+                    // at the moment it catches one.
+                    "dedupe_layer": layer.as_str(),
+                    "trials_charged": 0,
+                }),
+            )
+            .await
+            .map_err(|e| Self::infra("recording the intake refusal", e))?;
+            // Nothing is claimed this iteration. The next one folds a log that
+            // now has one fewer claimable item and picks again.
+            return Ok(None);
+        }
 
         self.log_selection(session, &scored, &selection, &chosen, share, seed)
             .await?;

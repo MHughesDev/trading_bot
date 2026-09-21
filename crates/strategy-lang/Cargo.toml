@@ -1,0 +1,11 @@
+[package]
+name = "strategy-lang"
+version = "0.1.0"
+edition = "2021"
+description = "SLv2: the text a model writes a strategy in, and the parser, validator and diagnostics that answer it (AGENT-011)"
+
+[dependencies]
+domain = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

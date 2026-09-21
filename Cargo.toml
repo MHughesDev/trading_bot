@@ -26,6 +26,7 @@ members = [
     "crates/llm",
     "crates/research",
     "crates/research-session",
+    "crates/strategy-lang",
     "crates/graph",
     "crates/semantic",
     "crates/dataplane",
@@ -142,6 +143,7 @@ mcp-server-lib = { path = "crates/mcp-server" }
 llm = { path = "crates/llm" }
 research = { path = "crates/research" }
 research-session = { path = "crates/research-session" }
+strategy-lang = { path = "crates/strategy-lang" }
 graph = { path = "crates/graph" }
 semantic = { path = "crates/semantic" }
 dataplane = { path = "crates/dataplane" }

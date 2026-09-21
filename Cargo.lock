@@ -5328,6 +5328,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "strategy-lang"
+version = "0.1.0"
+dependencies = [
+ "domain",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "strategy-runtime"
 version = "0.1.0"
 dependencies = [
