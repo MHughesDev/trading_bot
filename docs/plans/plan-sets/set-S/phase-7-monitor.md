@@ -33,6 +33,77 @@ check and returns its scopes, and `BearerToken::permits` gates on them. (The
 
 ---
 
+### The halt stopped erasing itself — and the sweep was refused, 2026-09-21
+
+`check_position_divergence_at_venue` now raises through
+`MonitorStore::carry_out_mismatch`, which writes the durable
+`monitor.kill_switch` row **first** and mirrors `trip_scope` second. **The bare
+`trip_scope` is gone from `crates/reconciliation` entirely**, and a test asserts
+that — not a comment asking callers not to use it.
+
+`a_reconciliation_halt_is_still_a_halt_after_the_mirror_refresh` builds a
+`LeaseWatcher` exactly as `AppState` does, against the same database, and calls
+`.refresh().await` **between** the halt and the assertion. Reverted to the
+pre-fix body it fails, and it fails *after* passing the "immediately halted"
+line — which is the whole point: the broken version halts, and only the real
+refresh catches that the halt was in memory. The gate assertion goes through
+`RiskGate::check` **with a mark price**, because a `None` there makes every
+assertion true via `MarketDataUnavailable` — the trap that had six COMP-007
+sections resting on it.
+
+`compare_position` was split out as pure arithmetic that **raises nothing**, so
+"you cannot reach a halt without naming a venue" is structural. `SweepError` has
+`Unreadable` and `NotHalted` and **neither can be spelled as a clean result**. A
+sweep halts a venue **once** however many instruments disagree, so one incident
+is one `monitor.events` row.
+
+### The sweep was refused, and the reason is the rule
+
+The audit was right that `apps/platform` declares `reconciliation` and never
+uses it — **proof: four public signatures changed and `cargo check -p platform`
+still passes.** But wiring the 30-second loop was refused, and correctly:
+
+`main.rs` builds the only `ExecutionEngine` on `paper_engine.multi_asset_broker()`,
+and `PaperBroker::query_positions()` returns `self.engine.positions(...)` — **the
+same `Arc<PaperTradingEngine>` the internal book is read from**. Every real venue
+adapter (`Alpaca`, `Kalshi`, `Oanda`, `Tradier`, `Tradovate`, `ZeroX`) is
+constructed **only** in `crates/execution/tests/venue_adapters.rs`. There is no
+live broker in the running process.
+
+So the sweep would compare a value with itself and log *"position reconciliation
+OK"* every thirty seconds for a check that **cannot fail** — a reconciliation
+verdict nothing measured, feeding an `all_venues_reconciled` proxy that would
+keep reading clean. An absent measurement rendered as a passing one, on the
+control that decides whether our book and a venue agree about what is owned. The
+reason is recorded in `positions.rs`'s module doc, **which previously claimed
+the loop existed**.
+
+### Still open, and each needs something outside that track's reach
+
+- **The global reconciliation halt has the same erasure defect.**
+  `check_position_divergence` (the venue-less form, reached by
+  `DivergenceMonitor::on_position` → `ForwardRecorder::reconcile_position`) calls
+  `KillSwitch::trip()`, and `replace_halted` also does `self.global.store(global)`
+  from the table — so a global trip with no `scope='global'` row is erased within
+  one cadence too. Closing it needs a global `Fact::ReconciliationMismatch`, or
+  venue attribution the recorder does not have: `DeploymentSpec.venue` is
+  `PaperVenue::AlpacaPaper` → `"alpaca_paper"`, which is **not** the `venue_id`
+  the gate sees from instrument metadata, so halting on it would refuse nothing.
+  Documented on the function; behaviour left alone rather than a venue name
+  invented.
+- **No table holds a real per-venue reconciliation verdict**, so
+  `all_venues_reconciled = !any venue halted` stays a proxy. Recording "venue X
+  was checked at T and agreed / disagreed / could not be read" needs a migration.
+- **`monitor.lease` is a single global row** (`lease_id` is hard-coded to
+  `LEASE_ID`; the drills vary the *holder*). **Any test that takes the lease
+  opens the platform's order gate for one cadence, process-wide.** The new test
+  deletes its row on the way out; the monitor drills do not delete theirs.
+- **`crates/strategy-runtime/Cargo.toml` declares `reconciliation` and uses
+  nothing from it** — a second dead dependency of the same shape.
+- `crates/dataplane/src/census.rs:315` trips `clippy::manual_checked_ops`, which
+  fails a literal `-D warnings` run before it reaches any other crate.
+
+
 ### Five of eleven fail-closed tests had never met a database, 2026-09-21
 
 **190 lib + 6 + 14 + 4 tests**, clippy `-D warnings` clean. But the counts are

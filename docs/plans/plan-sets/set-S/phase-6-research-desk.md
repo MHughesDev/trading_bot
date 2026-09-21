@@ -382,9 +382,38 @@ archived/superseded filter had to be duplicated against that file's explicit
 warning — paid for with **a CI test that reads both files and fails if either
 half drops out of either**, rather than with the comment the store asks for.
 
-**`/api/agent/usage` reads the wrong table**, which is the same defect one layer
-down and is now its own track: the tokens are in `agent_runs`, and the route
-selects `llm_usage`.
+**`/api/agent/usage` read the wrong table** — the same defect one layer down,
+now fixed. The tokens are in `agent_runs` and the route selected `llm_usage`.
+Three things the fix turned up, all of which change what the number *means*:
+
+- **The 2,526,695 figure is not one desk's spend.** It is spread over 26
+  `user_id`s and the route is user-scoped: 2,189,739 on a preview account (18
+  runs, all measured), 170,912 on a demo account (11 runs, 6 measured), and
+  **165,044 on the real human account across 3 runs**. Quoting the global total
+  to a signed-in user would have been a second wrong number in place of the
+  first.
+- **22 of the 28 "unmeasured" runs are test litter.** `tests/pg_agent_effect_log.rs`'s
+  `a_run()` helper inserts a fresh `users` row and an `agent_runs` row per
+  invocation and never cleans up — 23 of the 55 rows. "28 runs recorded nothing"
+  is mostly residue, not lost production telemetry.
+- **Migration `0035` declares `tokens_in`/`tokens_out` `BIGINT NOT NULL DEFAULT
+  0`,** so a run holding `0/0` is **unrecoverably ambiguous** between measured-
+  at-zero and never-written. No query fixes that; it needs a nullable column,
+  and the response says so rather than picking a reading.
+
+The two sources are never added together: `llm_usage` is per-call and priced,
+`agent_runs` is per-run and unpriced, and `llm_usage_calls` is the disambiguator
+the old response lacked — four zero counters with `calls = 0` (an empty table)
+and with `calls = 12` (twelve idle calls) now print differently. A `project_id`
+filter **withholds the run block entirely** rather than answering with unscoped
+totals, because `agent_runs` has no such column and all 55 runs would have been
+attributed to whichever project was asked for.
+
+> **For the next frontend track:** `cache_hit_rate` is now `null` where it used
+> to be `0.0`. `Operations.tsx` renders `null` as "not reported" and keys its
+> better sentence — "not measured — no prompt has been billed yet" — on
+> `billablePrompt === 0`, which is now unreachable. It should key on
+> `cache_hit_rate === null` instead.
 
 
 ### The right panel, 2026-09-21 — two tabs were blaming the run for a missing route

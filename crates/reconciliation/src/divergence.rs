@@ -1,10 +1,28 @@
 //! Divergence detection between internal position view and broker position.
 //!
-//! On divergence: trips the kill switch for the affected instrument and
-//! logs an alarm.  Does **not** force-close the position.
+//! On divergence: halts the venue that disagrees with our book, and logs an
+//! alarm.  Does **not** force-close the position.
+//!
+//! ## Why the venue halt goes through `monitor`
+//!
+//! A halt raised here used to be `KillSwitch::trip_scope` and nothing else — an
+//! in-memory scoped view with no row behind it. [`KillSwitch::replace_halted`][rh]
+//! **replaces** that view from `monitor.kill_switch` on every refresh, so a halt
+//! raised because our book and the venue disagree about what is owned was erased
+//! within one refresh cadence (about five seconds in the platform) and the venue
+//! silently resumed trading.
+//!
+//! [`MonitorStore::carry_out_mismatch`][cm] is the receiving half: it writes the
+//! durable row first and mirrors the trip second. It is the only way a halt
+//! leaves this module, which `tests/a_venue_mismatch_survives_the_mirror_refresh.rs`
+//! asserts against the source rather than trusting this paragraph.
+//!
+//! [rh]: risk::KillSwitch::replace_halted
+//! [cm]: monitor::store::MonitorStore::carry_out_mismatch
 
 use std::sync::Arc;
 
+use monitor::store::{MonitorStore, StoreError};
 use rust_decimal::Decimal;
 use tracing::{error, warn};
 
@@ -28,6 +46,31 @@ pub enum ReconcileOutcome {
     },
 }
 
+/// Compare `internal_qty` against `broker_qty` and say what disagrees.
+///
+/// Raises nothing. This is the arithmetic on its own, so the comparison can be
+/// tested without a database and so that no caller can reach a halt without
+/// naming the venue it is at.
+#[must_use]
+pub fn compare_position(
+    instrument_id: &str,
+    internal_qty: Decimal,
+    broker_qty: Decimal,
+) -> ReconcileOutcome {
+    let tolerance: Decimal = QUANTITY_TOLERANCE.parse().expect("constant is valid");
+    let delta = (internal_qty - broker_qty).abs();
+
+    if delta > tolerance {
+        ReconcileOutcome::Diverged {
+            instrument_id: instrument_id.to_owned(),
+            internal_qty: internal_qty.to_string(),
+            broker_qty: broker_qty.to_string(),
+        }
+    } else {
+        ReconcileOutcome::Match
+    }
+}
+
 /// Compare `internal_qty` against `broker_qty`.  If they diverge beyond
 /// tolerance, trip the kill switch and return `Diverged`.
 ///
@@ -36,64 +79,34 @@ pub enum ReconcileOutcome {
 /// the venue is known: COMP-007 §4 halts the venue that disagrees and leaves the
 /// others trading, and a global halt for one venue's bookkeeping is the kind of
 /// over-reaction that gets a safety mechanism switched off.
+///
+/// # This halt does not survive a mirror refresh
+///
+/// `KillSwitch::trip()` writes the in-memory global flag and no row, and
+/// [`replace_halted`][rh] sets that flag from `monitor.kill_switch` on every
+/// refresh — so in a process that runs the lease watcher (every process that
+/// builds an `api::AppState`) this halt is erased within one cadence. The
+/// venue-scoped form below does not have that defect. There is no global
+/// equivalent of [`Fact::ReconciliationMismatch`][f] to record, so closing this
+/// one is a change in `crates/monitor`, not here.
+///
+/// [rh]: risk::KillSwitch::replace_halted
+/// [f]: monitor::family::Fact
 pub fn check_position_divergence(
     instrument_id: &str,
     internal_qty: Decimal,
     broker_qty: Decimal,
     kill_switch: &Arc<KillSwitch>,
 ) -> ReconcileOutcome {
-    check_divergence(instrument_id, None, internal_qty, broker_qty, kill_switch)
-}
-
-/// The venue-scoped form (COMP-007 §4, §8.3).
-///
-/// Halts `venue:<id>` and nothing else. The other venues keep trading, because
-/// the fact established here is "this venue and our book disagree about what is
-/// owned", which says nothing at all about the others.
-pub fn check_position_divergence_at_venue(
-    instrument_id: &str,
-    venue_id: &str,
-    internal_qty: Decimal,
-    broker_qty: Decimal,
-    kill_switch: &Arc<KillSwitch>,
-) -> ReconcileOutcome {
-    check_divergence(
-        instrument_id,
-        Some(venue_id),
-        internal_qty,
-        broker_qty,
-        kill_switch,
-    )
-}
-
-fn check_divergence(
-    instrument_id: &str,
-    venue_id: Option<&str>,
-    internal_qty: Decimal,
-    broker_qty: Decimal,
-    kill_switch: &Arc<KillSwitch>,
-) -> ReconcileOutcome {
-    let tolerance: Decimal = QUANTITY_TOLERANCE.parse().expect("constant is valid");
-    let delta = (internal_qty - broker_qty).abs();
-
-    if delta > tolerance {
+    let outcome = compare_position(instrument_id, internal_qty, broker_qty);
+    if let ReconcileOutcome::Diverged { .. } = &outcome {
         error!(
             %instrument_id,
-            venue_id = venue_id.unwrap_or("<unknown>"),
             %internal_qty,
             %broker_qty,
-            %delta,
-            "POSITION DIVERGENCE — tripping kill switch"
+            "POSITION DIVERGENCE — halting all order flow"
         );
-        match venue_id {
-            Some(v) => kill_switch.trip_scope(&risk::Scope::venue(v)),
-            None => kill_switch.trip(),
-        }
-        ReconcileOutcome::Diverged {
-            instrument_id: instrument_id.to_owned(),
-            internal_qty: internal_qty.to_string(),
-            broker_qty: broker_qty.to_string(),
-        }
+        kill_switch.trip();
     } else {
         warn!(
             %instrument_id,
@@ -101,8 +114,62 @@ fn check_divergence(
             %broker_qty,
             "position reconciliation OK"
         );
-        ReconcileOutcome::Match
     }
+    outcome
+}
+
+/// The venue-scoped form (COMP-007 §4, §8.3; S-7.6).
+///
+/// Halts `venue:<id>` and nothing else. The other venues keep trading, because
+/// the fact established here is "this venue and our book disagree about what is
+/// owned", which says nothing at all about the others.
+///
+/// The halt is raised through [`MonitorStore::carry_out_mismatch`], which writes
+/// the durable `monitor.kill_switch` row **first** and mirrors the trip second.
+/// That ordering is the whole point: the venue is halted before this returns and
+/// is still halted after the next [`replace_halted`][rh] refresh.
+///
+/// `venue_id` is the id the order gate sees — `risk::GateContext::venue_id`,
+/// which the platform fills from the instrument's metadata row. A halt raised
+/// against any other spelling refuses nothing.
+///
+/// # Errors
+/// [`StoreError`] if the durable row could not be written. The mirror is then
+/// left alone deliberately: the database that could not be written is the same
+/// one the monitor lease lives in, so the lease gate has already refused every
+/// order platform-wide, and an in-memory trip with nothing behind it would add
+/// one refresh cadence of protection and then silently resume.
+///
+/// [rh]: risk::KillSwitch::replace_halted
+pub async fn check_position_divergence_at_venue(
+    instrument_id: &str,
+    venue_id: &str,
+    internal_qty: Decimal,
+    broker_qty: Decimal,
+    store: &MonitorStore,
+    kill_switch: &Arc<KillSwitch>,
+) -> Result<ReconcileOutcome, StoreError> {
+    let outcome = compare_position(instrument_id, internal_qty, broker_qty);
+    if let ReconcileOutcome::Diverged { .. } = &outcome {
+        error!(
+            %instrument_id,
+            %venue_id,
+            %internal_qty,
+            %broker_qty,
+            "POSITION DIVERGENCE — halting this venue"
+        );
+        let halted = store.carry_out_mismatch(venue_id, kill_switch).await?;
+        warn!(scope = %halted, "venue halted and recorded");
+    } else {
+        warn!(
+            %instrument_id,
+            %venue_id,
+            %internal_qty,
+            %broker_qty,
+            "position reconciliation OK"
+        );
+    }
+    Ok(outcome)
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -325,26 +392,21 @@ mod tests {
     }
 
     #[test]
-    fn a_venue_scoped_divergence_halts_that_venue_and_only_that_venue() {
-        // COMP-007 §8.3. The old behaviour halted the whole platform because one
-        // venue's bookkeeping disagreed — which is both an over-reaction and the
-        // reason an operator reaches for a global reset, losing the information
-        // about which venue was actually wrong.
+    fn the_comparison_raises_nothing_on_its_own() {
+        // COMP-007 §8.3's halt is venue-scoped and durable, so it needs a
+        // database and lives in `tests/a_venue_mismatch_survives_the_mirror_refresh.rs`.
+        // What can be judged without one is the arithmetic, and it must raise
+        // nothing at all — a comparison that halts as a side effect is how a
+        // caller ends up with a halt it never named a venue for.
         let ks = ks();
-        let result = check_position_divergence_at_venue(
+        let diverged = compare_position(
             "BTC-USD",
-            "kraken",
             Decimal::from_str("1.0").unwrap(),
             Decimal::from_str("2.0").unwrap(),
-            &ks,
         );
-        assert!(matches!(result, ReconcileOutcome::Diverged { .. }));
-        assert!(ks.refuses(Some("kraken"), None), "the divergent venue halts");
-        assert!(
-            !ks.refuses(Some("alpaca"), None),
-            "the other venues keep trading"
-        );
-        assert!(!ks.is_active(), "and the platform is not globally halted");
+        assert!(matches!(diverged, ReconcileOutcome::Diverged { .. }));
+        assert!(!ks.is_active());
+        assert!(!ks.refuses(Some("kraken"), None));
     }
 
     #[test]

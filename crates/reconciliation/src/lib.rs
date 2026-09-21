@@ -11,8 +11,8 @@ pub mod sequence;
 pub mod store;
 
 pub use divergence::{
-    check_position_divergence, check_position_divergence_at_venue, DivergenceMonitor,
-    DivergenceVerdict, ReconcileOutcome,
+    check_position_divergence, check_position_divergence_at_venue, compare_position,
+    DivergenceMonitor, DivergenceVerdict, ReconcileOutcome,
 };
 pub use forward::{
     AlignedBar, AlignmentError, DeploymentSpec, DivergenceThresholds, ExpectedBar, ForwardError,
@@ -20,6 +20,9 @@ pub use forward::{
 };
 pub use freshness::{check_freshness, FreshnessOutcome};
 pub use gate15::record_gate15_statistics;
-pub use positions::{reconcile_all, reconcile_one, reconcile_with_broker, InternalPosition};
+pub use positions::{
+    compare_all, compare_one, reconcile_all, reconcile_one, reconcile_with_broker,
+    InternalPosition, SweepError,
+};
 pub use recorder::ForwardRecorder;
 pub use sequence::SequenceTracker;

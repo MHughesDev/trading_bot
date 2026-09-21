@@ -75,8 +75,12 @@ fn code_only(path: &Path) -> String {
 /// string somebody types, it is a source change and a review.
 #[test]
 fn the_only_venue_this_set_can_name_is_paper() {
-    for v in [PaperVenue::AlpacaPaper] {
-        assert!(v.is_paper(), "{v:?} is not a paper venue");
+    let v = PaperVenue::AlpacaPaper;
+    match v {
+        // Exhaustive deliberately, and stronger than a loop over the variants
+        // somebody remembered to list: adding one that is not paper makes this
+        // fail to compile rather than fail to be checked.
+        PaperVenue::AlpacaPaper => assert!(v.is_paper(), "{v:?} is not a paper venue"),
     }
     assert_eq!(PaperVenue::AlpacaPaper.as_str(), "alpaca_paper");
 

@@ -11,6 +11,10 @@ execution = { workspace = true }
 # type the ledger persists for a backtest — so "same shape" is a compile-time
 # fact rather than a claim two structs make about each other.
 ledger = { workspace = true }
+# S-7.6: the durable receiving half of a venue halt. A path dependency the way
+# `crates/api/Cargo.toml` declares it; `monitor` depends on `domain`, `risk`,
+# `storage`-free sqlx and nothing else here, so this closes no cycle.
+monitor = { path = "../monitor" }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
