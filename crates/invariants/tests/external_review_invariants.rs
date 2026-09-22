@@ -268,6 +268,95 @@ fn the_simulator_never_chooses_its_own_intrabar_policy() {
     }
 }
 
+// ── ADR-P6-14: the live runtime drives the same tracker, or SC-3 is a slogan ──
+
+/// The live strategy runtime drives the one shared `ExitTracker`.
+///
+/// The twin of `the_backtest_simulator_drives_the_shared_exit_tracker`, and the
+/// half that was false until ADR-P6-14. Between ADR-P6-11 and ADR-P6-14 the
+/// platform was in the worst of the three available states: a declared
+/// stop-loss fired in a backtest and did not fire live, so a strategy whose
+/// backtest showed a bounded loss deployed without the bound that made the
+/// backtest acceptable. Ignoring exits on both paths was wrong; honouring them
+/// on one was dangerous.
+///
+/// SC-3 is the guarantee that the two cannot disagree, and it is only a
+/// guarantee while both of these tests pass. One of them passing is the state
+/// this test exists to make impossible to return to silently.
+#[test]
+fn the_live_runtime_drives_the_shared_exit_tracker() {
+    let src = rust_code();
+    let (path, runtime) = src
+        .iter()
+        .find(|(p, _)| p.ends_with("strategy-runtime/src/runtime.rs"))
+        .expect("the live strategy runtime must exist");
+
+    assert!(
+        runtime.contains("ExitTracker::new"),
+        "{path}: the live runtime does not construct the shared ExitTracker. A declared \
+         stop-loss would then bound a backtest and not the deployment the backtest was used \
+         to justify. ADR-P6-14, SC-3."
+    );
+    assert!(
+        runtime.contains("tracker.on_bar_update(") || runtime.contains("tracker.on_bar("),
+        "{path}: the live runtime holds an ExitTracker but never evaluates it. ADR-P6-14."
+    );
+    assert!(
+        runtime.contains("tracker.bar_closed()"),
+        "{path}: the live runtime evaluates the policy but never advances the holding-bar \
+         count, so `max_holding_bars` can never fire live. ADR-P6-14."
+    );
+}
+
+/// Neither path chooses its own intrabar policy.
+///
+/// `the_simulator_never_chooses_its_own_intrabar_policy` pins the replay half.
+/// This pins the live half, for the same reason: a per-instance switch between
+/// a pessimistic and an optimistic resolution of an ambiguous bar is a knob,
+/// and it is worse live than in replay — a backtest computed under `WorstFirst`
+/// would then be describing fills the deployment never takes.
+#[test]
+fn the_live_runtime_never_chooses_its_own_intrabar_policy() {
+    for (path, body) in rust_code() {
+        if !path.contains("strategy-runtime/src/runtime.rs") {
+            continue;
+        }
+        assert!(
+            !body.contains("with_intrabar("),
+            "{path}: the live runtime selects an intrabar policy. It must take the \
+             pessimistic default, which is the one the simulator takes. ADR-P6-09, ADR-P6-14."
+        );
+    }
+}
+
+/// The declared bar is assembled in one place.
+///
+/// The live feed is finer than a bar — one event per trade — and the replay
+/// feed is exactly a bar. Something has to reconcile them, and if that
+/// something exists twice then `max_holding_bars` means two things again, which
+/// is the defect ADR-P6-14 closed. `BarAggregator` is that one place.
+#[test]
+fn the_declared_bar_is_assembled_in_exactly_one_place() {
+    let definitions: Vec<String> = rust_code()
+        .into_iter()
+        .filter(|(_, body)| body.contains("pub struct BarAggregator"))
+        .map(|(path, _)| path)
+        .collect();
+
+    assert_eq!(
+        definitions.len(),
+        1,
+        "the declared bar must be assembled in one place and is assembled in {}: \
+         {definitions:?}. ADR-P6-14.",
+        definitions.len()
+    );
+    assert!(
+        definitions[0].ends_with("strategy-runtime/src/exits.rs"),
+        "the one aggregator moved to {}; it belongs beside the tracker it feeds",
+        definitions[0]
+    );
+}
+
 // ── ADR-P6-07: dollars and dollar tokens are different things ────────────────
 
 /// The literal that started it: three assets, one of them an unsecured claim on
