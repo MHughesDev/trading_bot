@@ -48,7 +48,14 @@ export function AppLayout() {
   // mounted first. `logout()` owns the teardown.
   useEffect(() => {
     if (!user) return
-    initWsClient(getStoredToken() ?? 'dev-local')
+    // No token, no socket. `?? 'dev-local'` opened one until the live lane
+    // started resolving its token against the `sessions` table; now the handshake
+    // is refused, and the only thing the fallback changed was that the refusal
+    // arrived through the same path a dropped connection does. `useConnection`
+    // reports `signed-out` in this case so the banner says which it is.
+    const token = getStoredToken()
+    if (!token) return
+    initWsClient(token)
   }, [user])
 
   // Instrument metadata drives per-instrument decimal precision (spec N2).

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { getWsClient, wsBus } from '@/api/ws'
+import { getStoredToken } from '@/lib/api'
 import type { ConnectionState } from '@/components/primitives/States'
 
 /* Spec §5.2 — connection states.
@@ -19,14 +20,28 @@ export function useConnection(): ConnectionInfo {
   // The socket is a module singleton that usually connected long before this
   // hook mounted, so an event-only view reports "reconnecting" forever on any
   // screen opened after the first one.
+  //
+  // A browser with no session token is the one case where there is no client
+  // and never will be until someone signs in. That used to seed 'reconnecting',
+  // which is a claim that a retry is in flight; nothing was retrying, because
+  // `initWsClient` was handed the string 'dev-local' and the live lane refuses
+  // it. Reported as its own state so the banner can say so.
   const [state, setState] = useState<ConnectionState>(() =>
-    getWsClient()?.isConnected() ? 'connected' : 'reconnecting',
+    !getStoredToken()
+      ? 'signed-out'
+      : getWsClient()?.isConnected()
+        ? 'connected'
+        : 'reconnecting',
   )
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
   const [lastMessageAt, setLastMessageAt] = useState<number | null>(null)
   const beatRef = useRef<number | null>(null)
 
   useEffect(() => {
+    // Nothing can move a signed-out reading except signing in, which reloads.
+    // Staying off the bus keeps a stray control frame from some other panel
+    // from repainting "no credential" as "connected".
+    if (!getStoredToken()) return
     // Re-check on mount too: a socket that opened between render and effect
     // would otherwise wait for the next heartbeat to be reported as live.
     if (getWsClient()?.isConnected()) setState((s) => (s === 'connected' ? s : 'connected'))

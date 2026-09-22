@@ -135,7 +135,20 @@ export function StaleBadge({ age }: { age: string }) {
   )
 }
 
-export type ConnectionState = 'connected' | 'degraded' | 'reconnecting' | 'disconnected'
+/**
+ * `signed-out` is not a degree of brokenness, which is why it sits beside the
+ * other four rather than inside `disconnected`. The other four all describe a
+ * socket that exists; this one says no socket was opened, because this browser
+ * holds no session token to open one with. Folding it into `reconnecting` —
+ * which is what a missing client used to seed — told the operator to wait for a
+ * retry that cannot succeed.
+ */
+export type ConnectionState =
+  | 'connected'
+  | 'degraded'
+  | 'reconnecting'
+  | 'disconnected'
+  | 'signed-out'
 
 /** Persistent banner shown while the market-data feed is not healthy (§5.2). */
 export function DisconnectedBanner({
@@ -148,23 +161,39 @@ export function DisconnectedBanner({
   onRetry?: () => void
 }) {
   if (state === 'connected') return null
+  const signedOut = state === 'signed-out'
   const tone = state === 'disconnected' ? 'neg' : 'warn'
   const text =
-    state === 'disconnected'
-      ? 'Market data disconnected. Figures show their last known value and are marked stale.'
-      : state === 'reconnecting'
-        ? 'Reconnecting to market data…'
-        : 'Market data delayed. Figures may lag the venue.'
+    signedOut
+      ? 'Live data is not connected: this browser holds no signed-in session. Sign in again to restore it.'
+      : state === 'disconnected'
+        ? 'Market data disconnected. Figures show their last known value and are marked stale.'
+        : state === 'reconnecting'
+          ? 'Reconnecting to market data…'
+          : 'Market data delayed. Figures may lag the venue.'
   return (
-    <div className={cn('banner', tone)} role="status" aria-live="polite">
+    <div
+      className={cn('banner', tone)}
+      role="status"
+      aria-live="polite"
+      data-testid={signedOut ? 'connection-signed-out' : 'connection-banner'}
+    >
       <WifiOff size={13} aria-hidden />
       <span>{text}</span>
       {detail}
       <span className="spacer" />
-      {onRetry && (
-        <Button size="xs" variant="ghost" onClick={onRetry}>
-          Reconnect now
+      {/* A retry cannot mint a credential, so the signed-out banner offers the
+          action that can instead of the one that reads as "try again". */}
+      {signedOut ? (
+        <Button size="xs" variant="ghost" onClick={() => { window.location.href = '/login' }}>
+          Sign in
         </Button>
+      ) : (
+        onRetry && (
+          <Button size="xs" variant="ghost" onClick={onRetry}>
+            Reconnect now
+          </Button>
+        )
       )}
     </div>
   )

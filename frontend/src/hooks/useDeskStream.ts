@@ -114,13 +114,25 @@ export function useDeskStream({ url, onEvent }: Options): DeskStream {
       }
     }
 
+    // An absent credential is a permanent answer, and the cheapest place to
+    // give it is before the first request. Sending `Bearer dev-local` asked the
+    // platform a question it has always answered 401, and then reported that
+    // 401 as though a real credential had been refused. The state is `closed`
+    // rather than `stale` for the same reason a 401 is: reconnecting cannot
+    // produce a token, so a retry loop here is a poll against a fact.
+    if (!getStoredToken()) {
+      setError('not signed in')
+      setState('closed')
+      return () => {}
+    }
+
     const run = async () => {
       while (!closed) {
         try {
           const token = getStoredToken()
           const headers: Record<string, string> = {
             Accept: 'text/event-stream',
-            Authorization: token ? `Bearer ${token}` : 'Bearer dev-local',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           }
           if (cursorRef.current) headers['Last-Event-ID'] = cursorRef.current
 

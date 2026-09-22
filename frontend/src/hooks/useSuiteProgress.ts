@@ -19,7 +19,15 @@ export function useSuiteProgress(onProgress?: (p: SuiteProgress) => void): Suite
   cb.current = onProgress
 
   useEffect(() => {
-    const token = getStoredToken() ?? 'dev-local'
+    // No token, no socket. `?? 'dev-local'` used to open one anyway: the lane
+    // resolves its query token against the `sessions` table and refuses
+    // anything that is not a row, so the only thing the fallback produced was a
+    // socket that opened and closed for reasons the console could not name.
+    // There is nothing to display in its place — this hook is a liveness
+    // signal, and the console's own polling is the source of truth — so the
+    // return stays `null`, which already means "no frame".
+    const token = getStoredToken()
+    if (!token) return
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
     const url = `${proto}://${window.location.host}/ws/backtest-suite?token=${encodeURIComponent(token)}`
     let ws: WebSocket | null = null

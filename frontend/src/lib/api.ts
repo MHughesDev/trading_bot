@@ -10,10 +10,20 @@ export const getStoredToken = () => localStorage.getItem(TOKEN_KEY)
 export const setStoredToken = (t: string) => localStorage.setItem(TOKEN_KEY, t)
 export const clearStoredToken = () => localStorage.removeItem(TOKEN_KEY)
 
+// A request from a browser with no session token goes out with no
+// `Authorization` header at all.
+//
+// It used to go out as `Bearer dev-local`. The platform's `BearerToken`
+// extractor reads only this header — there is no cookie fallback, so
+// `withCredentials` buys nothing here — and resolves it against the `sessions`
+// table, where `dev-local` is not a row. Both spellings are therefore 401
+// (verified against :7080), but they are not the same 401: an invented token
+// makes a signed-out browser look like one presenting a credential the server
+// rejected, which is a different fact and points at a different fix.
 api.interceptors.request.use((config) => {
   if (!config.headers.Authorization) {
     const token = getStoredToken()
-    config.headers.Authorization = token ? `Bearer ${token}` : 'Bearer dev-local'
+    if (token) config.headers.Authorization = `Bearer ${token}`
   }
   return config
 })

@@ -185,9 +185,15 @@ export function openTimeline(
     while (!closed) {
       try {
         const token = getStoredToken()
+        if (!token) {
+          // Same permanent answer as the 401 below, reached without spending a
+          // request on a token the platform has never accepted.
+          onError?.('not signed in')
+          return
+        }
         const headers: Record<string, string> = {
           Accept: 'text/event-stream',
-          Authorization: token ? `Bearer ${token}` : 'Bearer dev-local',
+          Authorization: `Bearer ${token}`,
         }
         if (lastId) headers['Last-Event-ID'] = lastId
 

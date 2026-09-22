@@ -404,6 +404,15 @@ export function Conversation({
           ) : (
             <StaleBadge age={staleAge(stream.staleForSecs) as string} />
           ))}
+        {/* A closed stream drew nothing at all, while still disabling the
+            controls through `controls.disconnected` — so "you are not signed
+            in" and "this conversation is not yours" both arrived as a dead
+            toolbar with no sentence attached. The hook already knows which. */}
+        {stream.state === 'closed' && stream.error && (
+          <Badge tone="warn" data-testid="stream-closed-reason">
+            not live · {stream.error}
+          </Badge>
+        )}
         {workingState && (
           <span className="sub">
             trials {workingState.budget.trials_spent} · n_eff{' '}
