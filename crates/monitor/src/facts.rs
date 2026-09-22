@@ -187,8 +187,10 @@ impl FactAction {
 ///
 /// An empty result is a real answer and is not the same as "nothing was wrong":
 /// a stale feed that reaches no strategy reaches none because nothing depends on
-/// that instrument (COMP-007 §3). Callers say so out loud rather than treating
-/// it as success.
+/// **that feed** — that symbol *at that venue* (COMP-007 §3). Callers say so out
+/// loud rather than treating it as success. The distinction is not pedantic: a
+/// dependency map keyed on the symbol alone would answer this question for three
+/// different BTC-USD feeds at once, two of them wrongly.
 #[must_use]
 pub fn decide(
     fact: &Fact,
@@ -204,8 +206,8 @@ pub fn decide(
             vec![FactAction::Halt(Scope::venue(venue.as_str()))]
         }
         Fact::LeaseLost => vec![FactAction::RecordLeaseGap],
-        Fact::HardDataStaleness { instrument, .. } => deps
-            .strategies_for(instrument)
+        Fact::HardDataStaleness { feed, .. } => deps
+            .strategies_for(feed)
             .iter()
             .filter_map(|strategy_id| {
                 let (from, policy) = strategy_states
@@ -249,10 +251,20 @@ pub fn decide(
 mod tests {
     use super::*;
     use crate::family::{FactKind, Wiring};
+    use crate::feed::{FeedKey, Venue};
 
-    fn stale(instrument: &str) -> Fact {
+    /// A feed, through the only constructor there is.
+    fn feed(symbol: &str, venue: &str) -> FeedKey {
+        FeedKey::new(symbol, Venue::named(venue).expect("a venue")).expect("a feed")
+    }
+
+    fn venue(name: &str) -> Venue {
+        Venue::named(name).expect("a venue")
+    }
+
+    fn stale(symbol: &str) -> Fact {
         Fact::HardDataStaleness {
-            instrument: instrument.to_owned(),
+            feed: feed(symbol, "kraken"),
             age_secs: 700,
             timeframe_secs: 60,
         }
@@ -260,9 +272,9 @@ mod tests {
 
     fn deps() -> DependencyMap {
         let mut d = DependencyMap::new();
-        d.add("BTC-USD", "s-btc");
-        d.add("BTC-USD", "s-both");
-        d.add("ETH-USD", "s-eth");
+        d.add(&feed("BTC-USD", "kraken"), "s-btc");
+        d.add(&feed("BTC-USD", "kraken"), "s-both");
+        d.add(&feed("ETH-USD", "kraken"), "s-eth");
         d
     }
 
@@ -271,7 +283,7 @@ mod tests {
         // COMP-007 §4, §8.3.
         let actions = decide(
             &Fact::ReconciliationMismatch {
-                venue: "kraken".to_owned(),
+                venue: venue("kraken"),
             },
             &deps(),
             &[],
@@ -291,6 +303,52 @@ mod tests {
             .map(|a| a.scope().to_string())
             .collect();
         assert_eq!(touched, ["strategy:s-btc", "strategy:s-both"]);
+    }
+
+    #[test]
+    fn a_dead_feed_at_one_venue_does_not_halt_the_same_symbol_at_another() {
+        // COMP-007 §3's "and only those", read at the level it is actually
+        // violated. `a_hard_stale_feed_reaches_only_the_strategies_that_depend_on_it`
+        // above distinguishes BTC-USD from ETH-USD, which any keying gets right.
+        // This one distinguishes BTC-USD from BTC-USD, which only the (symbol,
+        // venue) key gets right — and it is the case the live database is in:
+        // binance's BTC-USD 60s bars stopped on 2026-06-22 while kraken's were
+        // 92 seconds old.
+        //
+        // Since ADR-D-11 the failure is not cosmetic. Under the symbol-keyed
+        // map this crate had until 2026-09-21, `s-kraken` appears in the
+        // dependants of the dead binance feed and is HALTED — a strategy pricing
+        // off a 92-second-old feed stops trading because of a venue it never
+        // touches.
+        let mut deps = DependencyMap::new();
+        deps.add(&feed("BTC-USD", "kraken"), "s-kraken");
+        deps.add(&feed("BTC-USD", "binance"), "s-binance");
+
+        let dead_binance = Fact::HardDataStaleness {
+            feed: feed("BTC-USD", "binance"),
+            age_secs: 7_893_272,
+            timeframe_secs: 60,
+        };
+        let actions = decide(&dead_binance, &deps, &[]);
+        assert_eq!(
+            actions,
+            vec![FactAction::Halt(Scope::strategy("s-binance"))],
+            "a feed dead since June halted a strategy whose prices are 92 seconds old"
+        );
+        // Anti-vacuity: the map really does hold a kraken dependant, so the
+        // assertion above is a discrimination and not an empty map.
+        assert_eq!(
+            decide(
+                &Fact::HardDataStaleness {
+                    feed: feed("BTC-USD", "kraken"),
+                    age_secs: 700,
+                    timeframe_secs: 60,
+                },
+                &deps,
+                &[],
+            ),
+            vec![FactAction::Halt(Scope::strategy("s-kraken"))]
+        );
     }
 
     #[test]
@@ -428,12 +486,12 @@ mod tests {
         // above asserts about the variants it names.
         let all_deps = {
             let mut d = DependencyMap::new();
-            d.add("BTC-USD", "s-btc");
+            d.add(&feed("BTC-USD", "kraken"), "s-btc");
             d
         };
         let samples = [
             Fact::ReconciliationMismatch {
-                venue: "kraken".to_owned(),
+                venue: venue("kraken"),
             },
             Fact::LeaseLost,
             stale("BTC-USD"),

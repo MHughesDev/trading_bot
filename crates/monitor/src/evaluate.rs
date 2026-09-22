@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 
 use crate::dwell::{DwellConfig, DwellTracker, DwellVerdict};
 use crate::family::{Fact, Family};
+use crate::feed::FeedKey;
 use crate::limits::{ControlLimit, LimitBook, LimitSeverity};
 use crate::state::{Severity, StrategyState, Transition};
 
@@ -82,11 +83,28 @@ pub struct Evaluation {
     pub dwell: Option<DwellVerdict>,
 }
 
-/// Which strategies depend on which instrument, so a stale feed halts the
+/// Which strategies depend on which **feed**, so a stale feed halts the
 /// strategies that use it **and only those** (COMP-007 §3, S-7.5).
+///
+/// # Why the key is a pair and not a symbol
+///
+/// This map was keyed on a bare `&str` symbol until 2026-09-21, and that made
+/// the "and only those" clause unkeepable rather than merely unenforced. In the
+/// live database `BTC-USD` is three feeds — coinbase, kraken and binance — and
+/// at one instant their last 60-second bars were 90 minutes, 92 seconds and 91
+/// days old. A symbol-keyed map has one entry for all three, so a
+/// [`Staleness::Hard`] verdict about the 91-day-old binance feed returns every
+/// strategy on the 92-second-old kraken feed as a dependant, and since ADR-D-11
+/// those strategies are *halted* rather than trimmed.
+///
+/// The key is [`FeedKey`] rather than a `(String, String)` tuple for the same
+/// reason [`crate::Family`] is an enum: a tuple of two strings can be built in
+/// the wrong order, and a dependency map keyed on `("kraken", "BTC-USD")`
+/// matches nothing, halts nothing, and passes every test that only asks whether
+/// the halt was correctly scoped.
 #[derive(Clone, Debug, Default)]
 pub struct DependencyMap {
-    by_instrument: BTreeMap<String, Vec<String>>,
+    by_feed: BTreeMap<FeedKey, Vec<String>>,
 }
 
 impl DependencyMap {
@@ -95,18 +113,22 @@ impl DependencyMap {
         Self::default()
     }
 
-    pub fn add(&mut self, instrument: &str, strategy_id: &str) {
-        let entry = self.by_instrument.entry(instrument.to_owned()).or_default();
+    /// Record that `strategy_id` trades this feed.
+    ///
+    /// There is no `add_symbol`, and adding one would undo the module: a caller
+    /// that does not know which venue a strategy trades at does not know what
+    /// the strategy depends on, and the honest thing for it to do is to fail to
+    /// compile.
+    pub fn add(&mut self, feed: &FeedKey, strategy_id: &str) {
+        let entry = self.by_feed.entry(feed.clone()).or_default();
         if !entry.iter().any(|s| s == strategy_id) {
             entry.push(strategy_id.to_owned());
         }
     }
 
     #[must_use]
-    pub fn strategies_for(&self, instrument: &str) -> &[String] {
-        self.by_instrument
-            .get(instrument)
-            .map_or(&[][..], Vec::as_slice)
+    pub fn strategies_for(&self, feed: &FeedKey) -> &[String] {
+        self.by_feed.get(feed).map_or(&[][..], Vec::as_slice)
     }
 }
 
@@ -119,15 +141,15 @@ impl DependencyMap {
 /// of its own rather than a number that looks like one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnmeasurableFeed {
-    /// No last-bar time is known for this instrument, so there is no age.
+    /// No last-bar time is known for this feed, so there is no age.
     ///
     /// Not "the last bar was long ago" and not "the last bar was just now". A
-    /// producer that has never seen this instrument, or that read a row whose
+    /// producer that has never seen this feed, or that read a row whose
     /// `last_bar_at` was NULL, knows only that it does not know — and the two
     /// numbers it would be tempted to substitute are a false halt and a false
     /// all-clear respectively.
     NoLastBarObserved,
-    /// No positive bar period is declared for this instrument, so there is no
+    /// No positive bar period is declared for this feed, so there is no
     /// multiple to measure an age against.
     ///
     /// A feed's staleness is defined *relative to its own timeframe* (four
@@ -161,11 +183,11 @@ pub enum Staleness {
     Fresh,
     /// Past `3 ×` the timeframe. Goes through dwell like any other estimate.
     Warning {
-        instrument: String,
+        feed: FeedKey,
         age_secs: i64,
     },
     /// Past `10 ×`. A fact: skips dwell, and halts every strategy that depends
-    /// on the instrument (COMP-007 §3, §4.1; ADR-D-11). Not a scale-down —
+    /// on the feed (COMP-007 §3, §4.1; ADR-D-11). Not a scale-down —
     /// scaling to a quarter still trades on a stale price.
     Hard(Fact),
     /// The inputs do not support any verdict, and this is the verdict.
@@ -178,11 +200,11 @@ pub enum Staleness {
     /// because [`Staleness::is_measured`] is the only predicate offered and
     /// there is no `is_fresh`.
     ///
-    /// A caller that reaches this has learned something real: it is watching an
-    /// instrument it cannot watch. Dropping it silently is the same defect as
+    /// A caller that reaches this has learned something real: it is watching a
+    /// feed it cannot watch. Dropping it silently is the same defect as
     /// reporting `Fresh`, one level up.
     Unmeasurable {
-        instrument: String,
+        feed: FeedKey,
         because: UnmeasurableFeed,
     },
 }
@@ -209,8 +231,13 @@ impl Staleness {
 ///
 /// # The signature is the safety property
 ///
+/// The subject is a [`FeedKey`], because `BTC-USD` is not one feed: the live
+/// database carries it at coinbase, kraken and binance, and a verdict about
+/// "BTC-USD" would be a verdict about whichever of the three the caller happened
+/// to read.
+///
 /// `age_secs` is an `Option` because the producer that will eventually call this
-/// has a third case as common as the other two — an instrument with no row, or a
+/// has a third case as common as the other two — a feed with no row, or a
 /// row whose `last_bar_at` is NULL — and the two ways of flattening that case
 /// into an `i64` are both wrong in a direction that costs money. A large
 /// substitute halts a healthy book; a zero reports a dead feed as current and
@@ -221,9 +248,9 @@ impl Staleness {
 /// both of those until 2026-09-21 — an absent measurement reported as a healthy
 /// one, on the one surface in the platform whose job is to refuse exactly that.
 #[must_use]
-pub fn staleness(instrument: &str, age_secs: Option<i64>, timeframe_secs: i64) -> Staleness {
+pub fn staleness(feed: &FeedKey, age_secs: Option<i64>, timeframe_secs: i64) -> Staleness {
     let unmeasurable = |because| Staleness::Unmeasurable {
-        instrument: instrument.to_owned(),
+        feed: feed.clone(),
         because,
     };
     if timeframe_secs <= 0 {
@@ -234,14 +261,14 @@ pub fn staleness(instrument: &str, age_secs: Option<i64>, timeframe_secs: i64) -
     };
     if age_secs > timeframe_secs * HARD_STALENESS_MULTIPLE {
         return Staleness::Hard(Fact::HardDataStaleness {
-            instrument: instrument.to_owned(),
+            feed: feed.clone(),
             age_secs,
             timeframe_secs,
         });
     }
     if age_secs > timeframe_secs * WARN_STALENESS_MULTIPLE {
         return Staleness::Warning {
-            instrument: instrument.to_owned(),
+            feed: feed.clone(),
             age_secs,
         };
     }
@@ -341,8 +368,19 @@ fn severity_of(limit: &ControlLimit) -> Severity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::feed::Venue;
     use crate::limits::LimitMethod;
     use chrono::Utc;
+
+    /// A feed, through the only constructor there is.
+    fn feed(symbol: &str, venue: &str) -> FeedKey {
+        FeedKey::new(symbol, Venue::named(venue).expect("a venue")).expect("a feed")
+    }
+
+    /// The feed three live venues disagree about.
+    fn btc() -> FeedKey {
+        feed("BTC-USD", "kraken")
+    }
 
     fn limit(metric: &str, family: Family, lower: f64, severity: LimitSeverity) -> ControlLimit {
         ControlLimit {
@@ -420,17 +458,17 @@ mod tests {
 
     #[test]
     fn a_fresh_feed_is_fresh_and_a_four_minute_old_daily_bar_is_too() {
-        assert_eq!(staleness("BTC-USD", Some(30), 60), Staleness::Fresh);
-        assert_eq!(staleness("AAPL", Some(240), 86_400), Staleness::Fresh);
+        assert_eq!(staleness(&btc(), Some(30), 60), Staleness::Fresh);
+        assert_eq!(staleness(&feed("AAPL", "alpaca"), Some(240), 86_400), Staleness::Fresh);
     }
 
     #[test]
-    fn staleness_is_measured_against_the_instruments_own_timeframe() {
+    fn staleness_is_measured_against_the_feeds_own_timeframe() {
         // 240s is fine for a daily bar and a hard halt for a one-minute one. A
         // single global threshold gets exactly one of those two wrong.
-        assert!(matches!(staleness("BTC-USD", Some(240), 60), Staleness::Warning { .. }));
-        assert!(matches!(staleness("BTC-USD", Some(700), 60), Staleness::Hard(_)));
-        assert_eq!(staleness("AAPL", Some(700), 86_400), Staleness::Fresh);
+        assert!(matches!(staleness(&btc(), Some(240), 60), Staleness::Warning { .. }));
+        assert!(matches!(staleness(&btc(), Some(700), 60), Staleness::Hard(_)));
+        assert_eq!(staleness(&feed("AAPL", "alpaca"), Some(700), 86_400), Staleness::Fresh);
     }
 
     #[test]
@@ -445,7 +483,7 @@ mod tests {
         // behaviour finds the name and stops. The assertion now reads
         // `Family::breach_halts` alongside the literal, so the name, the
         // assertion and the policy move together or not at all.
-        let Staleness::Hard(fact) = staleness("BTC-USD", Some(700), 60) else {
+        let Staleness::Hard(fact) = staleness(&btc(), Some(700), 60) else {
             panic!("700s on a 60s bar is past the hard multiple");
         };
         assert!(fact.family().breach_halts(), "COMP-007 §3: a hard-stale feed halts");
@@ -468,13 +506,13 @@ mod tests {
         // the book on it is the alarm fatigue §4.1 exists to prevent. Asserted so
         // that widening the halt to the whole Data family — which ADR-D-11 did —
         // cannot quietly swallow the warning band with it.
-        let Staleness::Warning { instrument, age_secs } = staleness("BTC-USD", Some(240), 60) else {
+        let Staleness::Warning { feed, age_secs } = staleness(&btc(), Some(240), 60) else {
             panic!("240s on a 60s bar is past the warn multiple and short of the hard one");
         };
-        assert_eq!(instrument, "BTC-USD");
+        assert_eq!(feed, btc());
         assert_eq!(age_secs, 240);
         assert!(
-            !matches!(staleness("BTC-USD", Some(240), 60), Staleness::Hard(_)),
+            !matches!(staleness(&btc(), Some(240), 60), Staleness::Hard(_)),
             "the soft band raises no fact, so nothing skips dwell and nothing halts"
         );
     }
@@ -491,17 +529,17 @@ mod tests {
         let hard_edge = tf * HARD_STALENESS_MULTIPLE;
         // `past the multiple`, not `at` it: a bar exactly 3× old is on time for a
         // feed that publishes on the boundary.
-        assert_eq!(staleness("BTC-USD", Some(warn_edge), tf), Staleness::Fresh);
+        assert_eq!(staleness(&btc(), Some(warn_edge), tf), Staleness::Fresh);
         assert!(matches!(
-            staleness("BTC-USD", Some(warn_edge + 1), tf),
+            staleness(&btc(), Some(warn_edge + 1), tf),
             Staleness::Warning { .. }
         ));
         assert!(matches!(
-            staleness("BTC-USD", Some(hard_edge), tf),
+            staleness(&btc(), Some(hard_edge), tf),
             Staleness::Warning { .. }
         ));
         assert!(matches!(
-            staleness("BTC-USD", Some(hard_edge + 1), tf),
+            staleness(&btc(), Some(hard_edge + 1), tf),
             Staleness::Hard(_)
         ));
     }
@@ -521,16 +559,16 @@ mod tests {
         // whatever it returns. A default that is safe only while it is unreached
         // is a loaded gun pointed at the day it becomes reachable.
         assert_eq!(
-            staleness("BTC-USD", Some(999_999), 0),
+            staleness(&btc(), Some(999_999), 0),
             Staleness::Unmeasurable {
-                instrument: "BTC-USD".to_owned(),
+                feed: btc(),
                 because: UnmeasurableFeed::NoTimeframeDeclared,
             }
         );
         assert_eq!(
-            staleness("BTC-USD", Some(999_999), -60),
+            staleness(&btc(), Some(999_999), -60),
             Staleness::Unmeasurable {
-                instrument: "BTC-USD".to_owned(),
+                feed: btc(),
                 because: UnmeasurableFeed::NoTimeframeDeclared,
             }
         );
@@ -540,7 +578,7 @@ mod tests {
     fn an_unknown_last_bar_time_is_neither_a_stale_feed_nor_a_fresh_one() {
         // The case the old signature could not express, which is why it was the
         // dangerous one. A producer reading a row whose `last_bar_at` is NULL, or
-        // finding no row at all for an instrument, had to invent an `i64` — and
+        // finding no row at all for a feed, had to invent an `i64` — and
         // both inventions are wrong in a direction that costs money. A large
         // substitute halts a book whose feeds are fine; a zero reports a dead
         // feed as current and lets a strategy price a position off it.
@@ -548,9 +586,9 @@ mod tests {
         // `None` is now the honest input and it has an honest answer, and the
         // timeframe being perfectly well known does not rescue it.
         assert_eq!(
-            staleness("BTC-USD", None, 60),
+            staleness(&btc(), None, 60),
             Staleness::Unmeasurable {
-                instrument: "BTC-USD".to_owned(),
+                feed: btc(),
                 because: UnmeasurableFeed::NoLastBarObserved,
             }
         );
@@ -569,7 +607,7 @@ mod tests {
         let mut unmeasurable = 0;
         for tf in timeframes {
             for age in ages {
-                let verdict = staleness("BTC-USD", age, tf);
+                let verdict = staleness(&btc(), age, tf);
                 let measurable = age.is_some() && tf > 0;
                 assert_eq!(
                     verdict.is_measured(),
@@ -603,7 +641,7 @@ mod tests {
         // the operator acts on the number. And the type offers no `is_fresh`, so
         // the only way to sort it into the healthy bucket is to write the match
         // out and be seen doing it.
-        let verdict = staleness("BTC-USD", None, 0);
+        let verdict = staleness(&btc(), None, 0);
         assert!(!matches!(verdict, Staleness::Hard(_)));
         assert!(!matches!(verdict, Staleness::Fresh));
         assert!(!verdict.is_measured());
@@ -611,10 +649,10 @@ mod tests {
         // measure it" is not actionable, "no bar period is declared for BTC-USD"
         // is. The timeframe is reported first because it is the one a human fixes
         // by declaring a row, rather than by finding out why a collector stopped.
-        let Staleness::Unmeasurable { instrument, because } = verdict else {
+        let Staleness::Unmeasurable { feed, because } = verdict else {
             panic!("no age and no timeframe is not measurable");
         };
-        assert_eq!(instrument, "BTC-USD");
+        assert_eq!(feed, btc());
         assert_eq!(because, UnmeasurableFeed::NoTimeframeDeclared);
         assert_eq!(because.to_string(), "no_timeframe_declared");
     }
@@ -624,18 +662,58 @@ mod tests {
         // COMP-007 §3 / S-7.5: "halts the strategy that depends on it and only
         // that one".
         let mut deps = DependencyMap::new();
-        deps.add("BTC-USD", "s-btc");
-        deps.add("ETH-USD", "s-eth");
-        deps.add("BTC-USD", "s-both");
-        deps.add("ETH-USD", "s-both");
-        assert_eq!(deps.strategies_for("BTC-USD"), ["s-btc", "s-both"]);
-        assert!(deps.strategies_for("SOL-USD").is_empty());
+        deps.add(&btc(), "s-btc");
+        deps.add(&feed("ETH-USD", "kraken"), "s-eth");
+        deps.add(&btc(), "s-both");
+        deps.add(&feed("ETH-USD", "kraken"), "s-both");
+        assert_eq!(deps.strategies_for(&btc()), ["s-btc", "s-both"]);
+        assert!(deps.strategies_for(&feed("SOL-USD", "kraken")).is_empty());
+    }
+
+    #[test]
+    fn one_symbol_at_two_venues_is_two_dependency_sets() {
+        // The test that fails against the map this was until 2026-09-21, and the
+        // reason the key had to change rather than the callers being asked to be
+        // careful.
+        //
+        // Both rows are real: `trading.market_bar` carries BTC-USD at kraken and
+        // at binance, and when this was measured the kraken bar was 92 seconds
+        // old and the binance one 91 days. A symbol-keyed map holds one entry
+        // for both, so `strategies_for` on the dead binance feed returns
+        // `s-kraken` as well — and since ADR-D-11 a data fact halts, so a
+        // strategy whose prices are 92 seconds old stops trading because a venue
+        // it does not touch went dark in June.
+        let kraken = feed("BTC-USD", "kraken");
+        let binance = feed("BTC-USD", "binance");
+        let mut deps = DependencyMap::new();
+        deps.add(&kraken, "s-kraken");
+        deps.add(&binance, "s-binance");
+
+        assert_eq!(deps.strategies_for(&binance), ["s-binance"]);
+        assert_eq!(deps.strategies_for(&kraken), ["s-kraken"]);
+
+        // And the fact a dead binance feed raises is about binance: its own
+        // `reason` says so, so the two verdicts cannot be confused downstream
+        // either.
+        let Staleness::Hard(fact) = staleness(&binance, Some(7_893_272), 60) else {
+            panic!("91 days on a 60s bar is past the hard multiple");
+        };
+        let Fact::HardDataStaleness { feed: subject, .. } = &fact else {
+            panic!("staleness raises a data fact");
+        };
+        assert_eq!(subject, &binance);
+        assert_ne!(subject, &kraken);
+        assert!(fact.reason().contains("binance"), "{}", fact.reason());
+        // Anti-vacuity: the kraken feed at the same instant is fresh, so the two
+        // verdicts really do differ rather than the test having chosen two
+        // stale feeds.
+        assert_eq!(staleness(&kraken, Some(92), 60), Staleness::Fresh);
     }
 
     #[test]
     fn a_reconciliation_mismatch_is_a_fact_and_does_not_wait() {
         let fact = Fact::ReconciliationMismatch {
-            venue: "kraken".to_owned(),
+            venue: Venue::named("kraken").expect("a venue"),
         };
         assert_eq!(fact.family(), Family::Venue);
         let t = Evaluator::on_fact(&fact, StrategyState::Nominal, crate::state::HaltPolicy::Hold);

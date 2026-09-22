@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::feed::{FeedKey, Venue};
+
 /// The families of COMP-007 §3.
 ///
 /// A closed enum rather than a string, because the precision report (§4.1) is
@@ -136,15 +138,23 @@ impl std::str::FromStr for Family {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Fact {
     /// `crates/reconciliation` found a mismatch at this venue.
-    ReconciliationMismatch { venue: String },
+    ReconciliationMismatch { venue: Venue },
     /// The monitor lost, or never had, its lease.
     LeaseLost,
     /// A feed is stale past the hard multiple — ten times its own timeframe,
     /// from [`HARD_STALENESS_MULTIPLE`](crate::evaluate::HARD_STALENESS_MULTIPLE).
     /// Not a default and not configurable: a switch that let this stop halting
     /// is the failure ADR-D-11 closes.
+    ///
+    /// The subject is a [`FeedKey`] and not a symbol. `BTC-USD` is three feeds
+    /// in the live database — coinbase, kraken and binance — and on 2026-09-21
+    /// their last 60-second bars were 90 minutes, 92 seconds and 91 days old. A
+    /// fact naming only the symbol would have to pick one of those ages, and
+    /// since ADR-D-11 made this a halt, picking the stale one stops strategies
+    /// whose feed is fine while picking the fresh one leaves a strategy pricing
+    /// off a feed that died in June.
     HardDataStaleness {
-        instrument: String,
+        feed: FeedKey,
         age_secs: i64,
         timeframe_secs: i64,
     },
@@ -297,18 +307,35 @@ impl FactKind {
                     "here: monitor::service::MonitorService::collect_cadence reads the ",
                     "gauge, passes Some(age) or None to monitor::evaluate::staleness, and ",
                     "routes a Staleness::Hard through monitor::facts::decide and ",
-                    "monitor::store::MonitorStore::carry_out_fact. NOTE for the third ",
-                    "step: Fact::HardDataStaleness and DependencyMap key on a bare symbol, ",
-                    "and in the live database BTC-USD is three instruments (dataplane ids ",
-                    "1005, 1007, 1008 at three venues) whose last 60s bars were 70 ",
-                    "minutes, 2 minutes and 91 days old at one instant — so the fact and ",
-                    "the dependency map must be keyed on (symbol, venue) or the gauge ",
-                    "halts the wrong strategies. The dependency edge itself is ",
-                    "strategy_instances (strategy_id, instrument_id), which holds 0 rows, ",
-                    "and the join from what a strategy names to what a bar is keyed on is ",
-                    "broken today: instruments.instrument_key is NULL for BTC-USD and the ",
-                    "six crypto instruments carrying live bars have no instruments row at ",
-                    "all",
+                    "monitor::store::MonitorStore::carry_out_fact. The keying half of ",
+                    "the third step is DONE and is no longer the blocker it was: ",
+                    "Fact::HardDataStaleness and DependencyMap are keyed on the (symbol, ",
+                    "venue) pair monitor::feed::FeedKey::new builds, which has no ",
+                    "constructor from a single string and whose venue half is its own ",
+                    "type so the two cannot be transposed; the re-keying was needed ",
+                    "because in the live database BTC-USD is three ",
+                    "feeds — dataplane instrument_ids 1005, 1007 and 1008 at venues ",
+                    "coinbase, kraken and binance — whose last 60s bars were 90 minutes, ",
+                    "92 seconds and 91 days old at one instant on 2026-09-21. TWO joins ",
+                    "remain, and only the second needs anybody's permission. FIRST, the ",
+                    "gauge's key is numeric and a FeedKey is not: the reader translates ",
+                    "with `SELECT s.symbol, v.name FROM dataplane.instrument_symbol s ",
+                    "JOIN dataplane.venue v USING (venue_id) WHERE s.valid_to IS NULL`, ",
+                    "which is in Postgres, is already populated for all ten instruments, ",
+                    "and is keyed (instrument_id, venue_id, valid_from, knowledge_time) ",
+                    "so the as-of read stays point-in-time; NOT through ",
+                    "instruments.instrument_key, which is NULL for BTC-USD. SECOND, the ",
+                    "dependency edge cannot yet express what the fact now says: it is ",
+                    "strategy_instances (strategy_id, instrument_id) -> instruments, ",
+                    "strategy_instances holds 0 rows, and instruments is PRIMARY KEY ",
+                    "(instrument_id) over a bare symbol with venue_id as an ordinary ",
+                    "column — so exactly one BTC-USD row can exist and it is pinned to ",
+                    "coinbase, while kraken is the venue whose feed is actually fresh. ",
+                    "Until a migration re-keys instruments on (instrument_id, venue_id), ",
+                    "or strategy_instances gains its own venue column, every edge ",
+                    "monitor::evaluate::DependencyMap::add could be given names a venue ",
+                    "the strategy was never declared to trade. Building the map from ",
+                    "instruments.venue_id today is a guess with a type around it",
                 ),
             },
         }
@@ -344,12 +371,17 @@ impl Fact {
                 format!("reconciliation mismatch at venue {venue}")
             }
             Self::LeaseLost => "monitor lease lost".to_owned(),
+            // The venue is in the sentence, not merely in the key. An operator
+            // told "BTC-USD last bar is 700s old" while three BTC-USD feeds are
+            // running, one of them 92 seconds old, has been told something that
+            // is false of two of them — and the first thing they will do is go
+            // and look at the wrong feed.
             Self::HardDataStaleness {
-                instrument,
+                feed,
                 age_secs,
                 timeframe_secs,
             } => format!(
-                "{instrument} last bar is {age_secs}s old, \
+                "{feed} last bar is {age_secs}s old, \
                  past the hard {}x multiple of its {timeframe_secs}s timeframe",
                 crate::evaluate::HARD_STALENESS_MULTIPLE
             ),
@@ -361,6 +393,26 @@ impl Fact {
 mod tests {
     use super::*;
     use std::str::FromStr;
+
+    /// The feed the live database's three BTC-USD rows disagree about.
+    ///
+    /// Through the real constructor rather than a literal, so a test cannot
+    /// build a key production could not.
+    fn feed(symbol: &str, venue: &str) -> FeedKey {
+        FeedKey::new(symbol, Venue::named(venue).expect("a venue")).expect("a feed")
+    }
+
+    fn stale(symbol: &str, venue: &str) -> Fact {
+        Fact::HardDataStaleness {
+            feed: feed(symbol, venue),
+            age_secs: 700,
+            timeframe_secs: 60,
+        }
+    }
+
+    fn venue(name: &str) -> Venue {
+        Venue::named(name).expect("a venue")
+    }
 
     #[test]
     fn every_family_round_trips_through_its_string() {
@@ -403,11 +455,7 @@ mod tests {
         // family the fact reports under is one that halts. Stated as a link
         // between two functions rather than as `Family::Data`, so renaming the
         // family does not quietly break the rule.
-        let fact = Fact::HardDataStaleness {
-            instrument: "BTC-USD".into(),
-            age_secs: 700,
-            timeframe_secs: 60,
-        };
+        let fact = stale("BTC-USD", "kraken");
         assert!(
             fact.family().breach_halts(),
             "a quarter-size position priced off a dead feed is the same error at 25% of the size"
@@ -418,18 +466,10 @@ mod tests {
     fn a_fact_names_the_family_that_owns_it() {
         assert_eq!(Fact::LeaseLost.family(), Family::Lease);
         assert_eq!(
-            Fact::ReconciliationMismatch { venue: "kraken".into() }.family(),
+            Fact::ReconciliationMismatch { venue: venue("kraken") }.family(),
             Family::Venue
         );
-        assert_eq!(
-            Fact::HardDataStaleness {
-                instrument: "BTC-USD".into(),
-                age_secs: 700,
-                timeframe_secs: 60,
-            }
-            .family(),
-            Family::Data
-        );
+        assert_eq!(stale("BTC-USD", "kraken").family(), Family::Data);
     }
 
     #[test]
@@ -438,13 +478,9 @@ mod tests {
         // variant does not compile until `kind` has an arm, and an arm needs a
         // `FactKind`, and a `FactKind` needs a `wiring` answer.
         let samples = [
-            Fact::ReconciliationMismatch { venue: "kraken".into() },
+            Fact::ReconciliationMismatch { venue: venue("kraken") },
             Fact::LeaseLost,
-            Fact::HardDataStaleness {
-                instrument: "BTC-USD".into(),
-                age_secs: 700,
-                timeframe_secs: 60,
-            },
+            stale("BTC-USD", "kraken"),
         ];
         let kinds: Vec<FactKind> = samples.iter().map(Fact::kind).collect();
         let mut sorted = kinds.clone();
@@ -471,14 +507,17 @@ mod tests {
     fn a_reason_names_the_thing_that_went_wrong() {
         // The operator's first question is always "why", and a reason that does
         // not name the instrument or the venue does not answer it.
-        let r = Fact::HardDataStaleness {
-            instrument: "BTC-USD".into(),
-            age_secs: 700,
-            timeframe_secs: 60,
-        }
-        .reason();
+        let r = stale("BTC-USD", "binance").reason();
         assert!(r.contains("BTC-USD"), "{r}");
         assert!(r.contains("700"), "{r}");
+        // And the venue, which is the half that was missing. Three BTC-USD
+        // feeds were live on 2026-09-21 and one of them was 92 seconds old; a
+        // reason naming only the symbol sends the operator to whichever one
+        // they think of first.
+        assert!(
+            r.contains("binance"),
+            "a reason that does not name the venue names two feeds that are fine: {r}"
+        );
         // And it names the multiple from the constant, not from a literal typed
         // into the sentence: a message that says "10x" after the constant moved
         // tells the operator a number that is not the one that fired.

@@ -358,13 +358,16 @@ impl MonitorStore {
         venue: &str,
         gate: &risk::KillSwitch,
     ) -> Result<Scope, StoreError> {
-        if venue.trim().is_empty() {
-            return Err(StoreError::Invalid(
-                "a reconciliation mismatch must name the venue it is at".to_owned(),
-            ));
-        }
+        // The one place in this crate where a `&str` becomes a
+        // [`Venue`](crate::feed::Venue), and deliberately at the boundary rather
+        // than deeper: `crates/reconciliation` hands over the venue it
+        // reconciled as a string, it is checked here, and nothing inside this
+        // crate then handles a venue nobody validated.
+        let venue = crate::feed::Venue::named(venue).map_err(|_| {
+            StoreError::Invalid("a reconciliation mismatch must name the venue it is at".to_owned())
+        })?;
         let fact = Fact::ReconciliationMismatch {
-            venue: venue.to_owned(),
+            venue: venue.clone(),
         };
         // Through `facts::decide` rather than naming the halt here, so the venue
         // scoping and the "that venue and no other" rule stay in one place for
