@@ -440,7 +440,9 @@ pub fn diff_strategies(params: &Value) -> Value {
 ///
 /// It never persists. A version that has not been previewed or backtested is a
 /// draft, and `create_strategy` is where a draft becomes something evidence can
-/// cite — under a new slug, because that tool upserts by `strategy_id`.
+/// cite — under the *same* slug, because saving appends a revision whose parent
+/// is the version this move edited. That chain is the lineage; a new slug throws
+/// it away (ADR-D-21).
 #[must_use]
 pub fn apply_move(params: &Value) -> Value {
     let Some(v) = params.get("definition").filter(|v| !v.is_null()) else {
@@ -510,8 +512,9 @@ pub fn apply_move(params: &Value) -> Value {
             "text": text,
             "note": "one move, checked by running the differ over the result — an edit that \
                      changed nothing or changed two things is refused rather than returned. \
-                     Nothing was persisted; pass `strategy_id` to mint the new version's slug, \
-                     since `create_strategy` upserts by it.",
+                     Nothing was persisted. `create_strategy` appends this as the next revision \
+                     of whatever slug it carries, so leaving `strategy_id` alone keeps the \
+                     lineage; passing a new one starts a separate history.",
         },
         "ids": {},
     })
@@ -660,7 +663,7 @@ pub fn specs() -> Vec<ToolSpec> {
                 },
                 "strategy_id": {
                     "type": "string",
-                    "description": "slug for the new version. create_strategy upserts by it, so reusing the old one overwrites the version your evidence cites."
+                    "description": "OPTIONAL slug override. Leave it unset to keep the same slug: create_strategy appends the edited version as a new revision of that slug's history and the previous one stays readable, so your evidence still resolves. Set it only to start a separate lineage."
                 }
             }
         }),
@@ -755,36 +758,6 @@ exit time 48 bars
         let def: domain::strategy_def::StrategyDefinition =
             serde_json::from_value(out["detail"]["definition"].clone()).expect("a definition");
         assert_eq!(def.definition_version, "1.3", "the exits block is a 1.3 document");
-    }
-
-    /// **The language compiles a document `create_strategy` refuses, and this
-    /// test exists to fail the day that stops being true.**
-    ///
-    /// `strategy-lang::compile` targets v1.3, because the typed `exits` block is
-    /// what makes `exit stop 2 % from entry` representable at all and
-    /// `StrategyDefinition::exits` is REQUIRED at 1.3. `strategy_validator`'s
-    /// `validate_schema` accepts `"1.0" | "1.2"` and nothing else, and
-    /// `POST /api/strategies` runs it before it persists — so **every** strategy
-    /// SLv2 produces is rejected by the platform, on a code whose own `fix` in
-    /// `teach.rs` reads "1.3 adds the `exits` block". The fix tells the author
-    /// to write the version the check refuses.
-    ///
-    /// That is a one-line change in `crates/strategy-validator/src/schema.rs`,
-    /// which is not this track's to make. What is recorded here instead is the
-    /// exact shape of the blockage: the version is the *only* thing wrong. When
-    /// the validator learns 1.3, this test fails, and the repair is to delete it
-    /// and assert `validate` is `Ok` — not to widen it.
-    #[test]
-    fn the_only_thing_the_validator_holds_against_a_compiled_strategy_is_its_version() {
-        let def: domain::strategy_def::StrategyDefinition =
-            serde_json::from_value(compiled(TREND)).expect("a definition");
-        let errs = strategy_validator::validate(&def).err().unwrap_or_default();
-        let codes: Vec<&str> = errs.iter().map(|e| e.code).collect();
-        assert_eq!(
-            codes,
-            vec!["unknown_definition_version"],
-            "the compiler and the validator disagree about more than the version now: {errs:#?}"
-        );
     }
 
     /// A refusal names the clause and carries a fix, because the whole argument

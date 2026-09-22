@@ -1202,3 +1202,58 @@ guard. That is a large security surface for a convenience, and the workspace is 
 reachable by the agent's own tools, which is the path that keeps the fence intact.
 
 §3.3's sentence should name the three and drop the fourth.
+
+---
+
+## Q-P-01 — two bar tables, different contents *and* different durability, and no plan file mentions either
+
+**Raised and answered 2026-09-21. Verified directly against ClickHouse, not reported.**
+
+`trading.market_bar` and `trading.market_bars_v2` both hold OHLCV bars and **disagree by
+12,307 rows** for one series (BTC-USD / coinbase / 1m: 105,760 vs 93,453). Two endpoints
+serve the two numbers: `/api/backtests/coverage` reads `market_bar`, and P-2.6's
+published QC census read `market_bars_v2`. Neither says which is authoritative.
+
+**The durability difference is the serious half**, and it is structural rather than
+configurable:
+
+```
+market_bar      ReplacingMergeTree(ingest_time)
+                ORDER BY (instrument_id, venue_id, period_secs, event_time,
+                          knowledge_time, revision_seq)
+
+market_bars_v2  ReplacingMergeTree(ingested_time)
+                ORDER BY (instrument_id, timeframe, venue_id, source,
+                          event_time, revision)
+```
+
+`knowledge_time` is **in `market_bar`'s sort tuple and absent from `market_bars_v2`'s**.
+So on v2, two rows for the same bar that share a `revision` value and differ in knowledge
+time **collapse on merge**, keeping whichever arrived later by `ingested_time`. A
+restatement is silently destroyed by a background merge — no error, no row, nothing to
+read afterwards. On `market_bar` the same pair cannot collapse, because both discriminators
+are in the key.
+
+**Status:** answered (decided under Mason's delegation of 2026-09-21 — ADR-D-29).
+**`market_bar` is authoritative. `market_bars_v2` is frozen.**
+
+The live system settles which: **`market_bar`'s newest row was ingested minutes ago
+(`23:02` today); `market_bars_v2`'s newest is `2026-09-14`** — a week stale. The canonical
+table is the one receiving live bars, and it is also the only one that can hold the
+revision guarantee DA-16 asks for.
+
+Three consequences, and the second is the one that costs work:
+
+1. **Nothing may read `market_bars_v2` for a point-in-time answer.** Its merge semantics
+   are a non-PIT read path that nobody added deliberately — it was inherited from a sort
+   key — and INVARIANTS forbids one however it arrived.
+2. **The writers that still target v2 must be redirected or retired** —
+   `dataplane/src/bar.rs`, `dataplane/src/source.rs`, `api/src/synthetic_worker.rs` and
+   the census example. A table that is frozen in the plan and written in the code is
+   worse than either.
+3. **P-2.6's published grades were measured on the stale table** and must be re-measured
+   before they are quoted again. The precedent for enforcement already exists: `xtask`
+   ships `check-bars-v1-frozen`, so freezing v2 is the same mechanism a second time.
+
+Recorded as a question rather than a bug because the choice of authority is a decision;
+the merge behaviour is a fact.

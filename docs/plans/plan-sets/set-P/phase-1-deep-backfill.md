@@ -22,7 +22,15 @@ graded A or B, then the remaining initialised instruments.
 ---
 
 ### P-1.1 The `backfill` job kind and a resumable cursor — M
-`NOT STARTED`
+`PARTIAL` — **corrected 2026-09-21 by audit; the marker said `NOT STARTED`.**
+`impl Worker for BackfillWorker` exists, `JobKind::Backfill` is in
+`JobKind::ALL`, migration `0099` is applied, `dataplane.backfill_state` is live,
+and `jobs/tests/backfill_resume.rs` counts adapter calls. **The gap is one
+registration:** `apps/platform/src/main.rs` registers GateAdvance, DataQc,
+SimulatePaths, Campaign, ResearchRun and Session — **and no backfill worker** —
+so a submitted backfill job queues for ever. This is the same shape as the
+reconciliation sweep and the trials route: the caller built, the callee
+registered nowhere.
 
 A job kind in `crates/jobs` whose manifest is `(source, instrument_id, timeframe, window)` and
 whose state is a cursor in a new `backfill_state` table (migration 0099: source, instrument,
@@ -85,7 +93,16 @@ asserts two backfilled rows for the same bar-close from different sources carry 
 **Traces:** DATA-005 §11 S1; ADR-P2-24.
 
 ### P-1.5 Revisions retained, never overwritten — M
-`NOT STARTED`
+`PARTIAL` — **corrected 2026-09-21 by audit; the marker said `NOT STARTED`
+and the acceptance is in the tree verbatim.** `backtest/tests/bar_store_pit.rs`
+holds all three clauses as named tests; `trading.market_bar`'s sorting key ends
+`event_time, knowledge_time, revision_seq`, so revisions survive
+ReplacingMergeTree merges **structurally**, and `store.rs` reads
+`argMax(…, (knowledge_time, revision_seq))`. **The one gap is the one that
+matters today:** the suite self-skips unless `BACKTEST_E2E_CLICKHOUSE_URL` is
+set, and **no CI file sets it**. By the rule established the same day — a test
+that skips silently is not a test, and a claim citing one is not verified — this
+cannot be `DONE` until CI runs it.
 
 DA-16 requires revisions to be retained so an `as_of` read can pick the revision that was
 current then. Backfill is exactly where a second version of an already-stored bar arrives.

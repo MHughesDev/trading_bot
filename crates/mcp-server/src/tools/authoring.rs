@@ -110,28 +110,68 @@ pub fn validate_strategy(definition_json: &str) -> ValidationResult {
 }
 
 /// `create_strategy` — validate locally, then persist via the platform API.
-pub async fn create_strategy(api: &ApiClient, definition_json: &str) -> Value {
+///
+/// `parent_strategy_id` is the optional explicit lineage described on the tool
+/// spec below: the slug this definition was derived from, when it came from a
+/// *different* lineage than its own.
+pub async fn create_strategy(
+    api: &ApiClient,
+    definition_json: &str,
+    parent_strategy_id: Option<&str>,
+) -> Value {
     let vr = validate_strategy(definition_json);
     if !vr.valid {
         return json!({ "error": "validation_failed", "errors": vr.errors });
     }
     let def: StrategyDefinition = serde_json::from_str(definition_json).expect("already validated");
-    create_strategy_from_def(api, def).await
+    create_strategy_from_def(api, def, parent_strategy_id).await
 }
 
 /// Persist a typed, already-validated `StrategyDefinition` via the API.
 ///
 /// Also used by `finalize_strategy` in the builder flow.
-pub async fn create_strategy_from_def(api: &ApiClient, def: StrategyDefinition) -> Value {
+///
+/// # The note this returns used to be wrong
+///
+/// It said "upserted by strategy_id — reusing this slug overwrites the
+/// strategy", and the tool description drew the obvious conclusion: mint
+/// `my_strat_v2` when iterating. Nothing is overwritten. `strategy_revision` is
+/// append-only and `strategy_definitions.strategy_id` is a pointer into it, so
+/// re-saving a slug **appends** and moves the head; the previous definition is
+/// still there and still reconstructable, which is the only reason
+/// `parent_hash` can be derived at all. The advice was therefore the cause of
+/// the thing it warned about: a new slug has no head, so every "v2" started a
+/// lineage of one.
+pub async fn create_strategy_from_def(
+    api: &ApiClient,
+    def: StrategyDefinition,
+    parent_strategy_id: Option<&str>,
+) -> Value {
     let body = match serde_json::to_value(&def) {
         Ok(v) => v,
         Err(e) => return json!({ "error": "serialization_error", "detail": e.to_string() }),
     };
-    match api.post("/api/strategies", body).await {
+    let path = match parent_strategy_id.filter(|p| !p.is_empty()) {
+        Some(parent) => format!(
+            "/api/strategies?parent_strategy_id={}",
+            crate::tools::market::urlencode(parent)
+        ),
+        None => "/api/strategies".to_string(),
+    };
+    match api.post(&path, body).await {
         Ok(resp) => json!({
             "strategy_id": resp.get("strategy_id").cloned().unwrap_or(json!(def.strategy_id)),
             "created": true,
-            "note": "upserted by strategy_id — reusing this slug overwrites the strategy",
+            // Reported, not assumed. `parent_revision` is null on a genuine
+            // first version and a hash on every later one; a caller that sees
+            // null where it expected a chain has reused a slug it thought was
+            // new, and that is worth seeing at the call rather than in an audit.
+            "revision_hash": resp.get("revision_hash").cloned().unwrap_or(Value::Null),
+            "parent_revision": resp.get("parent_revision").cloned().unwrap_or(Value::Null),
+            "actor_kind": resp.get("actor_kind").cloned().unwrap_or(Value::Null),
+            "note": "saved as a new revision of this slug. Re-saving the same slug appends to \
+                     its history and moves the head; nothing is overwritten and the previous \
+                     definition stays readable.",
         }),
         Err(e) => e.to_tool_error(),
     }
@@ -195,6 +235,21 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
             "definition_json": { "type": "object", "description": "Strategy definition OBJECT (format: get_authoring_guide). Send the object, not a string containing JSON." }
         }
     });
+    // `create_strategy` takes one field the read-only tools do not: the explicit
+    // lineage (ADR-D-21). Optional, and deliberately not defaulted — a first
+    // version genuinely has no parent, and a required lineage field is a field
+    // that gets filled with whatever is nearest.
+    let create_definition = json!({
+        "type": "object",
+        "required": ["definition_json"],
+        "properties": {
+            "definition_json": { "type": "object", "description": "Strategy definition OBJECT (format: get_authoring_guide). Send the object, not a string containing JSON." },
+            "parent_strategy_id": {
+                "type": "string",
+                "description": "OPTIONAL. The slug this was forked from, when it came from a DIFFERENT slug's lineage. Omit it when iterating on the same slug, and for a first version."
+            }
+        }
+    });
     vec![
         ToolSpec::new(
             "validate_strategy",
@@ -209,9 +264,14 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
             "create_strategy",
             "strategy",
             Risk::Write,
-            "Validate and persist a strategy definition to the platform's library. Upserts by \
-             strategy_id slug, so mint versioned slugs (my_strat_v2) when iterating.",
-            definition,
+            "Validate and persist a strategy definition to the platform's library. Saving is \
+             append-only: re-using the same strategy_id records a NEW revision whose parent is \
+             the previous one and moves the slug's head to it. Nothing is overwritten and every \
+             earlier version stays readable, so KEEP THE SAME SLUG while you iterate — that is \
+             what links the versions into a lineage. Minting my_strat_v2 starts a separate \
+             history with no parent. Use parent_strategy_id only when this definition came from \
+             a different slug's lineage.",
+            create_definition,
         )
         .internal()
         .evidence(&["strategy_id"])

@@ -1,6 +1,6 @@
 # Phase 2 — Quality and eligibility
 
-**Completion: 83% (5 / 6 tasks). P-2.3 `NOT STARTED` — enforcement, deliberately last; see P-2.6.**
+**Completion: 83% (4 / 6 tasks). P-2.3 `NOT STARTED` — enforcement, deliberately last; see P-2.6.** P-2.2 was downgraded from `DONE` on 2026-09-21: `data_qc_reports` has no reader and no writer anywhere outside its own migration.
 
 **Requirement IDs:** DA-07.
 **Spec:** [DATA-005 §7](../../../specs/DATA-005-data-api-v2.md) (the checks, the grades, the
@@ -46,7 +46,12 @@ report; the config version is recorded on every report.
 **Traces:** DATA-005 §7; DA-07.
 
 ### P-2.2 Grades A–D and `data_qc_reports` — M
-`DONE`
+`PARTIAL` — **downgraded from `DONE` on 2026-09-21.** The acceptance is
+*"persisted to `data_qc_reports` … every manifest carries the grade and the
+report id"*. The string `data_qc_reports` appears **nowhere in `crates/`,
+`frontend/src/` or `xtask/`** — only inside its own migration. The table is live
+with **0 rows, no reader and no writer**, and `routes/data.rs`'s manifest block
+emits neither the grade nor the report id.
 
 The grade function exactly as specified — A all pass; B gaps < 0.5% and no unrepaired bad
 ticks; C material, gaps < 5% or repaired bad ticks; D gaps ≥ 5%, unrepaired bad ticks, or any

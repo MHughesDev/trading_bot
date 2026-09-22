@@ -77,7 +77,11 @@ publication time; the free plan's actual history depth is recorded in this phase
 **Traces:** DATA-005 §11 S2, §10 (text rules); INV-03; 06_DATA §7.
 
 ### P-3.4 Kalshi history — S
-`NOT STARTED`
+`PARTIAL` — **corrected 2026-09-21 by audit; the marker said `NOT STARTED`
+and both stated halves are already true.** `collectors/src/prediction/kalshi.rs`
+exists, and `dataplane.source` row 13 `kalshi_rest` carries
+`declared_vendor_lag_ms = 60000`. The remaining gap is that no readable
+event-probability series or table exists.
 
 The collector already exists. This task brings its history into the same PIT discipline as
 everything else and records it in `dataplane.source` with a declared lag. Exposure only — event

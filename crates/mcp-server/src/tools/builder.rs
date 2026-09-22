@@ -405,7 +405,10 @@ pub async fn finalize_strategy(ctx: &McpContext, params: &Value) -> Value {
     }
 
     let strategy_id = def.strategy_id.clone();
-    let result = create_strategy_from_def(&ctx.api, def).await;
+    // No explicit parent: the builder finalises a draft under its own slug, so
+    // the lineage is the slug's own head (ADR-D-21). A fork is stated by the
+    // caller of `create_strategy`, never inferred here.
+    let result = create_strategy_from_def(&ctx.api, def, None).await;
     if result.get("error").is_some() {
         return result;
     }

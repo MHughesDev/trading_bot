@@ -275,6 +275,61 @@ fn the_scanner_still_finds_the_plan_files() {
     }
 }
 
+/// A set's `MASTER.md` counts the set it is the master of.
+///
+/// This test exists because both of them were wrong by the maximum possible
+/// amount. On 2026-09-21 `set-P/MASTER.md` and `set-T/MASTER.md` each read
+/// "Completion: 0% (0 / N tasks). NOT STARTED." while their own phase files
+/// held 83% and 75% respectively — and neither was noticed for six days,
+/// because [`every_phase_headline_counts_its_own_tasks`] scans `phase-*.md`
+/// and a MASTER is not a phase.
+///
+/// A file called MASTER is the first one a reader opens. Leaving the one file
+/// whose name promises the summary outside the only mechanism that checks
+/// summaries is the exact hole this suite exists to close, one directory up.
+#[test]
+fn every_set_master_counts_its_own_set() {
+    let mut wrong: Vec<String> = Vec::new();
+    for set in LIVE_SETS {
+        let path = repo_root()
+            .join("docs/plans/plan-sets")
+            .join(set)
+            .join("MASTER.md");
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            wrong.push(format!("{set}/MASTER.md does not exist"));
+            continue;
+        };
+        let t = tally_set(set);
+        let done = done_task_count_for_set(set);
+
+        let Some(line) = text.lines().find(|l| l.starts_with("**Completion:")) else {
+            wrong.push(format!("{set}/MASTER.md has no `**Completion:` line at all"));
+            continue;
+        };
+        let Some((d, total)) = first_fraction(line) else {
+            wrong.push(format!(
+                "{set}/MASTER.md states no `d / t` pair: {line}"
+            ));
+            continue;
+        };
+        if d != done || total != t.tasks {
+            wrong.push(format!(
+                "{set}/MASTER.md says {d}/{total}, the set holds {done}/{}",
+                t.tasks
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "a set MASTER disagrees with the set it is the master of. It is the first file          anyone opens, and both were wrong by the maximum possible amount before this          test existed: {wrong:#?}"
+    );
+}
+
+/// [`done_task_count`] over every phase file of a set.
+fn done_task_count_for_set(set: &str) -> usize {
+    phase_files(set).iter().map(|f| done_task_count(f)).sum()
+}
+
 #[test]
 fn the_headline_in_plan_md_is_the_number_the_plan_files_support() {
     let mut all = Tally::default();

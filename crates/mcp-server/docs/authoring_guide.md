@@ -87,10 +87,12 @@ a reproduction is a finding, and `report_kill` is how it is recorded.
 2. Write a strategy definition (JSON, format below). Prefer writing the full JSON and
    checking it with `validate_strategy` — it returns structured, fixable errors.
    (The step-by-step `new_strategy_draft` builder tools exist as an alternative.)
-3. `create_strategy` — persists the definition. **`strategy_id` is an upsert key**:
-   re-using a slug overwrites that strategy. When iterating, either intentionally
-   update the same slug or mint versioned slugs (`my_strat_v1`, `my_strat_v2`, …)
-   to keep every variant comparable.
+3. `create_strategy` — persists the definition. **Saving is append-only**: re-using
+   a slug records a new revision whose parent is the previous one and moves the
+   slug's head to it. Nothing is overwritten, and every earlier variant stays
+   readable by its `revision_hash`. **Keep the same slug while you iterate** — that
+   is what links the versions into a lineage. Minting `my_strat_v2` starts a
+   separate history whose first revision has no parent.
 4. `create_backtest` — launch a run. Returns a `backtest_id` immediately; the run
    proceeds in the background and can take minutes to over an hour for large windows.
 5. `wait_for_backtest` — blocks server-side until the run finishes or the call's
@@ -129,7 +131,8 @@ A strategy is one canonical JSON document:
 }
 ```
 
-- `strategy_id` — slug, `[a-z0-9_]`, the upsert key.
+- `strategy_id` — slug, `[a-z0-9_]`. It names a *history*, not a document: saving
+  appends a revision to it and moves its head. Keep it stable while you iterate.
 - `asset_class` — use `"crypto_spot_cex"` (this platform's v1 focus is crypto).
 - `inputs` — lane subscriptions. `"$bound_at_init"` means "the instrument this
   strategy is applied to" — always use it so the strategy is instrument-portable.
@@ -151,6 +154,26 @@ A strategy is one canonical JSON document:
 - `risk_overrides` (optional) — `{ "max_position": "<decimal>",
   "max_order_rate_per_minute": N, "max_order_rate_per_second": N }`. **Tighten-only**:
   overrides may only be stricter than the platform defaults; loosening fails validation.
+- `definition_version` — `"1.0"` is the base, `"1.1"` adds the `model_forecast`
+  node, `"1.2"` adds typed `parameters`, `"1.3"` adds `exits`. Anything in
+  `1.0..=1.3` is accepted; a higher version is refused because this build does not
+  know what it means.
+- `exits` — **required at `1.3` and not allowed below it.** It declares what closes
+  a position:
+
+  ```json
+  "exits": { "mode": "rules", "rules": [
+    { "rule": "stop_loss",   "fraction": "0.02" },
+    { "rule": "take_profit", "fraction": "0.05" }
+  ] }
+  ```
+
+  Distances are positive **fractions of entry** (`0.02` is 2%), never absolute
+  prices — a rule has to survive a sweep across instruments at different price
+  scales. If the risk layer's position limits genuinely are the whole exit logic,
+  say so with `{"mode": "risk_layer_only"}`. That is a legitimate choice, and it
+  has to be stated: a strategy that *forgot* its exits looks identical from the
+  outside, which is why silence is refused at 1.3.
 
 ## Expression grammar (frozen — nothing else parses)
 
@@ -308,10 +331,31 @@ terminal; only then is the symbol backtestable.
 
 ### create_strategy
 
-Upserts by `strategy_id` slug, so reusing a slug **overwrites** that strategy.
-Mint versioned slugs (`my_strat_v2`) when iterating, or you will lose the variant
-you were comparing against — and any Experiment pointing at the slug will silently
-start running the new definition.
+**Reusing the slug is the lineage mechanism.** `strategy_revision` is append-only
+and `strategy_id` is a pointer into it, so saving under an existing slug *appends*
+a revision, records the previous head as its `parent_hash`, and moves the pointer.
+The variant you were comparing against is not lost — it is the parent, still
+readable by its `revision_hash`, which is the only reason the chain exists.
+
+So iterate on one slug. A new slug (`my_strat_v2`) is a new history: its first
+revision has no parent, and nothing downstream can tell it descended from
+anything.
+
+Two things that follow:
+
+- **Anything that resolves a strategy by *slug* rather than by `revision_hash`
+  picks up the new head.** An Experiment pinned to a revision is unaffected; one
+  pinned to a slug starts running the new definition. Pin the hash the response
+  returns when a result has to stay reproducible.
+- **`parent_strategy_id` is for forks only** — a definition derived from a
+  *different* slug's lineage. It is optional and never defaulted: a genuine first
+  version has no parent, and a required field would be filled with whatever was
+  nearest. It is refused if the slug you are saving already has a history of its
+  own (that history is already the answer), or if the slug you name has none.
+
+The response reports `revision_hash`, `parent_revision` and `actor_kind` — read
+them rather than assuming. A `parent_revision` of `null` where you expected a
+chain means you saved under a slug the platform had never seen.
 
 ### get_backtest
 

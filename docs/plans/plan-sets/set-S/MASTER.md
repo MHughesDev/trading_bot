@@ -1,6 +1,14 @@
 # The Agent Platform — Set S
 
-**Completion: this header was wrong and is superseded by the per-phase files.**
+**Completion: 35% left (77 / 189 tasks). 77 done, 114 partial, 11 units blocked.**
+
+> This line read *"this header was wrong and is superseded by the per-phase
+> files"* until 2026-09-21. Deferring to the phase files was the right instinct
+> and the wrong remedy: a MASTER with no number is a MASTER nobody can check,
+> and the two sibling sets spent six days claiming `0% (0 / N tasks)` while
+> their own phase files recorded real work. The number here is now **derived**
+> from those phase files by `every_set_master_counts_its_own_set` and fails the
+> build when it drifts — which is the property the sentence was reaching for.
 
 > **Every phase has now been audited against the source (2026-09-16).** Read the per-phase
 > header, not this line. The audit ran in two passes: phases 4, 5 and 6 read task by task, and

@@ -1,7 +1,8 @@
-//! Structural validator for the frozen v1.0 strategy definition format.
+//! Structural validator for the strategy definition format.
 //!
 //! Checks:
-//! - `definition_version` == "1.0"
+//! - `definition_version` parses and lies inside the supported range
+//!   (see [`crate::version`])
 //! - `strategy_id` is non-empty
 //! - All node IDs are unique within the definition
 //! - Every `signal.when` references an existing `condition` node ID
@@ -11,23 +12,40 @@ use std::collections::HashSet;
 
 use domain::strategy_def::{nodes::NodeKind, StrategyDefinition};
 
+use crate::version::{DefinitionVersion, MAX_SUPPORTED, MIN_SUPPORTED};
 use crate::ValidationError;
 
 /// Validate the structural correctness of a definition.
 pub fn validate_schema(def: &StrategyDefinition) -> Vec<ValidationError> {
     let mut errors = Vec::new();
 
-    // v1.2 is additive (typed `parameters`); a v1.0 document is a valid v1.2
-    // document, so both version strings are accepted.
-    if !matches!(def.definition_version.as_str(), "1.0" | "1.2") {
-        errors.push(ValidationError {
+    // A bounded range, not a whitelist (ADR-D-20).
+    //
+    // The whitelist was `"1.0" | "1.2"`, and it was wrong twice: 1.1 added the
+    // `ModelForecast` node and 1.3 added the typed `exits` block, and neither
+    // arm was ever written. Because the schema versions are additive in the
+    // parser, a document at any version the parser knows is readable, so the
+    // only version worth refusing is one from beyond `MAX_SUPPORTED` — a
+    // document whose meaning this build has not been taught.
+    match DefinitionVersion::parse(&def.definition_version) {
+        Some(v) if v.is_supported() => {}
+        Some(v) => errors.push(ValidationError {
             code: "unknown_definition_version",
             path: "definition_version".into(),
             message: format!(
-                "expected '1.0' or '1.2', got '{}'; only v1.0/v1.2 definitions are accepted",
+                "definition_version {v} is outside the supported range \
+                 {MIN_SUPPORTED}..={MAX_SUPPORTED}; this build does not know what it means"
+            ),
+        }),
+        None => errors.push(ValidationError {
+            code: "unknown_definition_version",
+            path: "definition_version".into(),
+            message: format!(
+                "definition_version '{}' is not a MAJOR.MINOR version; expected something in \
+                 {MIN_SUPPORTED}..={MAX_SUPPORTED}",
                 def.definition_version
             ),
-        });
+        }),
     }
 
     if def.strategy_id.trim().is_empty() {

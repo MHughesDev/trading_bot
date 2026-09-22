@@ -91,8 +91,10 @@ pub const TEACHINGS: &[Teaching] = &[
     },
     Teaching {
         code: "unknown_definition_version",
-        fix: "set `definition_version` to a version this platform parses. 1.0 is the base, \
-              1.2 adds typed `parameters`, 1.3 adds the `exits` block.",
+        fix: "set `definition_version` to a version inside the supported range. 1.0 is the \
+              base, 1.1 adds the `model_forecast` node, 1.2 adds typed `parameters`, and 1.3 \
+              adds the `exits` block — 1.3 is the newest and what the strategy compiler emits. \
+              A version above the range is refused rather than read as the nearest one below.",
         see: Some("guide#definition"),
     },
     Teaching {

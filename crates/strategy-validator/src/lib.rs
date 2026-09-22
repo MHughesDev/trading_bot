@@ -9,6 +9,7 @@ pub mod expressions;
 pub mod risk;
 pub mod schema;
 pub mod teach;
+pub mod version;
 
 use domain::strategy_def::{nodes::NodeKind, params, StrategyDefinition};
 

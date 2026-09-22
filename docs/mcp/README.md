@@ -65,8 +65,13 @@ it to.
 
 Notes:
 
-- **Strategies upsert by `strategy_id` slug** — iterating agents should mint
-  versioned slugs (`my_strat_v2`, …).
+- **Strategy saves are append-only** — `strategy_id` names a history, not a
+  document. Saving under an existing slug records a new revision whose
+  `parent_hash` is the previous head and moves the pointer; nothing is
+  overwritten and every earlier version stays readable by its `revision_hash`.
+  Iterating agents should therefore **keep the same slug** — that is what links
+  the versions into a lineage. `parent_strategy_id` is the optional exception,
+  for a definition forked from a *different* slug's lineage.
 - **Long waits**: `wait_for_backtest` blocks server-side up to 600 s per call
   and returns progress on timeout — agents chain calls for hour-long runs. Over
   streamable HTTP the server emits keep-alive/progress frames every 10 s so

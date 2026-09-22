@@ -25,7 +25,15 @@ data policy (ADR-0027).
 ## Measure first
 
 ### P-0.1 The coverage census — what history actually exists — M
-`NOT STARTED`
+`PARTIAL` — **corrected 2026-09-21 by audit; the marker said `NOT STARTED`
+and the work is largely done.** `crates/dataplane/src/census.rs` is 749 lines and
+carries acceptance clauses 2 and 4 as named tests
+(`planted_three_bar_gap_is_reported_exactly`,
+`rerun_is_identical_except_as_of`); migration `0097` is applied; and
+`P-0.1-CENSUS-2026-09-15.md` publishes a nine-series result measured on live
+ClickHouse. **The gap is a caller:** `take_census`/`persist` have **zero callers
+workspace-wide** and `dataplane.data_coverage_census` holds 0 rows. Built,
+tested, published, unreached.
 
 A deterministic job that walks every `(instrument_id, timeframe)` in `market_bars_v2` and
 reports: first bar, last bar, expected bar count over that span from the instrument's trading
@@ -95,7 +103,13 @@ source, the task is `BLOCKED:UPSTREAM` with the term quoted and the next candida
 **Traces:** DATA-005 §11 S6, §12; DA-11; `artifact.md` FM-11.
 
 ### P-0.4 Crypto option chain snapshots, forward — S
-`NOT STARTED`
+`BLOCKED:UPSTREAM` — **corrected 2026-09-21; the marker said `NOT STARTED`
+while the task's own escape clause had already been satisfied.** The sibling
+document `P-0.4-BLOCKED-crypto-option-chains.md` quotes Deribit's terms (Art.
+2.4, 4.6) and records the block. The acceptance says *"terms verified and quoted
+… or `BLOCKED:UPSTREAM`"*, and that was done six days before anyone changed the
+marker. Needs a human: a decision on the next crypto-options candidate, or on
+revisiting ADR-0027.
 
 Hourly snapshots of BTC and ETH option chains from a free public API (DATA-005 S5 names
 Deribit public; market-data endpoints only, never trading endpoints — **verify US access terms

@@ -23,13 +23,28 @@
 use domain::strategy_def::exits::{ExitPolicy, ExitRule};
 use domain::strategy_def::{StrategyDefinition, DEFINITION_VERSION_V1_3};
 
+use crate::version::DefinitionVersion;
 use crate::ValidationError;
 
 /// Validate the `exits` block.
 #[must_use]
 pub fn validate_exits(def: &StrategyDefinition) -> Vec<ValidationError> {
     let mut errors = Vec::new();
-    let is_v13_or_later = def.definition_version.as_str() >= DEFINITION_VERSION_V1_3;
+
+    // Ordered as numbers, not as text. `"1.10" >= "1.3"` is false lexically and
+    // true numerically, so the old string compare would have read a 1.10
+    // document as pre-exits and refused its stop loss while leaving its entries
+    // legal — the one direction that trades an unprotected position.
+    //
+    // A version that does not parse gets **no** verdict from this pass rather
+    // than a defaulted one: `validate_schema` already refuses it by name, and a
+    // second error guessing at what the author meant would be an absent
+    // measurement reported as a reading.
+    let Some(version) = DefinitionVersion::parse(&def.definition_version) else {
+        return errors;
+    };
+    let is_v13_or_later = version
+        >= DefinitionVersion::parse(DEFINITION_VERSION_V1_3).expect("1.3 is a valid version");
 
     match (&def.exits, is_v13_or_later) {
         (None, true) => errors.push(ValidationError {

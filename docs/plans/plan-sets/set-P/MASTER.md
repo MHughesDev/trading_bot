@@ -1,6 +1,13 @@
 # Data Reach — Set P
 
-**Completion: 0% (0 / 30 tasks). NOT STARTED.**
+**Completion: 79% left (4 / 30 tasks). 4 done, 5 partial, 1 BLOCKED:UPSTREAM, 20 not started.**
+
+> **This line read `0% (0 / 30 tasks). NOT STARTED.` until 2026-09-21** — while
+> this set’s own phase files recorded real work. It was wrong by the maximum
+> possible amount for six days, because the test that holds every other count
+> honest scans `phase-*.md`, and a MASTER is not a phase. The file whose name
+> promises the summary was the only one outside the mechanism that checks
+> summaries. `every_set_master_counts_its_own_set` now covers it.
 
 **Status:** DRAFT (2026-09-15) — ready for execution.
 **Created:** 2026-09-15

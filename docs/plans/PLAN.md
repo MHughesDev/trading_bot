@@ -25,9 +25,9 @@ wildly different sizes averaged flat would flatter us.
 
 | counting rule | % of the work left |
 |---|---|
-| strict — only `DONE` counts | 64% |
+| strict — only `DONE` counts | 65% |
 | **`PARTIAL` counts half** | **42%** |
-| generous — `PARTIAL` counts done | 21% |
+| generous — `PARTIAL` counts done | 20% |
 
 Take the middle number and treat it as **±10**, not as a measurement. `PARTIAL`
 is 227 of 531 units and in this repository it spans "complete, one database test
@@ -39,13 +39,31 @@ than pick one and present it as precision.
 
 | set | subject | tasks | units | done | partial | % left |
 |---|---|---:|---:|---:|---:|---:|
-| **S** | The Agent Platform | 189 | 446 | 84 | 88 | **35%** |
-| **P** | Data Reach | 30 | 51 | 5 | 0 | **84%** |
-| **T** | Forward Evidence | 17 | 34 | 3 | 0 | **82%** |
+| **S** | The Agent Platform | 189 | 446 | 178 | 228 | **35%** |
+| **P** | Data Reach | 30 | 51 | 6 | 9 | **79%** |
+| **T** | Forward Evidence | 17 | 34 | 2 | 4 | **88%** |
 
 P and T are 16% of the weight and almost entirely ahead of us — and they are the
 two that carry a **calendar**, which is why §3 puts them first despite Set S
 being where the code is.
+
+**Both were audited for the first time on 2026-09-21 and both figures moved, in
+opposite directions.** Set P is better than published (84% → 79%): four tasks
+were further along than their markers said, including a 749-line census with its
+acceptance as named tests and a published nine-series result. **Set T is worse
+(82% → 88%), and it is 1 of 17 rather than 3.** Two of its three `DONE` markers
+do not survive contact with the tree — T-0.1's wire is not in place (the
+observer is constructed only in tests, and `ExecutionEngine::with_fill_observer`,
+the method this phase file instructs a track to call, **does not exist anywhere
+in the workspace**), and T-0.3's own note says *"This criterion is not met"*
+above a `DONE`. The one task that survives does so because its author wrote its
+partial down honestly.
+
+**The consequence is not the percentage.** T-0.1 means a credential alone would
+not start the evidence clock: with no production call site for the fill
+observer, `mlops.forward_observation` stays empty and Gate 15 stays
+`NotComputable`. That second blocker was in no plan file, and it would have been
+discovered only after H-1 was spent.
 
 ### Set S by phase
 

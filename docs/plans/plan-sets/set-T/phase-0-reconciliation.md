@@ -1,6 +1,6 @@
 # Phase 0 — Reconciliation and the first observation
 
-**Completion: 75% (3 / 4 tasks). T-0.4 `BLOCKED:HUMAN` on gate H-7 (venue credential); its code blocker cleared in integration wave 3.**
+**Completion: 75% (1 / 4 tasks). T-0.4 `BLOCKED:HUMAN` on gate H-7 (venue credential); its code blocker cleared in integration wave 3.** T-0.1 and T-0.3 were downgraded from `DONE` on 2026-09-21. T-0.1's wire is not in place — the observer is constructed only in tests and the method the file tells a track to call does not exist — and T-0.3's own note says its criterion is not met.
 
 > **Status, 2026-09-15 — track 5, `claude/set-t-phase-0-reconciliation`.**
 >
@@ -40,7 +40,20 @@ tell the truth?* — from unanswerable into merely unanswered-yet.
 ---
 
 ### T-0.1 Wire `crates/reconciliation` to the paper fill stream — M
-`DONE`
+`PARTIAL` — **downgraded from `DONE` on 2026-09-21, and the title is the
+criterion it fails.** The task is *"wire `crates/reconciliation` to the paper
+fill stream"*. `ForwardRecorder` is constructed **only in
+`crates/reconciliation/tests/`**; `execution::fills::register_observer` has
+**zero production call sites**; `ExecutionEngine.fill_observer` is `None` at
+construction; and **`with_fill_observer` — which this phase file instructs a
+track to call — does not exist as a method anywhere in the workspace**.
+`mlops.forward_observation` holds 0 rows. The logic is done; the wire in the
+title is not in place.
+
+**This is a second blocker on T-0.4 that no plan file recorded.** A frontier or
+paper credential alone would not produce a `forward_observation` row, so the
+evidence clock would not start — and that would have been discovered only after
+the credential arrived and nothing appeared.
 
 The crate exists and nothing calls it. Subscribe it to paper fills and positions, and have it
 maintain, per deployed strategy, the realised return series in the same shape the ledger stores
@@ -140,7 +153,12 @@ window. `TRIAL_STATISTICS` and migration 0106's CHECK are extended together.
 produced an observed row. The gate now has an input *path*; it does not yet have an input.
 
 ### T-0.3 Divergence halts before the next order — M
-`DONE`
+`PARTIAL` — **downgraded from `DONE` on 2026-09-21 — by its own note, which
+already said so.** The note reads verbatim: *"**NOT DONE — 'the halt is visible
+in the UI with its reason'.** No API route and no React surface were built …
+**This criterion is not met.**"* A task carrying an explicitly unmet acceptance
+criterion was marked `DONE`. Confirmed against the tree: no halt route in
+`routes/mod.rs`, no divergence surface in `frontend/src/pages/`.
 
 SC-6 and FM-4: the system halts on position or balance divergence **before** submitting new
 orders. Per-strategy thresholds declared at deployment (Phase 1) and recorded; when realised

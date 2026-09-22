@@ -54,8 +54,10 @@ pub fn server_instructions() -> &'static str {
      \n\
      Workflow: list_instruments (what data exists) → get_bars (inspect the \
      market) → write a definition → validate_strategy → create_strategy \
-     (upserts by strategy_id slug; use versioned slugs like my_strat_v2 when \
-     iterating) → create_experiment → run_sweep → wait_for_backtest (call \
+     (saving is append-only: keep the SAME strategy_id slug while iterating and \
+     each save records a new revision whose parent is the previous one — nothing \
+     is overwritten. A new slug starts a separate history with no parent) → \
+     create_experiment → run_sweep → wait_for_backtest (call \
      repeatedly for long runs; each call blocks up to timeout_seconds and \
      returns progress on timeout) → read results → compare_backtests across \
      variants → iterate. Every run is registered as a counted trial before it \
@@ -868,7 +870,10 @@ async fn dispatch_untraced(
         }
         "create_strategy" => {
             let definition_json = definition_arg(params);
-            tools::authoring::create_strategy(&ctx.api, &definition_json).await
+            // Forwarded, never synthesised: an absent `parent_strategy_id` is a
+            // claim of no parent, not a prompt to guess one (ADR-D-21).
+            let parent = params.get("parent_strategy_id").and_then(Value::as_str);
+            tools::authoring::create_strategy(&ctx.api, &definition_json, parent).await
         }
         "get_strategy" => tools::authoring::get_strategy(&ctx.api, params).await,
         "list_strategies" => tools::authoring::list_strategies(&ctx.api).await,
