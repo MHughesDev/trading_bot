@@ -12,6 +12,10 @@
 //! `api::leakage_audit::pass` now makes the name a *product* of the run —
 //! `checks_run` is private to that child module and `Tally::run` is the only
 //! append site — and these tests hold that property from the outside.
+//!
+//! The mirror-image failure is held here too: a check that is *called* and
+//! measures nothing must earn no name either. The random-label test has two ways
+//! to do that and only announces one of them, so both are pinned below.
 
 use api::leakage_audit::{Pass, Tally};
 use features::leakage::inject::{plant, Leak};
@@ -66,17 +70,16 @@ fn pipeline() -> dataplane::split::EmbargoInputs {
     features::walk_forward::embargo_inputs(&feature_names(), 1)
 }
 
-/// A geometry three expanding folds fit inside a ~2 000-row frame.
-fn spec() -> domain::model_def::cv::WalkForwardSpec {
-    domain::model_def::cv::WalkForwardSpec {
-        mode: domain::model_def::cv::WindowMode::Expanding,
-        folds: 3,
-        train_bars: 1_000,
-        cal_bars: 80,
-        test_bars: 150,
-        purge_bars: 2,
-        embargo_bars: 2,
-    }
+/// The geometry the audit itself would run this frame under.
+///
+/// The fixture does not pick its own fold sizes. A hand-written spec here would
+/// only ever test the hand-written spec, and the defect this file exists to hold
+/// down was a geometry that fit no frame at all — which a fixture that chose its
+/// own numbers would have hidden rather than caught.
+fn spec(frame: &features::TrainingFrame) -> domain::model_def::cv::WalkForwardSpec {
+    api::leakage_audit::harness_geometry(frame, &pipeline())
+        .expect("the audit's own sizing must fit a clean 2 000-bar frame")
+        .0
 }
 
 fn random_label_pass<'a>(
@@ -181,7 +184,7 @@ fn each_pass_is_named_by_the_check_whose_findings_it_produced() {
 #[test]
 fn only_the_random_label_pass_carries_the_statistics_that_prove_it_permuted() {
     let frame = clean_frame(2_000);
-    let (spec, pipeline) = (spec(), pipeline());
+    let (spec, pipeline) = (spec(&frame), pipeline());
 
     let passed = random_label_pass(&frame, &spec, &pipeline).run();
     assert_eq!(passed.earned(), Some(Check::RandomLabel));
@@ -223,7 +226,7 @@ fn only_the_random_label_pass_carries_the_statistics_that_prove_it_permuted() {
 #[test]
 fn a_random_label_pass_that_could_not_build_folds_claims_nothing() {
     let short = clean_frame(64);
-    let (spec, pipeline) = (spec(), pipeline());
+    let (spec, pipeline) = (spec(&clean_frame(2_000)), pipeline());
 
     let passed = random_label_pass(&short, &spec, &pipeline).run();
     let r = passed
@@ -276,7 +279,7 @@ fn findings_recorded_outside_a_pass_name_no_check() {
 #[test]
 fn a_tally_names_exactly_the_passes_that_earned_a_name() {
     let frame = clean_frame(2_000);
-    let (spec, pipeline) = (spec(), pipeline());
+    let (spec, pipeline) = (spec(&frame), pipeline());
 
     let mut tally = Tally::default();
     assert!(tally.checks_run().is_empty());
@@ -313,6 +316,138 @@ fn a_tally_names_exactly_the_passes_that_earned_a_name() {
     assert!(tally.random_label().is_some());
 }
 
+/// The audit's own fold sizing has to fit a frame, and the old one fit none.
+///
+/// `harness_cv` sized the roles as if the three folds shared the series, but
+/// `walk_forward_folds` lays them end to end: three folds reach about `2.1·n`
+/// rows for those numbers, for every `n`. So the geometry never built, the
+/// fold-geometry screen never ran, and the random-label test returned its "did
+/// not run" flag on every tenant every night — honestly, and uselessly.
+///
+/// This is the test that failure had none of. It asserts the property the
+/// sizing has to have and that nothing about the frame can supply: the folds
+/// build, and each is one the random-label probe will actually fit and score.
+#[test]
+fn the_audits_own_fold_geometry_fits_the_frame_it_was_sized_from() {
+    let pipeline = pipeline();
+    for rows in [2_000_usize, 5_000, 20_000] {
+        let frame = clean_frame(rows);
+        let (spec, folds) = api::leakage_audit::harness_geometry(&frame, &pipeline)
+            .unwrap_or_else(|| panic!("no geometry fits a {rows}-bar frame"));
+
+        assert_eq!(folds.len(), spec.folds as usize);
+        let rebuilt = features::walk_forward_folds(frame.row_count(), &spec, &pipeline)
+            .expect("the returned spec must be one that builds");
+        assert_eq!(rebuilt, folds, "the spec and the folds it returned disagree");
+
+        for f in &folds {
+            assert!(
+                f.test.end <= frame.row_count(),
+                "fold {} reaches row {} of a {}-row frame",
+                f.index,
+                f.test.end,
+                frame.row_count()
+            );
+            // The rule `leakage::random_label` skips folds by. A fold it skips
+            // contributes no out-of-sample observation, and a geometry whose
+            // folds are all skipped is the silent non-run below.
+            assert!(
+                f.train.len() > frame.feature_names.len() + 1,
+                "fold {} has {} train rows for {} features; the probe would skip it",
+                f.index,
+                f.train.len(),
+                frame.feature_names.len()
+            );
+            assert!(!f.test.is_empty(), "fold {} has no test rows", f.index);
+        }
+    }
+}
+
+/// A frame too short for any geometry gets no geometry, rather than one that
+/// will fail later where nothing is watching.
+#[test]
+fn a_frame_too_short_for_three_folds_is_given_no_geometry() {
+    assert!(
+        api::leakage_audit::harness_geometry(&clean_frame(20), &pipeline()).is_none(),
+        "a 20-bar frame was handed a three-fold walk-forward geometry"
+    );
+}
+
+/// The silent non-run, and the reason the earned name is not a vector length.
+///
+/// A geometry can build and still have every fold skipped — `random_label` never
+/// fits a fold whose training rows cannot outnumber the coefficients. It does
+/// not say so. It returns one t-statistic per permutation requested, every one
+/// `NaN`, and folds `permuted_max_abs_t` to `0.0` out of an empty set of finite
+/// draws: full-length statistics and the cleanest answer the limit can be given.
+/// That is indistinguishable, from `checks_run`, from a check that ran.
+#[test]
+fn a_pass_whose_every_fold_was_skipped_claims_nothing_and_reports_no_zero() {
+    let frame = clean_frame(2_000);
+    let pipeline = pipeline();
+
+    // Rolling, so every fold's train block is the same two rows — fewer than the
+    // two features plus an intercept, which is the probe's skip condition.
+    let starved = domain::model_def::cv::WalkForwardSpec {
+        mode: domain::model_def::cv::WindowMode::Rolling,
+        folds: 3,
+        train_bars: 2,
+        cal_bars: 1,
+        test_bars: 1,
+        purge_bars: 0,
+        embargo_bars: 0,
+    };
+    let folds = features::walk_forward_folds(frame.row_count(), &starved, &pipeline)
+        .expect("this geometry builds; that is the point");
+    assert!(
+        folds
+            .iter()
+            .all(|f| f.train.len() <= frame.feature_names.len() + 1),
+        "fixture no longer starves every fold, so it proves nothing"
+    );
+
+    let passed = random_label_pass(&frame, &starved, &pipeline).run();
+    let r = passed
+        .random_label()
+        .expect("the pass still reports what it found");
+    assert_eq!(
+        r.permuted_t_stats.len(),
+        PERMUTATIONS,
+        "fixture no longer reproduces the full-length-but-empty shape"
+    );
+    assert!(
+        r.permuted_t_stats.iter().all(|t| t.is_nan()),
+        "fixture no longer reproduces the shape: {:?}",
+        r.permuted_t_stats
+    );
+
+    assert_eq!(
+        passed.earned(),
+        None,
+        "a pass that scored no out-of-sample observation claimed to have run"
+    );
+    assert!(
+        !passed.report().findings.is_empty(),
+        "a test that did not run must say so; silence is what made this invisible"
+    );
+    // `record` persists these two whenever they are finite, and an absent
+    // measurement is never a zero.
+    assert!(
+        !r.permuted_max_abs_t.is_finite(),
+        "the permuted maximum |t| came back as {} from zero finite draws",
+        r.permuted_max_abs_t
+    );
+    assert!(!r.real_sharpe.is_finite(), "real Sharpe: {}", r.real_sharpe);
+
+    let mut tally = Tally::default();
+    tally.run(random_label_pass(&frame, &starved, &pipeline));
+    assert!(
+        tally.checks_run().is_empty(),
+        "the tally recorded {:?} for a pass that measured nothing",
+        tally.checks_run()
+    );
+}
+
 /// The regression itself, stated as a fact about the gate.
 ///
 /// `features::leakage::causal_access` needs the dataset's OHLCV rows and
@@ -331,7 +466,7 @@ fn a_tally_names_exactly_the_passes_that_earned_a_name() {
 #[test]
 fn gate_2_is_told_the_causal_guard_did_not_run_because_it_did_not() {
     let frame = clean_frame(2_000);
-    let (spec, pipeline) = (spec(), pipeline());
+    let (spec, pipeline) = (spec(&frame), pipeline());
 
     let mut tally = Tally::default();
     tally.run(Pass::SnapshotReproducibility {

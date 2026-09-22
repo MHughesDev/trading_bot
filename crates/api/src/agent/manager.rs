@@ -120,6 +120,30 @@ pub struct AgentManager {
 /// independently (S-10.2).
 const CHAT_DEMAND: harness::hardware::TaskDemand = harness::hardware::TaskDemand::MultiStep;
 
+/// States a run can be in once it is over.
+///
+/// The complement of [`conversations::ACTIVE_RUN_STATES`] over the words the
+/// drivers actually write, and it is longer than the obvious five. The local
+/// driver also ends a run `suspended` (waiting on a job it cannot yet resume)
+/// and `offered` (the turn ended asking for a Research run) — both with
+/// `finished_at` set. A list that stopped at the five would leave those two in
+/// neither list, and every caller keyed on "is this over" would answer *no*
+/// about a run that has been over for a week.
+///
+/// That is the `ended == "succeeded"` defect in its other direction — a branch
+/// keyed on a set of words the column does not actually take — and
+/// `the_terminal_list_holds_every_status_the_drivers_write` is what keeps this
+/// list honest as the drivers change.
+pub const TERMINAL_RUN_STATES: &[&str] = &[
+    "completed",
+    "failed",
+    "cancelled",
+    "fenced",
+    "refused",
+    "suspended",
+    "offered",
+];
+
 /// How an enum serialises, which is what the column stores.
 ///
 /// Taken from the enum rather than written out, so a row cannot carry a word
@@ -857,12 +881,9 @@ impl AgentManager {
         Ok(row.map(|(s,)| s))
     }
 
-    /// Terminal statuses. Named here once; see [`Self::owned_status`].
+    /// Terminal statuses. Named once; see [`Self::owned_status`].
     fn is_terminal(status: &str) -> bool {
-        matches!(
-            status,
-            "completed" | "failed" | "cancelled" | "fenced" | "refused"
-        )
+        TERMINAL_RUN_STATES.contains(&status)
     }
 
     /// Hold a run at its next step boundary for a bounded window (ADR-D-27).
@@ -926,10 +947,63 @@ impl AgentManager {
         }
     }
 
-    /// Whether a run this process drives is paused, and until when.
+    /// What this process can honestly say about a run's pause.
+    ///
+    /// The run reads go through here rather than through a bare
+    /// `Option<DateTime>`, because the interesting case is the one an `Option`
+    /// flattens: a run this replica is not driving. Nothing here observed it, so
+    /// the answer is *unknown* — and reporting unknown as `paused: false` would
+    /// be an absent measurement dressed as a zero, in the one response an
+    /// operator would use to decide whether a run is spending.
+    ///
+    /// `status` is passed rather than re-read: the caller already has the row,
+    /// and a second query could disagree with the one it is about to serialise.
     #[must_use]
-    pub fn paused_until(&self, run_id: Uuid) -> Option<chrono::DateTime<chrono::Utc>> {
-        self.control(run_id).and_then(|c| c.paused_until())
+    pub fn pause_view(&self, run_id: Uuid, status: &str) -> PauseView {
+        if Self::is_terminal(status) {
+            // Over, and therefore not held — the one absence this process can
+            // assert about a run it is not driving.
+            return PauseView::Finished;
+        }
+        match self.control(run_id) {
+            Some(c) => c.paused_until().map_or(PauseView::Running, PauseView::Held),
+            None => PauseView::Unobserved,
+        }
+    }
+}
+
+/// What a reader may say about a run's pause (ADR-D-27).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PauseView {
+    /// Held at a step boundary until this deadline. On expiry it stops.
+    Held(chrono::DateTime<chrono::Utc>),
+    /// This process is driving it and it is taking steps.
+    Running,
+    /// It has ended; a finished run holds no pause.
+    Finished,
+    /// Not driven here, so this process measured nothing. **Not `false`.**
+    Unobserved,
+}
+
+impl PauseView {
+    /// `(paused, paused_until)` as the run reads serialise them.
+    ///
+    /// Here rather than in the route so there is one mapping. Two would be two
+    /// answers to "is this run held", and the second one written would be the
+    /// one that forgot that [`Self::Unobserved`] is not `false`.
+    #[must_use]
+    pub fn as_json(self) -> (serde_json::Value, serde_json::Value) {
+        match self {
+            Self::Held(until) => (
+                serde_json::Value::Bool(true),
+                serde_json::Value::String(until.to_rfc3339()),
+            ),
+            Self::Running | Self::Finished => {
+                (serde_json::Value::Bool(false), serde_json::Value::Null)
+            }
+            // An absent measurement is never a zero.
+            Self::Unobserved => (serde_json::Value::Null, serde_json::Value::Null),
+        }
     }
 }
 

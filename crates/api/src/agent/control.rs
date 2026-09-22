@@ -43,6 +43,25 @@
 //! process is **not** driving cannot be paused, because there is no loop to
 //! hold. `AgentManager::pause` refuses such a run rather than writing a state
 //! nothing would honour.
+//!
+//! # What this deadline does *not* promise
+//!
+//! It is enforced **at the next boundary**, not on the wall clock, and the two
+//! differ whenever the driver is inside a long wait: a backtest poll
+//! (`wait_for_backtest_inline`) or an approval that nobody has answered. A pause
+//! set just before a forty-minute sweep is observed when the sweep returns, so
+//! its deadline can be overshot by the length of that wait.
+//!
+//! That is the same contract cancel has had all along — the loop is stopped at a
+//! boundary, never killed mid-write — and it is stated rather than fixed because
+//! the overshoot costs nothing the pause was protecting: a run inside a tool is
+//! making no model call and buying no new trial, which is exactly what a pause
+//! was asked to stop. What it *does* hold for longer is the budget and the
+//! lease, so the honest summary is: **the hold ends no later than the deadline
+//! plus the tool call in flight when it was set.**
+//!
+//! Closing that gap would need a pause the *tool waits* also poll, not a
+//! sweeper, and no caller has asked for one.
 
 use std::time::Duration;
 

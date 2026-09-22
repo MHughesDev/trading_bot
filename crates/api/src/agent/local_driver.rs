@@ -398,6 +398,20 @@ struct Recorder {
     /// a yield only computable on the happy path would report every failure as
     /// having produced nothing, which is the one reading that is never right.
     yielded: harness::lifecycle::r#yield::Yield,
+    /// Why the step boundary ended this run, when it was the boundary that did
+    /// (ADR-D-27).
+    ///
+    /// The governor has one word for "stop" — `Input::Cancel` — and it should
+    /// keep having one: a second exit would be a second way for a run to end
+    /// that the loop's own accounting never saw. But `Outcome::Cancelled` then
+    /// arrives at [`Self::finish`] carrying no error, so an expired pause and an
+    /// operator's Stop would write byte-identical rows, and the one question an
+    /// operator asks about a run they left paused — *did I lose it to the
+    /// deadline?* — would have no answer anywhere in `agent_runs`.
+    ///
+    /// So the reason is carried beside the governor rather than through it, and
+    /// only to decide the `error` text. It changes no status and no branch.
+    stop_reason: Option<super::control::StopReason>,
 }
 
 /// The harness that wrote a log. A replay by a different one is not a replay.
@@ -827,7 +841,19 @@ impl Recorder {
                 )),
                 None,
             ),
-            Outcome::Cancelled => ("cancelled", None, None),
+            // The error text is the *only* place an expired pause differs from a
+            // Stop. Status stays `cancelled` for both, deliberately: inventing a
+            // sixth terminal word would put a value in this column that every
+            // existing reader — the sidebar's running dot, `ACTIVE_RUN_STATES`,
+            // the restart sweep — would fail to recognise, which is the
+            // `ended == "succeeded"` defect rebuilt.
+            Outcome::Cancelled => (
+                "cancelled",
+                None,
+                self.stop_reason
+                    .and_then(super::control::StopReason::error_text)
+                    .map(str::to_owned),
+            ),
             // Not an error and not a refusal. The turn ended because the
             // question needs a Research run, and the summary says what would be
             // run rather than what was not.
@@ -1257,6 +1283,7 @@ pub async fn run(
         trials_spent: 0,
         exposure_out: params.exposure_out.clone(),
         yielded: harness::lifecycle::r#yield::Yield::default(),
+        stop_reason: None,
     };
     // No deadline. The agent runs until it calls `finish_task`.
     //
@@ -1677,6 +1704,10 @@ pub async fn run(
                 .await;
                 rec.input("Cancel", serde_json::json!({ "reason": reason.as_str() }))
                     .await;
+                // Beside the governor, not through it: `finish` reads this to
+                // decide the `error` line, so a run lost to its deadline does
+                // not write the same row as one an operator stopped.
+                rec.stop_reason = Some(reason);
                 effects = governor.next(Input::Cancel);
                 continue;
             }

@@ -36,6 +36,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use api::agent::control::{Hold, PauseRefused, PauseWindow, RunControl, StopReason, MAX_PAUSE};
+use api::agent::conversations::ACTIVE_RUN_STATES;
+use api::agent::manager::{PauseView, TERMINAL_RUN_STATES};
 
 // ── 1. A paused loop takes no steps ──────────────────────────────────────────
 
@@ -227,4 +229,203 @@ fn neither_control_answers_a_caller_who_is_nobody() {
             "{handler} takes no BearerToken, so it answers anyone"
         );
     }
+}
+
+
+// ── 4. A pause a reader can find ─────────────────────────────────────────────
+//
+// The control works and the routes are mounted, and that is still not the whole
+// fix. The bug was a header that said `paused` from a local flag with no server
+// answer to check it against. If the pause is visible only in the reply to the
+// click that set it, the next page load is back to guessing — so the run reads
+// have to carry it, and they have to be honest about the case where this
+// replica did not measure.
+
+/// The rule this platform states everywhere and breaks in exactly this shape:
+/// an absent measurement rendered as a zero. A run this process is not driving
+/// was not observed; reporting it as `paused: false` would be a claim, in the
+/// one field an operator would use to decide whether a run is spending money.
+#[test]
+fn a_run_this_process_did_not_observe_is_null_and_not_false() {
+    let (paused, until) = PauseView::Unobserved.as_json();
+    assert!(
+        paused.is_null(),
+        "an unobserved run was reported as not paused, which is a measurement \
+         nobody took rendered as a fact"
+    );
+    assert!(until.is_null());
+
+    // The three this process *can* answer.
+    let deadline = chrono::Utc::now() + chrono::Duration::minutes(15);
+    let (paused, until) = PauseView::Held(deadline).as_json();
+    assert_eq!(paused, serde_json::Value::Bool(true));
+    assert_eq!(until, serde_json::json!(deadline.to_rfc3339()));
+    assert_eq!(
+        PauseView::Running.as_json(),
+        (serde_json::Value::Bool(false), serde_json::Value::Null)
+    );
+    assert_eq!(
+        PauseView::Finished.as_json(),
+        (serde_json::Value::Bool(false), serde_json::Value::Null),
+        "a finished run holds no pause, and that absence this process can assert"
+    );
+}
+
+/// The reads carry it. Without this the pause state dies with the response that
+/// created it, which is the deleted button's defect with the sides swapped.
+#[test]
+fn the_run_reads_report_the_pause_rather_than_only_the_pause_reply() {
+    let src = read(&crate_src().join("agent/routes.rs"));
+    let at = src
+        .find("fn run_row_to_json(")
+        .expect("the run serialiser is gone");
+    // To the end of the serialiser, not a fixed window: the run row is wide and
+    // a window short enough to be safe would miss the fields being asserted.
+    let end = src[at..]
+        .find("
+pub async fn list_runs")
+        .map_or(src.len(), |o| at + o);
+    let body = &src[at..end];
+    assert!(
+        body.contains("pause_view"),
+        "GET /api/agent/runs/{{id}} does not ask whether the run is held, so a \
+         client that reloads cannot tell a paused run from a spending one"
+    );
+    assert!(
+        body.contains("\"paused\""),
+        "the run reads carry no `paused` field"
+    );
+    assert!(
+        body.contains("\"paused_until\""),
+        "the run reads carry no deadline, so `paused` would be the unbounded \
+         pause the whole decision exists to prevent"
+    );
+}
+
+/// Both drivers must leave a trace that says *which* stop this was. Status is
+/// `cancelled` for both on purpose — a sixth terminal word would be a value
+/// every existing reader fails to recognise — so the distinction has to land in
+/// `agent_runs.error`, and a run lost to its deadline must not write the same
+/// row as one an operator stopped.
+#[test]
+fn an_expired_pause_says_so_on_the_run_row_in_both_drivers() {
+    assert!(
+        StopReason::PauseExpired.error_text().is_some(),
+        "an expired pause carries no explanation to write"
+    );
+    assert!(
+        StopReason::Cancelled.error_text().is_none(),
+        "a plain cancel never carried an error and must not start"
+    );
+    assert_eq!(
+        StopReason::PauseExpired.terminal_status(),
+        StopReason::Cancelled.terminal_status(),
+        "the two stops must land on the same status word; the distinction is the error"
+    );
+
+    let frontier = read(&crate_src().join("agent/driver.rs"));
+    assert!(
+        frontier.contains("reason.error_text()"),
+        "agent/driver.rs drops the stop reason, so an expired pause writes a bare \
+         `cancelled` and the operator cannot tell they lost the run to the deadline"
+    );
+    let local = read(&crate_src().join("agent/local_driver.rs"));
+    assert!(
+        local.contains("rec.stop_reason = Some(reason)")
+            && local.contains("self.stop_reason"),
+        "agent/local_driver.rs routes its stop through the governor's one `Cancel` \
+         input (correctly) but never carries the reason to `finish`, so an expired \
+         pause and a Stop write byte-identical rows"
+    );
+}
+
+
+// ── 5. The status words, checked rather than assumed ─────────────────────────
+
+/// `pause`, `resume` and the run reads all branch on "is this run over". That
+/// branch is only as good as the list behind it, and this repository has already
+/// paid once for a branch keyed on a word the column never takes: a driver
+/// tested `ended == "succeeded"`, so every finished child took the failure path.
+///
+/// So the list is checked against the drivers instead of being trusted. Every
+/// status either driver writes must be in exactly one of the two lists — a word
+/// in neither is a run that is over and that `pause_view` would report as
+/// unknown forever, and a word in both is two readers disagreeing.
+#[test]
+fn the_terminal_list_holds_every_status_the_drivers_write() {
+    for s in TERMINAL_RUN_STATES {
+        assert!(
+            !ACTIVE_RUN_STATES.contains(s),
+            "`{s}` is in both lists, so the sidebar's dot and the pause gate disagree"
+        );
+    }
+
+    let local = read(&crate_src().join("agent/local_driver.rs"));
+    let at = local
+        .find("let (status, summary, error) = match outcome {")
+        .expect("the local driver's outcome→status mapping is gone");
+    let end = local[at..].find("\n        };").map_or(local.len(), |o| at + o);
+    // Prose first: the arms' other string literals are sentences, and the
+    // comments quote status words on purpose.
+    let arms: String = local[at..end]
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut found: Vec<String> = Vec::new();
+    let mut rest = arms.as_str();
+    while let Some(open) = rest.find('"') {
+        rest = &rest[open + 1..];
+        let Some(close) = rest.find('"') else { break };
+        let lit = &rest[..close];
+        rest = &rest[close + 1..];
+        // A status is one bare word. Everything else in these arms is a
+        // sentence, a format template or a field path.
+        if !lit.is_empty()
+            && lit
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c == '_')
+        {
+            found.push(lit.to_string());
+        }
+    }
+    assert!(
+        found.len() >= 5,
+        "found only {found:?} in the local driver's mapping; the scan stopped matching \
+         and would pass without checking anything"
+    );
+    for status in &found {
+        assert!(
+            TERMINAL_RUN_STATES.contains(&status.as_str()),
+            "the local driver ends a run `{status}` and nothing calls that terminal, so \
+             `pause` would offer to hold a run that finished and the run reads would \
+             report its pause as unknown forever"
+        );
+    }
+    // The two the five-word list used to miss, named so a future edit that drops
+    // them has to argue with this line rather than with a silence.
+    for over in ["suspended", "offered"] {
+        assert!(
+            found.contains(&over.to_string()),
+            "the local driver no longer ends a run `{over}`; if that is deliberate, take \
+             it out of TERMINAL_RUN_STATES too"
+        );
+    }
+
+    // The frontier driver's terminal words, which it writes as literals.
+    let frontier = read(&crate_src().join("agent/driver.rs"));
+    for status in ["failed", "cancelled", "completed"] {
+        if frontier.contains(&format!("ctx.finish(\"{status}\"")) {
+            assert!(
+                TERMINAL_RUN_STATES.contains(&status),
+                "agent/driver.rs ends a run `{status}` and nothing calls that terminal"
+            );
+        }
+    }
+    // And the one the pause writes, through the type rather than a literal.
+    assert!(
+        TERMINAL_RUN_STATES.contains(&StopReason::PauseExpired.terminal_status()),
+        "an expired pause lands on a status no reader calls terminal"
+    );
 }

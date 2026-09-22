@@ -388,7 +388,18 @@ const RUN_COLUMNS: &str = "run_id, status, goal, provider, model, constraints_js
                            wallclock_budget_secs, error, summary, final_strategy_id, \
                            best_backtest_id, created_at, started_at, finished_at";
 
-fn run_row_to_json(row: &sqlx::postgres::PgRow) -> Value {
+/// Serialise one run row, with what this process knows about its pause.
+///
+/// The pause is attached *here*, on the reads, and not only to the `…/pause`
+/// response. A control whose state is only visible in the reply to the click
+/// that set it is a control that vanishes on the next page load — and the defect
+/// being fixed was precisely a header that said `paused` from a local flag
+/// nobody could check against the server. A client that reloads must be able to
+/// ask, so the answer lives on the run.
+///
+/// `paused` is `null`, never `false`, for a run this process is not driving.
+/// See [`super::manager::PauseView::Unobserved`].
+fn run_row_to_json(row: &sqlx::postgres::PgRow, agent: &super::AgentManager) -> Value {
     use sqlx::Row;
     let ts = |name: &str| -> Value {
         row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>(name)
@@ -397,9 +408,12 @@ fn run_row_to_json(row: &sqlx::postgres::PgRow) -> Value {
             .map(|t| json!(t.to_rfc3339()))
             .unwrap_or(Value::Null)
     };
+    let run_id = row.try_get::<Uuid, _>("run_id").unwrap_or_default();
+    let status = row.try_get::<String, _>("status").unwrap_or_default();
+    let (paused, paused_until) = agent.pause_view(run_id, &status).as_json();
     json!({
-        "run_id": row.try_get::<Uuid, _>("run_id").map(|u| u.to_string()).unwrap_or_default(),
-        "status": row.try_get::<String, _>("status").unwrap_or_default(),
+        "run_id": run_id.to_string(),
+        "status": status,
         "goal": row.try_get::<String, _>("goal").unwrap_or_default(),
         "provider": row.try_get::<String, _>("provider").unwrap_or_default(),
         "model": row.try_get::<String, _>("model").unwrap_or_default(),
@@ -418,6 +432,14 @@ fn run_row_to_json(row: &sqlx::postgres::PgRow) -> Value {
         "created_at": ts("created_at"),
         "started_at": ts("started_at"),
         "finished_at": ts("finished_at"),
+        // `true`, `false`, or `null` for "this replica is not driving it and so
+        // did not measure" — the distinction the `…/pause` route's 409 makes in
+        // words, made here in a value.
+        "paused": paused,
+        "paused_until": paused_until,
+        // The half of the contract a reader would otherwise assume the other way
+        // round, carried on every run rather than only on the pause reply.
+        "pause_on_expiry": "stopped",
     })
 }
 
@@ -446,7 +468,10 @@ pub async fn list_runs(
 
     match rows {
         Ok(rows) => {
-            let runs: Vec<Value> = rows.iter().map(run_row_to_json).collect();
+            let runs: Vec<Value> = rows
+                .iter()
+                .map(|r| run_row_to_json(r, &state.agent))
+                .collect();
             Json(json!({ "runs": runs, "total": total })).into_response()
         }
         Err(e) => {
@@ -476,7 +501,7 @@ pub async fn get_run(
     .await;
 
     match row {
-        Ok(Some(row)) => Json(run_row_to_json(&row)).into_response(),
+        Ok(Some(row)) => Json(run_row_to_json(&row, &state.agent)).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({ "error": "not_found" }))).into_response(),
         Err(e) => {
             tracing::error!(error = %e, "get agent run failed");

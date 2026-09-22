@@ -38,6 +38,24 @@
 //! handled. Closing the other two means giving those two minimums names in
 //! `crates/features/src/leakage.rs` and declining out loud; see the report.
 //!
+//! # The random-label test had never run, and the geometry is why
+//!
+//! `harness_cv` sized three walk-forward folds as `test = n/10`, `cal = n/20`,
+//! `train = n − 3·(test + cal)`. [`features::walk_forward_folds`] lays folds end
+//! to end, so three of them reach `3·(train + 2·purge + cal + test) + 2·embargo`
+//! rows — about `2.1·n` for those numbers, for **every** `n`. The geometry
+//! therefore never built: the fold-geometry screen logged a warning every night
+//! and the random-label test returned its "did not run" flag every night, on
+//! every tenant, on every frame size. Nothing was wrong with the frames.
+//!
+//! [`harness_geometry`] sizes the roles out of what is left after the gaps and
+//! then *builds the folds to check*, returning them rather than a spec a caller
+//! has to re-derive. It also requires each fold to be one
+//! [`features::leakage::random_label`] will actually fit and score, because a
+//! geometry whose folds are all skipped is the failure below: a full-length
+//! vector of `NaN` t-statistics, which from the outside is the shape of a check
+//! that ran and found nothing.
+//!
 //! # The causal-access guard is not run here, and so is not claimed
 //!
 //! [`features::leakage::causal_access`] needs the dataset's OHLCV rows: its
@@ -62,7 +80,7 @@ pub use pass::{Pass, Passed, Tally};
 /// Nothing here is a convenience wrapper. The privacy is the enforcement: see
 /// the module header.
 pub mod pass {
-    use features::leakage::{self, Check, Report};
+    use features::leakage::{self, Check, Finding, Report, Severity};
 
     /// One check this audit can claim, carrying exactly the inputs that check
     /// needs.
@@ -166,17 +184,56 @@ pub mod pass {
                     permutations,
                     seed,
                 } => {
-                    let r = leakage::random_label(frame, spec, pipeline, permutations, seed);
-                    // A permutation count of zero is the routine's own statement
-                    // that it could not build the fold geometry and permuted
-                    // nothing. It reports that as a flag; it does not get to
-                    // report it as a check that ran.
-                    let earned = (!r.permuted_sharpes.is_empty()).then_some(Check::RandomLabel);
+                    let mut r = leakage::random_label(frame, spec, pipeline, permutations, seed);
+
+                    // There are two ways this routine returns without measuring
+                    // anything, and neither is a check that ran.
+                    //
+                    // It says so itself when it cannot build the fold geometry:
+                    // it permutes nothing and pushes a flag. It does *not* say
+                    // so when the geometry builds and every fold is then skipped
+                    // for having fewer training rows than coefficients. There it
+                    // returns one t-statistic per permutation requested — all
+                    // `NaN`, because a fold-less out-of-sample series has no
+                    // moments — and a `permuted_max_abs_t` folded to `0.0` out
+                    // of an empty set of finite draws. A full-length vector is
+                    // what a pass that ran looks like from the outside, and
+                    // `0.0` is the cleanest answer the limit can be given, so
+                    // that shape reads as a check that ran and found nothing.
+                    //
+                    // The name is therefore earned by finite statistics, not by
+                    // a vector length. The two cases are the same failure and
+                    // are treated the same way.
+                    let measured = permutations > 0
+                        && r.permuted_t_stats.len() == permutations
+                        && r.permuted_t_stats.iter().all(|t| t.is_finite());
+                    let mut report = Report {
+                        findings: r.report.findings.clone(),
+                    };
+                    if !measured {
+                        if report.findings.is_empty() {
+                            report.findings.push(Finding {
+                                check: Check::RandomLabel,
+                                severity: Severity::Flag,
+                                subject: "folds".into(),
+                                statistic: r.permuted_t_stats.len() as f64,
+                                detail: "the fold geometry built but produced no out-of-sample \
+                                         observations, so every permutation scored nothing; the \
+                                         test did not run"
+                                    .into(),
+                            });
+                        }
+                        // An absent measurement is not a zero. `record` persists
+                        // these columns whenever they are finite, and the `0.0`
+                        // a fold over no finite draws produces is finite.
+                        r.real_sharpe = f64::NAN;
+                        r.real_t = f64::NAN;
+                        r.permuted_mean = f64::NAN;
+                        r.permuted_max_abs_t = f64::NAN;
+                    }
                     Passed {
-                        earned,
-                        report: Report {
-                            findings: r.report.findings.clone(),
-                        },
+                        earned: measured.then_some(Check::RandomLabel),
+                        report,
                         random_label: Some(r),
                     }
                 }
@@ -206,7 +263,7 @@ pub mod pass {
             let passed = pass.run();
             if let Some(check) = passed.earned {
                 let name = check.to_string();
-                if !self.checks_run.iter().any(|c| *c == name) {
+                if !self.checks_run.contains(&name) {
                     self.checks_run.push(name);
                 }
             }
@@ -254,6 +311,10 @@ const MAX_DATASETS_PER_PASS: i64 = 5;
 /// Permutations per random-label pass. Eight is enough for the maximum |t| to
 /// have a usable null and cheap enough to run nightly.
 const PERMUTATIONS: usize = 8;
+
+/// Walk-forward folds the harness pass runs over. Three is the smallest number
+/// that can show a trend across folds rather than one sample.
+const FOLDS: u64 = 3;
 
 #[derive(Debug, Default, Serialize)]
 pub struct AuditReport {
@@ -343,29 +404,33 @@ pub async fn audit_tenant(
                 tally.run(Pass::TargetCorrelation(&frame));
                 tally.run(Pass::FullSampleNormalization(&frame));
 
-                let spec = harness_cv(&frame);
                 let pipeline =
                     features::walk_forward::embargo_inputs(&plan.features, plan.horizon_bars);
-                match features::walk_forward_folds(frame.row_count(), &spec, &pipeline) {
-                    Ok(folds) => {
+                match harness_geometry(&frame, &pipeline) {
+                    Some((spec, folds)) => {
                         // Real work with no name of its own to claim: the
                         // fold-geometry screen reports under `causal_access`,
                         // which is a different check. Its findings are recorded;
                         // no check is claimed for them.
                         tally.add_findings(leakage::fold_geometry(&folds));
+
+                        tally.run(Pass::RandomLabel {
+                            frame: &frame,
+                            spec: &spec,
+                            pipeline: &pipeline,
+                            permutations: PERMUTATIONS,
+                            seed: seed_for(tenant),
+                        });
                     }
-                    Err(e) => {
-                        tracing::warn!(%tenant, error = %e, "leakage audit: fold geometry unavailable");
+                    None => {
+                        tracing::warn!(
+                            %tenant,
+                            rows = frame.row_count(),
+                            "leakage audit: no fold geometry fits this frame; the random-label test did not run"
+                        );
+                        tally.add_findings(geometry_unavailable(&frame));
                     }
                 }
-
-                tally.run(Pass::RandomLabel {
-                    frame: &frame,
-                    spec: &spec,
-                    pipeline: &pipeline,
-                    permutations: PERMUTATIONS,
-                    seed: seed_for(tenant),
-                });
             }
             Err(e) => {
                 out.unrebuildable += 1;
@@ -426,22 +491,80 @@ async fn recent_specs(
         .collect())
 }
 
-/// The fold geometry the harness pass runs under: three expanding folds over the
-/// frame, sized from the frame itself so the test works on whatever the tenant
-/// actually has rather than only on a convenient sample.
-fn harness_cv(frame: &features::TrainingFrame) -> domain::model_def::cv::WalkForwardSpec {
-    let n = frame.row_count().max(1) as u64;
-    let test = (n / 10).max(1);
-    let cal = (n / 20).max(1);
-    let train = n.saturating_sub(3 * (test + cal)).max(1);
-    domain::model_def::cv::WalkForwardSpec {
+/// The fold geometry the harness pass runs under, together with the folds it
+/// builds — or `None` when this frame cannot carry one that measures anything.
+///
+/// Three expanding folds, sized from the frame so the test works on whatever the
+/// tenant actually has rather than only on a convenient sample.
+///
+/// [`features::walk_forward_folds`] lays the folds end to end, so `FOLDS` of
+/// them reach `FOLDS·(train + 2·purge + cal + test) + (FOLDS−1)·embargo` rows.
+/// The roles get what is left once the gaps are paid for, which is the step the
+/// previous sizing skipped; see the module header.
+///
+/// The folds are returned rather than the spec alone because the caller needs
+/// them anyway, and a caller that rebuilds them from the spec can get a
+/// different answer than the one verified here.
+///
+/// # Verified, not asserted
+///
+/// The candidate is checked by building it, and each fold is checked against the
+/// rule [`features::leakage::random_label`] skips folds by: a fold whose
+/// training rows cannot outnumber the coefficients is never fitted. A geometry
+/// whose folds are all skipped does not fail loudly — it returns one `NaN`
+/// t-statistic per permutation, which is the shape of a pass that ran. So it is
+/// refused here instead.
+#[must_use]
+pub fn harness_geometry(
+    frame: &features::TrainingFrame,
+    pipeline: &dataplane::split::EmbargoInputs,
+) -> Option<(domain::model_def::cv::WalkForwardSpec, Vec<features::Fold>)> {
+    let rows = frame.row_count();
+    // The spec asks for neither, so both are the pipeline's own minimum: purge
+    // is forced up to the label horizon and embargo to §12.2's computed value.
+    let purge = u64::from(pipeline.horizon_bars);
+    let embargo = u64::from(dataplane::split::compute_embargo(pipeline));
+
+    let gaps = 2 * FOLDS * purge + (FOLDS - 1) * embargo;
+    let unit = (rows as u64).checked_sub(gaps)? / FOLDS;
+    let test = (unit / 5).max(1);
+    let cal = (unit / 10).max(1);
+    let train = unit.checked_sub(test + cal)?;
+
+    let spec = domain::model_def::cv::WalkForwardSpec {
         mode: domain::model_def::cv::WindowMode::Expanding,
-        folds: 3,
+        folds: u32::try_from(FOLDS).ok()?,
         train_bars: train,
         cal_bars: cal,
         test_bars: test,
         purge_bars: 0,
         embargo_bars: 0,
+    };
+
+    let folds = features::walk_forward_folds(rows, &spec, pipeline).ok()?;
+    let min_train = frame.feature_names.len() + 2;
+    folds
+        .iter()
+        .all(|f| f.train.len() >= min_train && !f.test.is_empty())
+        .then_some((spec, folds))
+}
+
+/// A flag saying the harness pass had nowhere to run, so that a frame too short
+/// to carry the geometry is a recorded fact rather than a silent absence.
+fn geometry_unavailable(frame: &features::TrainingFrame) -> Report {
+    Report {
+        findings: vec![features::leakage::Finding {
+            check: features::leakage::Check::RandomLabel,
+            severity: Severity::Flag,
+            subject: "folds".into(),
+            statistic: frame.row_count() as f64,
+            detail: format!(
+                "{} rows cannot carry {FOLDS} walk-forward folds that this pipeline's purge and \
+                 embargo leave room to fit and score; the random-label test did not run and \
+                 claims nothing",
+                frame.row_count()
+            ),
+        }],
     }
 }
 
