@@ -16,7 +16,7 @@ use crate::credentials::LlmCredentialStore;
 use crate::{auth::BearerToken, state::AppState};
 
 use super::conversations;
-use super::manager::StartError;
+use super::manager::{PauseOutcome, ResumeOutcome, StartError};
 
 #[derive(Debug, Deserialize)]
 pub struct NewConversationBody {
@@ -574,6 +574,184 @@ pub async fn cancel_run(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": "cancel_failed" })),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ── The bounded pause: POST /api/agent/runs/{id}/pause and …/resume ──────────
+//
+// # Why these exist, and why `escalate` does not
+//
+// AGENT-012 requires a pause in §3.4 and makes it an acceptance criterion in
+// §19.3. §17 marked it unbuilt and the platform agreed: both paths answered 404
+// while `…/cancel` answered 401.
+//
+// The desk's three buttons were deleted on 2026-09-21, and that did not close
+// the need. Pause was the worst of them because it did not merely do nothing —
+// `onPause` set a local `paused` flag *before* issuing the request that 404'd,
+// so the conversation header read **paused** over a run still spending trials,
+// and the Stop dialog offered "Pause instead" as the gentler option. The
+// operator was being talked out of the control that works and into the one that
+// did not.
+//
+// `escalate` stays struck (ADR-D-27). A mid-run tier change carries its own
+// budget consequences, has no caller and no demand, and the honest way to
+// change a run's tier is to stop it and start one.
+//
+// # Bounded, and what "bounded" is doing
+//
+// A paused run holds its budget, its run-scoped service token and its slot in
+// the manager's map, so an unbounded pause is a resource leak that looks like an
+// operator being careful. Every pause carries a deadline — clamped by the
+// `PauseWindow` type, not by a check a later caller could skip — and **on
+// expiry the run stops. It does not resume.**
+//
+// The deadline is enforced by the driver task itself: it is parked inside
+// `RunControl::hold_at_boundary`, selecting the deadline against the wake-up. It
+// is not a column somebody hopes a sweeper reads.
+//
+// # The one thing an operator has to know
+//
+// Only a run **this process is driving** can be paused, because a pause is a
+// loop being held and nothing else. An orphan, or a run of another replica,
+// gets 409 with that sentence rather than a success that changes nothing.
+
+#[derive(Debug, Deserialize)]
+pub struct PauseBody {
+    /// How long to hold it. Clamped into the window the platform grants; the
+    /// response says what was actually granted, because a clamp the caller
+    /// cannot see is a deadline they are wrong about.
+    #[serde(default)]
+    pub seconds: Option<i64>,
+}
+
+/// POST /api/agent/runs/{id}/pause
+pub async fn pause_run(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(run_id): Path<Uuid>,
+    body: Option<Json<PauseBody>>,
+) -> Response {
+    let window = body
+        .and_then(|Json(b)| b.seconds)
+        .map_or_else(super::control::PauseWindow::default, |s| {
+            super::control::PauseWindow::from_seconds(s)
+        });
+
+    match state.agent.pause(token.user_id(), run_id, window).await {
+        Ok(PauseOutcome::Paused { until, seconds }) => Json(json!({
+            "paused": true,
+            "until": until.to_rfc3339(),
+            "seconds": seconds,
+            // Stated in the response because it is the half of the contract an
+            // operator would otherwise assume the other way round.
+            "on_expiry": "stopped",
+        }))
+        .into_response(),
+        Ok(PauseOutcome::NoSuchRun) => {
+            (StatusCode::NOT_FOUND, Json(json!({ "error": "not_found" }))).into_response()
+        }
+        Ok(PauseOutcome::AlreadyFinished(status)) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "run_already_finished",
+                "status": status,
+                "message": "this run has ended; there is no next step to hold it at",
+            })),
+        )
+            .into_response(),
+        Ok(PauseOutcome::NotDrivenHere(status)) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "run_not_driven_here",
+                "status": status,
+                "message": "a pause is a loop being held at its next step, and this process is                             not driving this run — so there is nothing to hold. Cancel it instead.",
+            })),
+        )
+            .into_response(),
+        Ok(PauseOutcome::AlreadyPaused(until)) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "already_paused",
+                "until": until.to_rfc3339(),
+                "message": "already held; an extension is a second decision, and a pause that                             renews itself is the unbounded pause the deadline exists to prevent",
+            })),
+        )
+            .into_response(),
+        Ok(PauseOutcome::Stopping) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "run_stopping",
+                "message": "this run is already stopping",
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "pause agent run failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "pause_failed" })),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// POST /api/agent/runs/{id}/resume
+pub async fn resume_run(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(run_id): Path<Uuid>,
+) -> Response {
+    match state.agent.resume(token.user_id(), run_id).await {
+        Ok(ResumeOutcome::Resumed) => Json(json!({ "resumed": true })).into_response(),
+        Ok(ResumeOutcome::NoSuchRun) => {
+            (StatusCode::NOT_FOUND, Json(json!({ "error": "not_found" }))).into_response()
+        }
+        Ok(ResumeOutcome::AlreadyFinished(status)) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "run_already_finished",
+                "status": status,
+                "message": "this run has ended; a resume cannot restart it",
+            })),
+        )
+            .into_response(),
+        Ok(ResumeOutcome::NotDrivenHere(status)) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "run_not_driven_here",
+                "status": status,
+                "message": "this process is not driving this run, so it holds no pause to lift",
+            })),
+        )
+            .into_response(),
+        Ok(ResumeOutcome::NotPaused) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "not_paused",
+                "message": "this run is not held; it is already taking steps",
+            })),
+        )
+            .into_response(),
+        // The expiry case an operator most needs told plainly: they came back
+        // after the deadline, and fail-closed means the run is gone rather than
+        // that the click did nothing.
+        Ok(ResumeOutcome::Stopping) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "run_stopping",
+                "message": "this run is stopping — either it was cancelled, or its pause expired                             and an expired pause stops the run rather than resuming it",
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "resume agent run failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "resume_failed" })),
             )
                 .into_response()
         }

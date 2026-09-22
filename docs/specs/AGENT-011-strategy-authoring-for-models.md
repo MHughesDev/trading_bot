@@ -119,9 +119,11 @@ Keep the grammar in FEAT-004 §3.1 with these amendments, all in the direction o
 > `strategy_revision.parent_hash`, derived server-side from the `head_revision` **of
 > the same `strategy_id`**. The tool's own description compounded it by advising
 > authors to *"mint versioned slugs (`my_strat_v2`) when iterating"* — and a new slug
-> has no head, so `parent_hash` is NULL. **Measured on the live registry: 40
+> has no head, so `parent_hash` is NULL. ~~Measured on the live registry: 40
 > agent-authored revisions across 34 slugs, 6 with a parent — 85% of the agent's
-> authoring history has no lineage at all.**
+> authoring history has no lineage at all.~~ **Retracted 2026-09-22: that measurement
+> counted test fixtures. See the retraction note below (Q-G4-02). The decision does not
+> rest on it.**
 >
 > The advice was written as if overwriting `head_revision` discarded the previous
 > definition. It does not: `strategy_revision` is append-only and the chain holds every
@@ -130,6 +132,57 @@ Keep the grammar in FEAT-004 §3.1 with these amendments, all in the direction o
 > to protect against a loss that cannot happen. The explicit parent is **optional**
 > rather than required, because a first version genuinely has no parent and a required
 > field would be filled with something.
+
+> **Amended 2026-09-22 (Q-G4-02 — a retraction, not a reversal).** The measurement
+> struck above was taken from `strategy_revision` on the platform's own development
+> database, and **every row it counted was test residue.**
+> `crates/ledger/tests/pg_strategy_revision.rs` used to write through the pool with no
+> teardown; those are its fixtures, written as `actor_kind = 'agent'` because the
+> column's CHECK admits no `'test'` value, and identifiable by `actor_id = 'a'`. The
+> test file now says so in its own header and runs every case inside a transaction it
+> never commits, because the table refuses DELETE and there is no teardown to write.
+>
+> Re-established the same day, excluding the residue: **every surviving revision was
+> written by 0058's own backfill** — `actor_kind = 'import'`, `actor_id = 'pre-0058'`,
+> each hash reproducing the backfill's `sha256(definition_json::text)` rather than the
+> application's canonical hasher. So `POST /api/strategies` has never committed a
+> revision to this database at all, and the honest statement is not that the agent's
+> lineage is mostly missing but that **there is no agent authoring history here to have
+> lineage** — which is a different problem, and a worse one for anyone planning to
+> measure the effect of ADR-D-21 by watching this table.
+>
+> **ADR-D-21 stands unchanged.** It was argued from the mechanism — a new slug has no
+> head, so `parent_hash` is NULL — and the mechanism is in the migration and the route,
+> not in the row count. A number was offered as corroboration and was not one. No count
+> replaces it here on purpose: a number written into a spec is a number nobody
+> recomputes, which is this file's own standing rule (see the status block), and this
+> paragraph is what happens when it is broken. The two other places that carry the
+> struck figure — `ADR-INDEX.md`'s ADR-D-21 row and `OPEN-QUESTIONS.md`'s Q-S5-06 — are
+> outside this track's write territory and are named in Q-G4-02 for whoever holds them.
+>
+> **Before believing any count from this registry**, exclude `actor_id = 'a'` and
+> `actor_id LIKE 'test-fixture:%'`; `pg_strategy_revision.rs`'s closing comment
+> specifies the migration that would make the marker unforgeable.
+
+> **Amended 2026-09-22 (Q-G4-01 — the contradiction is named, not resolved).**
+> `create_strategy`'s row above is the platform's **built** lineage design, and
+> **FEAT-004 §4 specifies a different one for the same thing**: `strategy_versions`
+> with a self-referential `parent_version`, plus a `strategy_slugs` table where
+> *"a slug moves `current_version`"*. Different tables, different lineage mechanism,
+> different immutability story — and nothing said which was real, which is how the slug
+> advice ADR-D-21 struck came to be written in the first place.
+>
+> Established from the migrations, the route and the live database: **`strategy_revision`
+> is built and `strategy_versions`/`strategy_slugs` exist nowhere** — no migration, no
+> crate, no frontend, no table; FEAT-004 §4 is their only mention in the repository, and
+> the migration number that section names is occupied by `0041_agent_conversations.sql`.
+> So this row describes the platform and FEAT-004 §4 describes a proposal.
+>
+> FEAT-004 §4 is **not struck**, because the unbuilt design carries something the built
+> one has no equivalent for — a per-slug `deployed_version` distinct from the current
+> pointer, which is what makes its funnel-restart rule expressible. Which design SLv2
+> storage should take is a decision with costs on both sides, so it is left open as
+> **Q-G4-01** rather than settled by whichever spec happened to be read first.
 
 **It says which clause blocked the entry.** `never_fires_because` at strategy level tells a
 model that something is wrong; it does not tell it *what*, so the next move is a guess and the

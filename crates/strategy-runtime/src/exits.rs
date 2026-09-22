@@ -471,7 +471,12 @@ impl NetPosition {
 }
 
 /// Seconds in one bar of `timeframe`.
-const fn bar_seconds(timeframe: Timeframe) -> i64 {
+///
+/// Shared with the history registers so a cross is measured over the same unit
+/// a holding period is counted in. A live feed publishing one event per trade
+/// would otherwise have `crossed_above` comparing two trades where the
+/// strategy declared minutes.
+pub(crate) const fn bar_seconds(timeframe: Timeframe) -> i64 {
     match timeframe {
         Timeframe::Seconds1 => 1,
         Timeframe::Minutes1 => 60,

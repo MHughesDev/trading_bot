@@ -318,6 +318,27 @@ pub enum SkipReason {
     /// An empty question. Offered, it would key on nothing and merge with every
     /// other empty one.
     Blank,
+    /// §4: the charter's scope does not admit the subject.
+    ///
+    /// Distinct from [`Self::Excluded`] and the two are not interchangeable:
+    /// one is "you did not ask about this" and the other is "you told me not
+    /// to". They read identically on an agenda and completely differently to a
+    /// human wondering why nothing is happening.
+    OutOfScope,
+    /// §2.2: the charter's `exclusions` name the subject, family or tool.
+    Excluded,
+    /// The condition a subscription is waiting on is one nothing on this
+    /// platform measures, so it can be neither true nor false.
+    ///
+    /// **Never used for a measured `false`.** See
+    /// [`crate::sources::Fired`]: a subscription that answers no and one that
+    /// cannot answer at all are different facts, and the second is the one that
+    /// wants a spec amendment.
+    NotEvaluable,
+    /// §4.7's rate limit: this session already raised an item for this event.
+    AlreadyRaised,
+    /// An event of a kind the session does not subscribe to.
+    NotSubscribed,
 }
 
 impl SkipReason {
@@ -326,6 +347,11 @@ impl SkipReason {
         match self {
             SkipReason::NotWorthPursuing => "not_worth_pursuing",
             SkipReason::Blank => "blank",
+            SkipReason::OutOfScope => "out_of_scope",
+            SkipReason::Excluded => "excluded",
+            SkipReason::NotEvaluable => "not_evaluable",
+            SkipReason::AlreadyRaised => "already_raised",
+            SkipReason::NotSubscribed => "not_subscribed",
         }
     }
 }

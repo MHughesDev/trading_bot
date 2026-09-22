@@ -18,7 +18,6 @@
 //! budget enforceable — a transcript the provider accumulates is a transcript the
 //! harness cannot compact (§4).
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -935,7 +934,7 @@ impl Recorder {
                 id: format!("{run}:cited"),
                 text: evidence.to_string(),
             }],
-            cost_usd: self.yielded.cost_usd,
+            spend: self.yielded.spend,
             // `self.trials_spent`, **not** `self.yielded.trials_spent`. The
             // yield's copy is assigned thirty lines below this call, so reading
             // it here recorded `0` on every dossier ever compiled — for the one
@@ -1232,7 +1231,12 @@ async fn load_brief(
 
 /// Runs one local-tier task to a terminal state.
 #[allow(clippy::too_many_lines)]
-pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: Arc<AtomicBool>) {
+pub async fn run(
+    pg: PgPool,
+    client: LlmClient,
+    params: LocalRunParams,
+    cancel: Arc<super::control::RunControl>,
+) {
     // Every platform tool call this session makes is recorded before it is
     // authorised and after it is answered (SPEC §15, ADR-P2-21, ADR-P2-34) —
     // by `dispatch_tool`, through the platform's own audit endpoint, which is
@@ -1639,10 +1643,43 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
             return;
         };
 
-        if cancel.load(Ordering::SeqCst) {
-            rec.input("Cancel", serde_json::json!({})).await;
-            effects = governor.next(Input::Cancel);
-            continue;
+        // ── The step boundary (ADR-D-27) ─────────────────────────────────────
+        //
+        // Cancel and pause leave the loop by the same door, and both go through
+        // the governor rather than around it: `Input::Cancel` is how this state
+        // machine is told to stop, and a second exit would be a second way for a
+        // run to end that the loop's own accounting never saw.
+        //
+        // While paused, `hold_at_boundary` does not resolve. No model call, no
+        // tool dispatch, no trial — which is what makes the word true.
+        if let Some(until) = cancel.paused_until() {
+            rec.append(
+                "status",
+                serde_json::json!({
+                    "phase": "paused",
+                    "until": until.to_rfc3339(),
+                    "note": "held at a step boundary; on expiry this run stops, it does not resume",
+                }),
+            )
+            .await;
+        }
+        match cancel.hold_at_boundary().await {
+            super::control::Hold::Proceed => {}
+            super::control::Hold::Resumed => {
+                rec.append("status", serde_json::json!({ "phase": "resumed" }))
+                    .await;
+            }
+            super::control::Hold::Stop(reason) => {
+                rec.append(
+                    "status",
+                    serde_json::json!({ "phase": "stopping", "reason": reason.as_str() }),
+                )
+                .await;
+                rec.input("Cancel", serde_json::json!({ "reason": reason.as_str() }))
+                    .await;
+                effects = governor.next(Input::Cancel);
+                continue;
+            }
         }
 
         let input = match blocking {
@@ -2132,7 +2169,7 @@ async fn await_approval(
     tool: &str,
     arguments: &Map<String, Value>,
     ruling: &harness::Ruling,
-    cancel: &AtomicBool,
+    cancel: &super::control::RunControl,
 ) -> Option<(bool, String)> {
     let approval_id = Uuid::new_v4();
     let payload = json!({
@@ -2174,7 +2211,7 @@ async fn await_approval(
         .await;
 
     loop {
-        if cancel.load(Ordering::SeqCst) {
+        if cancel.is_cancelled() {
             let _ = sqlx::query(
                 "UPDATE approval_requests SET state = 'cancelled' WHERE approval_id = $1
                  AND state = 'pending'",

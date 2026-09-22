@@ -1,4 +1,5 @@
-//! Agent run lifecycle: capacity, run rows, run-scoped tokens, spawn/cancel.
+//! Agent run lifecycle: capacity, run rows, run-scoped tokens, spawn, and the
+//! run controls — cancel, and the bounded pause/resume of ADR-D-27.
 //!
 //! Follows the platform's job pattern (ModelManager::start_train): insert a
 //! status row, `tokio::spawn` a driver that updates it as it goes, poll over
@@ -19,6 +20,7 @@ use mcp_server_lib::ApiClient;
 
 use crate::credentials::LlmCredentialStore;
 
+use super::control::{PauseRefused, PauseWindow, ResumeRefused, RunControl};
 use super::conversations;
 use super::driver::{self, DriverParams};
 use super::local_driver::{self, LocalRunParams};
@@ -74,8 +76,19 @@ pub struct AgentManager {
     /// Loopback base URL of this platform's own API (tool execution path).
     base_url: String,
     cfg: AgentConfig,
-    /// Cancel flags for in-process runs.
-    running: Mutex<HashMap<Uuid, Arc<AtomicBool>>>,
+    /// The control handle for every run this process is driving.
+    ///
+    /// This used to be an `Arc<AtomicBool>` per run — the cancel flag, and
+    /// nothing else. It is a [`RunControl`] because pause had to be built *on*
+    /// the cancel mechanism rather than beside it: the drivers already poll this
+    /// map's value at their step boundaries, so making the value able to hold
+    /// them there is the difference between a pause the loop obeys and a pause
+    /// that is a column.
+    ///
+    /// Membership of this map is also the honest answer to "can this run be
+    /// paused?". A run this process is not driving has no loop to hold, so
+    /// [`Self::pause`] refuses it rather than recording a state nothing honours.
+    running: Mutex<HashMap<Uuid, Arc<RunControl>>>,
     /// Set on `SIGTERM`: no new turns, and the ones in flight get to finish
     /// (§10.1, S-2.15).
     ///
@@ -537,7 +550,7 @@ impl AgentManager {
         .await
         .map_err(|e| StartError::Internal(e.to_string()))?;
 
-        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel = Arc::new(RunControl::new());
         self.running
             .lock()
             .expect("agent running lock")
@@ -792,10 +805,7 @@ impl AgentManager {
         let Some((status,)) = owned else {
             return Ok(false);
         };
-        if matches!(
-            status.as_str(),
-            "completed" | "failed" | "cancelled" | "fenced" | "refused"
-        ) {
+        if Self::is_terminal(&status) {
             return Ok(true);
         }
 
@@ -806,7 +816,7 @@ impl AgentManager {
             .get(&run_id)
             .cloned();
         match flag {
-            Some(f) => f.store(true, std::sync::atomic::Ordering::SeqCst),
+            Some(f) => f.cancel(),
             None => {
                 // Not driven by this process — orphan; close it directly.
                 sqlx::query(
@@ -820,4 +830,135 @@ impl AgentManager {
         }
         Ok(true)
     }
+
+    /// The control handle, if this process is the one driving the run.
+    fn control(&self, run_id: Uuid) -> Option<Arc<RunControl>> {
+        self.running
+            .lock()
+            .expect("agent running lock")
+            .get(&run_id)
+            .cloned()
+    }
+
+    /// `(status, is_terminal)` for a run this user owns, or `None` if they do
+    /// not own one with that id.
+    ///
+    /// The terminal list is the same one [`Self::cancel`] uses. Two copies of
+    /// it would be two answers to "is this run over", which is exactly the shape
+    /// of the `ended == "succeeded"` defect: a branch keyed on a word the column
+    /// never takes.
+    async fn owned_status(&self, user_id: Uuid, run_id: Uuid) -> Result<Option<String>, sqlx::Error> {
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT status FROM agent_runs WHERE run_id = $1 AND user_id = $2")
+                .bind(run_id)
+                .bind(user_id)
+                .fetch_optional(&self.pg)
+                .await?;
+        Ok(row.map(|(s,)| s))
+    }
+
+    /// Terminal statuses. Named here once; see [`Self::owned_status`].
+    fn is_terminal(status: &str) -> bool {
+        matches!(
+            status,
+            "completed" | "failed" | "cancelled" | "fenced" | "refused"
+        )
+    }
+
+    /// Hold a run at its next step boundary for a bounded window (ADR-D-27).
+    ///
+    /// # Errors
+    ///
+    /// Propagates the ownership lookup's database error.
+    pub async fn pause(
+        &self,
+        user_id: Uuid,
+        run_id: Uuid,
+        window: PauseWindow,
+    ) -> Result<PauseOutcome, sqlx::Error> {
+        let Some(status) = self.owned_status(user_id, run_id).await? else {
+            return Ok(PauseOutcome::NoSuchRun);
+        };
+        if Self::is_terminal(&status) {
+            return Ok(PauseOutcome::AlreadyFinished(status));
+        }
+        // A run this process is not driving has no loop to hold. Recording a
+        // pause for it would be a state nothing honours — the defect this
+        // control was built to stop telling.
+        let Some(control) = self.control(run_id) else {
+            return Ok(PauseOutcome::NotDrivenHere(status));
+        };
+        match control.pause(window) {
+            Ok(until) => Ok(PauseOutcome::Paused {
+                until,
+                seconds: window.as_secs(),
+            }),
+            Err(PauseRefused::AlreadyPaused) => Ok(PauseOutcome::AlreadyPaused(
+                control.paused_until().unwrap_or_else(chrono::Utc::now),
+            )),
+            Err(PauseRefused::Stopping) => Ok(PauseOutcome::Stopping),
+        }
+    }
+
+    /// Let a paused run take its next step.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the ownership lookup's database error.
+    pub async fn resume(&self, user_id: Uuid, run_id: Uuid) -> Result<ResumeOutcome, sqlx::Error> {
+        let Some(status) = self.owned_status(user_id, run_id).await? else {
+            return Ok(ResumeOutcome::NoSuchRun);
+        };
+        if Self::is_terminal(&status) {
+            return Ok(ResumeOutcome::AlreadyFinished(status));
+        }
+        let Some(control) = self.control(run_id) else {
+            return Ok(ResumeOutcome::NotDrivenHere(status));
+        };
+        match control.resume() {
+            Ok(()) => Ok(ResumeOutcome::Resumed),
+            Err(ResumeRefused::NotPaused) => Ok(ResumeOutcome::NotPaused),
+            // The expiry case reaches here: the deadline passed, the boundary
+            // flipped the run to stopping, and the operator's resume arrived
+            // after. Saying so is the point — fail-closed means the run is gone,
+            // not that the click did nothing.
+            Err(ResumeRefused::Stopping) => Ok(ResumeOutcome::Stopping),
+        }
+    }
+
+    /// Whether a run this process drives is paused, and until when.
+    #[must_use]
+    pub fn paused_until(&self, run_id: Uuid) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.control(run_id).and_then(|c| c.paused_until())
+    }
+}
+
+/// What [`AgentManager::pause`] decided. The route maps these to status codes;
+/// the manager does not know about HTTP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PauseOutcome {
+    Paused {
+        until: chrono::DateTime<chrono::Utc>,
+        seconds: u64,
+    },
+    /// No run with that id belongs to this user.
+    NoSuchRun,
+    /// It is over; the status says how it ended.
+    AlreadyFinished(String),
+    /// Not driven by this process — an orphan, or a run of another replica.
+    NotDrivenHere(String),
+    AlreadyPaused(chrono::DateTime<chrono::Utc>),
+    /// Cancelled, or its pause already expired.
+    Stopping,
+}
+
+/// What [`AgentManager::resume`] decided.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResumeOutcome {
+    Resumed,
+    NoSuchRun,
+    AlreadyFinished(String),
+    NotDrivenHere(String),
+    NotPaused,
+    Stopping,
 }

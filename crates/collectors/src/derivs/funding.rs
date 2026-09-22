@@ -136,6 +136,13 @@ pub struct FundingObservation {
     pub knowledge: Knowledge,
     pub rate: Decimal,
     pub relative_rate: Option<Decimal>,
+    /// The `dataplane.source.name` that produced this row.
+    ///
+    /// Carried on the row rather than inferred at the sink: the ticker poll and
+    /// the history endpoint are two different declared sources with two
+    /// different ids, and a sink that guessed between them would stamp a row
+    /// with the wrong declared lag.
+    pub source: &'static str,
 }
 
 impl FundingObservation {
@@ -158,6 +165,8 @@ pub struct OpenInterestObservation {
     pub knowledge: Knowledge,
     pub open_interest: Decimal,
     pub mark_price: Option<Decimal>,
+    /// The `dataplane.source.name` that produced this row.
+    pub source: &'static str,
 }
 
 impl OpenInterestObservation {
@@ -306,6 +315,7 @@ pub fn parse_tickers(body: &str, received_at: DateTime<Utc>) -> Result<TickerSna
                         knowledge: observed(&src, settled, received_at)?,
                         rate,
                         relative_rate: relative,
+                        source: src.name,
                     });
                 }
                 Err(_) => bad = true,
@@ -330,6 +340,7 @@ pub fn parse_tickers(body: &str, received_at: DateTime<Utc>) -> Result<TickerSna
                         knowledge: observed(&src, settled, received_at)?,
                         rate,
                         relative_rate: None,
+                        source: src.name,
                     });
                 }
                 Err(_) => bad = true,
@@ -352,6 +363,7 @@ pub fn parse_tickers(body: &str, received_at: DateTime<Utc>) -> Result<TickerSna
                         knowledge: observed(&src, received_at, received_at)?,
                         open_interest: oi,
                         mark_price: mark,
+                        source: src.name,
                     });
                 }
                 Err(_) => bad = true,
@@ -397,6 +409,7 @@ pub fn parse_history(body: &str, instrument: &str, received_at: DateTime<Utc>) -
                 .map_err(|e| FundingError::Provenance(e.to_string()))?,
             rate,
             relative_rate: relative,
+            source: src.name,
         });
     }
     Ok(out)

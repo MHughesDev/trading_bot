@@ -40,6 +40,111 @@ use serde::{Deserialize, Serialize};
 
 use crate::memory::Confidence;
 
+// ── Spend: two states, because one of them would be a lie ───────────────────
+
+/// What a phrase like "not priced" costs a reader who believed the zero.
+///
+/// Stated once, here, so the three surfaces that already say it and the ones
+/// that will say it next say the same thing.
+pub const NOT_PRICED: &str = "not priced — this platform records no per-run USD";
+
+/// What a run cost, or the fact that nobody measured it.
+///
+/// # Why this is not an `f64`
+///
+/// It was one, and nothing in the workspace ever assigned it. Every dossier
+/// this platform has ever compiled therefore carried the `Default`, `0.0`,
+/// which the reader rendered as **`$0.00`** — a measurement, in the one
+/// document a human opens to decide whether a strategy is worth money. An
+/// absent measurement is never a zero, and a type with no way to say "absent"
+/// gives the absence nowhere to go but into the number.
+///
+/// The platform already knew better everywhere else: `session_driver.rs`,
+/// `routes/desk_running.rs` and `routes/agent_sessions.rs` each refuse to
+/// price a run, because `llm_usage.cost_usd` keys on an **auth session**, not
+/// on a run. The dossier was the last surface believing the zero.
+///
+/// # Why not `Option<f64>`
+///
+/// Because `Option<f64>` has `unwrap_or`, and the shortest path from "nobody
+/// priced this run" to a rendered `$0.00` is one method call that reads as
+/// defensive programming — the exact collapse that put the zero in the
+/// document. Same argument [`Met`](crate::state::Met) makes about
+/// `Option<bool>`, applied to the thing that turns into money.
+///
+/// # The compile-time part
+///
+/// There is deliberately **no** bare float anywhere on this type: no
+/// `From<Spend>` conversion, no `is_priced`, no accessor handing back
+/// `Option<f64>`. The only way out is [`Spend::fold`], which takes one
+/// argument per state, so "render an unpriced run as a number" cannot be
+/// written by omission — a caller has to type the unpriced arm and choose what
+/// it says. `spend_never_grows_a_float_escape_hatch` in
+/// `tests/acceptance_and_budget_are_honest.rs` keeps it that way.
+///
+/// # What this deliberately does not do
+///
+/// It does not invent a price. ADR-D-03 decided that a static price table is
+/// the answer and that the estimate is `null` for any model not in it; that
+/// table does not exist yet. Until it does, [`Spend::NotPriced`] is the true
+/// value for every run this platform executes, and the job of this type is to
+/// stop the lie rather than to build the pricing.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum Spend {
+    /// Nobody measured it. The honest default, and the state of every run this
+    /// platform has ever executed. **Not** a claim that the run was free.
+    #[default]
+    NotPriced,
+    /// Measured, in US dollars. **Measured** is the load-bearing word: this is
+    /// a figure something computed from a price, never the absence of one.
+    Usd(f64),
+}
+
+impl Spend {
+    /// Collapse to one value per state. Two arguments, no default, no bare
+    /// float falling out.
+    ///
+    /// The priced arm takes the figure; the unpriced arm is a value, because
+    /// there is nothing to hand it.
+    pub fn fold<T>(self, priced: impl FnOnce(f64) -> T, not_priced: T) -> T {
+        match self {
+            Spend::Usd(usd) => priced(usd),
+            Spend::NotPriced => not_priced,
+        }
+    }
+
+    /// How a card says it.
+    ///
+    /// Words rather than a blank, because a blank beside a column of dollar
+    /// figures reads as zero, and that is the reading this type exists to
+    /// prevent.
+    #[must_use]
+    pub fn mark(self) -> String {
+        self.fold(|usd| format!("${usd:.2}"), NOT_PRICED.to_string())
+    }
+}
+
+/// `cost_usd: <number> | null` on the wire. `null` is [`Spend::NotPriced`], and
+/// it is sent rather than skipped: an absent key lets a consumer's `??` or
+/// `COALESCE` invent the zero that a missing measurement does not have.
+impl Serialize for Spend {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Spend::NotPriced => s.serialize_none(),
+            Spend::Usd(usd) => s.serialize_some(usd),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Spend {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(match Option::<f64>::deserialize(d)? {
+            None => Spend::NotPriced,
+            Some(usd) => Spend::Usd(usd),
+        })
+    }
+}
+
 /// What one run produced (§10).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Yield {
@@ -63,7 +168,15 @@ pub struct Yield {
     pub hypotheses_refuted: u32,
     pub hypotheses_supported: u32,
     pub trials_spent: u32,
-    pub cost_usd: f64,
+    /// What the run cost, or the fact that nobody priced it — see [`Spend`].
+    ///
+    /// Named `spend` and not `cost_usd` because the field is no longer a number
+    /// of dollars, and a name that promises one is how the zero got read as a
+    /// measurement. It still **serialises** as `cost_usd`, now carrying `null`
+    /// instead of `0.0`, so a consumer that reads the key gets the absence
+    /// rather than losing the key and defaulting.
+    #[serde(rename = "cost_usd", default)]
+    pub spend: Spend,
 }
 
 /// What a negative result is worth when its class is new for the subject.
@@ -97,15 +210,29 @@ impl Yield {
         self.trials_spent > 0 && self.knowledge_units() == 0
     }
 
-    /// Dollars per unit of knowledge, or `None` when there are none.
+    /// Dollars per unit of knowledge — three states, and two of them are
+    /// absences of different things.
     ///
-    /// `None` rather than infinity, and rather than the cost itself: a barren run
-    /// has no cost *per unit* because it produced no units, and reporting the raw
-    /// cost there would put a finite number in a column readers average.
+    /// * `None` — the run produced no units, so there is no *per unit* figure
+    ///   at all. `None` rather than infinity, and rather than the cost itself:
+    ///   reporting the raw cost there would put a finite number in a column
+    ///   readers average.
+    /// * `Some(Spend::NotPriced)` — it produced units, and nobody priced the
+    ///   run. Distinct from the line above, because "learned nothing" and "we
+    ///   do not know what it cost" are different facts about a run and a reader
+    ///   acts on them differently.
+    /// * `Some(Spend::Usd(_))` — both were measured.
+    ///
+    /// Folding the second case into the first would be the cheaper signature
+    /// and would lose the distinction; folding it into a number would be the
+    /// bug this module was rewritten to close.
     #[must_use]
-    pub fn cost_per_knowledge_unit(&self) -> Option<f64> {
+    pub fn cost_per_knowledge_unit(&self) -> Option<Spend> {
         let units = self.knowledge_units();
-        (units > 0).then(|| self.cost_usd / f64::from(units))
+        (units > 0).then(|| {
+            self.spend
+                .fold(|usd| Spend::Usd(usd / f64::from(units)), Spend::NotPriced)
+        })
     }
 
     /// Count one finding at its verified confidence.
@@ -307,11 +434,16 @@ mod tests {
     }
 
     /// Cost per unit is `None` with no units, not infinity and not the raw cost.
+    ///
+    /// The fixture prices the run deliberately: the assertion is about the
+    /// *units* being absent, so the cost has to be present for it to mean
+    /// anything. A run priced at `Spend::NotPriced` here would pass for the
+    /// wrong reason.
     #[test]
     fn a_barren_run_has_no_cost_per_unit() {
         let y = Yield {
             trials_spent: 3,
-            cost_usd: 4.20,
+            spend: Spend::Usd(4.20),
             ..Yield::default()
         };
         assert_eq!(
@@ -325,7 +457,89 @@ mod tests {
             ..y
         };
         let per = y.cost_per_knowledge_unit().expect("two units");
-        assert!((per - 2.10).abs() < 1e-9, "{per}");
+        let usd = per.fold(|usd| usd, f64::NAN);
+        assert!((usd - 2.10).abs() < 1e-9, "{usd}");
+    }
+
+    /// The whole defect, as an assertion: a run nobody priced is not a free run.
+    ///
+    /// `Yield::default()` is what every run on this platform carries, because
+    /// nothing in the workspace assigns a price. It used to be `0.0`, and it
+    /// reached a stored dossier and printed `$0.00`.
+    #[test]
+    fn a_run_nobody_priced_is_not_a_run_that_cost_nothing() {
+        let y = Yield {
+            trials_spent: 3,
+            findings_established: 2,
+            ..Yield::default()
+        };
+        assert_eq!(
+            y.spend,
+            Spend::NotPriced,
+            "nothing in this workspace assigns a price, so the default is the live value"
+        );
+        assert_eq!(
+            y.cost_per_knowledge_unit(),
+            Some(Spend::NotPriced),
+            "two units and no price is not two units at zero dollars each"
+        );
+        assert_eq!(y.spend.mark(), NOT_PRICED);
+        assert!(
+            !y.spend.mark().contains('$'),
+            "an unpriced run must not render with a currency figure: {}",
+            y.spend.mark()
+        );
+    }
+
+    /// `null` on the wire, not a missing key and not a zero.
+    ///
+    /// A missing key is what lets a consumer's `??` or a `COALESCE` invent the
+    /// zero back; a present `null` is a statement.
+    #[test]
+    fn an_unpriced_run_serialises_as_null_under_the_key_a_reader_looks_for() {
+        let wire = serde_json::to_value(Yield::default()).expect("serialises");
+        assert_eq!(
+            wire.get("cost_usd"),
+            Some(&serde_json::Value::Null),
+            "the key is sent, carrying null: {wire}"
+        );
+
+        let back: Yield = serde_json::from_value(wire).expect("round-trips");
+        assert_eq!(back.spend, Spend::NotPriced);
+
+        let priced = serde_json::to_value(Yield {
+            spend: Spend::Usd(4.20),
+            ..Yield::default()
+        })
+        .expect("serialises");
+        assert_eq!(priced["cost_usd"], serde_json::json!(4.20));
+        let back: Yield = serde_json::from_value(priced).expect("round-trips");
+        assert_eq!(back.spend, Spend::Usd(4.20));
+    }
+
+    /// A row that omits the key entirely still deserialises to the absence.
+    ///
+    /// Rows were persisted before this field existed. They carry no price, so
+    /// they read back as carrying no price — not as free runs.
+    #[test]
+    fn a_row_written_before_the_field_existed_is_unpriced_not_free() {
+        let y: Yield = serde_json::from_value(serde_json::json!({
+            "findings_established": 1,
+            "findings_suggestive": 0,
+            "findings_refuted": 0,
+            "negatives": 0,
+            "negatives_new_class": 0,
+            "questions_opened": 0,
+            "questions_closed": 0,
+            "contradictions_surfaced": 0,
+            "proposals": 0,
+            "hypotheses_tested": 0,
+            "hypotheses_refuted": 0,
+            "hypotheses_supported": 0,
+            "trials_spent": 2
+        }))
+        .expect("the old shape still reads");
+        assert_eq!(y.spend, Spend::NotPriced);
     }
 
     /// Barren rate is per (tier, workflow) and never averaged across them.

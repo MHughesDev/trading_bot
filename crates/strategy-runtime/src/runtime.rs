@@ -20,7 +20,8 @@ use thiserror::Error;
 
 use crate::bytecode;
 use crate::clock::StrategyClock;
-use crate::exits::{BarAggregator, ExitTracker, NetEffect, NetPosition, Triggered};
+use crate::exits::{bar_seconds, BarAggregator, ExitTracker, NetEffect, NetPosition, Triggered};
+use crate::history::{HistoryRegisters, Unknown, Unresolved, Verdict};
 use crate::ids::NodeId;
 use crate::intents::{build_intents_for_signals, SizedIntents, SizingContext};
 use crate::interpreter::evaluate_condition;
@@ -92,6 +93,29 @@ pub struct StrategyInstance {
     /// Per-program local-slot → global-registry-slot mapping, keyed by NodeId.
     /// Built once at init from compiled_conditions + registry.
     program_slots: HashMap<NodeId, Vec<u16>>,
+    /// Previous-bar values for every `crossed_above`, `crossed_below`,
+    /// `rising` and `falling` site in this definition's conditions.
+    ///
+    /// One file for the whole instance, so every condition rolls on the same
+    /// bar and two crosses in one definition cannot drift apart.
+    history: HistoryRegisters,
+    /// NodeId → the base of that program's run of history sites.
+    /// Built once at init, in node order so two runs of the same definition
+    /// assign the same sites.
+    program_site_base: HashMap<NodeId, usize>,
+    /// Seconds per bar of the timeframe adopted at the first bar event, which
+    /// is what the history registers bucket by.
+    ///
+    /// The live feed publishes one `WorldEvent::Bar` per *trade tick* — a
+    /// degenerate bar whose open, high, low and close are all the trade price
+    /// — so counting events would make a cross a comparison between two
+    /// trades. Bucketing by the declared timeframe is the same correction
+    /// [`BarAggregator`] makes for the holding count, and for the same reason:
+    /// a bar is a unit of the strategy's clock, not of the feed's.
+    ///
+    /// `None` until the first bar arrives. Before then there is no bar clock
+    /// and every history site reads unknown, which is the honest answer.
+    history_bucket_secs: Option<i64>,
     /// String node IDs indexed by NodeId for fallback interpreter path.
     _node_id_to_str: HashMap<NodeId, String>,
     /// Pre-populated model forecast results for `ModelForecast` nodes (v1.0/v1.1 compat).
@@ -157,16 +181,31 @@ impl StrategyInstance {
         let instrument_id = instrument_id.into();
         let (compiled_conditions, node_id_to_str) = Self::compile_conditions(&definition.nodes);
 
-        // Build the feature registry and per-program slot maps at init time.
-        // After this point the registry is read-only during the hot loop.
+        // Build the feature registry, the per-program slot maps and the
+        // history register file at init time.  After this point the registry is
+        // read-only during the hot loop.
+        //
+        // The walk is over `definition.nodes` in order and **not** over
+        // `compiled_conditions`, which is a `HashMap`: iterating that handed
+        // out feature slots — and would hand out history sites — in whatever
+        // order the hasher produced, so two runs of the same definition could
+        // number them differently.  Replay determinism (ADR-0008) needs the
+        // numbering to be a function of the definition alone.
         let mut registry = FeatureRegistry::new();
-        let program_slots: HashMap<NodeId, Vec<u16>> = compiled_conditions
-            .iter()
-            .map(|(node_id, program)| {
-                let mapping = bytecode::resolve_program_slots(program, &mut registry);
-                (*node_id, mapping)
-            })
-            .collect();
+        let mut program_slots: HashMap<NodeId, Vec<u16>> = HashMap::new();
+        let mut history = HistoryRegisters::new();
+        let mut program_site_base: HashMap<NodeId, usize> = HashMap::new();
+        for idx in 0..definition.nodes.len() {
+            let node_id = NodeId(idx as u32);
+            let Some(program) = compiled_conditions.get(&node_id) else {
+                continue;
+            };
+            program_slots.insert(
+                node_id,
+                bytecode::resolve_program_slots(program, &mut registry),
+            );
+            program_site_base.insert(node_id, program.install_sites(&mut history));
+        }
 
         // Pre-register feature slots for every Inference / Combine output binding
         // declared in the definition.  This must happen before WorldState is
@@ -193,6 +232,9 @@ impl StrategyInstance {
             compiled_conditions,
             registry,
             program_slots,
+            history,
+            program_site_base,
+            history_bucket_secs: None,
             _node_id_to_str: node_id_to_str,
             model_forecast_results: HashMap::new(),
             inference_outputs: HashMap::new(),
@@ -381,8 +423,12 @@ impl StrategyInstance {
             self.apply_inference_outputs();
         }
 
+        // Tell the history registers which bar this event belongs to, before
+        // anything reads them.
+        self.advance_history_clock(event);
+
         // Feature slot array passed directly — no allocation, no string clone.
-        let fired = self.run_signals();
+        let (fired, unresolved) = self.run_signals();
 
         // ── the declared exit, before this event's entries ───────────────────
         //
@@ -403,17 +449,40 @@ impl StrategyInstance {
 
         // Nothing firing and nothing was firing: the overwhelmingly common
         // case, and it allocates nothing beyond what `run_signals` already did.
+        // Safe to take with unresolved signals present — carrying an unknown
+        // signal's previous state forward is a no-op when there is no previous
+        // state to carry.
         if fired.is_empty() && self.active_signals.is_empty() {
-            return SizedIntents { intents: exit_intents, errors: Vec::new() };
+            return SizedIntents {
+                intents: exit_intents,
+                errors: Vec::new(),
+                unresolved,
+            };
         }
 
         // Rising edge only — see `active_signals`.  A signal that stays true
         // places one order, not one per event.
         let rising: HashSet<String> = fired.difference(&self.active_signals).cloned().collect();
-        self.active_signals = fired;
+
+        // A signal nobody could evaluate keeps whatever state it had.  Letting
+        // it drop out of `active_signals` would make the next event where it
+        // *is* true look like a fresh rising edge, so one unreadable bar in the
+        // middle of a held signal would place a second order into a position
+        // that is already open.
+        let mut next_active = fired;
+        for u in &unresolved {
+            if self.active_signals.contains(&u.signal) {
+                next_active.insert(u.signal.clone());
+            }
+        }
+        self.active_signals = next_active;
 
         if rising.is_empty() {
-            return SizedIntents { intents: exit_intents, errors: Vec::new() };
+            return SizedIntents {
+                intents: exit_intents,
+                errors: Vec::new(),
+                unresolved,
+            };
         }
 
         // Resolve Sizing-node fractions for any SizeMode::Model actions.
@@ -432,7 +501,57 @@ impl StrategyInstance {
         // one must produce flatten-then-enter in that order, or the two paths
         // net differently from the same bar.
         out.intents.splice(0..0, exit_intents);
+        out.unresolved = unresolved;
         out
+    }
+
+    /// Tell the history registers which bar this event belongs to.
+    ///
+    /// The bar clock is the *declared timeframe's* bucket of the event's
+    /// `available_time`, adopted from the first bar seen and fixed thereafter.
+    /// Bars of any other timeframe do not move it, matching what [`LiveExits`]
+    /// does with the holding count: a strategy's history is counted in one
+    /// unit or it is not counted at all.
+    ///
+    /// Only bar events move the clock. Feature values for a bar arrive after
+    /// it, so they update the bar that is already open — which is what lets a
+    /// cross be evaluated from the features of the bar it belongs to rather
+    /// than the bar before.
+    fn advance_history_clock(&mut self, event: &WorldEvent) {
+        let WorldEvent::Bar {
+            timeframe,
+            available_time,
+            ..
+        } = event
+        else {
+            return;
+        };
+        let secs = bar_seconds(*timeframe);
+        let adopted = *self.history_bucket_secs.get_or_insert(secs);
+        if secs != adopted {
+            return;
+        }
+        self.history
+            .open_bar(available_time.timestamp().div_euclid(adopted));
+    }
+
+    /// Bars of history this instance needs before every condition can be
+    /// answered, **on top of** its indicators' own warm-up.
+    ///
+    /// Zero for a definition written against the frozen v1 grammar; one for a
+    /// `crossed_above`; `n` for a `rising(x, n)`.
+    #[must_use]
+    pub fn history_warmup_bars(&self) -> u16 {
+        self.history.warmup_bars()
+    }
+
+    /// Whether every history site has accumulated the bars it needs.
+    ///
+    /// False while the instance is still warming — during which conditions
+    /// reading history report unresolved rather than false.
+    #[must_use]
+    pub fn history_is_warm(&self) -> bool {
+        (0..self.history.site_count()).all(|s| self.history.readiness(s).is_ok())
     }
 
     /// Advance the declared exit policy and return the flattening order if it
@@ -672,31 +791,45 @@ impl StrategyInstance {
         overrides
     }
 
-    fn run_signals(&self) -> HashSet<String> {
+    /// Evaluate every condition and map the results onto signals.
+    ///
+    /// Returns the signals that fired **and** the signals whose conditions
+    /// could not be evaluated. The second list is the point: an empty first
+    /// list used to mean both "the strategy declined to trade" and "nothing
+    /// could ask it", and a backtest that cannot tell those apart under-counts
+    /// entries at the start of every window it slices.
+    fn run_signals(&mut self) -> (HashSet<String>, Vec<Unresolved>) {
         use domain::strategy_def::nodes::NodeKind;
 
-        let feature_slots = &self.state.feature_slots;
-
-        // NodeId → fired: keyed by u32 so Signal nodes can look up by string id.
-        let mut conditions: HashMap<&str, bool> = HashMap::new();
+        // NodeId → verdict: keyed by the node's string id so Signal nodes can
+        // look it up.
+        let mut conditions: HashMap<&str, Verdict> = HashMap::new();
         for (idx, node) in self.definition.nodes.iter().enumerate() {
             match &node.kind {
                 NodeKind::Condition { expr } => {
                     let node_id = NodeId(idx as u32);
-                    let fired = if let (Some(program), Some(local_to_global)) = (
+                    let verdict = if let (Some(program), Some(local_to_global), Some(site_base)) = (
                         self.compiled_conditions.get(&node_id),
                         self.program_slots.get(&node_id),
+                        self.program_site_base.get(&node_id).copied(),
                     ) {
                         bytecode::run_slots(
                             program,
                             local_to_global,
-                            feature_slots,
+                            &self.state.feature_slots,
                             &self.state.bars,
+                            &mut self.history,
+                            site_base,
                         )
                     } else {
                         // Fallback for conditions that failed to compile — build a
                         // temporary name→value map from the slot array for the
                         // tree-walking interpreter.
+                        //
+                        // This path cannot answer a history-bearing function:
+                        // the interpreter refuses those by name. It is reached
+                        // only when `bytecode::compile` failed, which for such
+                        // an expression means it was malformed anyway.
                         let features: HashMap<String, f64> = self
                             .registry
                             .iter_slots()
@@ -709,33 +842,37 @@ impl StrategyInstance {
                                 }
                             })
                             .collect();
-                        evaluate_condition(expr, &features, &self.state.bars)
+                        Verdict::from_bool(evaluate_condition(expr, &features, &self.state.bars))
                     };
-                    conditions.insert(&node.id, fired);
+                    conditions.insert(&node.id, verdict);
                 }
                 NodeKind::ModelForecast { .. } => {
-                    // Look up pre-fetched result. If not available, abstain (false).
-                    let fired = self
+                    // A forecast that has not been fetched is not a forecast of
+                    // "no": it is the absence of one.
+                    let verdict = self
                         .model_forecast_results
                         .get(&node.id)
                         .copied()
-                        .unwrap_or(false);
-                    conditions.insert(&node.id, fired);
+                        .map_or(Verdict::Unknown(Unknown::FeatureNotReady), Verdict::from_bool);
+                    conditions.insert(&node.id, verdict);
                 }
                 NodeKind::Inference { condition, .. } => {
                     // Only evaluates as a condition when MatchSpec is present.
-                    let fired = if let Some(spec) = condition {
-                        self.inference_outputs
-                            .get(&node.id)
-                            .map(|o| {
-                                o.direction_matches(&spec.direction)
-                                    && o.confidence >= spec.min_confidence
-                            })
-                            .unwrap_or(false)
+                    let verdict = if let Some(spec) = condition {
+                        self.inference_outputs.get(&node.id).map_or(
+                            Verdict::Unknown(Unknown::FeatureNotReady),
+                            |o| {
+                                Verdict::from_bool(
+                                    o.direction_matches(&spec.direction)
+                                        && o.confidence >= spec.min_confidence,
+                                )
+                            },
+                        )
                     } else {
-                        false
+                        // No match spec: this node is not a condition at all.
+                        Verdict::False
                     };
-                    conditions.insert(&node.id, fired);
+                    conditions.insert(&node.id, verdict);
                 }
                 _ => {}
             }
@@ -761,24 +898,35 @@ impl StrategyInstance {
             }
         }
 
-        let mut signals: HashSet<String> = self
-            .definition
-            .nodes
-            .iter()
-            .filter_map(|node| {
-                if let NodeKind::Signal { when, emit } = &node.kind {
-                    if conditions.get(when.as_str()).copied().unwrap_or(false) {
-                        Some(emit.clone())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
+        let mut signals: HashSet<String> = HashSet::new();
+        let mut unresolved: Vec<Unresolved> = Vec::new();
+        for node in &self.definition.nodes {
+            let NodeKind::Signal { when, emit } = &node.kind else {
+                continue;
+            };
+            // A `when` naming a node that is not a condition is a broken
+            // definition, which is a thing to report rather than a quiet "no".
+            let verdict = conditions
+                .get(when.as_str())
+                .copied()
+                .unwrap_or(Verdict::Unknown(Unknown::Malformed));
+            match verdict {
+                Verdict::True => {
+                    signals.insert(emit.clone());
                 }
-            })
-            .collect();
+                Verdict::False => {}
+                Verdict::Unknown(reason) => unresolved.push(Unresolved {
+                    signal: emit.clone(),
+                    node: when.clone(),
+                    reason,
+                }),
+            }
+        }
         signals.extend(decision_signals);
-        signals
+        // A signal that some other node emitted for certain is settled, even if
+        // one condition feeding a same-named signal could not be read.
+        unresolved.retain(|u| !signals.contains(&u.signal));
+        (signals, unresolved)
     }
 
     /// The `available_time` of the most recently processed event.

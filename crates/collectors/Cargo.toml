@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 domain = { workspace = true }
 dataplane = { workspace = true }
+storage = { workspace = true }
 event-bus = { workspace = true }
 dashmap = { workspace = true }
 serde = { workspace = true }

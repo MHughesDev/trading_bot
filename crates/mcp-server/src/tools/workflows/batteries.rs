@@ -7,7 +7,7 @@
 //!
 //! Five of the six are [`Stage::Owed`] somewhere, and are therefore not in the
 //! catalogue. That is the honest shape and not an oversight: a `leakage_audit`
-//! that quietly ran three of its six checks would emit `clean` in exactly the
+//! that quietly ran some of its checks would emit `clean` in exactly the
 //! form the spec describes, and nothing downstream — not the funnel, not the
 //! dossier, not a reader — could tell it apart from the real thing. The gap is
 //! written into the battery where the battery is, so the next person building
@@ -15,6 +15,24 @@
 //!
 //! What each owed stage needs is in its `needs` field, and
 //! [`super::owed`] is the list.
+//!
+//! # A gap and a substitution are different shapes, and only one is obvious
+//!
+//! An [`Stage::Owed`] stage is visible everywhere: it keeps the battery out of
+//! the catalogue when it is unconditional, and it names what it needs. A
+//! **substitution** — a step that runs, and answers a neighbouring question to
+//! the one the spec named — is invisible by construction, because the battery
+//! completes and emits a verdict.
+//!
+//! `leakage_audit` has one. AGENT-006 §5.4's sixth check is
+//! `future_perturbation_test`, which shifts a feature column forward; the slot
+//! holds a `neighborhood` study, which varies parameters. It is written up at
+//! the step, and — because a comment is not enforcement — the `clean` verdict
+//! names it and `clean_does_not_claim_a_perturbation_nobody_ran` fails if that
+//! sentence goes away. This matters more than a mislabelled step: both of this
+//! battery's owed stages are [`When::IfArgument`], so it is runnable, so under
+//! ADR-S8-02 its Gate 2 requirement is enforceable — and a gate that refuses
+//! leaked strategies must not be satisfiable by a check nobody ran.
 //!
 //! # "No edge" and "leaking" are different conclusions
 //!
@@ -66,8 +84,10 @@ fn cannot_say(b: &Battery, verdict: &'static str) -> Option<Verdict> {
 /// `leakage_audit` — is this result an artefact of information the strategy
 /// could not have had?
 ///
-/// Six checks, of which three have no tool. The three that exist are real and
-/// are declared here so the battery is one edit from running.
+/// Six stages. Two are [`Stage::Owed`] and conditional, so the battery runs;
+/// four perform a tool. One of those four is a **substitution** — the spec's
+/// `future_perturbation_test` slot runs a parameter-neighborhood study — which
+/// is why `clean` below names what it did not check.
 fn leakage(b: &Battery) -> Verdict {
     if let Some(v) = cannot_say(b, "suspect") {
         return v;
@@ -131,8 +151,12 @@ fn leakage(b: &Battery) -> Verdict {
     }
     because(
         "clean",
-        "nothing in this battery found information the strategy could not have had. This is \
-         not a claim that it has an edge — a strategy with no edge passes every check here",
+        "no check that ran in this battery found information the strategy could not have had. \
+         Two things this is not. It is not a claim that the strategy has an edge — a strategy \
+         with no edge passes every check here. And it is not a column-perturbation result: \
+         AGENT-006 §5.4's sixth check, `future_perturbation_test`, shifts a feature column \
+         forward and re-runs, this platform has no such runtime mode (ADR-D-19), and no step \
+         here performed it. The `perturbation` step varies parameters, not time.",
     )
 }
 
@@ -577,6 +601,38 @@ pub static ALL: &[Workflow] = &[
                 "null_seeds",
                 "does the edge survive shuffling the labels?"
             ),
+            // **A substitution, and the one divergence in this file that had no
+            // note** (ADR-D-19; Set S task S-3.10).
+            //
+            // AGENT-006 §5.4's sixth check is `future_perturbation_test`: shift
+            // one *feature column* forward by `shift_bars` and see whether the
+            // edge survives — a lookahead probe. What runs in the slot is a
+            // `neighborhood` study, which varies the strategy's *parameters*.
+            // Those answer different questions: parameter fragility asks whether
+            // an edge survives a nudge to its constants, lookahead asks whether
+            // the strategy read the future.
+            //
+            // Column perturbation is not built because nothing in this workspace
+            // implements the runtime mode it needs — no `shift_bars`,
+            // `shift_column`, `mask_column`, `jitter_bars` or `perturbation_pct`
+            // anywhere — so the step is a substitution rather than a deferral,
+            // and the `clean` verdict names it as one.
+            //
+            // **`lookahead_truncation_test` is deliberately not wired here.** It
+            // is the other half of ADR-D-19 and it is built, but it belongs
+            // nowhere in this battery, for the same reason the `static scan`
+            // stage above is owed rather than stubbed. Every feature the preview
+            // evaluates goes through `WindowedFrame::back(k)`, which resolves
+            // `decision - k` and refuses `k >= lookback_bars`, so a truncation
+            // test over `preview_signals` cannot fail for any strategy this
+            // platform can represent. Adding it would put a check here that has
+            // never found anything and cannot — and, as the `static scan` note
+            // puts it, a leakage scan that has never found anything reads as
+            // evidence there is nothing to find. It is worth running on a draft,
+            // where it guards against a batch feature path appearing later; it
+            // is not worth anything to a gate. The second reason is plainer: it
+            // takes a strategy `definition`, and every step here is keyed on a
+            // result that already exists.
             study!(
                 "perturbation",
                 "neighborhood",
@@ -1051,6 +1107,76 @@ mod tests {
             ],
         );
         assert!(leakage(&b).because.contains("no edge"), "{}", leakage(&b).because);
+    }
+
+    /// `clean` here is not a lookahead clearance, and has to keep saying so.
+    ///
+    /// AGENT-006 §5.4's sixth check is `future_perturbation_test` — shift a
+    /// feature column forward and re-run. Nothing in this workspace implements
+    /// the runtime mode it needs (ADR-D-19), and the slot it would occupy holds
+    /// a `neighborhood` study, which varies *parameters*. The two answer
+    /// different questions and the battery performs only the second.
+    ///
+    /// Why that has to be in the verdict rather than in a comment: under
+    /// ADR-S8-02 this battery is **runnable** — both its owed stages are
+    /// `When::IfArgument`, so `owed_unconditionally()` is empty — which makes
+    /// its Gate 2 requirement enforceable. A `clean` that read as a general
+    /// statement about information the strategy could not have had would let a
+    /// gate built to refuse leaked strategies pass on a check nobody ran. This
+    /// test is what stops that sentence being quietly shortened back.
+    #[test]
+    fn clean_does_not_claim_a_perturbation_nobody_ran() {
+        let b = battery(
+            "leakage_audit",
+            vec![
+                step("provenance", json!({ "flagged": [] })),
+                study("label shuffle", false, true, None),
+            ],
+        );
+        let v = leakage(&b);
+        assert_eq!(v.value, "clean");
+        assert!(
+            v.because.contains("future_perturbation_test"),
+            "`clean` must name the §5.4 check this battery does not perform: {}",
+            v.because
+        );
+        assert!(
+            v.because.contains("parameters, not time"),
+            "`clean` must say which axis the perturbation step actually varies: {}",
+            v.because
+        );
+    }
+
+    /// And the substitution stays visible at the step, not only in the verdict:
+    /// the `perturbation` step must not describe itself as a time or column
+    /// perturbation, because that is not what it runs.
+    #[test]
+    fn the_perturbation_step_says_it_varies_parameters() {
+        let wf = ALL
+            .iter()
+            .find(|w| w.name == "leakage_audit")
+            .expect("the battery is declared");
+        let described: Vec<&str> = wf
+            .stages
+            .iter()
+            .filter_map(|s| match s {
+                Stage::Call(step) if step.label == "perturbation" => Some(step.tool),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            described,
+            vec!["run_study"],
+            "the `perturbation` label belongs to the neighborhood study; a step that ran a \
+             column perturbation would be a different tool and would need the runtime mode \
+             ADR-D-19 says does not exist"
+        );
+        assert!(
+            !wf.description.contains("lookahead"),
+            "the battery must not advertise a lookahead check in its catalogue description \
+             while its sixth slot runs a parameter study: {}",
+            wf.description
+        );
     }
 
     /// A flagged bar raises suspicion and does not decide — which is what

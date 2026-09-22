@@ -12,6 +12,11 @@
 //! endpoint at all.
 
 pub mod funding;
+pub mod service;
+pub mod sink;
+
+pub use service::{ForwardCollector, PollReport, RunReport, ServiceError, TickerSource};
+pub use sink::{Beat, ClickHouseForwardSink, ForwardSink, SinkError, SourceIds};
 
 pub use funding::{
     FundingKind, FundingObservation, KrakenFuturesClient, OpenInterestObservation, TickerSnapshot,

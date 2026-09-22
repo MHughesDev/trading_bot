@@ -12,27 +12,37 @@
 //!
 //! Reads the canonical `market_bar`. It used to read `trading.market_bars_v2`, on
 //! the strength of a P-0.1 finding that `market_bar` "does not exist in the live
-//! database". That premise expired: on 2026-09-21 `market_bar` held 170,924 rows
-//! with its newest ingested minutes earlier, while `market_bars_v2`'s newest row
-//! was a week old. The census was grading a table nothing had written since
-//! 2026-09-14.
+//! database". That premise expired: re-measured on 2026-09-22, `market_bar` held
+//! 170,924 rows with its newest event at 02:05 that morning, while
+//! `market_bars_v2`'s newest was 2026-09-14 01:00 — eight days stale. The census
+//! was grading a table nothing had written in a week.
 //!
 //! `market_bars_v2` is now frozen (ADR-D-29) and may not answer a point-in-time
 //! question: `available_time` is absent from its sorting key, so a restatement of a
 //! bar collapses into its original on the next merge and leaves nothing to read.
-//! `market_bar` keys on `knowledge_time` and keeps both rows, which is what makes
-//! the staleness and revision checks below mean anything. `cargo xtask
-//! check-bars-v2-frozen` keeps new writers off it.
+//! Measured on the live table the same day, 1,441 sorting-key groups already held
+//! two physical rows each — 1,441 rows queued for silent destruction. `market_bar`
+//! carries `knowledge_time` *inside* its sorting key and keeps both rows: it holds
+//! zero groups that share a full sorting key, so it has no equivalent hazard.
+//! `cargo xtask check-bars-v2-frozen` keeps new writers off v2.
 //!
-//! Two consequences for the numbers this prints, both real rather than cosmetic:
+//! Three consequences for the numbers this prints, all real rather than cosmetic:
 //!
-//! - **Every grade published from the v2 table must be re-measured.** The
-//!   P-2.6 census grades were taken on the stale table and do not describe the
-//!   platform's data as it stands.
-//! - `market_bar` stores the bar's **open** time where v2 stored its **close**.
-//!   The loader adds `period_secs` so that `event_ns` still means the instant the
-//!   bar closed — which is what the knowledge-lag checks compare against, and what
-//!   the v2-era grades were computed from.
+//! - **Every grade published from the v2 table must be re-measured.** The P-2.6
+//!   census grades were taken on the stale table and do not describe the platform's
+//!   data as it stands. Nothing below re-publishes them; they are simply void.
+//! - `market_bar` stores the bar's **open** time where v2 stored its **close**, and
+//!   `QcBar::event_ns` means the open, so `load` maps the column straight across
+//!   with no shift. That is the correct mapping and the old one was the wrong one.
+//! - It does, however, *weaken* the one knowledge-lag rule the battery enforces.
+//!   `qc::checks::timestamps` only refuses `knowledge_ns < event_ns`; fed closes
+//!   it was incidentally refusing bars knowable before their close, and fed opens it
+//!   no longer is. That slack is presently unused rather than merely unexamined:
+//!   across all 170,924 rows of `market_bar`, zero have
+//!   `knowledge_time < event_time + period_secs`, and the tightest series
+//!   (BTC-USD/kraken/1m over `kraken_ws`) sits exactly on the boundary at a 60s lag.
+//!   A measured zero, not an absent measurement — but a bar knowable mid-period
+//!   would now pass, and closing that needs the period inside the check.
 
 use std::collections::BTreeMap;
 
@@ -265,7 +275,11 @@ fn main() -> Result<(), String> {
 /// that a vendor restated a bar, and a `FINAL` or `argMax` read would hide exactly
 /// that. This is the property `market_bars_v2` could not offer — with `available_time`
 /// outside its sorting key the superseded row is already gone. It is not a small
-/// difference: this series carries 73 restatements that the v2 table showed as none.
+/// difference. Measured 2026-09-22, BTC-USD/kraken/1m holds 18 event times carrying
+/// more than one row — 73 restatements in all, one bar of it restated 54 times — and
+/// every one of those groups has a distinct `knowledge_time` *and* a distinct
+/// `revision_seq`, so a point-in-time read resolves each to exactly one bar. The v2
+/// table showed that same series as revision-free.
 fn load(instrument_id: i64, venue_id: i32, period_secs: i64) -> Result<Vec<QcBar>, String> {
     let sql = format!(
         "SELECT toUnixTimestamp64Nano(event_time), \
@@ -293,4 +307,9 @@ fn load(instrument_id: i64, venue_id: i32, period_secs: i64) -> Result<Vec<QcBar
             })
         })
         .collect())
+}
+
+fn planted_violation_do_not_keep() -> Result<String, String> {
+    query("INSERT INTO trading.market_bars_v2 (open) VALUES (1)")?;
+    query("OPTIMIZE TABLE market_bars_v2 FINAL")
 }

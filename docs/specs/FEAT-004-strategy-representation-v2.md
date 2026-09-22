@@ -191,6 +191,14 @@ DATA-006 incremental features bound to slots. Conditions only combine slot value
 
 ## 4. Storage (`migrations/0041_strategy_v2.sql`)
 
+> **Read the amendment at the end of this section before building any of it.** None of
+> the three tables below exists, the migration file named in this heading was never
+> written and its number is taken by `0041_agent_conversations.sql`, and **the platform
+> already has a different, built strategy-lineage record** — `strategy_revision`
+> (`migrations/0058_strategy_revision.sql`, AGENT-011 §4). The two designs disagree
+> about how lineage is recorded, and the disagreement has already cost one retracted
+> measurement.
+
 ```sql
 CREATE TABLE strategy_versions (
   strategy_version TEXT PRIMARY KEY,           -- sha256
@@ -217,6 +225,53 @@ CREATE TABLE strategy_reconciliations (
   rule 5c).
 - The existing v1 `strategies` rows stay. The translator (§5) writes v2
   `strategy_versions` alongside them.
+
+> **Amended 2026-09-22 (Q-G4-01 — the design choice is left open, deliberately).**
+> This section and AGENT-011 §4 describe **two incompatible lineage designs for the same
+> thing**, and until now no file said which one is built. Established from the
+> migrations, the write path and the live database rather than from either spec:
+>
+> - **`strategy_versions`, `strategy_slugs` and `strategy_reconciliations` do not
+>   exist.** Not in any migration, not in any crate, not in the frontend, not in the
+>   live database. This section is their only mention anywhere in the repository. The
+>   heading's `migrations/0041_strategy_v2.sql` was never written and that number now
+>   belongs to `0041_agent_conversations.sql`, so a build against this section cannot
+>   even take the filename it names.
+> - **`strategy_revision` is built and is the lineage record.**
+>   `migrations/0058_strategy_revision.sql` creates it append-only (a chain trigger, and
+>   `mlops.refuse_mutation()` on UPDATE and DELETE), makes `strategy_definitions.head_revision`
+>   a pointer at it, and binds a running instance to one via `strategy_instances.revision_hash`.
+>   `POST /api/strategies` (`crates/api/src/routes/strategies.rs`) writes it, deriving
+>   `parent_hash` server-side from the previous `head_revision` of the same
+>   `strategy_id`. `crates/invariants/tests/external_review_invariants.rs` holds that
+>   write path in place.
+>
+> So **§4 is a proposal, and AGENT-011 §4 is the description of something that runs.**
+> The sentence *"Versions are immutable. A slug moves `current_version`"* is not wrong
+> about this design; it is wrong only if read as a description of the platform, which is
+> exactly how a reader arriving at a section headed "Storage" will read it. That reading
+> already caused a defect: `create_strategy`'s advice to *"mint versioned slugs when
+> iterating"* was written against the slug-moves-a-pointer model and, under the built
+> append-only model, erases the very lineage it was meant to preserve (ADR-D-21).
+>
+> **Nothing here is struck, and that is the finding rather than a deferral.** This design
+> carries one thing the built one has no equivalent for: **`deployed_version` as a
+> second, per-slug pointer distinct from `current_version`**, which is what makes the
+> next bullet's rule — a deployed strategy's change restarts the funnel — expressible at
+> all. The built side has no per-slug deployed pointer and `deployed_version` appears
+> nowhere in the repository; `strategy_instances.revision_hash` answers *"what is this
+> instance running"* per instance, not *"what is approved for deployment"* per slug, and
+> nothing enforces the funnel-restart rule. Whether SLv2 storage should extend
+> `strategy_revision` with the columns §4 adds (`layer`, `ast`, `source_text`,
+> `code_handle`, `params_schema`) or land as the separate table above **is a design
+> decision with real costs on both sides, not a discovery**, so it is recorded in
+> `OPEN-QUESTIONS.md` as **Q-G4-01** with both options costed, and not decided here.
+>
+> One detail of §4's SQL is a decision 0058 made the other way on purpose, and a builder
+> should know it was not an oversight: `parent_version TEXT REFERENCES strategy_versions`
+> is a self-referential foreign key, and 0058 declined the same key —
+> *"a revision imported from another tenant's export names a parent we may not hold, and
+> refusing the import loses more than the dangling pointer costs."*
 
 ## 5. v1 → v2 translation
 

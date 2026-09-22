@@ -7,6 +7,7 @@
 
 pub mod audit;
 pub mod bridge;
+pub mod control;
 pub mod conversations;
 pub mod driver;
 pub mod hardware_probe;
@@ -18,4 +19,5 @@ pub mod routes;
 pub mod subrun;
 pub mod workspace_tools;
 
+pub use control::{Hold, PauseRefused, PauseWindow, ResumeRefused, RunControl, StopReason};
 pub use manager::{AgentManager, StartError};

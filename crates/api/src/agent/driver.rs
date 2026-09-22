@@ -7,7 +7,6 @@
 //! Backtest waits happen here (server-side polling via the platform API), so
 //! an hour-long simulation costs zero LLM tokens.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,6 +19,7 @@ use harness::registry::FINISH_TASK;
 use llm::{ChatRequest, ChatResponse, LlmClient, LlmError, Message, StopReason, ToolDef};
 use mcp_server_lib::{dispatch_under, tool_definitions_for, ApiClient, McpContext, ToolProfile};
 
+use super::control::{Hold, RunControl};
 use super::prompt;
 
 pub struct DriverParams {
@@ -336,7 +336,7 @@ async fn run_sweep_inline(
     api: &ApiClient,
     args: &Value,
     _deadline: Option<Instant>,
-    cancel: &AtomicBool,
+    cancel: &RunControl,
 ) -> Value {
     let sweep_id = match args.get("sweep_id").and_then(|v| v.as_str()) {
         Some(id) => id.to_string(),
@@ -354,7 +354,7 @@ async fn run_sweep_inline(
     ctx.set_status("waiting_backtest").await;
     let mut last_status_emit: Option<Instant> = None;
     let result = loop {
-        if cancel.load(Ordering::SeqCst) {
+        if cancel.is_cancelled() {
             let _ = api
                 .post(
                     &format!("/api/research/sweeps/{sweep_id}/cancel"),
@@ -410,13 +410,13 @@ async fn wait_for_backtest_inline(
     api: &ApiClient,
     backtest_id: &str,
     _deadline: Option<Instant>,
-    cancel: &AtomicBool,
+    cancel: &RunControl,
 ) -> Value {
     ctx.set_status("waiting_backtest").await;
     // None = no status message emitted yet, so the first poll always emits one.
     let mut last_status_emit: Option<Instant> = None;
     let result = loop {
-        if cancel.load(Ordering::SeqCst) {
+        if cancel.is_cancelled() {
             let _ = api
                 .post(&format!("/api/backtests/{backtest_id}/stop"), json!({}))
                 .await;
@@ -470,7 +470,7 @@ pub async fn drive(
     api: ApiClient,
     llm_client: LlmClient,
     params: DriverParams,
-    cancel: Arc<AtomicBool>,
+    cancel: Arc<RunControl>,
 ) {
     // Every platform tool call is recorded before it is authorised and after it
     // is answered (SPEC §15, ADR-P2-21, ADR-P2-34). This driver dispatches
@@ -537,10 +537,42 @@ pub async fn drive(
     let mut nudged_max_tokens = false;
 
     loop {
-        // The only stop conditions left: the user cancels, or the loop finishes.
-        if cancel.load(Ordering::SeqCst) {
-            ctx.finish("cancelled", None, None, None, None).await;
-            return;
+        // ── The step boundary (ADR-D-27) ─────────────────────────────────────
+        //
+        // The stop conditions are: the user cancels, the loop finishes, or a
+        // pause runs out. The pause is *held here* rather than recorded
+        // somewhere and hoped about — while this future is unresolved the loop
+        // makes no model call, dispatches no tool and buys no trial, which is
+        // the only reading of "paused" an operator can act on.
+        if let Some(until) = cancel.paused_until() {
+            ctx.append(
+                "status",
+                json!({
+                    "phase": "paused",
+                    "until": until.to_rfc3339(),
+                    "note": "held at a step boundary; on expiry this run stops, it does not resume",
+                }),
+            )
+            .await;
+        }
+        match cancel.hold_at_boundary().await {
+            Hold::Proceed => {}
+            Hold::Resumed => {
+                ctx.append("status", json!({ "phase": "resumed" })).await;
+            }
+            Hold::Stop(reason) => {
+                ctx.append("status", json!({ "phase": "stopping", "reason": reason.as_str() }))
+                    .await;
+                ctx.finish(
+                    reason.terminal_status(),
+                    reason.error_text(),
+                    None,
+                    None,
+                    None,
+                )
+                .await;
+                return;
+            }
         }
 
         iterations += 1;
@@ -631,7 +663,7 @@ pub async fn drive(
 
         // ── Execute tool calls ────────────────────────────────────────────
         for call in &resp.tool_calls {
-            if cancel.load(Ordering::SeqCst) {
+            if cancel.is_cancelled() {
                 ctx.finish("cancelled", None, None, None, None).await;
                 return;
             }

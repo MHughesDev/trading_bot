@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use domain::order::{OrderIntent, OrderState, OrderType, Side};
-use fills::{FillEvent, FillObserver, FillProcessor, FillResult};
+use fills::{FillEvent, FillProcessor, FillResult};
 use risk::ApprovedOrder;
 use rust_decimal::Decimal;
 use std::str::FromStr;
@@ -76,13 +76,22 @@ pub struct SyncResult {
 ///
 /// This struct is deliberately I/O-light in unit tests: the `Broker` trait is
 /// satisfied by a mock, keeping the tests fast and deterministic.
+///
+/// ## There is no per-engine fill observer, on purpose
+///
+/// This struct carried an `Option<Arc<dyn FillObserver>>` field that nothing
+/// ever set and nothing ever read — a half-built second path beside
+/// [`fills::register_observer`].  It was removed rather than completed.  A
+/// per-engine observer makes "is this platform recording forward evidence?" a
+/// question with one answer *per engine instance*: the hot path builds its own
+/// engine (`apps/platform/src/hot_path.rs`), the binary builds another, and
+/// an observer attached to one records nothing of the other's fills while
+/// looking, from the outside, exactly like a process that simply did not
+/// trade.  Set T's whole claim rests on that distinction, so the fill stream
+/// is process-wide and its state is one readable fact: [`fills::evidence`].
 pub struct ExecutionEngine {
     broker: Arc<dyn Broker>,
     fill_processor: std::sync::Mutex<FillProcessor>,
-    /// Told about every newly-applied fill. Set T T-0.1 attaches the
-    /// reconciliation recorder here so forward observations accrue from the
-    /// fill stream itself rather than from a sweep that could miss one.
-    fill_observer: Option<Arc<dyn FillObserver>>,
 }
 
 impl ExecutionEngine {
@@ -90,7 +99,6 @@ impl ExecutionEngine {
         Self {
             broker,
             fill_processor: std::sync::Mutex::new(FillProcessor::new()),
-            fill_observer: None,
         }
     }
 

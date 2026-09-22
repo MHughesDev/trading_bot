@@ -3,7 +3,31 @@ name = "observability"
 version = "0.1.0"
 edition = "2021"
 
+# Tracing setup, metric handles, and the silence alarm (Set P, P-0.6 item 2).
+#
+# Deliberately holds no database client of any kind. A component that measures
+# staleness *from* the store it is measuring cannot tell a dead feed from its own
+# outage — it reports every series silent and means nothing by it. `silence` is
+# handed a `Census` by whoever holds the connection and judges it. The test
+# `no_db_client_creeps_into_this_crate` reads this file and fails if a client is
+# ever added.
+#
+# `dataplane` is here for `retention::ForwardSeriesSpec` and `retention::alarm`:
+# the silence alarm's venue-clock deadline is called, not copied. Two silence
+# alarms with two deadline rules would drift, and the one nobody was watching
+# would be the one that was right.
+
 [dependencies]
 domain = { workspace = true }
+dataplane = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

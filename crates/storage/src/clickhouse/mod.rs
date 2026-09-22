@@ -15,6 +15,14 @@ pub enum ChError {
     Client(String),
     #[error("insert: {0}")]
     Insert(String),
+    /// A stored value would not decode into the type the reader promises.
+    ///
+    /// Separate from [`Self::Client`] because they are different facts: the
+    /// query reached the server and came back, and one of the values it carried
+    /// is not what the column claims. Neither is an absence of data, which is why
+    /// both live in `Err` and never in an empty result.
+    #[error("decode: {0}")]
+    Decode(String),
 }
 
 pub type ChClient = clickhouse::Client;

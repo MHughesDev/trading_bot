@@ -218,9 +218,24 @@ impl CoverageCensus {
     /// Rows this series may honestly offer Gate 15 as forward evidence: observed,
     /// minus the observed rows that cannot defend the claim.
     ///
-    /// On `market_bars_v2` as measured on 2026-09-15 this is zero for every series,
-    /// and that is the correct answer — the platform's entire history was stamped at
-    /// the bar close.
+    /// On `market_bars_v2` as measured on 2026-09-15 this was zero for every series,
+    /// and that was the correct answer for *that table* — its entire history was
+    /// stamped at the bar close.
+    ///
+    /// **That reading is void.** v2 is frozen (ADR-D-29) and has been stale since
+    /// 2026-09-14; the canonical `market_bar` is what the platform holds now. Counted
+    /// against `market_bar` on 2026-09-22, 160,715 of its 170,924 rows carry
+    /// `BACKFILLED_KNOWLEDGE_TIME` honestly and roughly 10,194 survive this
+    /// subtraction — nearly all of them BTC-USD/kraken/1m over `kraken_ws`, which
+    /// alone contributes 10,094 with no unflagged sentinel among them. The platform
+    /// does now hold forward evidence; it simply held none in the table the earlier
+    /// census was reading.
+    ///
+    /// The residue is 15 rows, spread over BTC-USD/coinbase/1m (9),
+    /// BTC-USD/kraken/1m via `kraken_rest` (5) and ETH-USD/coinbase/1m (1): rows
+    /// claiming observed knowledge stamped no later than `close + declared_lag`,
+    /// which is exactly the sentinel. Small, non-zero, and precisely what this
+    /// subtraction exists to remove.
     #[must_use]
     pub const fn defensibly_observed_bars(&self) -> u64 {
         self.observed_knowledge_bars.saturating_sub(self.unflagged_sentinel_bars)

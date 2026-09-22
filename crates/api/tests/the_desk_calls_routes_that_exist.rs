@@ -135,12 +135,18 @@ const UNBUILT: &[(&str, &str)] = &[
         "/api/strategies/preview",
         "S-5.4 — preview_signals is an MCP tool; the desk's editor has no route to it",
     ),
-    // The desk's run controls. `desk.ts` already marks these unbuilt in its own
-    // comment ("Pause/resume/escalate are ✗"); this is the same statement where
-    // a test can see it.
-    ("/api/agent/runs/{}/pause", "S-6.x — run controls unbuilt"),
-    ("/api/agent/runs/{}/resume", "S-6.x — run controls unbuilt"),
-    ("/api/agent/runs/{}/escalate", "S-6.x — run controls unbuilt"),
+    // The desk's run controls. Two of the three left this list on 2026-09-22:
+    // `…/pause` and `…/resume` are served, bounded by ADR-D-27 — every pause
+    // carries a deadline, the parked driver task enforces it, and on expiry the
+    // run stops rather than resuming.
+    //
+    // `…/escalate` stays, and stays *struck* rather than scheduled: a mid-run
+    // tier change carries its own budget consequences, has no caller and no
+    // demand, and the way to change a run's tier is to stop it and start one.
+    // The row is here because `frontend/src/components/desk/ControlsRow.tsx`
+    // still names the path in the prose explaining why its button was deleted,
+    // which this scan counts — deliberately, in the safe direction.
+    ("/api/agent/runs/{}/escalate", "S-6.x — run controls unbuilt; escalate is struck, not scheduled"),
     // Phase 6's State panel and Replay read these. The panel renders from the
     // stream today; the by-step fetch and the trajectory do not exist.
     (

@@ -13,8 +13,21 @@ use crate::nodes::UniverseEntry;
 /// no re-parsing occurs per tick.
 ///
 /// `feature(...)` calls in the program are resolved against each entry's
-/// feature map; `bar(...)` is not available in universe-mode evaluation and
-/// will return false if referenced.
+/// feature map; `bar(...)` is not available in universe-mode evaluation.
+///
+/// # Unknown excludes, and that is a choice made here
+///
+/// An entry whose predicate cannot be evaluated — a feature still warming, or
+/// a history-bearing function, which has no bar clock in universe mode — is
+/// dropped from the universe. That is a deliberate collapse of three values
+/// into two, written at the call site rather than hidden inside the evaluator,
+/// because a filter must return a list and "maybe" is not a member of one.
+///
+/// It is safe in the direction that matters: a universe is a candidate set, so
+/// excluding an instrument nobody could assess narrows what gets traded rather
+/// than widening it. It is *not* safe to copy this into signal evaluation,
+/// where the same collapse silently removes entries — see
+/// [`SignalEvaluator`](crate::interpreter::SignalEvaluator).
 pub fn filter_compiled(
     universe: &[UniverseEntry],
     program: &bytecode::Program,
@@ -22,7 +35,7 @@ pub fn filter_compiled(
     let empty_bars = HashMap::new();
     universe
         .iter()
-        .filter(|entry| bytecode::run(program, &entry.features, &empty_bars))
+        .filter(|entry| bytecode::run(program, &entry.features, &empty_bars).unknown_as_false())
         .cloned()
         .collect()
 }

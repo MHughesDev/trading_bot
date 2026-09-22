@@ -34,23 +34,30 @@
 
 pub mod agenda;
 pub mod charter;
+pub mod couplings;
 pub mod digest;
 pub mod fold;
 pub mod harvest;
+pub mod replenish;
 pub mod schedule;
 pub mod select;
+pub mod sources;
 pub mod stall;
 
 pub use agenda::{AgendaItem, DedupeLayer, Insert, ItemStatus, Score, Source};
 pub use charter::{
-    Autonomy, Charter, CharterError, ExplorationShare, Objective, ReviewEvery, Schedule, Scope,
-    Seed, SessionBudget, StopWhen, Window, EXPLORATION_FLOOR,
+    admit, Admitted, Autonomy, Charter, CharterError, ExplorationShare, Judgement, Objective,
+    Profile, ReviewEvery, Schedule, Scope, Seed, SessionBudget, StopWhen, TierRefusal, Window,
+    EXPLORATION_FLOOR,
 };
+pub use couplings::{evaluate as evaluate_couplings, PauseReason, Signals, Verdict};
 pub use digest::{
     Digest, DigestInput, Heading, Line, Period, Ref, RefKind, Section, SpendUnit,
 };
 pub use fold::{fold, Anomaly, EventKind, Folded, SessionEvent, SessionState};
+pub use replenish::{absorb, on_drain, Drain, Replenished, SurveyReport};
 pub use select::{Inputs, Provenance, Scored, Selection, Signal};
+pub use sources::{ingest, Fired, Ingest, World};
 pub use stall::{detect, Amendment, Diagnosis, FinishedRun, Precheck, Rule, Tripped};
 
 use uuid::Uuid;

@@ -56,7 +56,15 @@ pub struct Produced<'a> {
     pub result: &'a str,
     /// Rendered evidence the driver already has, by id.
     pub evidence: Vec<Evidence>,
-    pub cost_usd: f64,
+    /// What the run cost, **or that nobody measured it**.
+    ///
+    /// This was `f64`, and nothing in the workspace ever assigned the field it
+    /// came from, so every dossier compiled to date carried the `Default` and
+    /// the reader rendered it as `$0.00` — a fabricated measurement in the one
+    /// document a human opens to decide whether a strategy is worth money.
+    /// [`Spend`] has no bare-float escape hatch, so the zero cannot come back
+    /// by omission.
+    pub spend: harness::lifecycle::r#yield::Spend,
     pub trials: u32,
     pub harness_version: &'a str,
     pub profile: &'a str,
@@ -415,7 +423,11 @@ fn wire(
         "funnel": [],
         "unresolved_questions": section(dossier, Section::UnresolvedQuestions),
         "reviewer_critique": section(dossier, Section::ReviewerCritique),
-        "cost_usd": produced.cost_usd,
+        // Serialises as a number when priced and as `null` when not. `null`
+        // is the true value for every run this platform executes today: there
+        // is no per-run USD figure, because `llm_usage.cost_usd` keys on an
+        // auth session rather than on a run.
+        "cost_usd": produced.spend,
         "trials": produced.trials,
         "provenance": {
             "harness": produced.harness_version,

@@ -1120,6 +1120,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "storage",
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite 0.24.0",
@@ -1791,6 +1792,7 @@ dependencies = [
  "chrono",
  "dashmap",
  "domain",
+ "execution",
  "reqwest",
  "risk",
  "rust_decimal",
@@ -3492,7 +3494,12 @@ dependencies = [
 name = "observability"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "dataplane",
  "domain",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",
 ]

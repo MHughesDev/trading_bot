@@ -416,13 +416,32 @@ pub fn volume(bars: &[QcBar], cfg: &QcConfig) -> CheckResult {
 
 // ── 6. timestamps ────────────────────────────────────────────────────────────
 
-/// `available_time ≥ event_time`, monotonic ordering, no duplicates.
+/// `knowledge_ns ≥ event_ns`, monotonic ordering, no duplicates.
 ///
 /// **A failure here forces grade D regardless of everything else**, and this is
 /// the check that earns that. A series whose `knowledge_time` is wrong is a
-/// series where every point-in-time filter silently reads the future — and the
-/// census found that condition across all 158,259 rows the platform holds, so
-/// this is not a hypothetical.
+/// series where every point-in-time filter silently reads the future, and the
+/// census found that condition across every row of `market_bars_v2`.
+///
+/// # The rule this enforces is weaker than the one it should
+///
+/// `event_ns` is the bar's **open**. The bound below is therefore
+/// `knowledge ≥ open`, when the honest bound is `knowledge ≥ close + the source's
+/// declared lag` — [`crate::bar::earliest_knowable`] states that one, and only the
+/// write path enforces it. A bar stamped as knowable halfway through its own period
+/// passes here.
+///
+/// That slack is measured rather than assumed: across all 170,924 rows of
+/// `market_bar` on 2026-09-22, zero have `knowledge_time` earlier than
+/// `event_time + period_secs`, and the tightest series (BTC-USD/kraken/1m over
+/// `kraken_ws`) sits exactly on the boundary. A measured zero — but closing the gap
+/// needs the period inside this signature, which is a change to every caller and is
+/// not made here.
+///
+/// The old census hid this by accident: `market_bars_v2` stored the bar's *close* in
+/// `event_time`, so feeding it into a field meaning *open* gave the stronger bound
+/// for the wrong reason. Reading the canonical `market_bar` fixes the column meaning
+/// and loses the accident with it.
 ///
 /// # What counts as a duplicate
 ///
@@ -437,9 +456,11 @@ pub fn volume(bars: &[QcBar], cfg: &QcConfig) -> CheckResult {
 /// That table keeps `available_time` out of its sorting key, so a restatement was
 /// merged into its own original before anyone could read it and every series looked
 /// revision-free. Against the canonical `market_bar` (ADR-D-29) restatements survive
-/// and are ordinary: BTC-USD/kraken/1m alone holds 73, one bar of it revised 54
-/// times. Counting those as duplicates forced a D on the platform's best-attested
-/// series for doing precisely what the canonical table exists to do.
+/// and are ordinary: measured 2026-09-22, BTC-USD/kraken/1m alone has 18 event times
+/// carrying more than one row — 73 restatements in all, one bar of it restated 54
+/// times — every group with a distinct `knowledge_time` and a distinct
+/// `revision_seq`. Counting those as duplicates forced a D on the platform's
+/// best-attested series for doing precisely what the canonical table exists to do.
 #[must_use]
 pub fn timestamps(bars: &[QcBar]) -> CheckResult {
     let mut offending = Vec::new();

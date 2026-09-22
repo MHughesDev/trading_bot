@@ -1,6 +1,6 @@
 //! The leakage suite (SPEC §12.5, §13 M10; checklist 1.7–1.11).
 //!
-//! Four checks and one apparatus:
+//! Six checks and one apparatus:
 //!
 //! 1. **Causal access guard** (§12.5·1) — every feature in the pipeline is run
 //!    under the windowed proxy, which cannot name a future row at all and raises
@@ -17,6 +17,28 @@
 //! 4. **CV − WF Sharpe gap** — a soft flag, not a block: a cross-validated
 //!    Sharpe more than 1.0 above the walk-forward Sharpe is the signature of
 //!    overlapping-label leakage.
+//! 5. **Causal alignment** ([`causal_alignment`]) — the same behavioural probe
+//!    as (1), one layer down, where the ordering key is *knowledge time* rather
+//!    than a row index. A grid row's value is recomputed with every observation
+//!    that was not yet knowable at that tick replaced by noise; a value that
+//!    moves came from the future.
+//! 6. **Label-horizon embargo** ([`label_horizon_embargo`]) — the purge gap must
+//!    cover the label horizon the frame was actually built with, not a smaller
+//!    one a caller happened to declare.
+//!
+//! **Where a future read is even possible.** Checks (1) and (5) look alike and
+//! are not interchangeable, because only one of them can fire. A [`Feature`] is
+//! handed a [`WindowedFrame`], whose only accessor counts *backward* from the
+//! decision bar and refuses to count past the declared lookback; the frame's
+//! rows and decision index are private. A future-reading `Feature` is therefore
+//! not merely forbidden, it is **unrepresentable**, which is why [`inject`] has
+//! no variant that plants one — a detector that structurally cannot fire, feeding
+//! a gate, manufactures evidence of cleanliness. The leak classes that *are*
+//! representable live outside the `Feature` trait, where a future read is
+//! legitimate by design and so can be got wrong: the master-clock alignment in
+//! [`crate::align`], which keys on a `knowledge_ns` nothing independently
+//! verifies, and the forward-return label in [`crate::training_frame`], whose
+//! honesty rests entirely on the purge gap. (5) and (6) are those two.
 //!
 //! Plus [`inject`]: deliberate, known leaks planted in a known-clean frame. They
 //! are how this suite is tested — a detector nobody has shown a real leak to is
@@ -27,6 +49,7 @@ use std::fmt;
 
 use dataplane::feature::{FeatureError, FeatureRow, WindowedFrame};
 
+use crate::align::BarObs;
 use crate::training_frame::TrainingFrame;
 
 /// A finding either blocks or flags. Nothing in this suite is advisory-only:
@@ -49,6 +72,11 @@ pub enum Check {
     /// A feature column standardized over the whole sample rather than within
     /// the training block.
     FullSampleNormalization,
+    /// A grid row whose value came from an observation that was not yet
+    /// knowable at that grid tick — the alignment layer's future read.
+    CausalAlignment,
+    /// A purge gap narrower than the label horizon it has to cover.
+    LabelHorizonEmbargo,
 }
 
 impl fmt::Display for Check {
@@ -60,6 +88,8 @@ impl fmt::Display for Check {
             Self::CvWfGap => "cv_wf_gap",
             Self::TargetCorrelation => "target_correlation",
             Self::FullSampleNormalization => "full_sample_normalization",
+            Self::CausalAlignment => "causal_alignment",
+            Self::LabelHorizonEmbargo => "label_horizon_embargo",
         };
         f.write_str(s)
     }
@@ -126,13 +156,22 @@ impl Report {
 ///
 /// The behavioural probe is the one that catches a lying feature, which is why
 /// it runs over the whole pipeline's feature set and not only at registration.
+///
+/// **What this check can and cannot find.** The structural half is a regression
+/// test on [`WindowedFrame`] and [`dataplane::feature::CausalGuard`]. The
+/// behavioural half cannot fire for any `Feature` reachable through
+/// [`crate::runtime`], because the window a feature is handed makes a future read
+/// unrepresentable (see the module docs). It is kept because it is what a future
+/// `Feature` implementation — or a change to `WindowedFrame` — would have to
+/// defeat, and it is deliberately **not** wired to anything as evidence of
+/// cleanliness. The check that can find a real future read at this layer is
+/// [`causal_alignment`].
 #[must_use]
 pub fn causal_access(features: &[String], rows: &[FeatureRow]) -> Report {
     let mut report = Report::default();
     if rows.len() < 4 {
         return report;
     }
-    let decision = rows.len() - 2;
 
     for name in features {
         let Ok(f) = crate::runtime::feature(name) else {
@@ -147,6 +186,16 @@ pub fn causal_access(features: &[String], rows: &[FeatureRow]) -> Report {
             continue;
         };
         let def = f.def();
+
+        // The decision row sits two thirds of the way in, so "every later row"
+        // in the behavioural probe below is a third of the series rather than
+        // the single trailing row a decision of `len - 2` would leave. It is
+        // pushed forward far enough for the declared window to exist, and never
+        // past `len - 2`, because a probe with no later rows to perturb is not a
+        // probe. A feature whose window does not fit is skipped by `value_at`.
+        let decision = (rows.len() * 2 / 3)
+            .max(def.lookback_bars as usize)
+            .min(rows.len() - 2);
 
         // Structural: the proxy a feature is handed cannot name a future row at
         // all -- its only accessor counts *backward* from the decision bar -- and
@@ -234,14 +283,352 @@ fn perturb(rows: &[FeatureRow], range: std::ops::Range<usize>) -> Vec<FeatureRow
     for (i, r) in out.iter_mut().enumerate() {
         if range.contains(&i) {
             let bump = 913.7 + (i % 29) as f64 * 11.3;
-            r.open = r.open * -2.5 + bump;
-            r.high = r.high * -2.5 + bump + 4.0;
-            r.low = r.low * -2.5 + bump - 4.0;
-            r.close = r.close * -2.5 + bump;
-            r.volume = r.volume * 5.0 + bump;
+            r.open = deviate(r.open, bump);
+            r.high = deviate(r.high, bump + 4.0);
+            r.low = deviate(r.low, bump - 4.0);
+            r.close = deviate(r.close, bump);
+            r.volume = deviate(r.volume, bump + 7.0);
         }
     }
     out
+}
+
+/// A value that is guaranteed to differ from its input.
+///
+/// The affine map alone has one fixed point (`v == bump / 3.5`), and a
+/// perturbation that silently leaves one value alone is a probe that silently
+/// fails to fire on it. Nudging the collision is cheaper than reasoning about
+/// whether the data can reach it.
+fn deviate(v: f64, bump: f64) -> f64 {
+    let out = v.mul_add(-2.5, bump);
+    if out == v || !out.is_finite() {
+        v + 1.0
+    } else {
+        out
+    }
+}
+
+// ===========================================================================
+// Causal alignment — the future read that IS representable
+// ===========================================================================
+
+/// What a probe takes to be an observation's **true** knowledge time.
+///
+/// [`crate::align::densify_bars`] keys on the `knowledge_ns` it is handed and has
+/// no way to check it. If that stamp is earlier than the moment the bar could
+/// actually have been observed, every grid row that carries the bar forward is
+/// reading the future, and nothing downstream can tell — the frame looks
+/// perfectly causal with respect to a timestamp that is itself the lie.
+///
+/// So the hypothesis about the stamp is an explicit, typed input rather than
+/// something a probe guesses. [`Self::AsDeclared`] is the default and asserts
+/// nothing about the data: under it the probe is a regression test on the
+/// densifier alone, and an honest densifier yields no finding. The other
+/// variants name a specific way a stamp is wrong and ask whether the pipeline
+/// would have been fooled by it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stamping {
+    /// Take each observation's declared `knowledge_ns` at face value.
+    ///
+    /// The null. A finding under this hypothesis is a defect in the densifier,
+    /// not in the data, because the data is being believed.
+    AsDeclared,
+    /// Hypothesis: `ts_ns` is the bar's **open**, so the bar was not knowable
+    /// until its own period had elapsed — true knowledge is `ts_ns + step_ns`.
+    ///
+    /// This is the single most common bitemporal defect in market data: a vendor
+    /// or an ingest path stamps a bar with the instant it *began*, and a whole
+    /// period of its own future arrives a period early. The hypothesis is
+    /// applied as a maximum against the declared stamp, so a series that already
+    /// stamps at the close is unchanged by it and stays clean.
+    KnowableAtBarClose,
+    /// Hypothesis: the source publishes `lag_ns` after the moment it declares —
+    /// a filing, a macro release, a revision-bearing series.
+    PublishedAfter { lag_ns: i64 },
+}
+
+impl Stamping {
+    /// The moment this hypothesis says the observation was really knowable.
+    #[must_use]
+    pub fn truth_ns(self, obs: &BarObs, step_ns: i64) -> i64 {
+        match self {
+            Self::AsDeclared => obs.knowledge_ns,
+            Self::KnowableAtBarClose => obs.knowledge_ns.max(obs.ts_ns.saturating_add(step_ns)),
+            Self::PublishedAfter { lag_ns } => obs.knowledge_ns.saturating_add(lag_ns),
+        }
+    }
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::AsDeclared => "as_declared",
+            Self::KnowableAtBarClose => "knowable_at_bar_close",
+            Self::PublishedAfter { .. } => "published_after",
+        }
+    }
+}
+
+impl fmt::Display for Stamping {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PublishedAfter { lag_ns } => write!(f, "published_after({lag_ns}ns)"),
+            other => f.write_str(other.label()),
+        }
+    }
+}
+
+/// Grid ticks probed in one pass, at most.
+///
+/// Each probed tick costs a full re-densification, so an unbounded probe is
+/// quadratic in the series length and would simply never be run. The cap is on
+/// the *boundaries* — the ticks at which a new observation first becomes visible
+/// — because a carried tick reads the same observation as the boundary before
+/// it and cannot fail differently.
+pub const MAX_PROBE_TICKS: usize = 64;
+
+/// One causal-alignment pass, with its own coverage.
+///
+/// The coverage counts are here rather than buried in a log because a probe that
+/// examined 64 of 90 000 boundaries and found nothing has not established that
+/// the other 89 936 are clean. An absent measurement is not a zero, and a caller
+/// that wants to treat this as evidence has to look at `probed_ticks` to know
+/// what it is evidence of.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AlignmentResult {
+    pub stamping: Stamping,
+    /// Observations handed in.
+    pub observations: usize,
+    /// Grid rows the densifier produced.
+    pub grid_ticks: usize,
+    /// Ticks at which some observation first becomes visible — the ticks a leak
+    /// can show at.
+    pub boundaries: usize,
+    /// Boundaries actually re-densified and compared.
+    pub probed_ticks: usize,
+    pub report: Report,
+}
+
+/// Behavioural causal probe on the **alignment layer** (SPEC §2, INV-10, INV-11).
+///
+/// The claim under test is the platform's core bitemporal one: *a grid row's
+/// value is a function only of observations that were knowable at or before that
+/// row's tick.* It is checked the way [`causal_access`] checks a feature — by
+/// perturbation, not by reading the densifier's source — so it survives the
+/// densifier being rewritten:
+///
+/// 1. Densify `obs` honestly. That is the baseline.
+/// 2. At a probe tick `t`, rebuild the frame with the **values** of every
+///    observation whose `stamping`-true knowledge time is later than `t`
+///    replaced by noise. Knowledge times are left alone, so the grid is
+///    identical and the rows line up.
+/// 3. If the row at `t` moved, it was carrying an observation that was not yet
+///    knowable there.
+///
+/// Under [`Stamping::AsDeclared`] this fires on nothing an honest densifier
+/// produces — that is what makes it a null rather than a ritual. Under
+/// [`Stamping::KnowableAtBarClose`] it fires on a series stamped at the bar open,
+/// which is the leak it exists to find.
+///
+/// Nothing perturbed leaves this function. The return value carries counts and
+/// findings; the noised series is local, so there is no way for a caller to
+/// receive a frame built from it and mistake it for data.
+#[must_use]
+pub fn causal_alignment(obs: &[BarObs], step_ns: i64, stamping: Stamping) -> AlignmentResult {
+    let mut report = Report::default();
+
+    // Convention-independent, and certain: no reading of `ts_ns` makes a bar
+    // knowable strictly before it began. This needs no hypothesis and no
+    // perturbation, so it runs first and always.
+    for (i, o) in obs.iter().enumerate() {
+        if o.knowledge_ns < o.ts_ns {
+            let gap = o.ts_ns.saturating_sub(o.knowledge_ns);
+            report.push(Finding {
+                check: Check::CausalAlignment,
+                severity: Severity::Blocking,
+                subject: format!("observation {i} at ts_ns {}", o.ts_ns),
+                statistic: gap as f64,
+                detail: format!(
+                    "stamped knowable at {} but its own bar starts at {}: knowable {gap} ns before \
+                     it began, which no timestamp convention makes honest",
+                    o.knowledge_ns, o.ts_ns
+                ),
+            });
+        }
+    }
+
+    let baseline = crate::align::densify_bars(obs, step_ns);
+    let mut out = AlignmentResult {
+        stamping,
+        observations: obs.len(),
+        grid_ticks: baseline.len(),
+        boundaries: 0,
+        probed_ticks: 0,
+        report,
+    };
+    if baseline.is_empty() || step_ns <= 0 {
+        return out;
+    }
+
+    let boundaries = boundary_ticks(&baseline, obs);
+    out.boundaries = boundaries.len();
+    let probe_at = subsample(&boundaries, MAX_PROBE_TICKS);
+    out.probed_ticks = probe_at.len();
+
+    for &i in &probe_at {
+        let tick = baseline.rows[i].ts_ns;
+        let blinded = blind_after(obs, step_ns, stamping, tick);
+        let rebuilt = crate::align::densify_bars(&blinded, step_ns);
+        // Blinding touches values only, so the grid is unchanged; if it somehow
+        // is not, that is itself a finding rather than something to paper over.
+        let Some(row) = rebuilt.rows.get(i).filter(|r| r.ts_ns == tick) else {
+            out.report.push(Finding {
+                check: Check::CausalAlignment,
+                severity: Severity::Blocking,
+                subject: format!("tick {tick}"),
+                statistic: i as f64,
+                detail: "the grid moved when only observation values changed: densification is \
+                         not a function of knowledge times alone"
+                    .into(),
+            });
+            continue;
+        };
+        let base = baseline.rows[i];
+        let delta = [
+            (row.open - base.open).abs(),
+            (row.high - base.high).abs(),
+            (row.low - base.low).abs(),
+            (row.close - base.close).abs(),
+            (row.volume - base.volume).abs(),
+        ]
+        .into_iter()
+        .fold(0.0_f64, f64::max);
+        if delta > 0.0 {
+            out.report.push(Finding {
+                check: Check::CausalAlignment,
+                severity: Severity::Blocking,
+                subject: format!("tick {tick}"),
+                statistic: delta,
+                detail: format!(
+                    "the grid row at {tick} moved by {delta:.3e} when only observations that were \
+                     not yet knowable there changed (stamping {stamping}): this row carries the \
+                     future"
+                ),
+            });
+        }
+    }
+
+    if out.probed_ticks < out.boundaries {
+        out.report.push(Finding {
+            check: Check::CausalAlignment,
+            severity: Severity::Flag,
+            subject: "coverage".into(),
+            statistic: (out.boundaries - out.probed_ticks) as f64,
+            detail: format!(
+                "{} of {} knowledge boundaries were probed; the remaining {} were not examined and \
+                 are not evidence of anything",
+                out.probed_ticks,
+                out.boundaries,
+                out.boundaries - out.probed_ticks
+            ),
+        });
+    }
+    out
+}
+
+/// The grid indices at which some observation first becomes visible.
+///
+/// A tick between two boundaries carries the same observation forward as the
+/// boundary before it, so it cannot fail differently; probing it would cost a
+/// full re-densification to re-ask a question already answered.
+fn boundary_ticks(frame: &crate::align::MasterClockFrame, obs: &[BarObs]) -> Vec<usize> {
+    let mut ticks: Vec<usize> = obs
+        .iter()
+        .map(|o| frame.rows.partition_point(|r| r.ts_ns < o.knowledge_ns))
+        .filter(|&i| i < frame.rows.len())
+        .collect();
+    ticks.sort_unstable();
+    ticks.dedup();
+    ticks
+}
+
+/// At most `cap` entries, evenly spread, always including the first and last.
+fn subsample(xs: &[usize], cap: usize) -> Vec<usize> {
+    if xs.len() <= cap || cap == 0 {
+        return xs.to_vec();
+    }
+    let last = xs.len() - 1;
+    let mut out: Vec<usize> = (0..cap).map(|k| xs[k * last / (cap - 1).max(1)]).collect();
+    out.dedup();
+    out
+}
+
+/// Every observation not yet knowable at `tick_ns` under `stamping`, with its
+/// values replaced by noise and its timestamps untouched.
+///
+/// Private, and it stays private: this is a deliberately wrong reading of the
+/// data, and the only thing any caller may learn from it is whether a value
+/// moved.
+fn blind_after(obs: &[BarObs], step_ns: i64, stamping: Stamping, tick_ns: i64) -> Vec<BarObs> {
+    let mut out = obs.to_vec();
+    for (i, o) in out.iter_mut().enumerate() {
+        if stamping.truth_ns(o, step_ns) > tick_ns {
+            let bump = 613.1 + (i % 31) as f64 * 17.9;
+            o.open = deviate(o.open, bump);
+            o.high = deviate(o.high, bump + 4.0);
+            o.low = deviate(o.low, bump - 4.0);
+            o.close = deviate(o.close, bump);
+            o.volume = deviate(o.volume, bump + 7.0);
+        }
+    }
+    out
+}
+
+// ===========================================================================
+// Label horizon vs. the purge gap
+// ===========================================================================
+
+/// The purge gap must cover the label horizon the frame was **actually built
+/// with** (SPEC §3.5, INV-15).
+///
+/// [`crate::walk_forward_folds`] already raises the purge to
+/// `max(spec.purge_bars, pipeline.horizon_bars)`, so the geometry is safe with
+/// respect to the horizon *it is told about*. Nothing checks that this is the
+/// horizon the frame's label used, and it is not: [`crate::TrainingFrame`] does
+/// not record its own horizon, so a caller that builds a frame at H = 60 and
+/// derives its [`dataplane::split::EmbargoInputs`] from a stale H = 1 gets a
+/// one-bar purge across fifty-nine bars of overlapping label — and every check
+/// downstream passes, because each one is individually correct.
+///
+/// This is checked by comparison rather than by perturbation on purpose: two
+/// integers either agree or they do not, and a question that has a certain
+/// answer should not be handed to one that answers with a statistic.
+///
+/// `frame_horizon_bars` is the horizon passed to [`crate::build_training_frame`]
+/// or [`crate::build_aligned_training_frame`]. It is an explicit argument
+/// because the frame cannot be asked: see the note above.
+#[must_use]
+pub fn label_horizon_embargo(
+    subject: &str,
+    frame_horizon_bars: u64,
+    pipeline: &dataplane::split::EmbargoInputs,
+) -> Report {
+    let mut report = Report::default();
+    let declared = u64::from(pipeline.horizon_bars);
+    if declared < frame_horizon_bars {
+        report.push(Finding {
+            check: Check::LabelHorizonEmbargo,
+            severity: Severity::Blocking,
+            subject: subject.to_string(),
+            statistic: (frame_horizon_bars - declared) as f64,
+            detail: format!(
+                "the frame's label reaches {frame_horizon_bars} bars forward but the fold geometry \
+                 was given a horizon of {declared}: {} bars of every train row's label window fall \
+                 inside the block it is scored on",
+                frame_horizon_bars - declared
+            ),
+        });
+    }
+    report
 }
 
 // ===========================================================================

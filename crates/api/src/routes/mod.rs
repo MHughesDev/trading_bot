@@ -413,6 +413,19 @@ pub fn router(state: AppState) -> Router {
             "/api/agent/runs/{id}/cancel",
             post(crate::agent::routes::cancel_run),
         )
+        // The bounded pause (ADR-D-27). Not a third control beside cancel: the
+        // same `RunControl` the driver already polls at its step boundaries,
+        // taught to hold the loop there instead of only stopping it. The
+        // deadline is enforced by that parked task, and on expiry the run stops
+        // rather than resuming.
+        .route(
+            "/api/agent/runs/{id}/pause",
+            post(crate::agent::routes::pause_run),
+        )
+        .route(
+            "/api/agent/runs/{id}/resume",
+            post(crate::agent::routes::resume_run),
+        )
         // Research (FEAT-003): sweeps over the Backtest Suite, diagnostics,
         // and the selection-rule carry-forward read.
         .route(

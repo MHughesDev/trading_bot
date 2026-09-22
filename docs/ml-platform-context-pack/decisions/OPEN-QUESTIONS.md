@@ -1257,3 +1257,354 @@ Three consequences, and the second is the one that costs work:
 
 Recorded as a question rather than a bug because the choice of authority is a decision;
 the merge behaviour is a fact.
+
+---
+
+## Q-G4-01 — two specs give two incompatible lineage designs for the same thing, and no file said which is built
+
+**Raised 2026-09-22.**
+
+**FEAT-004 §4** specifies `strategy_versions(… parent_version TEXT REFERENCES
+strategy_versions …)` plus a `strategy_slugs` table, with *"Versions are immutable. A
+slug moves `current_version`"*. **AGENT-011 §4** specifies `strategy_revision`,
+append-only, with a server-derived `parent_hash` taken from `head_revision`. Different
+tables, different lineage mechanism, different immutability story.
+
+Not academic. `create_strategy`'s advice to *"mint versioned slugs (`my_strat_v2`) when
+iterating"* was written against the slug-moves-a-pointer model, and under the built
+append-only model it **erases the lineage the same task asks it to record** — a new slug
+has no head, so `parent_hash` is NULL. ADR-D-21 decided about the *advice*. It did not
+decide which table is the design, and until now nothing did.
+
+**Established from the code and the live database, not from either spec — this half is a
+discovery and is not open:**
+
+- `strategy_versions`, `strategy_slugs` and `strategy_reconciliations` **do not exist**:
+  not in `migrations/`, not in any crate, not in `frontend/`, not in the live database.
+  `docs/specs/FEAT-004-strategy-representation-v2.md` is their only occurrence in the
+  repository. The migration FEAT-004 §4 names, `migrations/0041_strategy_v2.sql`, was
+  never written and that number belongs to `0041_agent_conversations.sql`.
+- `strategy_revision` **is built**: `migrations/0058_strategy_revision.sql` creates it
+  append-only (chain trigger plus `mlops.refuse_mutation()` on UPDATE and DELETE), adds
+  `strategy_definitions.head_revision` as the pointer at it and
+  `strategy_instances.revision_hash` as an instance's binding, and enforces both with
+  triggers. `crates/api/src/routes/strategies.rs`'s `create_strategy` is the writer and
+  derives `parent_hash` from the previous `head_revision` of the same `strategy_id`;
+  `crates/api/src/routes/lifecycle.rs` reads definitions back out of it;
+  `crates/invariants/tests/external_review_invariants.rs` asserts the route still does
+  both. The live database holds the table with the triggers in place.
+
+**What is genuinely open — the decision, with both sides costed:**
+
+FEAT-004 §4 carries one capability the built design has no equivalent for: a per-slug
+**`deployed_version`, distinct from the current pointer**, which is what makes §4's next
+rule — *"Changing a deployed strategy restarts the funnel for the new version"* —
+expressible at all. `deployed_version` appears nowhere in the repository.
+`strategy_instances.revision_hash` answers *"what is this instance running"* per
+instance, not *"what is approved for deployment"* per slug, and nothing enforces the
+funnel-restart rule today. SLv2 also needs somewhere to put `layer`, `ast`,
+`source_text`, `code_handle` and `params_schema`, none of which `strategy_revision` has.
+
+  A. **Extend `strategy_revision`** with the SLv2 columns and add a second pointer
+     (`strategy_definitions.deployed_revision`) beside `head_revision` — cost: one
+     append-only table keeps carrying two formats (v1 JSON and v2 AST) and its
+     content-address is already computed two different ways (0058's backfill hashes
+     `definition_json::text`, the route hashes the application's canonical form, and
+     `actor_kind = 'import'` is the only thing distinguishing them); a `layer` column
+     that is NULL for everything written before SLv2; but no second lineage record, no
+     second immutability story, and every existing reader, trigger, test and
+     `RunConfig.strategy_version` binding keeps working untouched.
+  B. **Build `strategy_versions`/`strategy_slugs` as FEAT-004 §4 specifies** — cost: two
+     lineage records for one concept, which is precisely the condition that produced
+     this question; a migration to keep them consistent, or a second write path that
+     does not; and 0058's deliberate refusal of the self-referential parent FK
+     (*"a revision imported from another tenant's export names a parent we may not
+     hold, and refusing the import loses more than the dangling pointer costs"*) has to
+     be re-argued, because §4's `parent_version TEXT REFERENCES strategy_versions` is
+     exactly that key. In exchange: a clean per-layer schema and the deployed/current
+     split without retrofitting.
+  C. **Neither yet** — strike §4's storage block and re-specify it when
+     `crates/strategy-lang` exists. Cost: the funnel-restart rule loses its only written
+     home, and FEAT-004 §4's `deployed_version` is the only place on the platform where
+     that rule is stated at all.
+
+**Spec says:** both, incompatibly. FEAT-004 §4: *"Versions are immutable. A slug moves
+`current_version`."* AGENT-011 §4: *"reusing the slug is the lineage mechanism —
+`strategy_revision` is append-only and `parent_hash` is derived server-side from the
+`head_revision` of the same `strategy_id`."*
+
+**Reference says:** `migrations/0058_strategy_revision.sql` — *"`strategy_id` becomes a
+**pointer**, and everything that constitutes evidence binds to a content-addressed
+revision that cannot be edited or deleted."*
+
+**Recommendation:** none on the design choice — it is a decision, not a discovery, and
+guessing it is how the slug advice came to be written. High confidence on the discovery
+half: `strategy_revision` is what is built, and anything written against FEAT-004 §4's
+tables today is written against nothing.
+
+**What was done 2026-09-22 (this track, docs only — no code touched):** FEAT-004 §4
+gains a lead-in warning above its SQL block and a closing amendment recording all of the
+above; **nothing in §4 is struck**, because the unbuilt design is better on the
+deployed/current split and a contradiction named is worth more than a design rewritten
+on inference. AGENT-011 §4 gains the matching note. Both point here.
+
+**Status:** open (the design choice). The discovery — which design is built — is
+settled and recorded in both specs.
+
+---
+
+## Q-G4-02 — the 85% lineage figure was measured from test residue, and there is no agent authoring history at all
+
+**Raised and resolved 2026-09-22.**
+
+Q-S5-06 and ADR-D-21 both carry: *"Measured on the live registry: 40 agent-authored
+revisions across 34 slugs, 6 with a parent. 85% of the agent's authoring history has no
+lineage at all."* AGENT-011 §4 carried it in bold.
+
+**Every row that measurement counted is test residue.**
+`crates/ledger/tests/pg_strategy_revision.rs` used to write through the pool against
+`DATABASE_URL` — the platform's own development database — with no teardown. Its own
+header now says so: *"40 of the 54 rows in `strategy_revision` are its fixtures, and two
+separate measurements of 'how much of the agent's authoring history has lineage' were
+mostly counting them before anyone noticed."* The fixtures are written as
+`actor_kind = 'agent'` because the column's CHECK admits only
+`human|agent|scheduler|import` and there is no `'test'` value to use; they are
+identifiable by `actor_id = 'a'`. A DELETE teardown could not have fixed it —
+`trg_strategy_revision_immutable` refuses DELETE, which is the property one of the tests
+exists to assert — so the file now runs every case inside a transaction it never commits.
+
+Re-measured the same day with the residue excluded, the result is **worse than the
+retracted figure and points somewhere else**: every surviving revision was written by
+**0058's own backfill** — `actor_kind = 'import'`, `actor_id = 'pre-0058'`, and each
+hash reproduces the backfill's `sha256(definition_json::text)` rather than the
+application's canonical hasher. Not one revision has been committed by
+`POST /api/strategies`. So the honest statement is not that the agent's lineage is
+mostly missing; it is that **there is no agent authoring history on this database to
+have lineage**, and anyone planning to measure ADR-D-21's effect by watching this table
+will be watching an empty one.
+
+This also retires the evidence sentence in **Q-S5-07**: *"The live table holds 40
+`'agent'` rows, so a second writer exists and the two paths disagree about who wrote a
+revision."* There is no second writer — the only writers are 0058's backfill, the route,
+and the fixture. ADR-D-22's decision is unaffected: it rests on `actor_kind`'s meaning
+being enforceable rather than conventional, and a hard-coded `'human'` is wrong whether
+or not a second writer exists.
+
+**ADR-D-21 is unaffected and is not reopened.** It was argued from the mechanism — a new
+slug has no head, so `parent_hash` is NULL — which is in the migration and the route,
+not in a row count. A number was offered as corroboration and was not one.
+
+**Still carrying the struck figure, outside this track's write territory:**
+`ADR-INDEX.md`'s ADR-D-21 row (*"85% of the agent's authoring history has no lineage
+because of it"*) and Q-S5-06 above, which is append-only here. Whoever holds those files
+should strike the clause, not the decision.
+
+**The general rule this is the second instance of** (memory: *measured from residue*):
+before believing any count from `strategy_revision`, exclude `actor_id = 'a'` and
+`actor_id LIKE 'test-fixture:%'`. `pg_strategy_revision.rs`'s closing comment specifies
+the migration that would make the marker unforgeable — widen the `actor_kind` CHECK to
+admit `'test'` and add `CHECK ((actor_kind = 'test') = (actor_id LIKE 'test-fixture:%'))`
+`NOT VALID`, with no backfill, because the table refuses UPDATE as well as DELETE.
+
+**Status:** resolved as a retraction. No decision needed; the correction is factual.
+AGENT-011 §4's copy is struck in place with the account beside it.
+
+---
+
+## Q-G4-03 — AGENT-012 §3.3 still offers `/pin`, the mechanism ADR-D-23 struck from §3.5
+
+**Raised 2026-09-22.**
+
+ADR-D-23 struck §3.5's Tools-tab control: *"**pin a tool** for this run (sends a
+`search_tools`-equivalent)"*, because `Driver::route` builds `pinned` from exactly three
+sources — `discovered_tools`, the active plan step's named tool, and a three-hit search
+over that step's goal text — and a human message is none of them.
+
+**§3.3's composer still lists it as a slash command:** *"Slash commands: `/steer`,
+`/pause`, `/pin`, `/why`, `/model`, `/budget 5$`, `/tier local`."* The spec already
+flags this itself, in §3.5's own amendment: *"**Not reached by ADR-D-23:** §3.3's
+composer still offers a `/pin` slash command. It appears to name this same mechanism,
+but the decision does not mention it, so it is left standing and recorded as an open
+question rather than struck on inference."* This is that record; no Q- entry existed.
+
+  A. **`/pin` is the same mechanism and is struck** — cost: none in code (there is no
+     route, no column and no fourth router source to remove), and it closes the one
+     remaining place a reader can find the struck control. Risk: if `/pin` was meant as
+     something else — pinning a *card* or a *message* in the conversation, which §14
+     uses the word for (*"the approval/question card is pinned above the composer"*) —
+     striking it deletes an unrelated affordance nobody wrote down.
+  B. **`/pin` is a different thing and stays, renamed** — cost: someone must say what it
+     pins, and until they do the composer advertises a command with no referent, which
+     is principle 10's failure mode (*"a control that renders and does nothing is worse
+     than an absent one"*).
+
+**Recommendation:** A, at low-to-moderate confidence — the two entries sit in adjacent
+subsections of one spec and no text anywhere describes a second pin. Not applied:
+AGENT-012 is outside this track's write territory, and ADR-D-23 does not mention `/pin`,
+so applying it would be deciding on inference exactly where the spec says not to.
+
+**Status:** open.
+
+---
+
+## Q-G4-04 — AGENT-012 §3.3's `/tier local` is a mid-run tier change, which ADR-D-27 struck `Escalate to…` for being
+
+**Raised 2026-09-22.**
+
+ADR-D-27 struck §3.4's `Escalate to…` control: *"it is a tier change mid-run, which is a
+separate product decision with its own budget consequences, and it has no caller and no
+demand. A control row is not a place to park an intention."* §0.2's principle 10 was
+amended to match.
+
+**§3.3's composer offers `/tier local`** in the same slash-command list. §3.3 also says
+*"Sending while a run is active is a **steer** by default"* — so `/tier local` typed
+during a run is a mid-run tier change, in the down direction, by a different widget.
+ADR-D-27 names a *button* in a *control row*; it does not mention the slash command, and
+the down direction is not obviously the same product decision as the up one.
+
+  A. **The two are one decision; `/tier local` is struck alongside `Escalate to…`** —
+     cost: the composer loses a quick way to say "do this cheaply", which the model
+     picker beside it already provides for a *new* run. Downgrading mid-run has the
+     budget-consequence problem in mirror image (a run's evidence would then come from
+     two tiers with no record of the switch), which is ADR-D-27's stated reason.
+  B. **They are different; `/tier local` survives as a pre-run shortcut only** — i.e.
+     it is the §3.3 model picker in text form, refused while a run is active with the
+     reason named. Cost: a command whose availability depends on run state, which is a
+     third thing to build and test; but it keeps a genuinely useful shortcut and matches
+     what the composer's model picker already does.
+  C. **`/tier local` survives unrestricted** — cost: it reintroduces exactly the control
+     ADR-D-27 removed, through the widget that was not named in the decision, which is
+     how a struck mechanism comes back.
+
+**Spec says:** §3.3, verbatim — *"Slash commands: `/steer`, `/pause`, `/pin`, `/why`,
+`/model`, `/budget 5$`, `/tier local`."*
+
+**Recommendation:** B, low confidence, and explicitly not applied. The distinction
+between "change the tier of the run I am about to start" and "change the tier of the run
+that is spending right now" is the whole of ADR-D-27's reasoning, and which side
+`/tier local` falls on depends on a product intent the spec does not state.
+
+**Status:** open.
+
+---
+
+## Q-G4-05 — `escalate` appears in AGENT-012 §14 and §3.2 without saying which of the two escalations it means
+
+**Raised 2026-09-22.**
+
+ADR-D-27 drew a line the rest of the spec does not yet observe, and said so in its own
+words: *"**This is not the same thing as `Outcome::Escalated`.** That is the harness
+handing a run to a stronger tier when it needs one (AGENT-008 §4, AGENT-010 §6); it
+exists, it works… What is struck is an **operator button that changes tier mid-run**."*
+
+Two places still use the bare word:
+
+- **§14 (states)** — *"**Degraded tier refusing**: the refusal card explains what the
+  tier cannot do and **offers escalation**."*
+- **§3.2 (card kinds table)** — the `Halt / degradation` row's actions column reads
+  *"resume / retry / **escalate**"*.
+
+§3.2's separate **`Escalation`** card row — *"from tier → to tier, the working state
+carried, why"*, actions *"confirm/decline"* — is unambiguously `Outcome::Escalated`
+surviving as specified, and *Needs you* (§2) is right to show it.
+
+The ambiguity is worth an entry because the two readings differ in what gets built. If
+the refusal card *offers* escalation, that is an operator-initiated mid-run tier change
+with a budget consequence — the struck control, arriving through a state description. If
+it *reports* an escalation the harness already decided and asks the operator to confirm
+it, that is the `Escalation` card and needs no new control.
+
+  A. **Both are `Outcome::Escalated`; reword to "confirm escalation"** — cost: one word
+     in two places, no code. It makes the degraded-tier state consistent with the
+     `Escalation` card it would render. Risk: a degraded tier that *refuses* may have no
+     pending `Outcome::Escalated` to confirm, in which case "confirm" has nothing to act
+     on and the state needs a different answer (retry, or stop and restart at a tier
+     that can).
+  B. **The degraded-tier refusal genuinely needs an operator-initiated escalation** — in
+     which case ADR-D-27 has one exception and should say so, bounded to this state.
+     Cost: reopens the control ADR-D-27 closed, and the budget question it closed it
+     over; but a tier that cannot do the job and offers the operator nothing is the
+     halt-with-no-recourse that principle 10 exists to prevent.
+
+**Recommendation:** A, moderate confidence, contingent on the risk above being checked
+against what `Outcome::Escalated` actually emits on a degraded-tier refusal — which is a
+code question this entry did not settle. Not applied; AGENT-012 is outside this track's
+write territory and ADR-D-27 does not reach §14 or §3.2.
+
+**Status:** open.
+
+---
+
+## Q-G4-06 — AGENT-006 §6 says `leakage_audit` composes `future_perturbation_test`; the built battery runs a different test and says nothing about the substitution
+
+**Raised 2026-09-22.**
+
+**§6's workflow table** gives `leakage_audit`'s sequence as *"`probe_pit_provenance` →
+`feature_leakage_scan` → `bar_boundary_check` → null-library label shuffle →
+`future_perturbation_test` (bias → leaking) → `llm_contamination_check` if text features
+exist"*.
+
+**§5.4 says that step cannot run:** `future_perturbation_test` is *"**column
+perturbation**: move one feature column forward and rerun-and-diff; needs a 'shift/mask
+column X' mode in the strategy runtime, which does not exist, so this tool stays blocked
+on it"*.
+
+Read together, the battery cannot run as specified. **The part of that which is already
+decided:** ADR-S8-01 (a battery with a step nothing performs is absent from the
+catalogue, and every owed stage is declared where the battery is), ADR-S8-02
+(`enforced == workflow.is_runnable()`, held by
+`crates/invariants/tests/gates_demand_tickets.rs`) and ADR-S8-09 (a *conditional* owed
+stage moves the refusal into `run` instead of hiding the battery). All three are built:
+`crates/mcp-server/src/tools/workflows.rs` has `Stage::Owed`, `owed()`,
+`owed_unconditionally()` and `is_runnable()`.
+
+**What no ADR covers, and what this entry is for.** In
+`crates/mcp-server/src/tools/workflows/batteries.rs`, `leakage_audit`'s two `Stage::Owed`
+entries are the *static scan* and *contamination* steps, both `When::IfArgument`, both
+carrying a comment explaining why they are deferred by design. The
+`future_perturbation_test` step is not owed and not declared missing — **it has been
+replaced** by a `neighborhood` study labelled `perturbation`, asking *"does the edge
+survive perturbing the parameters it was found at?"*, with no comment recording the
+substitution. Every other divergence in that file is annotated; this one is not.
+
+Parameter-neighbourhood perturbation and forward-shifting a feature column are not the
+same test and do not detect the same defect: the first is a fragility check, the second
+is a lookahead check. Because both conditional gaps leave `owed_unconditionally()`
+empty, `leakage_audit` is **in the catalogue and runnable**, and under ADR-S8-02 that
+makes its gate-2 requirement enforceable — on a battery whose §6 sequence names a
+lookahead check it does not perform. `leakage_audit`'s whole product is the word
+`clean`, and ADR-S8-01's own argument applies: *"a `leakage_audit` that quietly ran three
+of its six checks would emit `clean` in exactly the form the spec describes, and nothing
+downstream could tell it apart from the real thing."*
+
+  A. **The neighbourhood study is the intended replacement** — then §6's sequence is
+     stale text and should name the step that runs, and `batteries.rs` should carry the
+     one-paragraph justification its three siblings carry. Cost: an edit to two files,
+     no code. But it must be argued, not assumed: it concedes that `leakage_audit`
+     performs no lookahead check at all, while `lookahead_truncation_test` (ADR-D-19,
+     `S`, *"buildable today"*) exists and is not in the sequence.
+  B. **The column-shift test is still owed** — then it is a `Stage::Owed` that was
+     dropped rather than declared, `leakage_audit` is unconditionally un-runnable under
+     ADR-S8-01, and ADR-S8-02's invariant should be flipping its gate-2 requirement to
+     `enforced: false`. Cost: gate 2 loses an enforced requirement it may currently be
+     enforcing, which is a visible behaviour change and the more expensive option — and
+     the more honest one if the check is genuinely absent.
+  C. **Substitute `lookahead_truncation_test` for the blocked step** — it answers the
+     lookahead question from the other end (a shorter run's signals must be a prefix of
+     a longer one's), is rated `S` and buildable on `preview_signals`, and is already in
+     the `audit` namespace per ADR-D-19. Cost: real implementation work; but it is the
+     only option that leaves `clean` meaning what §6 says it means.
+
+**Recommendation:** none between A, B and C — which check `leakage_audit` must perform
+before it may say `clean` is a decision about what the verdict word promises, and
+ADR-S8-01 is explicit that the verdict word is the whole product. High confidence on the
+finding itself: §6's named step and the built step are different tests, and nothing in
+the repository records the swap. Not applied; AGENT-006 and `crates/` are outside this
+track's write territory.
+
+**Also worth re-checking by whoever takes this:** AGENT-006 §9's AC-8 note says the
+requirement table *"declare[s] all four and enforces one — `selection_bias_verdict` at
+Gate 2"*. If `leakage_audit` is now runnable, ADR-S8-02's invariant should have made
+that two, and the note is stale.
+
+**Status:** open.

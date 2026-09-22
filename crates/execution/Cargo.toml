@@ -31,3 +31,12 @@ test-helpers = []
 tokio = { workspace = true }
 rust_decimal_macros = { workspace = true }
 risk = { workspace = true, features = ["test-helpers"] }
+# A dev-dependency on self, which is how a crate turns its own feature on for
+# its own test targets and nothing else.  Without it `cargo test -p execution`
+# does not compile: `tests/ack_timeout_query.rs` imports
+# `journal::memory::MemoryOrderJournal`, which is gated behind `test-helpers`,
+# and the feature was only ever switched on by `apps/platform`'s dev-deps — so
+# the suite passed under `cargo test --workspace` and failed for anyone running
+# this crate alone.  Test targets only: the feature stays off in every build
+# that produces a binary.
+execution = { path = ".", features = ["test-helpers"] }

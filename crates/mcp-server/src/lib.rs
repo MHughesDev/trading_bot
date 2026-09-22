@@ -854,6 +854,9 @@ async fn dispatch_untraced(
         "explain_strategy" => tools::strategy::explain_strategy(params),
         "diff_strategies" => tools::strategy::diff_strategies(params),
         "apply_move" => tools::strategy::apply_move(params),
+        "lookahead_truncation_test" => {
+            tools::strategy::lookahead_truncation_test(&ctx.api, params).await
+        }
 
         // ── Discovery ──────────────────────────────────────────────────────────
         "list_lanes" => {

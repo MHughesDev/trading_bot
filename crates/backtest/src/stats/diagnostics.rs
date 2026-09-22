@@ -61,6 +61,81 @@ pub struct RegimeSlice {
     pub share_of_time: f64,
 }
 
+/// One labelled window of a run's calendar, half-open: `[start, end)`.
+///
+/// Named rather than a bare `(DateTime, DateTime, String)` so the two instants
+/// cannot be swapped silently, and so the contract on
+/// [`RegimeAttribution`] has a counterpart on the input side. Nothing in this
+/// crate produces these: the only labelling on the platform lives in
+/// `api::knowledge` (`RegimeStore` / `labels_as_of`), and `api` depends on
+/// `backtest`, not the other way round. This type is the seam a caller that
+/// *has* labels would hand them across.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegimeWindow {
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    pub label: String,
+}
+
+/// Why a run carries no regime attribution.
+///
+/// Each variant is a distinct fact about the world, and none of them is
+/// "every regime was measured and scored nothing".
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RegimeUnmeasured {
+    /// No labelled windows were supplied. Nobody has labelled this run's
+    /// calendar — which is not the same as a labelling that found nothing.
+    NoLabelsSupplied,
+    /// Windows were supplied, but the run has no equity curve to attribute them
+    /// to, so no return exists for any window.
+    RunHasNoEquityCurve,
+}
+
+/// Regime attribution for a run: either it was measured, or it was not.
+///
+/// Deliberately **not** a `Vec<RegimeSlice>`. Every `DiagnosticBundle` this
+/// platform has served carried `by_regime: []`, produced by the only call site
+/// supplying no windows at all — and an empty array reads, to a model and to a
+/// human, as "measured, and no regime qualified". It was never measured.
+///
+/// The two cases cannot be collapsed by accident: there is no accessor that
+/// hands back an empty slice for [`Self::Unmeasured`]. [`Self::slices`] returns
+/// an `Option`, so erasing the difference costs a visible `unwrap_or_default`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum RegimeAttribution {
+    /// Nothing was attributed, and this says why.
+    Unmeasured { reason: RegimeUnmeasured },
+    /// Windows were supplied and attributed. `slices` may legitimately be
+    /// empty: that is "labelled, and no slice qualified", which *is* a
+    /// measurement.
+    Measured { slices: Vec<RegimeSlice> },
+}
+
+impl RegimeAttribution {
+    /// The slices, or `None` when nothing was measured.
+    ///
+    /// `Option` on purpose. Returning `&[]` for the unmeasured case is exactly
+    /// the lie this type exists to prevent.
+    #[must_use]
+    pub fn slices(&self) -> Option<&[RegimeSlice]> {
+        match self {
+            Self::Unmeasured { .. } => None,
+            Self::Measured { slices } => Some(slices),
+        }
+    }
+
+    /// Why nothing was measured, or `None` when something was.
+    #[must_use]
+    pub fn unmeasured(&self) -> Option<RegimeUnmeasured> {
+        match self {
+            Self::Unmeasured { reason } => Some(*reason),
+            Self::Measured { .. } => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WorstTrade {
     pub entry_time: DateTime<Utc>,
@@ -101,8 +176,9 @@ pub struct DiagnosticBundle {
     pub metrics: MetricSet,
     pub trades: TradeStats,
     pub by_month: Vec<MonthSlice>,
-    /// Empty until a regime engine supplies labelled windows.
-    pub by_regime: Vec<RegimeSlice>,
+    /// Measured slices, or a stated reason why nothing was measured. Never a
+    /// bare empty array — see [`RegimeAttribution`].
+    pub by_regime: RegimeAttribution,
     /// The ten worst trades by P&L.
     pub worst_trades: Vec<WorstTrade>,
     pub longest_drawdown: Option<DrawdownEpisode>,
@@ -311,42 +387,53 @@ fn exposure(equity: &[(DateTime<Utc>, f64)], trades: &[Trade], metrics: &MetricS
     }
 }
 
-fn by_regime(
+fn regime_attribution(
     equity: &[(DateTime<Utc>, f64)],
     trades: &[Trade],
-    regimes: &[(DateTime<Utc>, DateTime<Utc>, String)],
-) -> Vec<RegimeSlice> {
-    if regimes.is_empty() || equity.is_empty() {
-        return Vec::new();
+    regimes: &[RegimeWindow],
+) -> RegimeAttribution {
+    // The two refusals are different facts, and the caller is told which.
+    if regimes.is_empty() {
+        return RegimeAttribution::Unmeasured {
+            reason: RegimeUnmeasured::NoLabelsSupplied,
+        };
+    }
+    if equity.is_empty() {
+        return RegimeAttribution::Unmeasured {
+            reason: RegimeUnmeasured::RunHasNoEquityCurve,
+        };
     }
     let span = (equity[equity.len() - 1].0 - equity[0].0)
         .num_seconds()
         .max(1) as f64;
     let mut acc: BTreeMap<String, (f64, usize, f64)> = BTreeMap::new(); // ret, trades, secs
-    for (start, end, label) in regimes {
-        let first = equity.iter().find(|(ts, _)| ts >= start).map(|p| p.1);
-        let last = equity.iter().rev().find(|(ts, _)| ts < end).map(|p| p.1);
+    for w in regimes {
+        let first = equity.iter().find(|(ts, _)| *ts >= w.start).map(|p| p.1);
+        let last = equity.iter().rev().find(|(ts, _)| *ts < w.end).map(|p| p.1);
         let ret = match (first, last) {
             (Some(a), Some(b)) if a > 0.0 => b / a - 1.0,
             _ => 0.0,
         };
         let n = trades
             .iter()
-            .filter(|t| t.exit_time >= *start && t.exit_time < *end)
+            .filter(|t| t.exit_time >= w.start && t.exit_time < w.end)
             .count();
-        let e = acc.entry(label.clone()).or_default();
+        let e = acc.entry(w.label.clone()).or_default();
         e.0 += ret;
         e.1 += n;
-        e.2 += (*end - *start).num_seconds().max(0) as f64;
+        e.2 += (w.end - w.start).num_seconds().max(0) as f64;
     }
-    acc.into_iter()
-        .map(|(label, (ret, n_trades, secs))| RegimeSlice {
-            label,
-            ret,
-            n_trades,
-            share_of_time: secs / span,
-        })
-        .collect()
+    RegimeAttribution::Measured {
+        slices: acc
+            .into_iter()
+            .map(|(label, (ret, n_trades, secs))| RegimeSlice {
+                label,
+                ret,
+                n_trades,
+                share_of_time: secs / span,
+            })
+            .collect(),
+    }
 }
 
 fn render_text(b: &DiagnosticBundle) -> String {
@@ -419,24 +506,38 @@ fn render_text(b: &DiagnosticBundle) -> String {
                 .join(", ")
         );
     }
-    if !b.by_regime.is_empty() {
-        s.push_str("by regime: ");
-        s.push_str(
-            &b.by_regime
-                .iter()
-                .map(|r| {
-                    format!(
-                        "{} {:+.1}% ({} trades, {:.0}% of time)",
-                        r.label,
-                        r.ret * 100.0,
-                        r.n_trades,
-                        r.share_of_time * 100.0
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("; "),
-        );
-        s.push('\n');
+    // Always rendered. Saying nothing about regimes leaves the reader to
+    // assume the question was asked and came back flat.
+    match &b.by_regime {
+        RegimeAttribution::Measured { slices } if slices.is_empty() => {
+            s.push_str("by regime: labelled, no slice qualified\n");
+        }
+        RegimeAttribution::Measured { slices } => {
+            s.push_str("by regime: ");
+            s.push_str(
+                &slices
+                    .iter()
+                    .map(|r| {
+                        format!(
+                            "{} {:+.1}% ({} trades, {:.0}% of time)",
+                            r.label,
+                            r.ret * 100.0,
+                            r.n_trades,
+                            r.share_of_time * 100.0
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            );
+            s.push('\n');
+        }
+        RegimeAttribution::Unmeasured { reason } => {
+            let why = match reason {
+                RegimeUnmeasured::NoLabelsSupplied => "no labelled windows supplied",
+                RegimeUnmeasured::RunHasNoEquityCurve => "run has no equity curve",
+            };
+            let _ = writeln!(s, "by regime: NOT MEASURED ({why}) — not a flat result");
+        }
     }
     if !b.worst_trades.is_empty() {
         s.push_str("worst trades: ");
@@ -469,9 +570,13 @@ fn render_text(b: &DiagnosticBundle) -> String {
 }
 
 impl DiagnosticBundle {
-    /// Build the bundle from a stored result. `regimes` may be empty.
+    /// Build the bundle from a stored result.
+    ///
+    /// An empty `regimes` is not "no regime performed": it becomes
+    /// [`RegimeUnmeasured::NoLabelsSupplied`], and every reader of the bundle
+    /// is told so rather than handed an empty array.
     #[must_use]
-    pub fn from_result(r: &RunResult, regimes: &[(DateTime<Utc>, DateTime<Utc>, String)]) -> Self {
+    pub fn from_result(r: &RunResult, regimes: &[RegimeWindow]) -> Self {
         let trades = trade_stats(&r.trades, &r.metrics);
         let mut worst: Vec<&Trade> = r.trades.iter().collect();
         worst.sort_by_key(|t| t.pnl);
@@ -493,7 +598,7 @@ impl DiagnosticBundle {
             metrics: r.metrics,
             trades,
             by_month: by_month(&r.equity_curve, &r.trades),
-            by_regime: by_regime(&r.equity_curve, &r.trades, regimes),
+            by_regime: regime_attribution(&r.equity_curve, &r.trades, regimes),
             worst_trades,
             longest_drawdown: longest_drawdown(&r.equity_curve),
             exposure: exposure(&r.equity_curve, &r.trades, &r.metrics),
@@ -572,29 +677,98 @@ mod tests {
         assert!(b.text.contains("longest drawdown"));
     }
 
+    fn win(start: DateTime<Utc>, end: DateTime<Utc>, label: &str) -> RegimeWindow {
+        RegimeWindow {
+            start,
+            end,
+            label: label.to_string(),
+        }
+    }
+
     #[test]
     fn regime_slices_when_windows_supplied() {
         let r = fixture();
         let t0 = r.equity_curve[0].0;
         let regimes = vec![
-            (t0, t0 + Duration::days(30), "trend".to_string()),
-            (
-                t0 + Duration::days(30),
-                t0 + Duration::days(51),
-                "chop".to_string(),
-            ),
-            (
-                t0 + Duration::days(51),
-                t0 + Duration::days(120),
-                "trend".to_string(),
-            ),
+            win(t0, t0 + Duration::days(30), "trend"),
+            win(t0 + Duration::days(30), t0 + Duration::days(51), "chop"),
+            win(t0 + Duration::days(51), t0 + Duration::days(120), "trend"),
         ];
         let b = DiagnosticBundle::from_result(&r, &regimes);
-        assert_eq!(b.by_regime.len(), 2);
-        let chop = b.by_regime.iter().find(|x| x.label == "chop").unwrap();
+        let slices = b.by_regime.slices().expect("windows were supplied");
+        assert_eq!(slices.len(), 2);
+        let chop = slices.iter().find(|x| x.label == "chop").unwrap();
         assert!(chop.ret < 0.0);
         assert_eq!(chop.n_trades, 3);
         assert!(b.text.contains("by regime"));
+        assert!(!b.text.contains("NOT MEASURED"));
+        assert!(b.by_regime.unmeasured().is_none());
+    }
+
+    /// The defect this type exists for: the only non-test caller on the
+    /// platform supplies no windows, so every bundle ever served carried
+    /// `by_regime: []`. That absence now names itself, in the struct and in
+    /// the text the model reads.
+    #[test]
+    fn no_labels_is_not_an_empty_measurement() {
+        let b = DiagnosticBundle::from_result(&fixture(), &[]);
+        assert_eq!(
+            b.by_regime.unmeasured(),
+            Some(RegimeUnmeasured::NoLabelsSupplied)
+        );
+        // No accessor hands back an empty slice for the unmeasured case.
+        assert!(b.by_regime.slices().is_none());
+        assert!(
+            b.text.contains("NOT MEASURED"),
+            "the LLM-facing text must not stay silent about an unasked question: {}",
+            b.text
+        );
+    }
+
+    /// Windows supplied but nothing to attribute them to is a third state, and
+    /// it is not the same as having had no windows.
+    #[test]
+    fn windows_without_an_equity_curve_say_which_half_is_missing() {
+        let t0 = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let slice = DataSlice::new("X", t0, t0 + Duration::days(1), EvalResolution::Day1);
+        let cfg = RunConfigBuilder::new("s", "v", slice, "c", "z", "snap").build();
+        let r = RunResult::failed(&cfg, ledger::TerminalReason::DataError, "nope", "test");
+        let b = DiagnosticBundle::from_result(&r, &[win(t0, t0 + Duration::days(1), "trend")]);
+        assert_eq!(
+            b.by_regime.unmeasured(),
+            Some(RegimeUnmeasured::RunHasNoEquityCurve)
+        );
+        assert!(b.text.contains("run has no equity curve"));
+    }
+
+    /// The enforcement, on the wire rather than in a comment: a consumer that
+    /// only ever sees JSON can still tell the two apart, and neither of them
+    /// serialises to a bare `[]`.
+    #[test]
+    fn the_two_absences_are_distinguishable_on_the_wire() {
+        let unmeasured = RegimeAttribution::Unmeasured {
+            reason: RegimeUnmeasured::NoLabelsSupplied,
+        };
+        let qualified_none = RegimeAttribution::Measured { slices: vec![] };
+
+        let a = serde_json::to_string(&unmeasured).unwrap();
+        let b = serde_json::to_string(&qualified_none).unwrap();
+        assert_ne!(a, b, "not-labelled and nothing-qualified must not collapse");
+        assert_ne!(a, "[]");
+        assert_ne!(b, "[]");
+        assert!(a.contains("no_labels_supplied"), "{a}");
+
+        // And they survive a round trip as different values.
+        assert_eq!(
+            serde_json::from_str::<RegimeAttribution>(&a).unwrap(),
+            unmeasured
+        );
+        assert_eq!(
+            serde_json::from_str::<RegimeAttribution>(&b).unwrap(),
+            qualified_none
+        );
+        assert!(qualified_none.slices().is_some_and(<[RegimeSlice]>::is_empty));
+        assert!(unmeasured.slices().is_none());
     }
 
     #[test]
@@ -607,5 +781,9 @@ mod tests {
         assert_eq!(b.status, RunStatus::Failed(ledger::TerminalReason::DataError));
         assert!(b.longest_drawdown.is_none());
         assert!(b.by_month.is_empty());
+        assert_eq!(
+            b.by_regime.unmeasured(),
+            Some(RegimeUnmeasured::NoLabelsSupplied)
+        );
     }
 }

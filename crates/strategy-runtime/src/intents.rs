@@ -24,6 +24,8 @@ use domain::money::{Price, Size};
 use domain::order::{OrderIntent, OrderType};
 use domain::strategy_def::actions::{Action, ActionKind, SizeMode};
 
+use crate::history::Unresolved;
+
 /// A size could not be computed.  Never silently swallowed: the caller logs it
 /// and, on the live path, it is visible as a refused order rather than as
 /// nothing happening.
@@ -194,12 +196,30 @@ pub struct SizedIntents {
     /// Actions that asked for a size and could not get one.  The caller must
     /// surface these — dropping them is the defect this type exists to prevent.
     pub errors: Vec<(String, SizingError)>,
+    /// Signals whose conditions could not be evaluated on this event.
+    ///
+    /// The same defect as `errors`, one stage earlier: an empty `intents` can
+    /// mean the strategy decided not to trade *or* that nobody could ask it,
+    /// and those are different facts about a run.  A cross on the first bar of
+    /// a window lands here, as does any condition reading an indicator still
+    /// inside its warm-up.
+    ///
+    /// Non-empty is normal at the start of a stream and suspicious after it.
+    pub unresolved: Vec<Unresolved>,
 }
 
 impl SizedIntents {
+    /// Whether this event produced nothing at all — no orders, no refusals and
+    /// no open questions.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.intents.is_empty() && self.errors.is_empty()
+        self.intents.is_empty() && self.errors.is_empty() && self.unresolved.is_empty()
+    }
+
+    /// Whether every signal got a real answer on this event.
+    #[must_use]
+    pub fn is_settled(&self) -> bool {
+        self.unresolved.is_empty()
     }
 }
 

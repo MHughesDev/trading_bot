@@ -33,6 +33,7 @@
 
 use harness::drive::{Effect, Input, Loop, Task};
 use harness::hardware::{Admission, TaskDemand};
+use harness::lifecycle::r#yield::Spend;
 use harness::profile::{Budgets, Profile, ProfileSet};
 use harness::registry::ToolRegistry;
 use harness::state::{AcceptanceCriterion, Detail, GoalKind, Met, WorkingState};
@@ -241,6 +242,90 @@ fn met_never_grows_a_bool_escape_hatch() {
     assert!(
         !met_impl.contains("Option<bool>"),
         "an `Option<bool>` accessor on `Met` is `unwrap_or(false)` with extra steps"
+    );
+}
+
+// ── The same defect, in the field that turns into money ─────────────────────
+
+/// A run nobody priced is not a run that cost nothing.
+///
+/// `Yield::cost_usd` was an `f64` that **nothing in the workspace ever
+/// assigned**. It reached every compiled dossier at its `Default` — `0.0` — via
+/// `local_driver.rs` into `dossier.rs`, and the dossier page printed `$0.00`:
+/// a fabricated measurement in the one document a human opens to decide whether
+/// a strategy is worth money. Three other surfaces on this platform already
+/// refuse to print that number, because `llm_usage.cost_usd` keys on an auth
+/// session rather than on a run. The dossier was the last one believing it.
+///
+/// This test is the one that could not have been written before: `Spend` did
+/// not exist, and there was no state for the type to be in other than a number.
+#[test]
+fn an_unpriced_run_cannot_be_rendered_as_a_figure() {
+    let unpriced = Spend::default();
+    assert_eq!(
+        unpriced,
+        Spend::NotPriced,
+        "the default is the absence, because nothing assigns a price"
+    );
+    assert!(
+        !unpriced.mark().contains('$'),
+        "an unpriced run renders as words, never a currency figure: {}",
+        unpriced.mark()
+    );
+    assert_eq!(Spend::Usd(4.20).mark(), "$4.20", "a measured one does");
+
+    // And the absence travels as `null` under the key a reader looks for,
+    // rather than as a missing key something downstream can default.
+    assert_eq!(
+        serde_json::to_value(Spend::NotPriced).expect("serialises"),
+        Value::Null
+    );
+}
+
+/// `Spend` must never grow a float escape hatch.
+///
+/// Same enforcement as [`met_never_grows_a_bool_escape_hatch`], for the same
+/// reason one level up the stakes: with no bare float anywhere on the type,
+/// `format!("${:.2}", y.spend)` and a defaulting accessor are compile errors,
+/// and [`Spend::fold`] makes a caller type the unpriced arm and decide what it
+/// says. A comment asking callers to check whether the run was priced is not
+/// enforcement; this is.
+#[test]
+fn spend_never_grows_a_float_escape_hatch() {
+    let src = include_str!("../src/lifecycle/yield.rs");
+    for forbidden in [
+        "impl From<Spend> for f64",
+        "fn is_priced",
+        "fn as_f64",
+        "fn or_zero",
+        "fn usd_or",
+        "fn unwrap_or",
+        "PartialEq<f64> for Spend",
+        "Display for Spend",
+    ] {
+        assert!(
+            !src.contains(forbidden),
+            "`{forbidden}` gives a caller a one-state reading of a two-state fact, and the \
+             state it drops is the one that reads as free; use `Spend::fold` and name both"
+        );
+    }
+    // The subtler ones: an accessor handing back `Option<f64>` restores the
+    // defaulting call this type exists to prevent, and any method returning a
+    // bare float is that call with a different name.
+    let spend_impl = src
+        .split("impl Spend {")
+        .nth(1)
+        .expect("`impl Spend` is still in yield.rs")
+        .split("\n}\n")
+        .next()
+        .expect("with a closing brace");
+    assert!(
+        !spend_impl.contains("Option<f64>"),
+        "an `Option<f64>` accessor on `Spend` is a defaulted zero with extra steps"
+    );
+    assert!(
+        !spend_impl.contains("-> f64"),
+        "a method on `Spend` returning a bare float has to invent one for the unpriced case"
     );
 }
 

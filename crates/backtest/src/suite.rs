@@ -2278,14 +2278,6 @@ impl SuiteManager {
     }
 }
 
-/// Derive a stable user id from a bearer token, matching the API's
-/// `BearerToken::user_id` (UUIDv5 over `NAMESPACE_OID`). Exposed so the WS lane
-/// (which receives the token as a query param) scopes frames to the same id.
-#[must_use]
-pub fn user_id_from_token(token: &str) -> Uuid {
-    Uuid::new_v5(&Uuid::NAMESPACE_OID, token.as_bytes())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -9,6 +9,7 @@ pub mod automation;
 pub mod bytecode;
 pub mod clock;
 pub mod compatibility;
+pub mod history;
 pub mod ids;
 pub mod intents;
 pub mod interpreter;
@@ -22,9 +23,16 @@ pub mod world;
 
 pub use bytecode::{compile as compile_expr, run as run_expr, BarField, Op, Program};
 pub use clock::{ReplayClock, StrategyClock, WallClock};
+pub use history::{
+    BarTransition, HistoryRegisters, SignalVerdicts, Unknown, Unresolved, Verdict,
+    MAX_HISTORY_DEPTH,
+};
 pub use intents::{SizedIntents, SizingContext, SizingError};
 pub use live::{LiveKey, LiveRegistryError, LiveSource, LiveStrategyRegistry, LiveStrategySpec};
-pub use interpreter::{evaluate_condition, evaluate_signals, EvalError};
+pub use interpreter::{
+    evaluate_condition, evaluate_signals, nodes_history_warmup_bars, nodes_need_history, EvalError,
+    SignalEvaluator,
+};
 pub use registry::FeatureRegistry;
 // Re-exported so a caller can build a `WorldEvent::Feature` without
 // depending on `features` directly.
