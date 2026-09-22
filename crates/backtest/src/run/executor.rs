@@ -39,6 +39,16 @@ impl RunExecutor for Box<dyn RunExecutor> {
     }
 }
 
+/// Shared executors are executors. A long-lived worker holds one executor and
+/// builds a fresh [`crate::run::Backtest`] per job — the engine owns its store
+/// and its ledger handle, but the simulator connection behind the executor is
+/// expensive and is shared rather than rebuilt.
+impl RunExecutor for std::sync::Arc<dyn RunExecutor> {
+    fn execute(&self, cfg: &RunConfig, ticket: &TrialTicket) -> RunResult {
+        (**self).execute(cfg, ticket)
+    }
+}
+
 /// A `RunExecutor` backed by an arbitrary closure — used for composition and in
 /// tests as a stand-in for the simulator-backed executor.
 pub struct ClosureExecutor<F>(pub F)

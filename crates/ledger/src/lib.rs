@@ -14,6 +14,7 @@ pub mod anchor;
 pub mod audit;
 pub mod campaign;
 pub mod capital;
+pub mod evidence;
 pub mod gates;
 pub mod holdout;
 pub mod internal;

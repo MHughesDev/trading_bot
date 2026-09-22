@@ -211,6 +211,34 @@ impl CampaignHandle {
         }
     }
 
+    /// Crate-internal: re-seal a campaign that was defined earlier, carrying the
+    /// `define_hash` **as it was recorded** rather than as it recomputes.
+    ///
+    /// A worker that resumes a campaign has to reconstruct the handle from the
+    /// stored row, and the row is not a perfect round trip of the definition —
+    /// `approval_spend_usd` is `NUMERIC(14,2)` in the table, so a definition
+    /// carrying more precision than that comes back rounded. Recomputing the
+    /// hash from the rounded definition would produce a *different*
+    /// pre-registration hash from the one Gate 1 reads, and every decision the
+    /// resumed driver logged would carry a context hash that matches nothing.
+    ///
+    /// So the recorded hash wins. The definition is what the row says; the hash
+    /// is what the log says; and `a_loaded_campaign_carries_the_recorded_hash`
+    /// in `pg_campaign` pins that a normally-defined campaign round-trips both.
+    pub(crate) fn seal_loaded(
+        campaign_id: Uuid,
+        tenant_id: String,
+        definition: CampaignDefinition,
+        define_hash: String,
+    ) -> Self {
+        Self {
+            campaign_id,
+            tenant_id,
+            definition,
+            define_hash,
+        }
+    }
+
     #[must_use]
     pub fn campaign_id(&self) -> Uuid {
         self.campaign_id

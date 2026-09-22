@@ -16,18 +16,30 @@
 //!   created the child" reuses it instead of starting a second one. That is the
 //!   exactly-once property a workflow engine would have been adopted for.
 //!
-//! ## What is not here yet, and is not pretended to be
+//! ## The three mechanical terminal rules
 //!
-//! §10 has three mechanical terminal rules. Only one of them can be computed
-//! today:
+//! All three are computed, and each from something recorded rather than
+//! remembered:
 //!
-//! * `BUDGET_EXHAUSTED` — implemented: the campaign's `max_trials` against the
-//!   trials the ledger has actually counted for it.
-//! * `DIMINISHING_RETURNS` and `CONVERGED` — both need the posterior from the
-//!   comparison protocol's confidence sequence (checklist 2.12), which is not
-//!   built. [`TerminationCheck`] names them as `NotComputable` rather than
-//!   approximating them, because a campaign that stops early on a made-up
-//!   posterior is worse than one that runs to its budget.
+//! * `BUDGET_EXHAUSTED` — the campaign's `max_trials` against the trials the
+//!   ledger has actually counted for it.
+//! * `DIMINISHING_RETURNS` — every comparison recorded over the last 20 % of
+//!   the campaign's trials has an anytime-valid upper bound below
+//!   `delta_practical`. The interval is the confidence sequence
+//!   `ComparisonPlan::judge` produced (§11.5), so "the posterior probability
+//!   that any remaining candidate exceeds the incumbent by `delta_practical`
+//!   falls below 0.05" is read off the recorded bound rather than approximated.
+//! * `CONVERGED` — the incumbent has been unchanged for `max(20, 0.25 · trials)`
+//!   trials **and** the diminishing-returns test agrees. A promotion is the only
+//!   thing that moves the incumbent, so "unchanged" is measured from the last
+//!   comparison whose verdict was `promote`, or from the campaign's first trial
+//!   if there has never been one.
+//!
+//! Each rule still reports [`TerminationCheck::NotComputable`] when its inputs
+//! are absent — a campaign with no recorded comparison cannot be said to have
+//! converged — and the reasons travel in the job's output, so a reader can see
+//! which rules were live for a given campaign rather than assuming all of them
+//! were.
 //!
 //! `HALTED` is a human appending the event; the driver only observes it.
 
@@ -72,23 +84,6 @@ impl CampaignWorker {
         ledger::pg::PgTrialLedger::new(self.pg.clone())
     }
 
-    /// Trials the ledger has counted for this campaign — every look, including
-    /// failures, cache hits and gate failures, because the budget is a budget on
-    /// looks the same way the exploration floor is (§4.5, §8).
-    async fn trials_counted(&self, tenant: &str, campaign_id: Uuid) -> Result<i64, JobError> {
-        let mut tx = ledger::pg::tenant_tx(&self.pg, tenant)
-            .await
-            .map_err(|e| JobError::infrastructure(format!("tenant transaction: {e}")))?;
-        let count: (i64,) =
-            sqlx::query_as("SELECT count(*) FROM mlops.trial WHERE campaign_id = $1")
-                .bind(campaign_id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|e| JobError::infrastructure(format!("counting trials: {e}")))?;
-        let _ = tx.commit().await;
-        Ok(count.0)
-    }
-
     /// The campaign's DEFINE facts, read back from the row they were locked in.
     async fn budget_max_trials(&self, tenant: &str, campaign_id: Uuid) -> Result<i64, JobError> {
         let mut tx = ledger::pg::tenant_tx(&self.pg, tenant)
@@ -121,19 +116,64 @@ impl CampaignWorker {
             })
     }
 
-    /// The §10 terminal rules, evaluated against what the ledger actually holds.
+    /// The §10 terminal rules, evaluated against what the ledger actually holds,
+    /// in the order they are checked.
+    ///
+    /// Reported as a list rather than collapsed to the first hit, so the job's
+    /// output can say which rules were live and which could not be computed. A
+    /// campaign that ran to its budget because nothing else was computable is a
+    /// different fact from one that ran to its budget with every rule watching.
+    async fn termination_report(
+        &self,
+        tenant: &str,
+        campaign_id: Uuid,
+    ) -> Result<Vec<(&'static str, TerminationCheck)>, JobError> {
+        let max_trials = self.budget_max_trials(tenant, campaign_id).await?;
+        let trial_times = self
+            .ledger()
+            .campaign_trial_times_async(tenant, campaign_id)
+            .await
+            .map_err(|e| JobError::infrastructure(format!("reading the trial timeline: {e}")))?;
+        let comparisons = self
+            .ledger()
+            .comparisons_async(tenant, campaign_id)
+            .await
+            .map_err(|e| JobError::infrastructure(format!("reading the comparisons: {e}")))?;
+
+        let counted = i64::try_from(trial_times.len()).unwrap_or(i64::MAX);
+        let budget = if counted >= max_trials {
+            TerminationCheck::End(
+                CampaignPhase::BudgetExhausted,
+                format!("{counted} trials counted against a budget of {max_trials}"),
+            )
+        } else {
+            TerminationCheck::Continue
+        };
+
+        let diminishing = diminishing_returns(&trial_times, &comparisons);
+        let converged = converged(&trial_times, &comparisons, &diminishing);
+
+        // Budget first: it is the one limit that is external to the campaign's
+        // own evidence, and spending past it is the failure the other two are
+        // trying to avoid. CONVERGED before DIMINISHING_RETURNS because it is
+        // the stronger statement and subsumes the weaker one.
+        Ok(vec![
+            ("budget_exhausted", budget),
+            ("converged", converged),
+            ("diminishing_returns", diminishing),
+        ])
+    }
+
+    /// The first §10 rule that says to stop, if any.
     async fn should_end(
         &self,
         tenant: &str,
         campaign_id: Uuid,
     ) -> Result<TerminationCheck, JobError> {
-        let max_trials = self.budget_max_trials(tenant, campaign_id).await?;
-        let counted = self.trials_counted(tenant, campaign_id).await?;
-        if counted >= max_trials {
-            return Ok(TerminationCheck::End(
-                CampaignPhase::BudgetExhausted,
-                format!("{counted} trials counted against a budget of {max_trials}"),
-            ));
+        for (_, check) in self.termination_report(tenant, campaign_id).await? {
+            if matches!(check, TerminationCheck::End(_, _)) {
+                return Ok(check);
+            }
         }
         Ok(TerminationCheck::Continue)
     }
@@ -319,6 +359,25 @@ impl Worker for CampaignWorker {
                 })?;
 
             if let Some(end) = state.terminal {
+                // Which §10 rules were live when it ended, and which could not
+                // be computed. A campaign that reached its budget with two rules
+                // unevaluable is a different fact from one that reached it with
+                // all three watching, and the output has to be able to say so.
+                let rules: Vec<Value> = self
+                    .termination_report(&tenant, campaign_id)
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(name, check)| match check {
+                        TerminationCheck::Continue => json!({ "rule": name, "state": "live" }),
+                        TerminationCheck::End(phase, why) => json!({
+                            "rule": name, "state": "fired", "phase": phase.as_str(), "why": why
+                        }),
+                        TerminationCheck::NotComputable(why) => {
+                            json!({ "rule": name, "state": "not_computable", "why": why })
+                        }
+                    })
+                    .collect();
                 return Ok(JobOutput {
                     summary: Some(format!(
                         "campaign {campaign_id} ended in {} after {} events ({phases_run} advanced here)",
@@ -330,6 +389,7 @@ impl Worker for CampaignWorker {
                         "terminal": end.as_str(),
                         "seq": state.seq,
                         "cycles": state.cycles,
+                        "termination_rules": rules,
                     }),
                     ..Default::default()
                 });
@@ -370,6 +430,130 @@ impl Worker for CampaignWorker {
     }
 }
 
+// ── §10's evidence-driven terminal rules ─────────────────────────────────────
+
+/// The fraction of a campaign's trials the diminishing-returns test looks at
+/// (§10: "estimated over the last 20 % of trials").
+const RECENT_TRIAL_FRACTION: f64 = 0.20;
+
+/// The two halves of CONVERGED's "unchanged for long enough" (PHASE-2-5-PLAN
+/// §2.1): an absolute floor, and a quarter of the campaign's trials so far.
+const CONVERGED_MIN_TRIALS: i64 = 20;
+const CONVERGED_TRIAL_FRACTION: f64 = 0.25;
+
+/// The first index of the campaign's most recent `fraction` of trials.
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn recent_window_start(
+    trial_times: &[chrono::DateTime<chrono::Utc>],
+    fraction: f64,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    let n = trial_times.len();
+    if n == 0 {
+        return None;
+    }
+    let take = ((n as f64) * fraction).ceil().max(1.0) as usize;
+    trial_times.get(n.saturating_sub(take)).copied()
+}
+
+/// §10's DIMINISHING_RETURNS, computed rather than approximated.
+///
+/// "Stop when the posterior probability that any remaining candidate exceeds
+/// the incumbent by `delta_practical` falls below 0.05, estimated over the last
+/// 20 % of trials."
+///
+/// The posterior is the confidence sequence `ComparisonPlan::judge` already
+/// produced and the ledger already stored. It is anytime-valid at `alpha`, so
+/// an upper bound below `δ` *is* the statement that the probability of a
+/// `δ`-sized improvement is at most `alpha` — and it is valid after any number
+/// of peeks, which is the only reason a rule like this can be evaluated on
+/// every pass of a driver loop.
+///
+/// **Every** comparison in the window has to rule `δ` out. One candidate still
+/// in contention is a remaining candidate, and §10 asks about *any*.
+fn diminishing_returns(
+    trial_times: &[chrono::DateTime<chrono::Utc>],
+    comparisons: &[ledger::evidence::StoredComparison],
+) -> TerminationCheck {
+    let Some(from) = recent_window_start(trial_times, RECENT_TRIAL_FRACTION) else {
+        return TerminationCheck::NotComputable("no trials have been counted for this campaign");
+    };
+    let recent: Vec<&ledger::evidence::StoredComparison> =
+        comparisons.iter().filter(|c| c.recorded_at >= from).collect();
+    if recent.is_empty() {
+        return TerminationCheck::NotComputable(
+            "no comparison has been recorded over the campaign's most recent trials",
+        );
+    }
+    if recent.iter().all(|c| c.rules_out_delta()) {
+        let worst = recent
+            .iter()
+            .map(|c| c.record.cs_upper)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let delta = recent[0].record.delta_practical;
+        return TerminationCheck::End(
+            CampaignPhase::DiminishingReturns,
+            format!(
+                "every one of the {} comparisons over the last {:.0}% of trials bounds the \
+                 improvement below the declared effect size (worst upper bound {worst:+.4} < \
+                 δ {delta:.4})",
+                recent.len(),
+                RECENT_TRIAL_FRACTION * 100.0,
+            ),
+        );
+    }
+    TerminationCheck::Continue
+}
+
+/// §10's CONVERGED: the incumbent unchanged for `max(20, 0.25 · trials)` trials
+/// **and** the diminishing-returns test agreeing.
+///
+/// Only a promotion moves the incumbent, so "unchanged since" is the time of
+/// the last comparison whose verdict was `promote` — or the campaign's first
+/// trial, because a campaign that has never promoted anything has had the same
+/// incumbent, the declared benchmark, from the beginning.
+///
+/// The conjunction is not decoration. A campaign can sit on one incumbent
+/// because its search has stalled rather than because it has finished, and
+/// without the second half this rule would call that convergence and stop
+/// spending a budget that was still buying information.
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+fn converged(
+    trial_times: &[chrono::DateTime<chrono::Utc>],
+    comparisons: &[ledger::evidence::StoredComparison],
+    diminishing: &TerminationCheck,
+) -> TerminationCheck {
+    match diminishing {
+        TerminationCheck::NotComputable(why) => return TerminationCheck::NotComputable(why),
+        TerminationCheck::Continue => {
+            return TerminationCheck::Continue;
+        }
+        TerminationCheck::End(_, _) => {}
+    }
+    let Some(first) = trial_times.first().copied() else {
+        return TerminationCheck::NotComputable("no trials have been counted for this campaign");
+    };
+    let since = comparisons
+        .iter()
+        .filter(|c| c.promoted())
+        .map(|c| c.recorded_at)
+        .max()
+        .unwrap_or(first);
+    let unchanged_for = i64::try_from(trial_times.iter().filter(|t| **t >= since).count())
+        .unwrap_or(i64::MAX);
+    let n = trial_times.len() as f64;
+    let required = CONVERGED_MIN_TRIALS.max((n * CONVERGED_TRIAL_FRACTION).ceil() as i64);
+    if unchanged_for >= required {
+        return TerminationCheck::End(
+            CampaignPhase::Converged,
+            format!(
+                "the incumbent has been unchanged for {unchanged_for} trials (needs {required}) \
+                 and the diminishing-returns test agrees"
+            ),
+        );
+    }
+    TerminationCheck::Continue
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,5 +582,168 @@ mod tests {
             let kind = CampaignWorker::child_kind(p).expect("has a child kind");
             assert!(kind.counts_trial(), "{p:?} dispatches {kind}, which is not counted");
         }
+    }
+}
+
+#[cfg(test)]
+mod termination_tests {
+    use super::*;
+    use chrono::{Duration, TimeZone, Utc};
+    use ledger::evidence::{ComparisonRecord, StoredComparison};
+
+    fn t0() -> chrono::DateTime<chrono::Utc> {
+        Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()
+    }
+
+    fn trials(n: usize) -> Vec<chrono::DateTime<chrono::Utc>> {
+        (0..n).map(|i| t0() + Duration::minutes(i as i64)).collect()
+    }
+
+    fn comparison(at_minute: i64, cs_upper: f64, verdict: &str) -> StoredComparison {
+        StoredComparison {
+            record: ComparisonRecord {
+                campaign_seq: at_minute,
+                arm_a: "challenger:1".into(),
+                arm_b: "incumbent".into(),
+                metric: "sharpe_net".into(),
+                verdict: verdict.into(),
+                cs_centre: 0.0,
+                cs_lower: -1.0,
+                cs_upper,
+                alpha: 0.05,
+                mean_difference: 0.0,
+                p_a_better: 0.5,
+                p_a_better_lower: 0.2,
+                achieved_k: 9,
+                wins: 4,
+                ties: 1,
+                losses: 4,
+                profile_id: "strict_v1".into(),
+                n_eff: 10.0,
+                delta_practical: 0.25,
+                trials_a: 9,
+                trials_b: 9,
+                flags: serde_json::json!({}),
+                headline: "h".into(),
+            },
+            recorded_at: t0() + Duration::minutes(at_minute),
+        }
+    }
+
+    /// Absent evidence stays absent. A campaign with no trials, or with no
+    /// comparison recorded over the window §10 names, cannot be said to have hit
+    /// diminishing returns — and the rule says so rather than defaulting either
+    /// way. This is the behaviour that used to be the *only* behaviour.
+    #[test]
+    fn diminishing_returns_is_not_computable_without_a_comparison_in_the_window() {
+        assert!(matches!(
+            diminishing_returns(&[], &[]),
+            TerminationCheck::NotComputable(_)
+        ));
+        assert!(matches!(
+            diminishing_returns(&trials(50), &[]),
+            TerminationCheck::NotComputable(_)
+        ));
+        // Recorded before the window opened: 20% of 50 trials is the last 10, so
+        // the window starts at minute 40 and a comparison at minute 5 is old news.
+        assert!(matches!(
+            diminishing_returns(&trials(50), &[comparison(5, 0.01, "reject")]),
+            TerminationCheck::NotComputable(_)
+        ));
+    }
+
+    /// The rule fires only when every comparison in the window bounds the
+    /// improvement below δ. One candidate still in contention is a remaining
+    /// candidate, and §10 asks about *any* of them.
+    #[test]
+    fn one_candidate_still_in_contention_keeps_the_campaign_running() {
+        let ts = trials(50);
+        let closed = comparison(45, 0.01, "reject");
+        let open = comparison(46, 0.90, "keep_sampling");
+
+        assert!(matches!(
+            diminishing_returns(&ts, &[closed.clone()]),
+            TerminationCheck::End(CampaignPhase::DiminishingReturns, _)
+        ));
+        assert!(matches!(
+            diminishing_returns(&ts, &[closed, open]),
+            TerminationCheck::Continue
+        ));
+    }
+
+    /// CONVERGED requires both halves. A campaign whose incumbent has stood for
+    /// a long time but whose candidates are still in contention has not
+    /// converged — it is still learning something, and stopping it would leave
+    /// budget unspent on a question still open.
+    #[test]
+    fn converged_needs_the_diminishing_returns_test_to_agree() {
+        let ts = trials(40);
+        let contested = vec![comparison(33, 0.01, "reject"), comparison(34, 0.9, "keep_sampling")];
+        let dr = diminishing_returns(&ts, &contested);
+        assert!(matches!(dr, TerminationCheck::Continue));
+        assert!(matches!(converged(&ts, &contested, &dr), TerminationCheck::Continue));
+
+        // With every candidate ruled out and no promotion ever recorded, the
+        // incumbent has stood for all 40 trials against a requirement of
+        // max(20, 10) = 20.
+        let settled = vec![comparison(33, 0.01, "reject")];
+        let dr = diminishing_returns(&ts, &settled);
+        assert!(matches!(dr, TerminationCheck::End(CampaignPhase::DiminishingReturns, _)));
+        assert!(matches!(
+            converged(&ts, &settled, &dr),
+            TerminationCheck::End(CampaignPhase::Converged, _)
+        ));
+    }
+
+    /// A recent promotion moves the incumbent, so the clock restarts. This is
+    /// the half that stops a campaign being declared converged on the strength
+    /// of a candidate it adopted moments ago.
+    #[test]
+    fn a_recent_promotion_restarts_the_incumbents_clock() {
+        let ts = trials(40);
+        let after_a_promotion = vec![
+            comparison(36, 0.01, "promote"),
+            comparison(37, 0.01, "reject"),
+        ];
+        let dr = diminishing_returns(&ts, &after_a_promotion);
+        assert!(matches!(dr, TerminationCheck::End(CampaignPhase::DiminishingReturns, _)));
+        // Only trials at minute 36 and later count as "unchanged": 4 of 40,
+        // against a requirement of 20.
+        assert!(matches!(
+            converged(&ts, &after_a_promotion, &dr),
+            TerminationCheck::Continue
+        ));
+    }
+
+    /// The window is the last 20 % of *trials*, measured on the trial timeline
+    /// rather than on a wall-clock duration — a campaign that ran twice as fast
+    /// gets the same window.
+    #[test]
+    fn the_window_is_the_last_fifth_of_the_trial_timeline() {
+        let ts = trials(100);
+        assert_eq!(recent_window_start(&ts, 0.20), Some(t0() + Duration::minutes(80)));
+        // Small campaigns still get a window rather than an empty one.
+        assert_eq!(recent_window_start(&trials(1), 0.20), Some(t0()));
+        assert_eq!(recent_window_start(&[], 0.20), None);
+    }
+
+    /// CONVERGED's requirement is `max(20, 0.25 · trials)`, so a long campaign
+    /// needs proportionally more quiet and a short one still needs twenty.
+    #[test]
+    fn the_converged_requirement_scales_with_the_campaign() {
+        // 200 trials ⇒ needs 50 unchanged; the last promotion was 40 trials ago.
+        let ts = trials(200);
+        let cs = vec![comparison(160, 0.01, "promote"), comparison(199, 0.01, "reject")];
+        let dr = diminishing_returns(&ts, &cs);
+        assert!(matches!(dr, TerminationCheck::End(CampaignPhase::DiminishingReturns, _)));
+        assert!(matches!(converged(&ts, &cs, &dr), TerminationCheck::Continue));
+
+        // Move the promotion back to 60 trials ago and it clears 50.
+        let cs = vec![comparison(140, 0.01, "promote"), comparison(199, 0.01, "reject")];
+        let dr = diminishing_returns(&ts, &cs);
+        assert!(matches!(
+            converged(&ts, &cs, &dr),
+            TerminationCheck::End(CampaignPhase::Converged, _)
+        ));
     }
 }

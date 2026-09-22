@@ -1610,3 +1610,384 @@ impl DecisionLog for PgTrialLedger {
         self.block(self.log_decision_async(ctx, decision))
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The comparison protocol's evidence and verdicts (SPEC §11.5, §10;
+// migration 0113; ADR-P2-34, ADR-P2-35).
+// ─────────────────────────────────────────────────────────────────────────────
+
+impl PgTrialLedger {
+    /// Re-seal a campaign that was defined earlier.
+    ///
+    /// `define_campaign_async` mints a handle at DEFINE and refuses a second
+    /// definition, which is correct and leaves a resumed worker with no way to
+    /// get one. This is that way, and it is deliberately the *only* one: the
+    /// handle is still minted inside this crate, from the immutable row, so
+    /// "dispatch against a campaign that was never defined" stays
+    /// unrepresentable.
+    ///
+    /// The `define_hash` comes from the campaign's own `define` event rather
+    /// than from recomputation — see `CampaignHandle::seal_loaded`. A campaign
+    /// whose log has no recorded hash is refused: a pre-registration nobody can
+    /// read is not a pre-registration.
+    ///
+    /// # Errors
+    /// An unknown campaign, a log with no `define_hash`, a stored row that does
+    /// not validate as a definition, or a backend failure.
+    pub async fn load_campaign_async(
+        &self,
+        tenant_id: &str,
+        campaign_id: Uuid,
+    ) -> Result<crate::campaign::CampaignHandle, LedgerError> {
+        let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
+        #[allow(clippy::type_complexity)]
+        let row: Option<(
+            String,
+            String,
+            serde_json::Value,
+            serde_json::Value,
+            f64,
+            serde_json::Value,
+            f64,
+            String,
+            Option<serde_json::Value>,
+            serde_json::Value,
+            f64,
+        )> = sqlx::query_as(
+            "SELECT slug, hypothesis, objective, benchmark, delta_practical, budget,
+                    exploration_floor, gates_profile, preference_vector, search_space,
+                    approval_spend_usd::float8
+               FROM mlops.campaign WHERE campaign_id = $1 AND tenant_id = $2",
+        )
+        .bind(campaign_id)
+        .bind(tenant_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(be)?;
+        let _ = tx.commit().await;
+
+        let Some((
+            slug,
+            hypothesis,
+            objective,
+            benchmark,
+            delta_practical,
+            budget,
+            exploration_floor,
+            gates_profile,
+            preference_vector,
+            search_space,
+            approval_spend_usd,
+        )) = row
+        else {
+            return Err(LedgerError::Invalid(format!(
+                "campaign {campaign_id} is not defined for this tenant"
+            )));
+        };
+
+        let define_hash = self
+            .campaign_define_hash_async(tenant_id, campaign_id)
+            .await?
+            .ok_or_else(|| {
+                LedgerError::Invalid(format!(
+                    "campaign {campaign_id} has no recorded define_hash; a pre-registration nobody \
+                     can read is not a pre-registration (§10, Gate 1)"
+                ))
+            })?;
+
+        let definition = crate::campaign::CampaignDefinition {
+            slug,
+            hypothesis,
+            objective,
+            benchmark,
+            delta_practical,
+            approval_spend_usd,
+            budget: serde_json::from_value(budget).map_err(be)?,
+            exploration_floor: crate::campaign::ExplorationFloor::new(exploration_floor)?,
+            gates_profile,
+            preference_vector,
+            search_space,
+        };
+        definition.validate()?;
+        Ok(crate::campaign::CampaignHandle::seal_loaded(
+            campaign_id,
+            tenant_id.to_string(),
+            definition,
+            define_hash,
+        ))
+    }
+
+    /// Record one arm's measurement on one replicate.
+    ///
+    /// Idempotent by construction: the table is unique on
+    /// `(campaign_id, arm, replicate, metric)` and this inserts `ON CONFLICT DO
+    /// NOTHING`, so a study re-queued after a lost lease re-measures and writes
+    /// nothing new. That is what makes the EXPERIMENT phase's *side effect*
+    /// idempotent as well as its child job.
+    ///
+    /// Returns whether the row was new.
+    ///
+    /// # Errors
+    /// A non-finite value, an unknown trial (refused by the foreign key), or a
+    /// backend failure.
+    pub async fn record_replicate_measurement_async(
+        &self,
+        tenant_id: &str,
+        campaign_id: Uuid,
+        m: &crate::evidence::ReplicateMeasurement,
+        produced_by: &str,
+    ) -> Result<bool, LedgerError> {
+        if !m.value.is_finite() {
+            return Err(LedgerError::Invalid(format!(
+                "a replicate measurement of {} is not an observation",
+                m.value
+            )));
+        }
+        let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
+        let inserted: Option<(Uuid,)> = sqlx::query_as(
+            "INSERT INTO mlops.replicate_measurement
+                 (tenant_id, campaign_id, arm, window_index, cost_bp, seed, metric, value,
+                  trial_id, produced_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+             ON CONFLICT (campaign_id, arm, window_index, cost_bp, seed, metric) DO NOTHING
+             RETURNING measurement_id",
+        )
+        .bind(tenant_id)
+        .bind(campaign_id)
+        .bind(&m.arm)
+        .bind(m.key.window_index)
+        .bind(m.key.cost_bp)
+        .bind(m.key.seed)
+        .bind(&m.metric)
+        .bind(m.value)
+        .bind(m.trial_id)
+        .bind(produced_by)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(be)?;
+        tx.commit().await.map_err(be)?;
+        Ok(inserted.is_some())
+    }
+
+    /// Every measurement recorded for one arm of one campaign, on one metric,
+    /// in replicate order.
+    ///
+    /// Replicate order, not insertion order: the COMPARE phase zips two arms
+    /// together and the pairing is what makes the difference meaningful, so the
+    /// two reads have to be in the same order however they were written.
+    ///
+    /// # Errors
+    /// Backend failures.
+    pub async fn replicate_measurements_async(
+        &self,
+        tenant_id: &str,
+        campaign_id: Uuid,
+        arm: &str,
+        metric: &str,
+    ) -> Result<Vec<crate::evidence::ReplicateMeasurement>, LedgerError> {
+        let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
+        let rows: Vec<(i32, i32, i64, f64, Uuid)> = sqlx::query_as(
+            "SELECT window_index, cost_bp, seed, value, trial_id
+               FROM mlops.replicate_measurement
+              WHERE tenant_id = $1 AND campaign_id = $2 AND arm = $3 AND metric = $4
+              ORDER BY window_index, cost_bp, seed",
+        )
+        .bind(tenant_id)
+        .bind(campaign_id)
+        .bind(arm)
+        .bind(metric)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(be)?;
+        tx.commit().await.map_err(be)?;
+        Ok(rows
+            .into_iter()
+            .map(|(window_index, cost_bp, seed, value, trial_id)| {
+                crate::evidence::ReplicateMeasurement {
+                    arm: arm.to_string(),
+                    key: crate::evidence::ReplicateKey { window_index, cost_bp, seed },
+                    metric: metric.to_string(),
+                    value,
+                    trial_id,
+                }
+            })
+            .collect())
+    }
+
+    /// The arms a campaign holds measurements for, most recently written first.
+    ///
+    /// # Errors
+    /// Backend failures.
+    pub async fn replicate_arms_async(
+        &self,
+        tenant_id: &str,
+        campaign_id: Uuid,
+        metric: &str,
+    ) -> Result<Vec<String>, LedgerError> {
+        let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT arm FROM mlops.replicate_measurement
+              WHERE tenant_id = $1 AND campaign_id = $2 AND metric = $3
+              GROUP BY arm ORDER BY max(recorded_at) DESC, arm",
+        )
+        .bind(tenant_id)
+        .bind(campaign_id)
+        .bind(metric)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(be)?;
+        tx.commit().await.map_err(be)?;
+        Ok(rows.into_iter().map(|(a,)| a).collect())
+    }
+
+    /// Record a judged comparison at a campaign's fold position.
+    ///
+    /// Idempotent on `(campaign_id, campaign_seq)`. Returns `true` if the row
+    /// was new — a `false` is a resumed worker arriving at a position that has
+    /// already been judged, which is the expected outcome of a re-queue and not
+    /// an error.
+    ///
+    /// # Errors
+    /// Backend failures, and every CHECK the table repeats.
+    pub async fn record_comparison_async(
+        &self,
+        tenant_id: &str,
+        campaign_id: Uuid,
+        rec: &crate::evidence::ComparisonRecord,
+    ) -> Result<bool, LedgerError> {
+        let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
+        let inserted: Option<(Uuid,)> = sqlx::query_as(
+            "INSERT INTO mlops.comparison
+                 (tenant_id, campaign_id, campaign_seq, arm_a, arm_b, metric, verdict,
+                  cs_centre, cs_lower, cs_upper, alpha, mean_difference, p_a_better,
+                  p_a_better_lower, achieved_k, wins, ties, losses, profile_id, n_eff,
+                  delta_practical, trials_a, trials_b, flags, headline)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+                     $21,$22,$23,$24,$25)
+             ON CONFLICT (campaign_id, campaign_seq) DO NOTHING
+             RETURNING comparison_id",
+        )
+        .bind(tenant_id)
+        .bind(campaign_id)
+        .bind(rec.campaign_seq)
+        .bind(&rec.arm_a)
+        .bind(&rec.arm_b)
+        .bind(&rec.metric)
+        .bind(&rec.verdict)
+        .bind(rec.cs_centre)
+        .bind(rec.cs_lower)
+        .bind(rec.cs_upper)
+        .bind(rec.alpha)
+        .bind(rec.mean_difference)
+        .bind(rec.p_a_better)
+        .bind(rec.p_a_better_lower)
+        .bind(rec.achieved_k)
+        .bind(rec.wins)
+        .bind(rec.ties)
+        .bind(rec.losses)
+        .bind(&rec.profile_id)
+        .bind(rec.n_eff)
+        .bind(rec.delta_practical)
+        .bind(rec.trials_a)
+        .bind(rec.trials_b)
+        .bind(&rec.flags)
+        .bind(&rec.headline)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(be)?;
+        tx.commit().await.map_err(be)?;
+        Ok(inserted.is_some())
+    }
+
+    /// Every comparison recorded for a campaign, oldest first.
+    ///
+    /// # Errors
+    /// Backend failures.
+    pub async fn comparisons_async(
+        &self,
+        tenant_id: &str,
+        campaign_id: Uuid,
+    ) -> Result<Vec<crate::evidence::StoredComparison>, LedgerError> {
+        let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
+        // Twenty-four columns: past sqlx's tuple `FromRow` impls, and a row is
+        // read by name here rather than by position, which is the safer form for
+        // a projection this wide anyway.
+        let rows = sqlx::query(
+            "SELECT campaign_seq, arm_a, arm_b, metric, verdict, cs_centre, cs_lower, cs_upper,
+                    alpha, mean_difference, p_a_better, p_a_better_lower, achieved_k, wins, ties,
+                    losses, profile_id, n_eff, delta_practical, trials_a, trials_b, flags,
+                    headline, recorded_at
+               FROM mlops.comparison
+              WHERE tenant_id = $1 AND campaign_id = $2
+              ORDER BY campaign_seq, recorded_at",
+        )
+        .bind(tenant_id)
+        .bind(campaign_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(be)?;
+        tx.commit().await.map_err(be)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| crate::evidence::StoredComparison {
+                record: crate::evidence::ComparisonRecord {
+                    campaign_seq: r.get("campaign_seq"),
+                    arm_a: r.get("arm_a"),
+                    arm_b: r.get("arm_b"),
+                    metric: r.get("metric"),
+                    verdict: r.get("verdict"),
+                    cs_centre: r.get("cs_centre"),
+                    cs_lower: r.get("cs_lower"),
+                    cs_upper: r.get("cs_upper"),
+                    alpha: r.get("alpha"),
+                    mean_difference: r.get("mean_difference"),
+                    p_a_better: r.get("p_a_better"),
+                    p_a_better_lower: r.get("p_a_better_lower"),
+                    achieved_k: r.get("achieved_k"),
+                    wins: r.get("wins"),
+                    ties: r.get("ties"),
+                    losses: r.get("losses"),
+                    profile_id: r.get("profile_id"),
+                    n_eff: r.get("n_eff"),
+                    delta_practical: r.get("delta_practical"),
+                    trials_a: r.get("trials_a"),
+                    trials_b: r.get("trials_b"),
+                    flags: r.get("flags"),
+                    headline: r.get("headline"),
+                },
+                recorded_at: r.get("recorded_at"),
+            })
+            .collect())
+    }
+
+    /// When each of a campaign's trials was registered, oldest first.
+    ///
+    /// §10's DIMINISHING_RETURNS is estimated "over the last 20 % of trials",
+    /// so the driver needs the campaign's trial timeline to say where that
+    /// window starts. Every counted look is in it — failures, cache hits and
+    /// gate failures included — because the denominator of "20 % of trials" is
+    /// the same denominator the budget and the exploration floor use (§4.5, §8).
+    ///
+    /// # Errors
+    /// Backend failures.
+    pub async fn campaign_trial_times_async(
+        &self,
+        tenant_id: &str,
+        campaign_id: Uuid,
+    ) -> Result<Vec<chrono::DateTime<chrono::Utc>>, LedgerError> {
+        let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
+        let rows: Vec<(chrono::DateTime<chrono::Utc>,)> = sqlx::query_as(
+            "SELECT registered_at FROM mlops.trial
+              WHERE tenant_id = $1 AND campaign_id = $2
+              ORDER BY registered_at, seq",
+        )
+        .bind(tenant_id)
+        .bind(campaign_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(be)?;
+        tx.commit().await.map_err(be)?;
+        Ok(rows.into_iter().map(|(t,)| t).collect())
+    }
+}

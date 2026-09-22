@@ -319,6 +319,18 @@ pub struct ComparisonFlags {
     /// Either side predates the gate stack it is being judged against
     /// (ADR-P2-27).
     pub legacy_ungated: bool,
+    /// The cost dimension of the nuisance grid was not actually varied: every
+    /// replicate in this pair was measured at the same cost assumption
+    /// (ADR-P2-36).
+    ///
+    /// §11.5 asks for *all* nuisance sources to be randomized, and the analyst's
+    /// cost assumption is one of the three. A comparison that varied only the
+    /// window and the fill seed is narrower than the protocol describes — the
+    /// difference it estimates holds at one cost model rather than across the
+    /// plausible range — and the reader has to be able to see that, because the
+    /// direction of the error is the flattering one: unvaried costs make two
+    /// candidates look more separable than they are.
+    pub cost_nuisance_unrandomized: bool,
 }
 
 impl ComparisonFlags {
@@ -330,6 +342,7 @@ impl ComparisonFlags {
             || self.split_overrides
             || self.uses_backfilled_knowledge
             || self.legacy_ungated
+            || self.cost_nuisance_unrandomized
     }
 
     /// The flags that are set, for display beside the number.
@@ -350,6 +363,9 @@ impl ComparisonFlags {
         }
         if self.legacy_ungated {
             out.push("legacy_ungated");
+        }
+        if self.cost_nuisance_unrandomized {
+            out.push("cost_nuisance_unrandomized");
         }
         out
     }
@@ -480,6 +496,54 @@ impl Comparison {
             self.profile_id,
             flags,
         )
+    }
+
+    /// The ledger form of this verdict (migration 0113, ADR-P2-35).
+    ///
+    /// This is the **only** way a comparison reaches `mlops.comparison`, and it
+    /// lives here rather than in the writer for the same reason the type is
+    /// sealed: a record assembled anywhere else would be a verdict somebody
+    /// wrote down, and the table would be exactly the bare-number channel the
+    /// seal exists to close. The record carries every field the type carries —
+    /// there is no lossy projection, because "which fields were dropped on the
+    /// way to storage" is the question a reader of the table should never have
+    /// to ask.
+    ///
+    /// `campaign_seq` is the fold position of the COMPARE phase that produced
+    /// it; the ledger is unique on it, so a re-queued worker rewrites nothing.
+    #[must_use]
+    pub fn to_record(
+        &self,
+        campaign_seq: i64,
+        arm_a: impl Into<String>,
+        arm_b: impl Into<String>,
+        metric: impl Into<String>,
+    ) -> ledger::evidence::ComparisonRecord {
+        ledger::evidence::ComparisonRecord {
+            campaign_seq,
+            arm_a: arm_a.into(),
+            arm_b: arm_b.into(),
+            metric: metric.into(),
+            verdict: self.verdict.as_str().to_string(),
+            cs_centre: self.interval.centre,
+            cs_lower: self.interval.lower,
+            cs_upper: self.interval.upper,
+            alpha: self.interval.alpha,
+            mean_difference: self.mean_difference,
+            p_a_better: self.p_a_better,
+            p_a_better_lower: self.p_a_better_lower,
+            achieved_k: i32::try_from(self.achieved_k).unwrap_or(i32::MAX),
+            wins: i32::try_from(self.wins).unwrap_or(i32::MAX),
+            ties: i32::try_from(self.ties).unwrap_or(i32::MAX),
+            losses: i32::try_from(self.losses).unwrap_or(i32::MAX),
+            profile_id: self.profile_id.clone(),
+            n_eff: self.n_eff,
+            delta_practical: self.delta_practical,
+            trials_a: self.trials_a,
+            trials_b: self.trials_b,
+            flags: serde_json::to_value(&self.flags).unwrap_or(serde_json::Value::Null),
+            headline: self.headline(),
+        }
     }
 }
 
