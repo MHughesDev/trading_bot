@@ -228,15 +228,30 @@ fn parse_response(body: Value) -> Result<ChatResponse, LlmError> {
         other => StopReason::Other(other.to_string()),
     };
 
+    // OpenAI's automatic prefix caching reports the hit inside `prompt_tokens`
+    // rather than beside it: `prompt_tokens` is the whole prompt and
+    // `prompt_tokens_details.cached_tokens` is the cached part of it. Anthropic
+    // reports them disjoint. `Usage` uses the disjoint convention (it is the one
+    // `prompt_tokens()` can sum), so the cached part is subtracted out here
+    // rather than double-counted.
+    let cached = body
+        .pointer("/usage/prompt_tokens_details/cached_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let prompt = body
+        .pointer("/usage/prompt_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     let usage = Usage {
-        input_tokens: body
-            .pointer("/usage/prompt_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
+        input_tokens: prompt.saturating_sub(cached),
         output_tokens: body
             .pointer("/usage/completion_tokens")
-            .and_then(|v| v.as_u64())
+            .and_then(Value::as_u64)
             .unwrap_or(0),
+        cache_read_input_tokens: cached.min(prompt),
+        // OpenAI's cache is automatic: nothing is billed for writing it, and
+        // nothing is reported.
+        cache_creation_input_tokens: 0,
     };
 
     Ok(ChatResponse {

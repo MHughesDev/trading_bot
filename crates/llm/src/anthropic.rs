@@ -82,27 +82,94 @@ fn build_messages(req: &ChatRequest) -> Vec<Value> {
     out
 }
 
+/// The marker that closes a cache prefix segment.
+fn ephemeral() -> Value {
+    json!({ "type": "ephemeral" })
+}
+
+/// Put a `cache_control` marker on the last content block of the last message.
+///
+/// A plain-string user message is lifted into a single text block first, because
+/// `cache_control` is a property of a block and a string has none.
+///
+/// This is the third and last breakpoint, and it is the one that moves: every
+/// turn appends, so next call's marker sits further along the same prefix and
+/// everything in front of it is read from the cache written here.
+fn mark_last_message(messages: &mut [Value]) {
+    let Some(last) = messages.last_mut() else {
+        return;
+    };
+    let content = match last.get_mut("content") {
+        Some(c) => c,
+        None => return,
+    };
+    if let Some(text) = content.as_str() {
+        *content = json!([{ "type": "text", "text": text, "cache_control": ephemeral() }]);
+        return;
+    }
+    if let Some(block) = content.as_array_mut().and_then(<[Value]>::last_mut) {
+        if let Some(obj) = block.as_object_mut() {
+            obj.insert("cache_control".into(), ephemeral());
+        }
+    }
+}
+
+/// Build the request body, with the three cache breakpoints of AGENT-005 §6.1.
+///
+/// **Prefix order, stable-first: tools → system → messages.** That is the order
+/// the provider hashes the prefix in, so a breakpoint is only worth placing
+/// after everything in front of it is byte-identical to the previous call. A
+/// breakpoint placed after something that varies never hits; a breakpoint placed
+/// before something stable leaves those bytes uncached. Both are silent — the
+/// request succeeds either way and the cost shows up only in `Usage`.
+///
+/// Segments under the provider's minimum (1,024 tokens) are ignored by the API
+/// rather than rejected, so this is safe on a prompt too small to benefit.
 fn build_body(req: &ChatRequest) -> Value {
     let mut body = Map::new();
     body.insert("model".into(), json!(req.model));
     body.insert("max_tokens".into(), json!(req.max_tokens));
-    body.insert("messages".into(), Value::Array(build_messages(req)));
+
+    // Breakpoint 3 (last in prefix order, applied here because `messages` is
+    // built here): the last content block of the last message.
+    let mut messages = build_messages(req);
+    mark_last_message(&mut messages);
+    body.insert("messages".into(), Value::Array(messages));
+
+    // Breakpoint 2: `system` as a text block rather than a bare string. The
+    // charter is byte-stable (AGENT-005 §3.1), so this segment is the one that
+    // survives an entire conversation.
     if let Some(system) = &req.system {
-        body.insert("system".into(), json!(system));
+        body.insert(
+            "system".into(),
+            json!([{ "type": "text", "text": system, "cache_control": ephemeral() }]),
+        );
     }
     if let Some(t) = req.temperature {
         body.insert("temperature".into(), json!(t));
     }
     if !req.tools.is_empty() {
+        let last = req.tools.len() - 1;
         let tools: Vec<Value> = req
             .tools
             .iter()
-            .map(|t| {
-                json!({
+            .enumerate()
+            .map(|(i, t)| {
+                let mut def = json!({
                     "name": t.name,
                     "description": t.description,
                     "input_schema": t.input_schema,
-                })
+                });
+                // Breakpoint 1: the LAST tool closes the whole tool layer. One
+                // marker, not one per tool — a breakpoint per tool would spend
+                // the provider's four-breakpoint allowance on a layer that is
+                // append-only anyway.
+                if i == last {
+                    def.as_object_mut()
+                        .expect("tool definition is an object")
+                        .insert("cache_control".into(), ephemeral());
+                }
+                def
             })
             .collect();
         body.insert("tools".into(), Value::Array(tools));
@@ -162,15 +229,16 @@ fn parse_response(body: Value) -> Result<ChatResponse, LlmError> {
         None => StopReason::Other("missing".into()),
     };
 
+    let u = |field: &str| {
+        body.pointer(&format!("/usage/{field}"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    };
     let usage = Usage {
-        input_tokens: body
-            .pointer("/usage/input_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
-        output_tokens: body
-            .pointer("/usage/output_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0),
+        input_tokens: u("input_tokens"),
+        output_tokens: u("output_tokens"),
+        cache_read_input_tokens: u("cache_read_input_tokens"),
+        cache_creation_input_tokens: u("cache_creation_input_tokens"),
     };
 
     Ok(ChatResponse {
@@ -318,9 +386,11 @@ mod tests {
         let results = messages[2]["content"].as_array().unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(results[1]["is_error"], true);
-        // System prompt is top-level, not a message.
+        // System prompt is top-level, not a message. Since AGENT-005 §6.1 it
+        // is a one-element block array rather than a bare string, because a
+        // `cache_control` marker is a property of a block.
         let body = build_body(&req);
-        assert_eq!(body["system"], "sys");
+        assert_eq!(body["system"][0]["text"], "sys");
     }
 
     #[test]

@@ -15,9 +15,11 @@ pub fn specs() -> Vec<ToolSpec> {
         "get_authoring_guide",
         "core",
         Risk::Read,
-        "Return the strategy-authoring protocol: definition JSON format, expression grammar, \
-         supported features, backtest workflow, and result interpretation. Call it once before \
-         authoring anything.",
+        "Return the research protocol (the edge-finding loop: model, design, experiment, sweep, \
+         diagnose, validate) and the full strategy-authoring protocol: definition JSON format, \
+         expression grammar, supported features, backtest workflow, and result interpretation. \
+         Call this once before authoring a strategy or starting a research loop; not needed for \
+         lookups.",
         json!({ "type": "object", "properties": {} }),
     )
     .internal()]

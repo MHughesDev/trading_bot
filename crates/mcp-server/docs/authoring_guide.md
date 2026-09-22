@@ -5,6 +5,48 @@ You are talking to a trading-strategy research platform. Through these tools you
 the results, and iterate**. You cannot place orders or trade — there is deliberately
 no order tool on this server.
 
+## The research protocol
+
+Follow this when the goal is to find a trading edge. A goal that asks a question is
+finished when the question is answered - do not start strategy work that was not
+asked for.
+
+0. **Model**, if the strategy needs one: `list_models`. If nothing suitable exists,
+   `train_model` - one call that creates, trains on real stored bars, waits, and
+   returns the trained version with its metrics. Pin `seed` so the run can be
+   repeated, and check the instrument has bars first with `list_instruments`. Then
+   `promote_model_version`, so strategies resolve to it.
+1. **Design**: write a strategy definition WITH a `parameters` block for every number
+   you might tune (periods, thresholds, gates) and `param('name')` / `{{name}}`
+   references. Declare honest ranges. Check it with `validate_strategy`, which returns
+   structured, fixable errors, and then `create_strategy` with the definition object.
+   (MCP clients that would rather assemble it a piece at a time have the
+   `new_strategy_draft` builder tools - see "The recommended loop" step 2. The in-app
+   research agent is not offered them and does not need them.)
+
+   A `when` on a node names ANOTHER NODE'S ID. It is not an expression -
+   `feature('x') > 0.5` belongs in a condition node, and the node that uses it refers
+   to that node by id.
+2. **Experiment**: `create_experiment` for that `strategy_ref` with an objective - a
+   primary metric plus constraints such as `min_trades` and `max_drawdown_lte`. The
+   holdout is locked; every Study you run is a counted trial.
+3. **Sweep**: `run_sweep` to tune the parameters. YOU NEVER PICK A NUMBER - you may
+   only narrow ranges; the sampler chooses. Read `surface.text`: a plateau is robust,
+   a spike is fragile. Build on `carried_forward` (the stable centroid), never on a
+   best sample - there is no best sample.
+4. **Diagnose**: `get_diagnostics` on a member run (ids in `list_studies`) to learn
+   WHAT loses: which months, which trades, how long the drawdown, how much cost drag.
+   Propose ONE structural change in response (add or remove a filter, change an exit,
+   gate on a regime) as a new versioned strategy (`..._v2`), then repeat from step 2
+   with a new Experiment.
+5. **Validate**: `run_study` `walk_forward` and `cpcv` on the carried-forward
+   parameters; then `choose_null` and `advance_gate` through the funnel. A candidate
+   that fails Gate 2 or Gate 3 is a finding, not a failure - say why and move on.
+
+Do not create raw backtests; Experiments are the only path for research. Prefer
+`run_sweep` and `run_study` - they block server-side at zero cost to you - over
+polling. Change one thing at a time and keep slugs versioned.
+
 ## The recommended loop
 
 1. `list_instruments` — see which instruments have stored bar history (and how much,

@@ -172,6 +172,11 @@ fn parse_response(body: Value) -> Result<ChatResponse, LlmError> {
             .and_then(|v| v.as_u64())
             .unwrap_or(0),
         output_tokens: body.get("eval_count").and_then(|v| v.as_u64()).unwrap_or(0),
+        // Ollama has no prompt cache to report. Zero here is a measurement, not a
+        // placeholder: a local run's whole prompt is fresh every call, which is
+        // why the local tier's budget arithmetic is the one that has to be exact.
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
     };
 
     Ok(ChatResponse {

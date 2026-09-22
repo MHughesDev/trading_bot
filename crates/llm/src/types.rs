@@ -126,10 +126,55 @@ pub enum StopReason {
 }
 
 /// Token accounting for one call.
+///
+/// `input_tokens` is what the provider charged at the *uncached* rate. With
+/// prompt caching on (AGENT-005 §6.1) that is no longer the size of the prompt:
+/// the bytes served from cache are reported separately and are not included in
+/// it. Reading `input_tokens` as "how big was the prompt" was correct before
+/// caching and is an undercount after it, which is why [`Usage::prompt_tokens`]
+/// exists and why the estimator calibration in §7 must use it.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct Usage {
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Prompt tokens served from a cache hit — billed at a discount, and the
+    /// number AC-2 is measured against.
+    #[serde(default)]
+    pub cache_read_input_tokens: u64,
+    /// Prompt tokens written into the cache on this call — billed at a premium
+    /// and paid once per breakpoint per TTL.
+    #[serde(default)]
+    pub cache_creation_input_tokens: u64,
+}
+
+impl Usage {
+    /// Every prompt token this call actually read, cached or not.
+    ///
+    /// The three fields are disjoint: a token is fresh, or read from cache, or
+    /// written to cache, never two of those. Summing them is therefore the
+    /// prompt size, and it is the only one of the four numbers that can be
+    /// compared against a harness estimate of the same request.
+    #[must_use]
+    pub fn prompt_tokens(&self) -> u64 {
+        self.input_tokens
+            .saturating_add(self.cache_read_input_tokens)
+            .saturating_add(self.cache_creation_input_tokens)
+    }
+
+    /// The share of the prompt that did not have to be re-read, in `[0, 1]`.
+    ///
+    /// `None` when the call read no prompt at all, because a ratio over zero is
+    /// not "perfectly cached" — it is "nothing happened", and reporting the
+    /// first for the second is how an unused run comes to look like a success.
+    #[must_use]
+    pub fn cache_hit_rate(&self) -> Option<f64> {
+        let total = self.prompt_tokens();
+        if total == 0 {
+            return None;
+        }
+        #[allow(clippy::cast_precision_loss)]
+        Some(self.cache_read_input_tokens as f64 / total as f64)
+    }
 }
 
 /// A chat completion response in provider-neutral form.

@@ -507,10 +507,16 @@ pub async fn drive(
     // run-scoped token — identical code path to the external MCP front door.
     let mcp_ctx = McpContext::new(api.clone());
     let tools = tool_defs();
-    let system = prompt::system_prompt(&params.constraints);
+    // L1 of AGENT-005 §2.1: byte-stable, ≤ 3,200 B, and the same string on every
+    // call of every session — which is what makes the system cache breakpoint
+    // (§6.1) hit rather than re-create.
+    let system = prompt::charter();
 
+    // L3: everything that varies. `prior` was computed in `manager.rs`, handed to
+    // this driver, and never read until here, so every turn after the first began
+    // as though the conversation had not happened.
     let mut messages: Vec<Message> = vec![Message::User {
-        content: params.goal.clone(),
+        content: prompt::opening_message(&params.prior, &params.constraints, &params.goal),
     }];
     let mut iterations: i32 = 0;
     let mut tokens_in: i64 = 0;

@@ -57,6 +57,9 @@ pub struct LocalRunParams {
     /// The user's message for this turn.
     pub goal: String,
     pub charter: String,
+    /// The run's constraints. Rendered into the opening message by
+    /// `prompt::opening_message`, never into the charter (AGENT-005 §3.2).
+    pub constraints: Value,
     /// What earlier turns concluded. Empty on the first turn.
     pub prior: String,
     /// Where agent workspaces live. One folder per conversation underneath.
@@ -503,15 +506,11 @@ pub async fn run(pg: PgPool, client: LlmClient, params: LocalRunParams, cancel: 
         params.profile.clone(),
         registry,
         Task {
-            goal: if params.prior.trim().is_empty() {
-                params.goal.clone()
-            } else {
-                format!(
-                    "{}\n\nThe user now asks: {}",
-                    params.prior.trim(),
-                    params.goal
-                )
-            },
+            // One opening message for both drivers (AGENT-005 §3.2). This used to
+            // be a local-only `format!` that knew about `prior` but not about the
+            // run constraints, while the hosted driver knew about the constraints
+            // but put them in the system prompt and dropped `prior` on the floor.
+            goal: super::prompt::opening_message(&params.prior, &params.constraints, &params.goal),
             charter: format!(
                 "{}\n\n\u{2500}\u{2500} YOUR WORKSPACE \u{2500}\u{2500}\n\n{}",
                 params.charter,
@@ -917,6 +916,7 @@ mod tests {
             usage: llm::Usage {
                 input_tokens: 1,
                 output_tokens: 1,
+                ..llm::Usage::default()
             },
         };
         let raw = reply_text(&Decode::Native { tools: vec![] }, &resp);
@@ -936,6 +936,7 @@ mod tests {
             usage: llm::Usage {
                 input_tokens: 1,
                 output_tokens: 1,
+                ..llm::Usage::default()
             },
         };
         let raw = reply_text(

@@ -637,6 +637,91 @@ mod catalogue_tests {
         );
     }
 
+    /// Set S task S-1.7, AGENT-005 §3.3: the research protocol is *served*, not
+    /// carried in the charter of every call.
+    ///
+    /// It opens the guide because it is the part a research goal needs and the
+    /// part a lookup goal must not be made to read: the guide is served whole on
+    /// the MCP path and head-truncated on the local path, so position is what
+    /// decides which half a 7B actually sees.
+    #[test]
+    fn the_guide_opens_with_the_research_protocol() {
+        let guide = authoring_guide();
+        let first_section = guide
+            .find("\n## ")
+            .map(|i| &guide[i + 4..])
+            .and_then(|rest| rest.split(['\r', '\n']).next())
+            .expect("the guide has at least one `## ` heading");
+        assert_eq!(
+            first_section, "The research protocol",
+            "the research protocol must be the guide's first section"
+        );
+        // The five steps, by the tool each one names.
+        for step in [
+            "list_models",
+            "train_model",
+            "validate_strategy",
+            "create_experiment",
+            "run_sweep",
+            "get_diagnostics",
+            "run_study",
+            "advance_gate",
+        ] {
+            assert!(
+                guide.contains(step),
+                "the research protocol must name {step}"
+            );
+        }
+        // The rewording §3.3 asks for: `validate_strategy` then `create_strategy`,
+        // and the builder mentioned only in the MCP-client sense.
+        let protocol_end = guide.find("## The recommended loop").expect("second section");
+        let protocol = &guide[..protocol_end];
+        assert!(
+            protocol.contains("`validate_strategy`"),
+            "the protocol validates before it creates"
+        );
+        assert!(
+            !protocol.contains("BUILD IT WITH THE DRAFT BUILDER"),
+            "the draft-builder instruction is not the research path"
+        );
+
+        // And the tool that serves it says so, so the model knows what it is
+        // fetching and when it does not need to.
+        let desc = spec::find("get_authoring_guide")
+            .expect("get_authoring_guide is declared")
+            .description;
+        assert!(
+            desc.contains("research protocol"),
+            "get_authoring_guide's description must name the research protocol"
+        );
+        assert!(
+            desc.contains("lookup"),
+            "get_authoring_guide's description must say a lookup does not need it"
+        );
+    }
+
+    /// The adversarial half of S-1.7: the protocol may live in exactly one place.
+    ///
+    /// Two copies of a protocol is the failure this task exists to undo — the old
+    /// charter carried the five steps *and* inlined the guide that also carried
+    /// them, so a wording fix in one left the other stale and the model read both.
+    #[test]
+    fn the_research_protocol_is_not_also_in_the_charter() {
+        let guide = authoring_guide();
+        let protocol_end = guide.find("## The recommended loop").expect("second section");
+        let protocol = &guide[..protocol_end];
+        // A distinctive line from each of the five steps. If one of these ever
+        // reappears in a prompt literal, this is the test that should be read.
+        for marker in ["YOU NEVER PICK A NUMBER", "the stable centroid"] {
+            assert_eq!(
+                guide.matches(marker).count(),
+                1,
+                "{marker} appears more than once in the guide"
+            );
+            assert!(protocol.contains(marker), "{marker} belongs to the protocol");
+        }
+    }
+
     /// §2.5, the static half: a write in a namespace that can run the simulator
     /// either declares a trial kind or is on this list with a reason.
     ///

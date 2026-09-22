@@ -289,13 +289,13 @@ impl AgentManager {
             .cloned();
 
         if let Some(profile) = local {
-            let charter = prompt::system_prompt(&serde_json::json!({}));
             let params = LocalRunParams {
                 run_id,
                 user_id,
                 conversation_id,
                 goal: text.to_string(),
-                charter,
+                charter: prompt::charter(),
+                constraints: serde_json::json!({}),
                 prior,
                 profile,
                 namespaces: vec!["core".into(), "discovery".into()],
