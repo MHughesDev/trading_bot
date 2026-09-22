@@ -1630,3 +1630,60 @@ Crypto carry *is* the perpetual funding rate. Funding is forward-collect-only un
 
 **The question that remains.** Should `cost_model_ref` be (a) honoured by the executors — a real cost-model registry, so a `CostSweep` re-simulates and captures cost-aware strategy behaviour the analytic ladder cannot; (b) removed from `VarySpec`, since `StudyKind::CostSweep` currently cannot do what its name says; or (c) left as-is with the analytic ladder as the supported path and the study kind documented as not-yet-wired? Only (a) captures a strategy that *reads* its cost model and trades differently under a worse one — which no strategy in the frozen v1.0 grammar does today.
 **Status:** open.
+
+---
+
+## Q-S3-05 — `lookahead_truncation_test` cannot fail on this substrate
+
+**Raised and answered 2026-09-22.**
+
+ADR-D-19 split AGENT-006 §5.4 into two tools and called the truncation half
+*"buildable today"*. It was built, with 27 tests including planted breaks that
+prove the detector fires on a fabricated input. The premise held.
+
+**And then the same investigation that made `future_perturbation_test`
+unbuildable made this one unfalsifiable.** Verified in the code:
+
+- `preview.rs` calls `features::runtime::value_at(feature, &rows, decision)` with
+  `decision = rows.len() - 1`, over a sliding buffer holding only bars up to `i`.
+  Future bars are not merely unreadable — **they are not in memory**.
+- `WindowedFrame` keeps `data` and `decision` private and exposes only
+  `back(k)` → `data[decision - k]`, refusing `k >= lookback`, and
+  `Feature::compute(&self, frame: &WindowedFrame)` is the only signature, so no
+  feature can bypass it.
+- `evaluate_signals` takes scalars for the current bar; no whole-window
+  aggregate is expressible.
+- A registry grep for a forward-reading name (`forward|lead_|future|ahead|shift`)
+  returns **zero hits** outside the string `"futures"` in an asset-class list.
+
+So the shorter run's firings are a prefix of the longer's **by construction**,
+and the test cannot fail for any strategy this platform can represent.
+`crates/features/src/leakage.rs` names this exact anti-pattern in its own module
+docs, about its sibling: *a detector that structurally cannot fire, feeding a
+gate, manufactures evidence of cleanliness.*
+
+**Status:** answered (decided under Mason's delegation of 2026-09-21 — ADR-D-30).
+**The detector stays and the model-facing tool goes.**
+
+The regression it guards is real and worth keeping. `features::runtime::backfill_column`
+already passes the **full** rows slice with `decision = i`; it is causal today
+only because `back(k)` cannot count forward. The day a vectorised implementation
+appears under that path the structural argument stops holding, and a truncation
+check is what notices.
+
+But that is **a CI test's job, not a model-facing tool's.** The catalogue is sent
+on every model call, so the tool spends description budget to offer an agent a
+check whose answer is `prefix_held` for every representable strategy — and an
+agent citing `prefix_held` as evidence of no lookahead is precisely the
+manufactured cleanliness the rule forbids. Moving it to a `#[test]` over
+`backfill_column` catches the same regression with no budget and no citable
+verdict.
+
+The 27 tests move with it; the planted-break cases are what make it a detector
+rather than an assertion, and they are the reason this is a move and not a
+deletion.
+
+**And it settles the namespace divergence** that would otherwise need its own
+answer: AGENT-006 §5.6's table puts the tool in `audit` (counting "13") while
+the declaration put it in `strategy`. With no tool there is no namespace — the
+table's count returns to 12 and the row goes.
