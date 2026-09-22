@@ -233,7 +233,9 @@ impl Insight {
 /// Reads and writes `knowledge.insight` — AGENT-003's durable memory and the
 /// pack's insight table, one store under two names (ADR-P3-04).
 pub struct InsightStore {
-    pg: PgPool,
+    /// `pub(crate)` so the read path in [`crate::insight_memory`] can extend
+    /// this type without moving it — track 8 owns the tensor half of this file.
+    pub(crate) pg: PgPool,
 }
 
 impl InsightStore {
@@ -267,12 +269,17 @@ impl InsightStore {
                     contradicted_n, decay_score
              FROM knowledge.insight
              WHERE tenant_id = $1 AND ($2::smallint IS NULL OR tier = $2)
+               -- 0118: a contradicted or archived claim leaves *retrieval*, and
+               -- leaves nothing else. See `insight_memory::RETRIEVAL_FLOOR`.
+               AND archived_at IS NULL
+               AND decay_score >= $4
              ORDER BY decay_score DESC, last_confirmed_at DESC NULLS LAST
              LIMIT $3",
         )
         .bind(tenant_id)
         .bind(tier)
         .bind(limit.clamp(1, 500))
+        .bind(crate::insight_memory::RETRIEVAL_FLOOR)
         .fetch_all(&mut *tx)
         .await?;
         tx.commit().await?;

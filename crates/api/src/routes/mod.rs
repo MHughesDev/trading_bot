@@ -6,6 +6,7 @@ pub mod backtests;
 pub mod dashboard;
 pub mod data;
 pub mod experiments;
+pub mod insights;
 pub mod jobs;
 pub mod llm;
 pub mod models;
@@ -353,6 +354,17 @@ pub fn router(state: AppState) -> Router {
         .route("/api/platform/health", get(platform_health::health))
         .route("/api/platform/gates/{subject}", get(platform_health::gate_stack))
         .route("/api/platform/timeline", get(platform_health::timeline))
+        // ── The insight store's read path (SPEC §5.6, checklist 3.10) ────────
+        .route("/api/knowledge/insights", post(insights::write))
+        .route("/api/knowledge/insights/search", post(insights::search))
+        .route(
+            "/api/knowledge/insights/{id}/contradict",
+            post(insights::contradict),
+        )
+        .route(
+            "/api/knowledge/insights/{id}/reconfirm",
+            post(insights::reconfirm),
+        )
         // I-2.11 leaderboard (static path must precede dynamic /{id})
         .route("/api/models/leaderboard", get(models::leaderboard))
         // I-3.1 feature library
