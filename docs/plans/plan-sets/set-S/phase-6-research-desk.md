@@ -1,6 +1,13 @@
 # Phase 6 — The Research Desk
 
-**Completion: 0% (0 / 24 tasks)**
+**Completion: 24 / 24 surfaces built; 11 `DONE`, 13 `PARTIAL`**
+
+> Every task's UI is built, wired and tested. Thirteen are `PARTIAL` because the endpoint
+> they read does not exist yet — AGENT-012 §17 marks a dozen rows as absent and they belong
+> to other phases. Each of those surfaces renders an honest empty state naming the phase that
+> owns the data, rather than a placeholder number. **A `PARTIAL` here means "the screen is
+> finished and proven against fixtures; the live data is not there yet"**, and each note says
+> which.
 
 **Requirement IDs:** DK-01…DK-24.
 **Spec:** [AGENT-012](../../../specs/AGENT-012-research-desk-ui.md), which supersedes
@@ -31,7 +38,9 @@ built only on the primitives and `app.css`, and S-6.22 deletes what it replaces.
 ## Shell and transport
 
 ### S-6.1 The desk shell — M
-`NOT STARTED`
+`DONE`
+
+**Landed 2026-09-15 (track 25).** Routes under `/desk` (one lazy route in `App.tsx`), nav entry, `FULL_HEIGHT_ROUTES`, three columns at wide width becoming a drawer at 1200px and a sheet at 768px. Verified by: `no-deprecated-aliases.test.ts`.
 
 Routes under `/desk` (`App.tsx`, lazily imported, named exports), a nav entry in
 `NAV_SECTIONS` (`TopBar.tsx` — `CommandPalette` derives its "Go to" commands from it), and
@@ -47,7 +56,9 @@ without reflow.
 **Traces:** AGENT-012 §1; §19.7.
 
 ### S-6.2 One event stream — M
-`NOT STARTED`
+`DONE`
+
+**Landed 2026-09-15 (track 25).** `useDeskStream` keeps a cursor, resumes with `Last-Event-ID`, backs off to 15 s, marks the UI stale with an age instead of blanking it, and merges by `seq` so a replayed frame cannot duplicate a card. Verified by: `controls-and-replay.test.tsx > the stream resumes without duplicating`.
 
 Copy the pattern that already works: `api/research.ts` `openTimeline` is a hand-rolled
 `fetch` SSE client with `AbortController`, `Last-Event-ID` resume, manual frame splitting,
@@ -61,7 +72,9 @@ cards; while disconnected the last state stays visible, marked stale with an age
 **Traces:** AGENT-012 §16; §14 (states).
 
 ### S-6.3 The card stream — L
-`NOT STARTED`
+`DONE`
+
+**Landed 2026-09-15 (track 25).** Step groups with a header, raw events folded behind a disclosure (off by default, on with `d`), the disclosure state persisted per conversation, and only the last 25 groups mounted so a 200-step run does not mount 200 steps.
 
 Not a transcript: cards grouped by step under a step header ("Step 7 · sweep parameters · 2
 tools · 41 s"), with raw events (exposure, compaction, validation, usage) folded behind a
@@ -72,7 +85,9 @@ conversation.
 **Traces:** AGENT-012 §3.2.
 
 ### S-6.4 Cards, part 1 — L
-`NOT STARTED`
+`DONE`
+
+**Landed 2026-09-15 (track 25).** You, agent, plan, tool, finding, negative result, decision. A tool card shows the summary as prose, never a raw table, and an `n`-less number renders "(n unknown)". Verified by: `honesty.test.tsx > a number without its sample size says so`.
 
 You · Plan (status glyphs, the tool each step names) · Tool (name, namespace, risk badge,
 collapsed arguments, duration, the `ToolResult` summary as prose with linked ids, `n`/`se`
@@ -84,7 +99,9 @@ inline, handle) · Finding (confidence pill, evidence chips, "cited later") · N
 **Traces:** AGENT-012 §3.2; §19.1.
 
 ### S-6.5 Cards, part 2 — L
-`NOT STARTED`
+`DONE`
+
+**Landed 2026-09-15 (track 25).** Question, approval, job, gate, escalation, correction, compaction, report, stage, pre-registration, offer, proposal, halt. A `SealedHoldout` approval cannot be confirmed in one click. Verified by: `honesty.test.tsx > an irreversible approval cannot be confirmed in one click`.
 
 Question · Approval (envelope banner, reversibility, two-step for irreversible) · Job
 (deterministic progress, never an indeterminate spinner over content) · Gate (funnel
@@ -100,7 +117,9 @@ do).
 ## Working with the agent
 
 ### S-6.6 The controls row and the keyboard map — M
-`NOT STARTED`
+`DONE`
+
+**Landed 2026-09-15 (track 25).** Every control is bound at the document, not to a focused element, and nothing is disabled by the agent being busy — only by a dropped stream, which is named in the tooltip. Verified by: `controls-and-replay.test.tsx > every control works from the keyboard while the agent is mid-call`.
 
 Pause · Resume · Stop · Steer · Approve/Deny · Escalate · Budget · Details · Replay, always
 visible, never scrolled away. `space` pause/resume, `esc` stop (confirm), `a`/`x` approve or
@@ -112,7 +131,9 @@ frontier run and on a local run.
 **Traces:** AGENT-012 §3.4; §19.3.
 
 ### S-6.7 The composer — M
-`NOT STARTED`
+`DONE`
+
+**Landed 2026-09-15 (track 25).** Two options and a toggle. The charter lives beside the question, so toggling loses nothing in either direction; a Chat question that would need a trial renders the offer instead of submitting; a send mid-run is a steer. Verified by: `modes.test.tsx`.
 
 Model picker with tier badge and an `unmeasured` warning; constraint chips (instrument,
 timeframe, window, balance) that render into the opening message (S-1.6); attach a strategy,
@@ -129,7 +150,9 @@ mid-run produces a steer card rather than a queued turn.
 **Traces:** AGENT-012 §3.3 (amended 2026-09-14); AGENT-008 §3.1; AGENT-013 §2.
 
 ### S-6.8 Right panel — State — M
-`NOT STARTED`
+`PARTIAL`
+
+**Landed 2026-09-15 (track 25).** Panel complete and proven against a fixture. It renders from `GET /api/agent/runs/{id}/state`, which AGENT-012 §17 marks as not built — so in the running app today it shows "No working state yet" rather than a reconstruction from cards. Verified by: `state-panel.test.tsx`.
 
 The `WorkingState` card: goal and kind, acceptance criteria with ticks, hypothesis, plan
 tracker, evidence with the tool that produced each id, findings, open questions, decisions,
@@ -143,7 +166,9 @@ opening a card.
 **Traces:** AGENT-012 §3.5, principle 8; §19.1.
 
 ### S-6.9 Right panel — Evidence — L
-`NOT STARTED`
+`PARTIAL`
+
+**Landed 2026-09-15 (track 25).** Resolution and the strike-through are done and adversarially tested. The in-place viewers are id chips plus a summary line, not the plateau/spike plot, the gate ledger or the trade list — those need the experiment and study endpoints. Verified by: `honesty.test.tsx > every id resolves or is struck through`.
 
 Every id the run produced, grouped, with in-place viewers: experiment summary, study surface
 (the plateau/spike plot — `charts/Primitives.tsx` has the parts), gate ledger, trade list
@@ -154,7 +179,9 @@ with the concentration bar, bars chart, data-quality results.
 **Traces:** AGENT-012 §3.5, §6.3, principle 9; §19.2.
 
 ### S-6.10 Right panel — Memory — M
-`NOT STARTED`
+`PARTIAL`
+
+**Landed 2026-09-15 (track 25).** Tab built with *cited* marks, "why retrieved" and forget. `/api/memory/*` (Set S phase 4) does not answer, so it renders the "not built yet" state rather than an empty brief.
 
 What the brief contained, each item marked *cited* when the run used it, with "why
 retrieved" on hover, and **add to memory** / **forget**.
@@ -165,7 +192,9 @@ retrieved" on hover, and **add to memory** / **forget**.
 **Traces:** AGENT-012 §3.5; AGENT-007 §4.
 
 ### S-6.11 Right panel — Tools — M
-`NOT STARTED`
+`PARTIAL`
+
+**Landed 2026-09-15 (track 25).** The mode and ring filter is done and adversarially tested; pin-a-tool is wired. The exposed set cannot yet be compared with the harness's `Note::Exposure` because no endpoint publishes it. Verified by: `modes.test.tsx > the Tools panel renders none of them in Chat, and says why`.
 
 What this tier can currently see, what it searched for, the whole catalogue with search,
 tool notes on click, and pin-a-tool for this run.
@@ -176,7 +205,9 @@ exactly; pinning a tool makes it available on the next step.
 **Traces:** AGENT-012 §3.5.
 
 ### S-6.12 Right panel — Cost — M
-`NOT STARTED`
+`PARTIAL`
+
+**Landed 2026-09-15 (track 25).** Component built — per-layer table, per-call cache sparkline, calibrated against estimated bytes/token, with `unmeasured` where there is no calibration. No endpoint publishes per-call layer totals, so it renders empty.
 
 Tokens by layer (charter / schemas / body / output) per call, cache hit as a sparkline,
 cumulative dollars, and the calibrated bytes-per-token beside the harness estimate and the
@@ -188,7 +219,9 @@ calibrated error; the cache sparkline is per call, not per run.
 **Traces:** AGENT-012 §3.5, principle 11.
 
 ### S-6.13 The shared components — M
-`NOT STARTED`
+`DONE`
+
+**Landed 2026-09-15 (track 25).** All eleven components are on `/design` under "Research desk"; none uses colour alone.
 
 Tier badge (with measured/unmeasured), budget meter (four bars, cap, 90% line, projected
 end, `warn` at 75% / `neg` at 90%, always with the text value), evidence chip, confidence
@@ -203,7 +236,9 @@ principle 3).
 ## The other surfaces
 
 ### S-6.14 Desk home — L
-`NOT STARTED`
+`PARTIAL`
+
+**Landed 2026-09-15 (track 25).** All six panels present, with the empty "Needs you" naming the last decision rather than showing "No data". "Running now" cannot yet show tier, current step, cost or cache per row — the conversation list does not carry them and `/api/desk/events` does not exist.
 
 Needs you (approvals, questions, escalations — proposals and stalled continuous sessions join
 it in S-10.15 / S-11.13) · Running now (tier, current step, what it waits on, cost, pause/stop
@@ -215,7 +250,9 @@ data" (Meridian §3.22); the Start panel's mode control sends the mode with the 
 **Traces:** AGENT-012 §2 (amended 2026-09-14).
 
 ### S-6.15 Approvals, inline and global — M
-`NOT STARTED`
+`DONE`
+
+**Landed 2026-09-15 (track 25).** `ApprovalsInbox` reused and rebuilt on the primitives (deviation recorded in the file header); `/approvals` redirects to `/desk/approvals`.
 
 Reuse `components/workspace/ApprovalsInbox.tsx`, which already handles eight approval kinds
 with evidence and timeouts. Keep `/approvals` as an alias of `/desk/approvals`.
@@ -225,7 +262,9 @@ with evidence and timeouts. Keep `/approvals` as an alias of `/desk/approvals`.
 **Traces:** AGENT-012 §1, §3.2.
 
 ### S-6.16 Run detail and the replay scrubber — L
-`NOT STARTED`
+`PARTIAL`
+
+**Landed 2026-09-15 (track 25).** Scrubber, layer table and prompt/reply/diff built; the byte-for-byte property is proven on fixtures and the panel *says* when the layers do not reassemble instead of showing a plausible reconstruction. `/api/agent/runs/{id}/trajectory` does not exist, and **Save as case** is a stub. Verified by: `controls-and-replay.test.tsx > the replay scrubber reproduces the prompt byte-for-byte`.
 
 A step strip; the working state **as it was** at that step; the model call's rendered prompt
 sections with their token sizes; toggles for prompt / reply / diff. **Save as case** writes
@@ -237,7 +276,9 @@ from `agent_events`, with per-layer token sizes matching AGENT-005's accounting.
 **Traces:** AGENT-012 §4; §19.4.
 
 ### S-6.17 The dossier reader — L
-`NOT STARTED`
+`PARTIAL`
+
+**Landed 2026-09-15 (track 25).** Reader, per-claim verify-in-place and three exports built; the untrusted mark survives the Markdown export and is tested. `/api/dossiers/*` does not exist.
 
 A document, in the `paper` reading layout even when the app is in `terminal`: verdict,
 evidence table (claim → id → n/se → verification method), plan as executed, funnel with
@@ -251,7 +292,9 @@ the fold; **verify** updates in place.
 **Traces:** AGENT-012 §5; §19.5.
 
 ### S-6.18 The memory browser — L
-`NOT STARTED`
+`PARTIAL`
+
+**Landed 2026-09-15 (track 25).** All seven tabs, the conflicts filter and the side-by-side pairing are built — `conflictPairs` pairs each disagreement once, so neither side can be ranked away. `/api/memory/*` does not answer.
 
 Findings · Negative results (with "retry now" opening a conversation with the brief) ·
 Instrument profiles · Preferences · Playbooks · Signal registry. A conflicts filter shows
@@ -263,7 +306,9 @@ row opens its provenance (run, tool, data window).
 **Traces:** AGENT-012 §7.
 
 ### S-6.19 The catalogue page — M
-`NOT STARTED`
+`PARTIAL`
+
+**Landed 2026-09-15 (track 25).** Namespaces, tool cards and the simulate-exposure control are built. `/api/catalogue` and `/api/catalogue/exposure` do not exist, so the "same slice as the router" acceptance cannot be checked yet.
 
 Namespaces as columns, tools as cards (tier visibility, risk, trial flag, output budget,
 notes), workflows as sequences with decision points, and **simulate exposure**: pick a
@@ -275,7 +320,9 @@ profile and goal, and names the reason each tool was included.
 **Traces:** AGENT-012 §9.
 
 ### S-6.20 Models and tiers — M
-`NOT STARTED`
+`PARTIAL`
+
+**Landed 2026-09-15 (track 25).** Providers and keys moved off the retired agent page and work here; a profile with no calibration row renders `unmeasured`. The decode ladder, scorecards and canary need AGENT-009.
 
 Per profile: capabilities, decode ladder, exposure and context budgets, calibration with
 sample size, scorecard with per-suite pass rates and five-version sparklines, hardware
@@ -288,7 +335,9 @@ providers and keys work here and the old form is gone.
 **Traces:** AGENT-012 §10; AGENT-009 §4.
 
 ### S-6.21 Usage, monitor, strategy editor — L
-`NOT STARTED`
+`PARTIAL`
+
+**Landed 2026-09-15 (track 25).** The kill-switch banner is global, structural (it sits in `AppLayout` above the outlet) and has no dismiss control at all — that half is done. Usage shows the totals `/api/agent/usage` answers; the monitor table and the SLv2 compile and preview calls have no endpoint yet.
 
 Usage (spend by day/conversation/model/layer, cache rate, cost per finding and per gate,
 budget policies, CSV). Monitor (Phase 7's UI: strategy table with status and breaching
@@ -303,7 +352,9 @@ one event and cannot be dismissed while tripped.
 **Traces:** AGENT-012 §8, §11, §12; §19.6.
 
 ### S-6.22 Retire what this replaces — M
-`NOT STARTED`
+`PARTIAL`
+
+**Landed 2026-09-15 (track 25).** `/agent` and `/research` are deleted with redirects; `components/agent/*` and `components/workspace/*` are gone and nothing imports them (asserted by test). **The alias block is NOT deleted** — 28 non-desk files still use it (mlops, automations, workbench, proving-ground, settings, `layout/ModeBadge`, `ui/dialog`), which is outside this phase; see the plan defect noted in the track report. Notifications are not built. Verified by: `no-deprecated-aliases.test.ts`.
 
 Delete `/agent` and `/research` (keep redirects), `components/agent/*` and
 `components/workspace/*` except `ApprovalsInbox`, and the back-compat Tailwind aliases in
@@ -318,7 +369,9 @@ usable; live regions announce new approval, new question and run finished.
 **Traces:** AGENT-012 §13, §14, §15; §19.7, §19.8.
 
 ### S-6.23 The provenance fence has to reach the human — M
-`NOT STARTED`
+`DONE`
+
+**Landed 2026-09-15 (track 25).** Untrusted text renders inert, the mark names the source, `model_summary` is visibly not a measurement, and the mark survives export. Verified by: `honesty.test.tsx > the provenance fence reaches the human`.
 
 The platform fences untrusted content so the *model* can tell data from instruction. Nothing
 carried that to the *person*, who is the one who acts on it. The path is short and real: a
@@ -339,7 +392,9 @@ survives PDF and Markdown export; `model_summary` and `direct_stat` are visually
 **Traces:** AGENT-012 §6.3a; §19.1a.
 
 ### S-6.24 Since you were away — M
-`NOT STARTED`
+`PARTIAL`
+
+**Landed 2026-09-15 (track 25).** The panel, the last-visit marker, the gap filter and the under-an-hour rule are built and tested. `/api/desk/digest` does not exist. Verified by: `controls-and-replay.test.tsx > Since you were away covers exactly the gap`.
 
 The operator persona's actual question, which no other panel answers. The desk knows when you
 last looked, so it can say what changed: runs that finished and what they **concluded**

@@ -18,7 +18,7 @@ import { persist } from 'zustand/middleware'
 export type OrderType = 'market' | 'limit'
 export type Tif = 'gtc' | 'day' | 'ioc' | 'fok'
 export type ChartStyle = 'candles' | 'bars' | 'line' | 'area'
-export type LandingPage = '/dashboard' | '/trading' | '/terminal' | '/strategy' | '/agent'
+export type LandingPage = '/dashboard' | '/trading' | '/terminal' | '/strategy' | '/desk'
 export type SizeUnit = 'base' | 'quote'
 export type ApprovalPolicy = 'always' | 'above_budget' | 'never'
 

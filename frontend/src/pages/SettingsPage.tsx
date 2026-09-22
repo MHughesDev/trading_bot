@@ -23,9 +23,9 @@ import { Select } from '@/components/primitives/Overlay'
 import { ConfirmDialog, Modal } from '@/components/primitives/Modal'
 import { EmptyState } from '@/components/primitives/States'
 import { VenueCredentials } from '@/components/settings/VenueCredentials'
-import { LlmCredentialForm } from '@/components/agent/LlmCredentialForm'
-import { ApiAccessCard } from '@/components/agent/ApiAccessCard'
+import { ApiAccessCard } from '@/components/settings/ApiAccessCard'
 import { cn } from '@/lib/utils'
+import { Link } from 'react-router-dom'
 
 /* =============================================================================
    Spec §4.4 — Settings.
@@ -311,7 +311,7 @@ function WorkspaceSection() {
               { value: '/trading', label: 'Trading desk — my panel layout', text: 'Trading desk' },
               { value: '/terminal', label: 'Terminal — one market, full depth', text: 'Terminal' },
               { value: '/strategy', label: 'Strategy builder', text: 'Strategy' },
-              { value: '/agent', label: 'Research agent', text: 'Agent' },
+              { value: '/desk', label: 'Research desk', text: 'Desk' },
             ]}
           />
         </Field>
@@ -1102,7 +1102,11 @@ function AiSection() {
           Connect an LLM provider for the research agent. Keys are verified against the provider, encrypted
           at rest, and never returned.
         </p>
-        <LlmCredentialForm />
+        {/* Providers and keys live on the desk's Models page now (AGENT-012
+            §10). One place to add a key, beside the profile it enables. */}
+        <Link to="/desk/models" className="btn">
+          Open Models and providers
+        </Link>
       </PanelBody>
     </Panel>
   )
