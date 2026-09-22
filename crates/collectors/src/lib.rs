@@ -3,16 +3,24 @@
 //! Each venue implementation lives in its own sub-module and is deliberately
 //! different to prove that the `Collector` abstraction is venue-agnostic.
 
+pub mod corp_actions;
 pub mod crypto;
 pub mod dex;
 pub mod equity;
+pub mod fundamentals;
 pub mod futures;
 pub mod fx;
 pub mod gap;
+/// Macro-economic series. Spelled `r#macro` because `macro` is a reserved word;
+/// the spec's path `collectors::macro::fred` resolves here unchanged.
+pub mod r#macro;
+pub mod news;
 pub mod normalizer;
 pub mod options;
 pub mod prediction;
+pub mod ratelimit;
 pub mod reconnect;
+pub mod secret;
 pub mod social;
 pub mod web;
 

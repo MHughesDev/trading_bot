@@ -5,6 +5,11 @@ edition = "2021"
 
 [dependencies]
 domain = { workspace = true }
+# Set P Phase 3: the alternative-data collectors normalize into the data plane's
+# point-in-time types (`vintage`, `fundamentals`, `text`, `corporate`) rather than
+# inventing parallel ones. `dataplane` is pure logic with no I/O deps, so this
+# adds no transitive storage dependency to the collector crate.
+dataplane = { workspace = true }
 event-bus = { workspace = true }
 dashmap = { workspace = true }
 serde = { workspace = true }
@@ -21,3 +26,6 @@ rust_decimal = { workspace = true }
 rtrb = { workspace = true }
 rkyv = { workspace = true }
 xxhash-rust = { workspace = true, features = ["xxh3"] }
+
+[dev-dependencies]
+rust_decimal_macros = { workspace = true }
