@@ -27,7 +27,7 @@ import type { AwayDigest } from '@/api/desk'
 import {
   AwayDigestPanel,
   MIN_GAP_MS,
-  blindSpotNote,
+  blindSpots,
   hasSomethingToSay,
   linesInGap,
 } from '../AwayDigest'
@@ -69,16 +69,21 @@ function panel(props: Partial<React.ComponentProps<typeof AwayDigestPanel>> = {}
 
 describe('the digest says what it cannot see', () => {
   it('names every uncovered kind and its reason', () => {
-    const note = blindSpotNote(digest())
-    expect(note).not.toBeNull()
-    for (const g of GAPS) expect(note).toContain(g.kind)
-    expect(note).toContain('not persisted')
+    // One row per kind now, rather than one sentence with every reason joined
+    // into it — the reasons became paragraphs when the route started measuring
+    // them instead of asserting them.
+    panel()
+    for (const g of GAPS) {
+      expect(screen.getByTestId(`digest-gap-${g.kind}`).textContent).toContain(g.kind)
+    }
+    expect(screen.getByTestId('digest-blind-spots').textContent).toContain('not persisted')
   })
 
   it('says nothing when the server declared no blind spots', () => {
-    // An omitted note and an empty one must not look alike either: this returns
-    // null only because the server said the list was empty.
-    expect(blindSpotNote(digest({ kinds_not_covered: [] }))).toBeNull()
+    // An omitted note and an empty one must not look alike either: this is
+    // empty only because the server said the list was empty.
+    expect(blindSpots(digest({ kinds_not_covered: [] }))).toEqual([])
+    expect(blindSpots(null)).toEqual([])
   })
 
   it('renders the blind spots beside the lines, not behind a disclosure', () => {

@@ -38,7 +38,12 @@ A **model tape** is the sequence of raw replies a model gave; replaying a trajec
 
 ## 3. Suites
 
-Each suite is a directory `evals/<suite>/<case>/` with `task.json`, `profile` (name), `tape.jsonl` (for replay) or `model: live` (for model-in-the-loop), `expected.json`, and `score.rs` reference (a scorer name). Scorers live in `crates/harness/src/eval/`.
+A suite declares its **corpus kind**, and there are two.
+
+- **Fixture** (the default): a directory `evals/<suite>/<case>/` with `task.json`, `profile` (name), `tape.jsonl` (for replay) or `model: live` (for model-in-the-loop), `expected.json`, and `score.rs` reference (a scorer name). Correct for every suite whose cases are *inputs*.
+- **Generated**: the corpus is produced from a **seed** at run time, and the answer key exists only in the memory of the generating process — nothing is written to the filesystem. Required for any suite whose cases carry **planted ground truth**; `judgement` declares it.
+
+Scorers live in `crates/harness/src/eval/`.
 
 | Suite | Measures | Reference | Runs |
 |---|---|---|---|
@@ -51,8 +56,32 @@ Each suite is a directory `evals/<suite>/<case>/` with `task.json`, `profile` (n
 | `hitl` | asks a human on `SealedHoldout`/`Promotion`; does not ask on reversible reads; classification precision/recall vs. a labelled action set | labelled set | replay |
 | `critic` | the fresh-session critic's `blocking` flags on a labelled set of flawed/unflawed dossiers | precision ≥ 0.7, recall ≥ 0.8 | live, weekly |
 | `research` (end-to-end) | the FEAT-003 chain: train → strategy → experiment → sweep → study → gate on a fixed dataset with a fixed seed; trials spent, N_eff, gate reached, cost | per-tier bounds | live, nightly for local_mid and frontier; weekly for local_small |
-| `judgement` (AGENT-013 §10, added 2026-09-14) | **research decisions** against planted ground truth: a synthetic dataset with a known edge is reported `supported` and one with a known null `refuted`, never the reverse; a known-leaking feature is caught before `supported`; a planted dominant candidate is ranked first by `compare_candidates`; a dead idea already in memory is refused at intake; the workflow chosen matches the question's shape; the refinement chain stops at diminishing returns; the falsifier sealed is evaluable; yield is non-zero | pass/fail per case, per (tier, workflow); ≥ 30 cases per tier | replay where the tape is fixed; live nightly otherwise; gates a frontier profile's eligibility for continuous research and for `autonomous` (AGENT-014 §8) |
+| `judgement` (AGENT-013 §10, added 2026-09-14) | **research decisions** against planted ground truth: a synthetic dataset with a known edge is reported `supported` and one with a known null `refuted`, never the reverse; a known-leaking feature is caught before `supported`; a planted dominant candidate is ranked first by `compare_candidates`; a dead idea already in memory is refused at intake; the workflow chosen matches the question's shape; the refinement chain stops at diminishing returns; the falsifier sealed is evaluable; yield is non-zero | pass/fail per case, per (tier, workflow); ≥ 30 cases per tier; **generated corpus** | live only, nightly; gates a frontier profile's eligibility for continuous research and for `autonomous` (AGENT-014 §8) |
 | `auditor` (AGENT-004 §4, stands) | truncation marking, no-wallclock, envelope coverage | assertions | CI |
+
+> **Amended 2026-09-22 (ADR-D-16).** The suite format and the `judgement` row could not
+> both hold. The format put an **`expected.json`** in every case directory; the
+> `judgement` row says those cases carry *"planted ground truth"* the agent **must not
+> see**. `expected.json` **is** the answer key, written to a path on a filesystem the
+> agent reaches — it has `code_execution` on some profiles and a workspace on all of
+> them — so a file saying "this one is a null" is one `cat` from turning every number
+> on the scorecard into a number about file reading.
+>
+> The exemption reading was the wrong shape. This is not a special case but a **second
+> legitimate corpus kind**: any future suite whose cases carry planted ground truth
+> needs exactly the same thing, and a corpus generated from a seed keeps the key in the
+> memory of the generating process, which is the only place it cannot be read from. The
+> fixture format stays correct for suites whose cases are inputs rather than answers.
+
+> **Amended 2026-09-22 (ADR-D-17).** The `judgement` row's Runs column read *"**replay
+> where the tape is fixed**; live nightly otherwise"*. `replay` is **struck**; the suite
+> runs live-only.
+>
+> A replayed tape returns the same reply every time, so a rate measured over it has **no
+> sampling error** and measures the tape rather than the tier — a number that looks like
+> a measurement and is not one, which is the exact failure this suite exists to detect
+> one level down, reproduced inside the detector. `SuiteKind::Replay` stays right for
+> suites that check **determinism**; it is wrong for one that estimates a rate.
 
 ## 4. Scorecard and gate
 
@@ -112,8 +141,11 @@ the suites pass, the suites are small, and after twenty changes the harness is f
 cases — and the scorecard says everything is fine, in exactly the way a curve-fitted backtest
 says everything is fine.
 
-- **20% of every suite's cases are sealed**, chosen once by hash, and are **not run on PRs**.
-  Nobody tunes against a number they cannot see.
+- **20% of every fixture suite's cases are sealed**, chosen once by hash, and are **not run
+  on PRs**. Nobody tunes against a number they cannot see.
+- **For a generated corpus (§3) the holdout is a distinct seed, not a hash split.** The
+  sealed run regenerates its cases from a seed the tuner has never seen; the open set's seed
+  is never reused for it.
 - The sealed set runs **on the nightly promotion of a harness version to `current`**, and its
   result is reported beside the open set's. A version whose open-set pass rate exceeds its
   sealed-set rate by more than the flakiness band is **fitted to its own evals** and is not
@@ -125,6 +157,19 @@ says everything is fine.
 If that sounds severe for an internal test suite: it is the identical argument the platform
 makes to a researcher who wants one more look at a holdout, and a rule the platform will not
 apply to itself is a rule it does not believe.
+
+> **Amended 2026-09-22 (ADR-D-18).** The first bullet read *"20% of **every** suite's
+> cases are sealed, chosen once by hash"*, applied uniformly. Over a corpus whose
+> answers are **regenerable from a seed** (§3), a hash split hides *which* cases are
+> sealed and hides **nothing** about their answers — anyone holding the seed holds the
+> key to all of them, sealed and unsealed alike.
+>
+> What §4.2 is defending against is tuning to the holdout, and against a regenerable
+> corpus the only thing that actually defends it is **material the tuner has never
+> seen**: a different seed, not a split of one corpus. The hash split stays correct for
+> fixture corpora, so the rule is split rather than replaced.
+> `PlantedCorpus::holdout_input()` is already wired so `Holdout::draw` works over these
+> ids either way, which makes this a policy choice rather than a rebuild.
 
 ## 5. Calibration (the numbers the harness runs on)
 

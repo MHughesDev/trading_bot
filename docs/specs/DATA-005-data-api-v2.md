@@ -185,6 +185,32 @@ PARTITION BY (timeframe, toYYYYMM(event_time));
 - `market_trades` has the same pattern with `dedup_key` in its sorting key. It's
   acceptable for trades, since trades aren't revised; keep it.
 
+> **Amended 2026-09-22 (ADR-D-29). `market_bars_v2` is not the authoritative bar table
+> and may not answer a point-in-time question. `trading.market_bar` is.** Everything
+> above describes a two-table world — `market_bars` frozen, `market_bars_v2` live — and
+> a third table exists that this spec never named. Both hold OHLCV bars and they
+> **disagree by 12,307 rows** on one series (BTC-USD / coinbase / 1m: 105,760 vs
+> 93,453), with two endpoints serving the two numbers.
+>
+> **The durability difference decides it, and it is structural rather than
+> configurable.** `market_bar` is
+> `ReplacingMergeTree(ingest_time) ORDER BY (instrument_id, venue_id, period_secs,
+> event_time, knowledge_time, revision_seq)`; `market_bars_v2` is
+> `ReplacingMergeTree(ingested_time) ORDER BY (instrument_id, timeframe, venue_id,
+> source, event_time, revision)`. **`knowledge_time` is in `market_bar`'s sort tuple
+> and absent from v2's**, so on v2 two rows for the same bar that share a `revision`
+> and differ in knowledge time **collapse on a background merge**, keeping whichever
+> arrived later by `ingested_time`. A restatement is destroyed silently — no error, no
+> row, nothing to read afterwards. On `market_bar` the same pair cannot collapse,
+> because both discriminators are in the key. That is a non-PIT read path nobody added
+> deliberately, inherited from a sorting key.
+>
+> The live system settles which is authoritative rather than which is newer in the
+> spec: `market_bar`'s newest row was ingested minutes ago, v2's a week earlier. So
+> **`market_bars_v2` is frozen**, on the precedent of `xtask check-bars-v1-frozen`, and
+> the v2 writers this spec still names — the `simulate_paths` synthetic-bar writer
+> (§9) and the ClickHouse storage list (§12) — must be redirected or retired.
+
 ## 4. Point-in-time, cutoff and Desk semantics
 
 | Concept | Rule |
@@ -354,7 +380,14 @@ The grade is attached to every manifest. `POST /api/hypotheses` and
 | D9 | EDGAR `as_of=t` never returns a fact accepted after `t` | DA-11 |
 | D10 | A synthetic planted-edge instrument backtests like a real one | DA-13 |
 | D11 | A live read in a research project → `403 live_data_desk_only`; the Desk answers; a Desk Experiment is refused at G3 | DA-15 |
-| D12 | Cross-timeframe bars with an equal `available_time` both survive in `market_bars_v2`; a revised bar is returned only for `as_of` after its availability | §3 |
+| D12 | Cross-timeframe bars with an equal `available_time` both survive in `market_bar`; a revised bar is returned only for `as_of` after its availability | §3 |
+
+> **Amended 2026-09-22 (ADR-D-29).** D12 named `market_bars_v2`. A point-in-time
+> acceptance criterion cannot be asserted against v2: `knowledge_time` is absent from
+> its sorting key, so two revisions of one bar collapse on merge and the criterion's
+> second clause is unprovable there by construction (§3's amendment). It names
+> `market_bar`, the authoritative table, instead. **Anything already measured against
+> v2 was measured on the stale table and must be re-measured before it is quoted.**
 
 ## 14. Open questions
 

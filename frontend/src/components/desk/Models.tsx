@@ -158,14 +158,29 @@ export function ProfileCard({ p }: { p: AgentProfile }) {
           decode ladder, exposure budget, context budget and per-suite scorecards arrive with AGENT-009 (Set S
           phase 4). The desk shows what is recorded and nothing more.
         </p>
-        <div className="desk-actions">
-          <Button size="xs" variant="ghost" disabled title="AGENT-009 §4 — not built yet">
-            Run scorecard
-          </Button>
-          <Button size="xs" variant="ghost" disabled title="AGENT-009 §4 — not built yet">
-            Run canary
-          </Button>
-        </div>
+        {/* **Run scorecard and Run canary were deleted, not left disabled.**
+            They were two `disabled` buttons carrying their reason in a `title`,
+            which is a tooltip: invisible to a touch screen, invisible to a
+            keyboard until focus lands, and invisible to the person who simply
+            looked at the card and concluded the feature was broken rather than
+            absent. A disabled control with no visible explanation is a promise
+            that it will work when some condition clears, and there is no such
+            condition here.
+            Searched before deleting: no route in `crates/api/src` runs either
+            one. `grep -rn "scorecard\|canary"` over `crates/api/src/routes`
+            returns a single sentence inside `research_sessions.rs` prose, and
+            `routes/mod.rs` mounts `/api/agent/profiles` (GET) and nothing
+            beside it. The nearest thing that does exist,
+            `POST /api/models/{id}/versions/{v}/evaluate`, belongs to the ML
+            model studio and evaluates a *trading* model version by registry id
+            — pointing these buttons at it would evaluate a different object
+            entirely and report the answer under this profile's name.
+            Asserted by `a-run-nobody-can-run-is-not-a-disabled-button`. */}
+        <p className="sub" data-testid="no-scorecard-runner">
+          Nothing on this platform can run a scorecard or a canary for a capability profile: no route
+          serves either, so there is no button here to press. What is shown above is what has been
+          recorded, and running a new measurement arrives with AGENT-009 §4.
+        </p>
       </PanelBody>
     </Panel>
   )

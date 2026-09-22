@@ -123,7 +123,23 @@ export const researchApi = {
       { params: { path } },
     ),
 
-  report: (reportId: string) => client.get<unknown>(`/api/reports/${reportId}`),
+  // **`report(reportId)` was deleted.** It was `GET /api/reports/{id}`, typed
+  // `unknown`, and it had no caller anywhere in `frontend/src` — a client
+  // method in front of a route this platform does not mount. An unauthenticated
+  // GET against :7080 answers **404**, where every mounted route answers 401.
+  //
+  // Found by a systematic sweep rather than by reading: every `/api/…` literal
+  // in `frontend/src/api/*.ts` requested against the running platform. It is
+  // the fourth path nobody had named, after `…/state`, `…/trajectory` and
+  // `…/lifecycle`, and the only one of the four with no caller at all.
+  //
+  // Deleted rather than kept for the day the route lands, for the reason
+  // `deskApi` gives where it deleted `pause`, `resume` and `escalate`: the next
+  // caller finds a method on the client, and a method on the client reads as a
+  // route. A typed `unknown` return makes that worse, because nothing at the
+  // call site would have disagreed with it.
+  //
+  // Asserted by `a-client-method-in-front-of-nothing-is-not-a-route`.
 
   syntheticCatalogue: () =>
     client.get<{

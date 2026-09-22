@@ -370,7 +370,13 @@ describe('nothing on the run detail claims to have written a file', () => {
         <RunDetail runId="run_1" onBack={() => {}} />
       </QueryClientProvider>,
     )
-    await waitFor(() => expect(screen.getByText(/No trajectory is stored/i)).toBeTruthy())
+    // Waits on the empty state's action rather than its headline. The headline
+    // used to read "No trajectory is stored for this run" in both of this
+    // panel's absences, and it now says which absence it is — a route this
+    // platform does not mount, or a run with no steps — so it is no longer a
+    // stable thing for an unrelated claim to key on. See
+    // `an-unmounted-route-is-not-a-run-that-took-no-steps`.
+    await waitFor(() => expect(screen.getByRole('button', { name: /Back to the conversation/ })).toBeTruthy())
     expect(screen.queryByText(/save as case/i)).toBeNull()
     expect(alerted).not.toHaveBeenCalled()
     alerted.mockRestore()

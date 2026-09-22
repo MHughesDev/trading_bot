@@ -46,11 +46,30 @@ export function RunDetail({ runId, onBack }: { runId: string; onBack: () => void
   if (traj.isLoading) return <div className="desk-scroll">Loading the trace…</div>
   const steps: TrajectoryStep[] = traj.data?.steps ?? []
   if (steps.length === 0) {
+    // **Two absences, and only one of them is about the run.**
+    //
+    // `optional()` answers `null` for a 404 and the decoded body for anything
+    // else, so `traj.data === null` is "the route is not mounted" and
+    // `traj.data` with an empty `steps` is "the route answered and this run has
+    // no stored steps". The panel printed *"No trajectory is stored for this
+    // run"* over both — a claim about the run, from a component with no source
+    // for it.
+    //
+    // Verified against the live platform on 2026-09-22:
+    // `GET /api/agent/runs/{id}/trajectory` answers **404** unauthenticated,
+    // where every mounted route on :7080 answers 401. So on this deployment the
+    // first branch is the only one that renders, and the sentence it replaces
+    // was wrong on every run.
+    const unmounted = traj.data == null
     return (
       <div className="desk-scroll">
         <EmptyState
-          message="No trajectory is stored for this run"
-          detail="The scrubber reads `agent_events` through /api/agent/runs/{id}/trajectory, which AGENT-010 §5 adds. It is not built yet, and the desk will not reconstruct a prompt it cannot prove."
+          message={unmounted ? 'Nothing here can report what this run did' : 'This run has no stored steps'}
+          detail={
+            unmounted
+              ? 'The scrubber reads `agent_events` through GET /api/agent/runs/{id}/trajectory, which AGENT-010 §5 adds and this platform does not mount — it answers 404 where every mounted route answers 401. An empty scrubber is this panel having no source, not a run that took no steps, and the desk will not reconstruct a prompt it cannot prove.'
+              : 'The trajectory route answered and holds no step for this run. That is a fact about the run rather than about the platform.'
+          }
           action={
             <Button size="sm" onClick={onBack}>
               Back to the conversation

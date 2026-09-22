@@ -50,7 +50,24 @@ Keep the grammar in FEAT-004 §3.1 with these amendments, all in the direction o
 - **Every clause on its own line, keywords first** (`entry`, `exit`, `size`, `risk`, `params`, `inputs`). A `select_fill` tier is given a JSON-Schema-shaped grammar over these clauses (one clause per fill), not the EBNF, and the compiler assembles the text. A frontier tier writes the text.
 - **`inputs` are mandatory for anything used twice** and named; the compiler rejects an expression longer than 120 characters inline with `fix: "bind it as an input"`. This keeps rules legible to the human reviewer and to the model on re-read.
 - **Units are explicit**: `exit stop 1.5 atr from entry`, `exit target 2 % from entry`, `exit time 48 bars`. A bare number in a distance is a compile error with the three legal units named.
-- **`crossed_above/below`, `rising/falling(x, n)`, `between(x, a, b)`, `abs/min/max/clip`** are compiler-provided; the rising-edge semantics the v1 signal node had become explicit.
+- **`crossed_above/below`, `rising/falling(x, n)`, `between(x, a, b)`, `abs/min/max/clip`** are compiler-provided. Cross detection needs a previous-value register and a `CrossedAbove` op in the runtime, which FEAT-004 §3.3 already lists as the intended extension; until they land, `crossed_above` is refused by name with `needs_history`, pointing at the level comparison that does compile (`macd(close, 7, 21) > 0`).
+
+  > **Amended 2026-09-22 (ADR-D-10).** This bullet ended *"the rising-edge semantics
+  > the v1 signal node had become explicit"*, which describes something that is not
+  > there: `strategy-runtime::interpreter::evaluate_signals` and `runtime::run_signals`
+  > both evaluate the condition on the current bar and emit, there is **no** previous-
+  > value register, and `bytecode::Op` has no `CrossedAbove`. The feature engine cannot
+  > supply it either — `features::registry`'s naming scheme is `family_p1[_p2…]` over
+  > integer parameters, so there is no lag *of a derived feature*. The false
+  > justification is struck and replaced by what has to be built.
+  >
+  > The alternative — striking cross detection from §3 — was **rejected**: a crossing
+  > is in this spec's own headline example (`entry long when crossed_above(ema(close,7),
+  > ema(close,21)) and rsi(close,14) < 60`), it is how the majority of published
+  > technical rules are stated, and a language that cannot express it pushes authors
+  > toward the level test that *looks* equivalent and is not. The `needs_history`
+  > refusal stays correct meanwhile and must **not** be relaxed into that
+  > approximation.
 - **State predicates** (`flat`, `long`, `bars_in_trade`, `unrealized_return`, `last_exit_reason`) as specified; they are what make "re-enter only after a stop-out cooldown" expressible.
 - **Typed `params` with ranges** as specified (they are what `run_sweep` sweeps; v1.2's `param('name')` remains an alias).
 - **`order` clauses** as specified; default market.
@@ -76,18 +93,66 @@ Keep the grammar in FEAT-004 §3.1 with these amendments, all in the direction o
 | `preview_signals` | `(text \| strategy_id, instrument, timeframe, start, end, max_events=50) -> {n_entries, n_exits, by_month[], sample_events[{ts, side, reason, bars_in_trade, exit_reason}], warmup_ok, never_fires_because?}` | P3: a dry run over stored bars through the feature engine and the exit policy, **no trial, no ledger row**; capped by `max_tool_result_bytes` with a handle |
 | `diff_strategies` | `(a, b) -> {moves[{kind, path, before, after, words}], n_moves, is_single_change}` | P5: what changed, in words; AST diff classified into FEAT-004 §6 move kinds, `rewrite` when it cannot |
 | `apply_move` | `(base_version, move: {kind, args}) -> {new_version, text, diff}` | the typed edit; one move, one version, validated |
-| `create_strategy` (exists) | now accepts `text`; records `parent_version` and the move(s) that produced it | lineage for `family_test` and move memory |
-| `suggest_moves` | `(strategy_id, diagnostics_ref) -> {moves[{kind, args, why, expected_effect}]}` | maps `get_diagnostics` findings ("loses in high-vol months") to candidate moves ("add_regime_gate on rv(20) pct_rank < 0.8"); deterministic rules first, model-ranked on capable tiers |
+| `create_strategy` (exists) | now accepts `text`; **reusing the slug is the lineage mechanism** — `strategy_revision` is append-only and `parent_hash` is derived server-side from the `head_revision` of the same `strategy_id` — plus an **optional** explicit `parent_strategy_id` for a strategy derived from a different lineage, and the move(s) that produced it | lineage for `family_test` and move memory |
+| `suggest_moves` | `(strategy_id, diagnostics_ref) -> {moves[{kind, args, why, expected_effect}]}` | maps `get_diagnostics` findings ("loses in high-vol months") to candidate moves ("add_regime_gate on `rv(close, 20) < 0.02`" — a level test on one catalogue feature, which is what the grammar can compile today); deterministic rules first, model-ranked on capable tiers. It never invents a regime predicate: it takes one from the caller as a `Predicate` checked against the catalogue at construction, or withholds the move naming what is missing |
 | `strategy_skeleton` | `(hypothesis_family: trend\|mean_reversion\|breakout\|carry\|vol_target\|model_signal) -> {text, params[], notes}` | a correct starting point per family, so the first version is never a syntax lesson |
+
+> **Amended 2026-09-22 (ADR-D-14).** `suggest_moves`' worked example read
+> *"add_regime_gate on `rv(20) pct_rank < 0.8`"*. That predicate is **a feature of a
+> feature**, and the canonical expression grammar's only named value is
+> `feature('name')` — a name, not an expression — so the spec was illustrating the
+> platform's flagship suggestion with a document **the compiler refuses**. The example
+> had to change immediately, because a spec that does that teaches the wrong thing to
+> every reader and to every model given the spec as context; the threshold in the
+> replacement is illustrative and carries no meaning of its own.
+>
+> But the old example was **not badly chosen**: a percentile rank of a derived feature
+> is the natural way to state a regime gate, and `skeleton.rs`'s `VOL_TARGET_NOTES`
+> independently recorded the same limit for `pct_rank(rv(close,20), 200)`. Two places
+> wanting one missing construct is a language gap, not a bad example, so **nested
+> feature expressions become a scheduled language item** in their own right.
+> `suggest_moves` keeps taking a catalogue-checked `Predicate` from its caller until
+> the grammar has them — never inventing one.
+
+> **Amended 2026-09-22 (ADR-D-21).** `create_strategy` read *"records
+> `parent_version`"*. `parent_version` exists nowhere in the repository: lineage is
+> `strategy_revision.parent_hash`, derived server-side from the `head_revision` **of
+> the same `strategy_id`**. The tool's own description compounded it by advising
+> authors to *"mint versioned slugs (`my_strat_v2`) when iterating"* — and a new slug
+> has no head, so `parent_hash` is NULL. **Measured on the live registry: 40
+> agent-authored revisions across 34 slugs, 6 with a parent — 85% of the agent's
+> authoring history has no lineage at all.**
+>
+> The advice was written as if overwriting `head_revision` discarded the previous
+> definition. It does not: `strategy_revision` is append-only and the chain holds every
+> version, which is precisely *why* `parent_hash` is derivable. So the guidance
+> inverted the design — it told the author to do the one thing that breaks the record,
+> to protect against a loss that cannot happen. The explicit parent is **optional**
+> rather than required, because a first version genuinely has no parent and a required
+> field would be filled with something.
 
 **It says which clause blocked the entry.** `never_fires_because` at strategy level tells a
 model that something is wrong; it does not tell it *what*, so the next move is a guess and the
 guess costs a round trip. The preview evaluates each clause of each entry condition
 independently over the window and returns a **blocking profile**: for every clause, the share
-of bars on which it was true, and for the conjunction, the share on which it was the *last*
-clause to fail. "`rsi(close,14) < 30` was true on 0.4% of bars and was the sole blocker on 91%
+of bars on which it was true, and — the field is `bars_sole_blocker` — the share of the
+remaining bars on which that clause was the **only** false operand of the conjunction.
+"`rsi(close,14) < 30` was true on 0.4% of bars and was the sole blocker on 91%
 of the rest" is a finding a model can act on in one step, and it is the highest-value feedback
 in the authoring loop — it turns "it doesn't fire" into "this threshold is the problem".
+
+> **Amended 2026-09-22 (ADR-D-15).** This paragraph defined the profile's second
+> number **twice, as two different quantities**: *"the share on which it was the
+> **last** clause to fail"*, and two sentences later *"was the **sole blocker** on 91%
+> of the rest"*. The "last clause to fail" wording is **struck**, here and wherever
+> S-5.15's body carries it.
+>
+> It is not a second candidate reading — **it has no referent on this platform.** "Last
+> to fail" presupposes an evaluation order; the compiled condition is `(A * B)`, both
+> operands evaluate, and there is no failure order for "last" to index. The field is
+> named `bars_sole_blocker` precisely so it cannot be read as the other, and keeping
+> the phrase would leave a reader hunting for an evaluation order the compiler is
+> specifically designed not to have.
 
 The same profile is what `suggest_moves` (§4) reads to motivate a `change_threshold` or
 `remove_filter`, so a suggestion cites a measurement rather than a heuristic.
@@ -155,8 +220,28 @@ Three rejections on the same `path` within a run return, additionally, a worked 
 
 - Multi-instrument / cross-sectional strategies (OQ-040) — after v2.0.
 - User-defined functions or loops in SLv2 — that is `run_python`.
-- Changing the canonical JSON storage form — ADR-0010 stands.
+- **Rewriting** the canonical JSON storage form — ADR-0010 stands. Versioning it forward does not touch that: `ExitRule` gains `unit: fraction_of_entry | atr | sigma` at a new schema version, defaulting to `fraction_of_entry`.
 - A visual builder; the MCP draft builder remains for that client.
+
+> **Amended 2026-09-22 (ADR-D-09).** This non-goal read *"Changing the canonical JSON
+> storage form — ADR-0010 stands"*, which read against §3's *"Units are explicit:
+> `exit stop 1.5 atr from entry`"* made the two unsatisfiable together:
+> `ExitRule::StopLoss` carries `fraction: Decimal`, documented as *"always expressed as
+> a positive fraction of entry"*, and an ATR- or sigma-scaled distance is a **per-bar**
+> quantity — there is no fraction of entry that means it.
+>
+> ADR-0010 protects the canonical storage form from being **rewritten**; it does not
+> forbid the schema from versioning forward, which 1.0 → 1.2 → 1.3 already does. So
+> `ExitRule` gains the unit at a new version, defaulting to `fraction_of_entry` so
+> every stored document keeps its current meaning byte for byte, and the ATR/sigma
+> variants carry the lookback as a typed parameter rather than as a string. Dropping
+> two of three units from the language was rejected on what it costs: an ATR-scaled
+> stop is the most common risk rule in the domain, and a language that cannot express
+> it gets worked around with a hand-computed fraction that is **wrong on the next bar**
+> and looks identical in storage. The compiler's `unit_not_representable` refusal stays
+> until the field lands — refusing is still better than converting. Coupled to
+> ADR-D-20: the validator must accept the new version, and it currently refuses even
+> 1.3.
 
 ## 10. Open questions
 

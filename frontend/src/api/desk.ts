@@ -1363,6 +1363,76 @@ export interface DossierComment {
   created_at: string
 }
 
+/**
+ * What a read of `/api/dossiers/{ticket}` came back with — three answers, not
+ * one `null`.
+ *
+ * `none` is the route's own 404 and is a statement about *this ticket*;
+ * `unreadable` is the request not coming back and is a statement about the
+ * *platform*. A reader deciding whether to go looking for the document
+ * elsewhere needs to know which, and the old `optional()` read made them
+ * identical.
+ */
+export type DossierRead =
+  | { kind: 'found'; body: Record<string, unknown> }
+  | { kind: 'none'; fix: string | null }
+  | { kind: 'unreadable'; message: string }
+
+/** The body `POST /api/dossiers/{ticket}/verify/{claim}` answers with. */
+export interface VerifyResult {
+  ok: boolean
+  note: string
+  /** How the document says the claim was verified. Absent on a 404. */
+  was?: string | null
+  /** What re-deriving it now gives. Absent on a 404. */
+  now?: string | null
+}
+
+/** The error body a route hands back, when it handed one back. */
+function errBody(e: unknown): Record<string, unknown> | null {
+  const d = (e as { response?: { data?: unknown } }).response?.data
+  return d !== null && typeof d === 'object' ? (d as Record<string, unknown>) : null
+}
+
+function errStatus(e: unknown): number | undefined {
+  return (e as { response?: { status?: number } }).response?.status
+}
+
+async function readDossier(p: Promise<{ data: Record<string, unknown> }>): Promise<DossierRead> {
+  try {
+    return { kind: 'found', body: (await p).data }
+  } catch (e) {
+    const status = errStatus(e)
+    if (status === 404) {
+      const fix = errBody(e)?.fix
+      return { kind: 'none', fix: typeof fix === 'string' ? fix : null }
+    }
+    const message = (errBody(e)?.message as string | undefined) ?? (e as Error)?.message ?? 'the request failed'
+    return { kind: 'unreadable', message }
+  }
+}
+
+/**
+ * A recheck's answer, keeping the route's words whichever status carried them.
+ *
+ * Only a request that produced no body at all becomes a sentence written here,
+ * and that sentence says the request failed rather than that the claim did.
+ */
+async function readVerify(p: Promise<{ data: VerifyResult }>): Promise<VerifyResult> {
+  try {
+    return (await p).data
+  } catch (e) {
+    const body = errBody(e)
+    if (typeof body?.note === 'string') {
+      return { ok: body.ok === true, note: body.note }
+    }
+    return {
+      ok: false,
+      note: `the recheck request did not come back (${errStatus(e) ?? 'no response'}) — this says nothing about the claim`,
+    }
+  }
+}
+
 export const deskApi = {
   /** Existing: the conversation list the desk rail renders. */
   conversations: () =>
@@ -1423,9 +1493,38 @@ export const deskApi = {
   memory: (bucket: string) =>
     optional<{ rows: Array<Record<string, unknown>> }>(client.get(`/api/memory/${bucket}`)),
   forget: (bucket: string, id: string) => client.delete(`/api/memory/${bucket}/${id}`),
-  dossier: (ticket: string) => optional<Record<string, unknown>>(client.get(`/api/dossiers/${ticket}`)),
+  /**
+   * `GET /api/dossiers/{ticket}` — **and this route is mounted.**
+   *
+   * It went through `optional()` until now, which folded its three distinct
+   * answers into one `null`, and the reader printed the same sentence over all
+   * three: *"/api/dossiers/{ticket} is not built yet"*. That sentence was true
+   * when it was typed and is false today — `routes/mod.rs` registers
+   * `/api/dossiers/{ticket}`, `…/verify/{claim}` and `…/comments`, and an
+   * unauthenticated GET answers **401** where an unmounted path answers 404.
+   *
+   * The route's own 404 means something much more useful, and it says it: a
+   * dossier is compiled at the end of the run that produced it, so a ticket
+   * with none had a claim its evidence did not support, or no critique. That
+   * `fix` string is the one thing a reader of an empty dossier page wants, and
+   * `optional()` was throwing it away.
+   */
+  dossier: (ticket: string) => readDossier(client.get(`/api/dossiers/${ticket}`)),
+  /**
+   * `POST /api/dossiers/{ticket}/verify/{claim}`.
+   *
+   * Deliberately **not** `optional()`. The route answers 404 with a body —
+   * "there is no dossier with that ticket", "this dossier has no claim citing
+   * `x`" — and folding that into `null` made the row report *"the recheck
+   * endpoint did not answer"* about a route that had answered, precisely.
+   *
+   * It also carries `was` and `now`: what the document claims the verification
+   * was, and what re-deriving it against the platform as it stands gives. A
+   * recheck that only says "does not hold" has thrown away the half a reviewer
+   * acts on.
+   */
   verifyClaim: (ticket: string, claim: string) =>
-    optional<{ ok: boolean; note: string }>(client.post(`/api/dossiers/${ticket}/verify/${claim}`)),
+    readVerify(client.post<VerifyResult>(`/api/dossiers/${ticket}/verify/${claim}`)),
   // A reviewer's notes on a dossier, which are deliberately not part of it: the
   // document is a snapshot and a comment is a later reading of it (S-8.7).
   dossierComments: (ticket: string) =>

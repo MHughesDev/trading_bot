@@ -119,7 +119,23 @@ on Input::RunDone (from the child's Outcome) → append run_finished{item, verdi
 if agenda drained: replenish ? run a `survey` item (§4.9) : append complete
 ```
 
-Each arrow is an event; each child is created through `JobStore::submit_child_once` keyed on `(session_id, agenda_item_id)` so a driver killed between "start run" and "record started" re-derives the same child rather than starting a second (AT-59's guarantee, reused verbatim). `max_concurrent_runs` > 1 means the loop may claim more than one item per iteration; each child is its own conversation (AGENT-010 §4.1: one live turn per conversation), so concurrency never shares a workspace.
+Each arrow is an event; **each child is created exactly once per `(session_id, agenda_item_id)`**, so a driver killed between "start run" and "record started" re-derives the same child rather than starting a second (AT-59's guarantee, reused as a property rather than as a call). §10 names the mechanism that delivers it. `max_concurrent_runs` > 1 means the loop may claim more than one item per iteration; each child is its own conversation (AGENT-010 §4.1: one live turn per conversation), so concurrency never shares a workspace.
+
+> **Amended 2026-09-22 (ADR-D-06).** This sentence read *"each child is created
+> through `JobStore::submit_child_once` keyed on `(session_id, agenda_item_id)`"*,
+> which named a mechanism the child path does not and will not use, and contradicted
+> §10's *"children via the conversation/turn path"* in the same document. §10 is the
+> one that exists: **a conversation turn is not a job.** It is started by
+> `AgentManager::send_message`, it runs on a spawned task, and its identity is a row
+> in `agent_runs` rather than in the job store — so `submit_child_once`, which keys on
+> `(parent job, member index)` and hands back a job, has nothing to hand back for one.
+> Following §3 literally would have meant building a worker that does not exist in
+> order to satisfy a sentence, and breaking the desk, the rail and the steer controls,
+> all of which read the conversation path today. **What §3 was reaching for is the
+> exactly-once property**, which is real, is what the sentence now states, and is
+> delivered by the derived conversation id plus the conditional claim (ADR-P11-01) —
+> proven by two restart tests, `restarting_between_start_and_record_re_derives_the_same_state`
+> and `a_child_conversation_id_is_the_same_one_after_a_restart`.
 
 ## 4. Agenda sources
 
@@ -201,7 +217,23 @@ Evaluated after every finished run over the last `K = max(6, 20% of runs)` runs:
 - **barren streak**: `knowledge_units = 0` in ≥ 4 of the last K, or the last 3 consecutively;
 - **degenerating**: every one of the last K items came from `refinement_followup`, and none produced an `established` finding or a new failure class — the programme is adjusting, not predicting;
 - **circling**: ≥ 2 of the last K were `proceed_as_variant` of the same family with the same failure class — the dedupe did its job and the policy overrode it;
-- **cost drift**: `cost_per_knowledge_unit` over the last K exceeds 3× the session's own median (only once ≥ 2K runs exist).
+- **cost drift**: `cost_per_knowledge_unit` over the last K exceeds 3× the median of the runs *preceding* the window (still the session's own history, not a platform figure; only once ≥ 2K runs exist).
+
+> **Amended 2026-09-22 (ADR-D-07).** The cost-drift rule read *"exceeds 3× the
+> session's own median"*, with no statement of which runs the median is taken over.
+> Read literally — the median over **every** run, the judged window included — the
+> rule **cannot fire at `2K` runs, the exact point its own gate opens.** At `2K` the
+> window is half the session, so with K cheap runs at `c` and K dear runs at `d` the
+> median is `(c + d) / 2`, and `d > 3 · (c + d) / 2` reduces to `−d > 3c`, which has
+> no solution for positive costs. Ten times, a thousand times, a million times the
+> baseline all fail. That is not a stricter reading of the spec; it is a sentence with
+> an arithmetic error in it, and the inertness is kept as a test over three orders of
+> magnitude —
+> `the_baseline_is_the_history_because_a_window_inside_its_own_median_can_never_drift`
+> in `crates/research-session/src/stall.rs`. The baseline is therefore the history
+> **before** the window, which is what is built and what makes the rule live from `2K`
+> onward as the gate intends. The other three rules have absolute thresholds and
+> self-gate; only this one was affected.
 
 Any one trips `stalled` with the diagnosis naming which, the items involved, and a suggested charter amendment (exclude the family; widen scope; a lower `delta_practical` suggestion is **never** offered — the effect size is the user's). A stall is not a failure of the session; it is the session noticing the thing a human running it would have noticed over lunch, and it is the mechanism behind "correctly reject weak ones" at the level of whole lines of inquiry.
 
@@ -235,11 +267,17 @@ The user sees **two** options — Chat / Research — and, under Research, a **C
 
 | Phase | Items |
 |---|---|
-| 1 | `ResearchSession`, `Charter`, `AgendaItem`, `session_events` + trigger; bounded sessions as the one-item case; `JobKind::ContinuousResearch` with the fold and `submit_child_once`; sources 4.1, 4.2; `replenish = false` only; `supervised` only |
+| 1 | `ResearchSession`, `Charter`, `AgendaItem`, `session_events` + trigger; bounded sessions as the one-item case; `JobKind::ContinuousResearch` with the fold and the exactly-once child over the conversation path (§3, §10); sources 4.1, 4.2; `replenish = false` only; `supervised` only |
 | 2 | scoring + exploration + `decision` rows; sources 4.3–4.6, 4.8; leases; harvest; the digest |
 | 3 | pause/stall/stop table; the stall detector; kill-switch and tier coupling; `notify` (default) / `autonomous` behind the `judgement` threshold |
 | 4 | source 4.7 subscriptions (profiler, coverage, monitor); replenish via `survey`; concurrency > 1 |
 | 5 | the desk: toggle, charter form, Agenda and Charter tabs, rail grouping, home rows; `lifecycle.get_session/list_agenda/get_digest`; `judgement` suite cases for selection |
+
+> **Amended 2026-09-22 (ADR-D-06).** Phase 1 read *"`JobKind::ContinuousResearch`
+> with the fold and `submit_child_once`"*. It named the same struck mechanism §3 did,
+> so a builder reading the build order rather than §3 would have rebuilt the job-backed
+> child the ADR refused. Nothing about the phase's contents or its position changed —
+> only the name of the path the child is created on.
 
 ## 12. Acceptance
 

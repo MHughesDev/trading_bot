@@ -100,6 +100,9 @@
   cursor: pointer;
 }
 .ev-chip.missing { text-decoration: line-through; color: var(--fg-tertiary); cursor: not-allowed; }
+/* Nobody looked. Not struck through — a strike is the answer "no", and this
+   chip has no answer. Words carry it, not the border (Meridian principle 3). */
+.ev-chip.unchecked { border-style: dotted; cursor: default; }
 .ev-chip[disabled] { cursor: not-allowed; }
 /* A chip whose id traces to fetched content (§6.3a). The dashed edge is the
    second signal; the word "fetched" inside it is the first, because a reader who

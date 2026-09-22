@@ -430,7 +430,36 @@ export function EvidenceChip({
   resolve?: IdResolver
   onOpen?: (id: string) => void
 }) {
+  // **Three states, not two.** `resolve ? resolve(id) : null` made an absent
+  // resolver indistinguishable from a resolver that looked and found nothing,
+  // and the chip then asserted *"this id resolves to nothing the platform
+  // holds"* on the strength of a lookup that never happened.
+  //
+  // That was live, and on the worst possible surface: `DeskPage.tsx` renders
+  // `<DossierReader ticket={ticket} />` with no `resolve` prop, so on the
+  // dossier page — the document whose whole claim is that its evidence is
+  // checkable — every evidence id and every funnel ticket rendered struck
+  // through and labelled not found. A reviewer reading that discards sound
+  // research.
+  //
+  // And it cannot be repaired by resolving a dossier's ids from the dossier's
+  // own claims: that is the circularity `makeResolver`'s header already refuses
+  // for cards, where resolving a card's ids from the card "would make every id
+  // resolve and the check would assert nothing". The dossier page has one
+  // genuine check of whether an id still resolves, and it is the **Verify**
+  // button in the same row — which is why the chip must not pre-empt it with an
+  // answer.
   const hit = resolve ? resolve(id) : null
+  if (!resolve) {
+    return (
+      <Tooltip content="Nothing on this surface checked whether this id still resolves. Use Verify, which re-derives it against the platform as it stands.">
+        <span className="ev-chip unchecked" data-testid={`ev-${id}`} data-resolved="unchecked">
+          {id}
+          <span className="ev-class">not checked</span>
+        </span>
+      </Tooltip>
+    )
+  }
   if (!hit) {
     return (
       <Tooltip content="This id resolves to nothing the platform holds.">

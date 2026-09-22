@@ -41,7 +41,7 @@ pub struct WorkingState {
     pub ring: Ring,                           // 0 research | 1 platform artifacts | 2 paper — AGENT-013 §4; filters exposure before routing
     pub stage: Stage,                         // the ten lifecycle stages — AGENT-013 §5; transitions are effects
     pub prereg: Option<PreregRef>,            // the sealed registration and its hash — AGENT-013 §7.2
-    pub acceptance: Vec<String>,              // what "done" means, from the goal + constraints
+    pub acceptance: Vec<Criterion>,           // {text, met: Option<bool>} — what "done" means, from the goal + constraints; `None` = not yet evaluated (ADR-D-25)
     pub hypothesis: Option<Hypothesis>,       // {family_id, statement, falsifier, role, status: Untested|Supported|Refuted|Inconclusive} — status is platform-written (AGENT-013 §8.1)
     pub plan: Vec<PlanStep>,                  // each with status: Pending|Active|Done|Skipped{why}|Failed{why}
     pub evidence: Vec<EvidenceRef>,           // ids seen this run, with the tool and step that produced them
@@ -52,6 +52,22 @@ pub struct WorkingState {
     pub decided: Vec<Decision>,               // §3.6: choices made and their reason, so they are not re-made
 }
 ```
+
+> **Amended 2026-09-22 (ADR-D-25).** `acceptance` was `Vec<String>`, on both sides of
+> the wire, so AGENT-012 §3.5's *"acceptance criteria with ticks"* had nothing to tick
+> and the desk rendered a plain list. §3.5 is right to ask: **an acceptance list with
+> no status is a list of things nobody is tracking**, which is the failure the working
+> state exists to prevent. So the harness emits the status and the field carries it.
+>
+> **The third state is required, not a convenience.** *"Not yet evaluated"* is the
+> honest answer for most criteria for most of a run, and collapsing it into `false`
+> reports every unstarted criterion as failing — a number that is wrong in the
+> flattering direction for anyone reading the panel. `None` is that state, and the desk
+> renders **three** glyphs, never two.
+>
+> §3.4a's amendment rules are unaffected: a constraint steer still amends the set and a
+> redirection still rewrites it — what changes is that each entry now carries a status
+> alongside its text.
 
 It is rendered by tier: the flat tier gets a ≤ 400-token card (goal, active step, last error, budget, three most recent evidence ids, findings count); the rich tier gets the card plus plan, hypothesis and open questions. It is one `Section::Subtask` block at priority 255, rewritten each step (never appended — the lesson of AGENT-005 §4.4). The anchor text (`drive.rs:1168`) is derived from it.
 

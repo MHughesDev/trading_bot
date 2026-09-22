@@ -64,7 +64,7 @@ CREATE TABLE jobs (
   parent_job_id  TEXT REFERENCES jobs(job_id),
   queue          TEXT NOT NULL CHECK (queue IN ('agent','human','system')),
   priority       SMALLINT NOT NULL DEFAULT 5,
-  manifest       JSONB NOT NULL,                  -- canonical JSON (RFC 8785 JCS)
+  manifest       JSONB NOT NULL,                  -- canonical JSON (RFC 8785 JCS + §4's pinned deviation)
   manifest_hash  TEXT NOT NULL,                   -- sha256 hex (see §4)
   state          TEXT NOT NULL,                   -- §5
   progress       JSONB NOT NULL DEFAULT '{}',     -- {pct, stage, message}
@@ -120,7 +120,33 @@ CREATE INDEX exploration_ledger_proj ON exploration_ledger (project_id, created_
 ## 4. Manifests and idempotency
 
 - **Canonical form:** the manifest is serialised with JSON Canonicalization Scheme
-  (RFC 8785).
+  (RFC 8785), **with one pinned deviation**: an integral float renders as `1.0` where
+  the RFC renders `1`. This is deliberate, it is not to be "fixed", and the condition
+  under which it *is* fixed is already decided — see the amendment below.
+
+> **Amended 2026-09-22 (ADR-D-01).** This bullet claimed plain RFC 8785 conformance.
+> `jobs::manifest::canonical` does not conform: RFC 8785 renders numbers by ECMAScript
+> `Number::toString`, under which `1.0` is `"1"`, so `{"n": 1}` and `{"n": 1.0}` are
+> one JSON value and must canonicalise identically. `serde_json` renders them `"1"` and
+> `"1.0"`, and `jobs` takes that as-is — found on its first run by
+> `canonical_json_agrees`, the reconciliation test added with S-1.19.
+>
+> **The deviation is pinned rather than corrected.** Correcting it changes the
+> canonical form of every job manifest, so every recorded `manifest_hash` stops
+> matching — the same failure shape as the sqlx migration-checksum divergence that
+> produced `.gitattributes`, and that one cost a day. What must not happen is the
+> mirror disagreeing with its original, so `crates/mcp-server`'s copy renders numbers
+> exactly as `jobs` does, the reconciliation test holds them equal, and
+> `idempotency::canonical_number` documents the deviation with a test asserting that
+> `1` and `1.0` differ.
+>
+> **The correction is pre-authorised on its trigger, so nobody has to decide it under
+> pressure:** the first time a number is observed arriving both ways — which would mean
+> a duplicate job, or an idempotency key writing twice — manifests gain a
+> canonicalisation version, old hashes verify under v1 and new ones under v2, and the
+> verifier gains its branch. `canonical_number`'s deviation test is that trigger and
+> says so in its own failure message. The condition is the decision; there is nothing
+> here to revisit.
 - **Hash:** `manifest_hash = sha256(canonical(manifest) ‖ sorted(code_hashes) ‖
   data_snapshot_id ‖ kind)`.
   - `code_hashes` are the sha256 of code-snapshot artifacts: Layer 1 strategy files, BYO

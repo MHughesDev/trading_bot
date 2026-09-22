@@ -29,9 +29,21 @@ The Research Desk is one surface. Its thesis: **a human and an agent researching
 
 8. **State over transcript.** The primary view of a run is its working state (goal, plan, evidence, findings, budget), not its message log. The log is one click away and never hidden.
 9. **Every number is a link.** An id, a Sharpe, a trial count is clickable and opens the thing it names: the experiment, the study, the ledger row, the bars. If it cannot be opened it is not evidence, and the UI shows it as prose, not as a number.
-10. **The human's controls are always visible and always work.** Pause, steer, approve, deny, escalate, stop — one row, never scrolled away, on every tier, including while the agent is mid-call.
+10. **The human's controls are always visible and always work.** Pause, resume, steer, approve, deny, stop — one row, never scrolled away, on every tier, including while the agent is mid-call. *"And always work"* is the load-bearing half: a control that renders and does nothing is worse than an absent one, because the operator stops looking for the control that would have helped.
 11. **Cost and safety are ambient.** Budget, cache hit, trials spent, environment (paper/live) and the kill-switch state are in the chrome, not in a report.
 12. **Understanding is two-way.** The agent shows what it decided and why; the person can ask "why?" on any card and correct any decision. Corrections become memory (AGENT-007 §3.4).
+
+> **Amended 2026-09-22 (ADR-D-27).** Principle 10 listed *"Pause, steer, approve,
+> deny, **escalate**, stop"*, which is §3.4's control row restated. `escalate` is struck
+> from that row (see §3.4), so it is struck here, and `resume` — which the row has and
+> the principle omitted — is added.
+>
+> **This is not the same thing as `Outcome::Escalated`.** That is the harness handing a
+> run to a stronger tier when it needs one (AGENT-008 §4, AGENT-010 §6); it exists, it
+> works, and *Needs you* (§2) is right to show a run escalated to a tier you must
+> confirm. What is struck is an **operator button that changes tier mid-run**, which is
+> a separate product decision with its own budget consequences, and which had no caller
+> and no demand.
 
 ## 1. Information architecture
 
@@ -150,17 +162,78 @@ Not a chat transcript: a **stream of cards**, one per meaningful event, grouped 
 Every id anywhere is a chip (§6.3). Hovering a chip previews the object; clicking opens it in the right panel; `⌘/Ctrl-click` opens the full page.
 
 ### 3.3 Composer
-Multi-line input with: model picker (profiles, with tier badge and "unmeasured" warning), **constraints** row (instrument, timeframe, window, balance — chips with pickers; they render as the opening message, AGENT-005 §3.2), **attach** (a strategy version, a dossier, a finding, a file from the workspace), **mode** segmented control (AGENT-013 §2): *Chat* (no trial can be spent) and *Research* (the lifecycle, with a **workflow** chip — investigate · falsify · replicate · compare · diagnose · survey · optimise — defaulted from the question's shape and overridable). Under Research, a **Continuous** toggle: on, the question field becomes the charter form (§2b). **Write strategy** is an action beside *attach* (opens the SLv2 editor, §8), not a mode. Slash commands: `/steer`, `/pause`, `/pin`, `/why`, `/model`, `/budget 5$`, `/tier local`. Sending while a run is active is a **steer** by default (AGENT-010 §7), shown as a distinct card.
+Multi-line input with: model picker (profiles, with tier badge and "unmeasured" warning), **constraints** row (instrument, timeframe, window, balance — chips with pickers; they render as the opening message, AGENT-005 §3.2), **attach** (a strategy version, a dossier, a finding), **mode** segmented control (AGENT-013 §2): *Chat* (no trial can be spent) and *Research* (the lifecycle, with a **workflow** chip — investigate · falsify · replicate · compare · diagnose · survey · optimise — defaulted from the question's shape and overridable). Under Research, a **Continuous** toggle: on, the question field becomes the charter form (§2b). **Write strategy** is an action beside *attach* (opens the SLv2 editor, §8), not a mode. Slash commands: `/steer`, `/pause`, `/pin`, `/why`, `/model`, `/budget 5$`, `/tier local`. Sending while a run is active is a **steer** by default (AGENT-010 §7), shown as a distinct card.
+
+> **Amended 2026-09-22 (ADR-D-28).** `attach` listed four things: *"a strategy
+> version, a dossier, a finding, **a file from the workspace**"*. The fourth is struck;
+> the three platform objects stay and are built.
+>
+> The three are objects this platform **already has ids for**, so attaching one is
+> inserting a typed reference the agent resolves with the tools it already has — no
+> storage, no upload, no new content to scan or serve — and it composes with the
+> provenance fence, because a reference to a platform object carries that object's own
+> provenance rather than acquiring a new one. **A file from the workspace is a
+> different thing wearing the same word:** it is a general upload endpoint, with new
+> storage, a new lifecycle, new size and content limits, and a new untrusted-content
+> surface feeding the exact channel the provenance fence (§6.3a) exists to guard. That
+> is a large security surface bought for a convenience, and the workspace is already
+> reachable by the agent's own tools — the path that keeps the fence intact.
 
 ### 3.4 Controls row (always visible)
-`Pause` · `Resume` · `Stop` · `Steer…` · `Approve/Deny` (when pending) · `Escalate to…` · `Budget` (edit the cap for this run) · `Details` toggle · `Replay`. Keyboard: `space` pause/resume, `esc` stop (confirm), `a`/`x` approve/deny the focused approval, `s` steer, `d` details, `r` replay, `/` focus composer, `?` shortcuts.
+`Pause` · `Resume` · `Stop` · `Steer…` · `Approve/Deny` (when pending) · `Budget` (edit the cap for this run) · `Details` toggle · `Replay`. Keyboard: `space` pause/resume, `esc` stop (confirm), `a`/`x` approve/deny the focused approval, `s` steer, `d` details, `r` replay, `/` focus composer, `?` shortcuts.
+
+**Pause is bounded.** A paused run holds its budget, its lease and its place in the queue, so `paused` carries a deadline; **on expiry the run stops — it does not resume.** Fail-closed, deliberately: a run nobody came back to must not quietly start spending again, and an operator who has forgotten a paused run is better served by finding it stopped than by finding it finished.
+
+> **Amended 2026-09-22 (ADR-D-27).** The control row read
+> `… · Approve/Deny (when pending) · **Escalate to…** · Budget …`. `Escalate to…` is
+> **struck**: it is a tier change mid-run, which is a separate product decision with
+> its own budget consequences, and it has no caller and no demand. A control row is not
+> a place to park an intention. It stays in §17 as an unbuilt endpoint, which is where
+> an intention belongs.
+>
+> `Pause`/`Resume` stay, and get built — the decision is that the *need* behind them is
+> real. `Stop` is destructive; an operator watching a run go wrong wants to interrupt
+> it without discarding its context, and **when the only offered control is destruction
+> somebody builds a gentler-looking one that does nothing.** That is what happened
+> here, twice: the button set a local `paused` flag *before* issuing a request that
+> 404s, so the header read **paused** over a run still spending trials, and the Stop
+> dialog offered *"Pause instead"* — talking the operator out of the control that works
+> and into the one that did not. The boundedness above is the condition on which pause
+> is allowed to exist at all. §19.3 is unchanged and now reachable.
 
 ### 3.5 Right panel (tabs)
-- **State** (default): the `WorkingState` card (AGENT-008 §2) — goal and kind, acceptance criteria with ticks, hypothesis and status, plan tracker, evidence list (ids with the tool that produced them), findings, open questions, decisions, last error, **budget meter** (steps/tokens/$ /trials, with the profile's caps and the 90% wrap-up line).
+- **State** (default): the `WorkingState` card (AGENT-008 §2) — goal and kind, acceptance criteria each with a **three-state** status (`met` · `not met` · *not yet evaluated*), hypothesis and status, plan tracker, evidence list (ids with the tool that produced them), findings, open questions, decisions, last error, **budget meter** (steps/tokens/$ /trials, with the profile's caps and the 90% wrap-up line).
 - **Evidence**: every id this run produced, grouped by type, with open-in-place viewers: experiment summary, study surface (the plateau/spike plot), gate ledger, trade list with the concentration bar, bars chart for a window, data-quality probe results.
 - **Memory**: what the brief contained (AGENT-007 §4) — preferences, instrument profile, findings and negative results retrieved, each marked *cited* when the run used it; "why retrieved" on hover; **add to memory** and **forget** actions.
-- **Tools**: what this tier can currently see (exposure), what it searched for, the whole catalogue with a search box; clicking a tool shows its notes; **pin a tool** for this run (sends a `search_tools`-equivalent).
+- **Tools**: what this tier can currently see (exposure), what it searched for, the whole catalogue with a search box; clicking a tool shows its notes; and the three levers that actually change what the agent can reach, named — a steer message, the active plan step's named tool, and the agent's own `search_tools`.
 - **Cost**: tokens by layer (charter / schemas / body / output) per call, cache hit per call as a sparkline, $ cumulative, the calibrated bytes/token and the harness's estimate vs. the provider's count.
+
+> **Amended 2026-09-22 (ADR-D-25).** The State tab read *"acceptance criteria with
+> ticks"*, and `WorkingState.acceptance` is `string[]` on both sides of the wire, so a
+> tick would have been an invented measurement. §3.5 was right to ask: an acceptance
+> list with no status is a list of things nobody is tracking, which is the failure the
+> working state exists to prevent. So **the harness emits the status and the field
+> becomes `[{text, met: bool | null}]`.** `null` is a required third state, not a
+> convenience — *"not yet evaluated"* is the honest answer for most criteria for most
+> of a run, and collapsing it into `false` would report every unstarted criterion as
+> failing. The panel renders **three** glyphs, never two.
+
+> **Amended 2026-09-22 (ADR-D-23).** The Tools tab ended *"**pin a tool** for this run
+> (sends a `search_tools`-equivalent)"*. **Struck.** `search_tools` is a tool the
+> *model* calls and the harness answers; there is no user-initiated equivalent, no
+> route and no column recording a per-run pin, and `Driver::route` builds `pinned` from
+> exactly three sources — `discovered_tools`, the active plan step's named tool, and a
+> three-hit search over that step's goal text. A human message is none of them.
+>
+> A pin would be a **fourth source in the router serving a need the three already
+> meet**: steering by message reaches `discovered_tools` and the plan step, which is
+> the documented way to change what the agent can reach. Two paths into one decision is
+> how `reorder` came to switch the scorer off. Naming the three real levers is the
+> honest replacement for a button that did nothing.
+>
+> **Not reached by ADR-D-23:** §3.3's composer still offers a `/pin` slash command.
+> It appears to name this same mechanism, but the decision does not mention it, so it
+> is left standing and recorded as an open question rather than struck on inference.
 
 ## 4. Run detail and replay (`/desk/c/:id/run/:runId`)
 The full trace (AGENT-010 §5 `agent_events`) as a scrubbable timeline: a horizontal step strip; drag or arrow keys to move; the centre shows the working state **as it was at that step** and the model call's rendered prompt sections with their token sizes (charter, brief, working state, schemas) — the same numbers AGENT-005 budgets. Toggle **prompt** to read exactly what the model saw, **reply** to read what it said, **diff** to see what changed since the previous step. This is also the eval author's tool: **Save as case** writes the trajectory to `evals/` (AGENT-009 §3).
@@ -174,7 +247,28 @@ A document, not a card stack, in the `paper` theme's reading layout even when th
 `frontier · local_high · local_mid · local_small · degraded`, with a second glyph for measured/unmeasured (AGENT-009 §5). Tooltip: model, decode ladder, exposure budget, last scorecard date.
 
 ### 6.2 Budget meter
-Four stacked bars (steps, tokens, $, trials) with the cap, the 90% wrap-up mark, and the projected end at current burn. Turns `warn` at 75%, `neg` at 90%, always with the text value (never colour alone).
+Four stacked bars (steps, tokens, $, trials). A bar whose cap is on the wire draws against it and carries the 90% wrap-up mark; a bar with **no cap recorded** renders the remainder over a hatched track with no `aria-valuenow` and says so in words. Four bars always render, so an uncapped one is visibly present rather than quietly dropped. Turns `warn` at 75%, `neg` at 90%, always with the text value (never colour alone).
+
+> **Amended 2026-09-22 (ADR-D-08).** This read *"Four stacked bars (steps, tokens, $,
+> trials) **with the cap**, the 90% wrap-up mark, **and the projected end at current
+> burn**"*. The only budget shape the desk receives is `BudgetView`, which mirrors
+> `crates/harness/src/state.rs` and carries `steps_total` plus **three bare
+> remainders** — so three of the four bars had no cap to draw against and there was no
+> burn series to project from.
+>
+> **Inventing a cap from a remainder is the one answer that is not available**, and it
+> is what the previous code did: `tokensCap = caps?.tokens ?? budget.tokens_remaining`
+> makes `used = cap − remaining = 0`, so a run that had burned half a million tokens
+> rendered **"0 / 40,000"**; the trials bar did it in reverse with `cap = max(spent, 1)`
+> and printed **"4 / 4 · 90%+"** for a run nothing had said the trial count of.
+>
+> Three of the four caps exist in the profile's `Budgets` (`steps`, tokens, trials) and
+> are simply not on the wire — a missing field, to be added. The fourth is **dollars**,
+> which cannot be capped until OQ-16's price table (ADR-D-03) holds a fresh row for the
+> model in question, so the dollar bar renders `no cap recorded` until then and says
+> why. **The projection is refused in both readings:** a projected end drawn from a
+> single remainder is a forecast with one data point, and §6.2 would need a burn
+> *series* on the wire before it meant anything.
 
 ### 6.3 Evidence chip
 `exp_7f0c` `study 3` `gate 2` `f_31a` — monospace, type icon, hover preview, click opens. A chip that cannot resolve renders struck-through with "not found" — this is the UI's honesty check on the agent's honesty check.
@@ -298,11 +392,28 @@ One SSE stream per open conversation (`/api/agent/sessions/{id}/events` today; `
 3. Approve, deny, pause, stop and steer work from the keyboard while the agent is mid-call, on a frontier run and on a local run.
 4. The replay scrubber reproduces the prompt the model saw at step N byte-for-byte from `agent_events`, with per-layer token sizes matching AGENT-005's accounting.
 5. A dossier opened cold shows verdict, evidence table, unresolved questions and reviewer critique above the fold; a claim's **verify** re-runs and updates in place.
-6. The kill-switch banner appears on every route within one event of the trip and cannot be dismissed while tripped.
+6. The kill-switch banner appears on every route **within 3 seconds** of the trip — immediately for a trip this client caused — and cannot be dismissed while tripped.
 7. Theme switch mid-run causes no reflow; both densities pass the contrast report; every icon-only control has a label.
 8. At 375px width the conversation, composer, controls row and approval cards are fully usable.
 9. A running Research turn shows mode, workflow, ring and stage in the header and State tab; the pre-registration card renders before any trial and its steer creates an amendment; a proposal card shows its envelope and tickets and approve/deny work from the keyboard; a Chat turn that would need a trial ends with a Research offer whose *Start* opens a run with the same question. *(Added 2026-09-14, AGENT-013.)*
 10. Toggling Continuous swaps the question field for the charter form and back without losing typed constraints; a continuous session's state, next item and budget are readable from *Running now*; a veto on a queued agenda item prevents its claim and appears in the digest; a reorder writes a `user` priority event; every id in a digest resolves; a grep of the desk source finds no user-visible "Program". *(Added 2026-09-14, revised 2026-09-15, AGENT-014.)*
+
+> **Amended 2026-09-22 (ADR-D-24).** Criterion 6 read *"appears on every route
+> **within one event** of the trip"*. Nothing on this platform pushes kill-switch state
+> to a browser: `useDeskStream` is per-run, there is no global channel, and a trip from
+> the risk engine or another operator reaches the banner by three-second poll and by
+> nothing else. So the criterion named a mechanism that does not exist, and was holding
+> up a phase-7 exit on a comment.
+>
+> It is restated as a **bounded interval**, and the reasoning is about what the banner
+> *is*: **it is not the control that stops trading.** The order gate is — server-side,
+> and already fail-closed, since with no monitor lease every order is refused today
+> with no browser involved. The banner is an operator *notification*, a three-second
+> bound on a notification is a real guarantee, and "within one event" over a channel
+> that does not exist is not one. Building a global push channel to improve 3s to ~0s
+> on a surface that authorises nothing is effort spent where the failure is already
+> contained. If a push channel is built later for other reasons, this criterion
+> tightens for free.
 
 ## 20. Non-goals
 

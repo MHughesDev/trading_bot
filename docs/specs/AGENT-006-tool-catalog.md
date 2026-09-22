@@ -53,7 +53,7 @@
 | `builder` | the draft builder | yes, MCP-only | 10 |
 | `backtest` | list/get/stop/rerun/delete/compare/wait, trade list | yes | 9 |
 | `research` | experiments, sweeps, studies, funnel, nulls, gates | yes | 14 |
-| `audit` | honesty arithmetic: deflated Sharpe, PBO, family-wise tests, holdout budget, leakage checks, metric integrity | **new** | 12 |
+| `audit` | honesty arithmetic: deflated Sharpe, PBO, family-wise tests, holdout budget, leakage checks, metric integrity | **new** | 13 (12 + `lookahead_truncation_test`, ADR-D-19) |
 | `falsification` | refutation: kills, evaluator defects, oracle, frontier, similar trials, ablation, fragility, jitter, cost shock, regime failure, reshuffle | yes (+6) | 13 |
 | `execution` | realism: venue constraints, funding costs, capacity curve, fill simulation, divergence attribution | **new** | 6 |
 | `portfolio` | book state and construction: rollup, activity, status, orders, shrunk covariance, allocation, control limits | yes (+3) | 7 |
@@ -197,6 +197,30 @@ that can ask "what will this cost" before committing is a model that can plan in
 budget rather than discovering it at the wall — and the number is what the human sees in the
 approval card when the call needs one (§2.6).
 
+> **Amended 2026-09-22 (ADR-D-03).** `est_usd` needs prices, and there were none
+> anywhere in the platform: a grep found no price per token, per second, per GPU-hour
+> or per job, while `harness::profile::Budgets` carried `max_usd_per_task` and
+> `ask_above_usd` in every profile and `policy::decide`'s cost axis had never fired,
+> because `drive.rs` passed `estimated_usd: None`. The source is now specified: **a
+> static, versioned price table in config**, per provider model (input/output per
+> million tokens) and per hardware class (per second), every row carrying `source_url`
+> and `verified_at`, under the same 90-day staleness bound the venue table uses
+> (§5.6). Prices are public facts that change a few times a year, so a reviewed file
+> beats a network call in a budget path.
+>
+> **Where a price is missing or stale, the refusal stands.** `estimate_cost` returns
+> `est_usd: null` beside a stated reason for any model not in the table; a row older
+> than 90 days is treated as **absent** for reporting; no price is ever inferred from
+> another model's price; and `max_usd_per_task` is enforced only against a fresh row,
+> because a budget cap that cannot be computed must not silently pass.
+>
+> **One asymmetry is carved out, and only one.** `ask_above_usd` *pauses for a human*:
+> it cannot spend, it can only stop. Pausing too often costs annoyance; never pausing
+> costs unbounded spend. So `policy.cost_above_threshold` fires on an **unverified**
+> row and names, in the pause, which row it used and when that row was last checked.
+> This is the one place on the platform where an approximate number beats an absence,
+> and it is bounded by what the gate can do.
+
 **Idempotency on writes.** Every `Risk::Write` and `Risk::Destructive` call carries an
 idempotency key derived from `(run_id, step, tool, canonical(arguments))` — the same
 canonical-JSON hashing the job service already uses for submission dedup. A retry inside a
@@ -299,7 +323,7 @@ Priority is the research brief's (P0 first), effort S/M/L, tier T = typed, P = t
 | `crowding_decay_overlay` | T | `(signal_ref, asset_class, proxy) -> {benchmark_decay{oos:26,post_pub:58}, observed_vs_benchmark, proxy_series_handle, alert}` — labelled "reference class: US equity anomalies" for crypto | `get_funding_history` | M | P2 |
 | `style_detector` | P | `(signal_ref) -> {loadings{momentum,carry,short_vol,liquidity}, dominant_style, residual{value,t}, verdict}` | `factor_spanning_test` | S | P2 |
 
-### 5.4 `audit` (+11)
+### 5.4 `audit` (+12)
 
 | Tool | Tier | Risk | Signature | Composes | Effort | Pri |
 |---|---|---|---|---|---|---|
@@ -309,11 +333,31 @@ Priority is the research brief's (P0 first), effort S/M/L, tier T = typed, P = t
 | `spend_holdout_look` | T | **write, `SealedHoldout`** | `(experiment_id, partition_id, reason) -> {recorded, new_count, blocked, metrics?}` — the **only** tool that may read holdout rows; every other tool's query scope excludes them | funnel holdout→paper | S–M | P0 |
 | `probability_of_overfit` | T | read | `(trial_family_id, n_splits=16, metric=sharpe) -> {pbo, is_winner_oos_percentile, logits_handle}` — refuses below 10 distinct configs | ledger return series | M | P1 |
 | `family_wise_test` | P | read | `(trial_family_id, method=romano_wolf|spa|reality_check, n_bootstrap=5000) -> {adjusted_p{}, rejected_at_5pct[]}` — block length from `describe_returns` diagnostics | null library block bootstrap | M | P1 |
-| `future_perturbation_test` | T | read | `(strategy_id, timeframe, shift_bars=1) -> {has_bias, biased_indicators[], biased_signal_count, max_divergence}` — rerun-and-diff, Freqtrade-style; needs a "shift/mask column X" mode in the strategy runtime | `run_study` | M | P0 |
+| `future_perturbation_test` | T | read | `(strategy_id, timeframe, shift_bars=1) -> {has_bias, biased_indicators[], biased_signal_count, max_divergence}` — **column perturbation**: move one feature column forward and rerun-and-diff; needs a "shift/mask column X" mode in the strategy runtime, which does not exist, so this tool stays blocked on it | `run_study` | M | P0 |
+| `lookahead_truncation_test` | T | read | `(strategy_id, instrument, timeframe, long_window, short_window) -> {is_prefix, first_divergence, divergences[]}` — **data truncation**: run the same strategy over a shorter window and assert the shorter run's signals are a **prefix** of the longer run's; Freqtrade's shipped `lookahead-analysis` in substance; buildable today on the invariant `preview_signals` already supports (AGENT-011 §4) | `preview_signals` | S | P0 |
 | `bar_boundary_check` | T | read | `(strategy_id, resample_pairs[]) -> {leak_detected, leaking_pairs[]}` — against the 1m aggregation consumers | — | S | P0 |
 | `feature_leakage_scan` | T | read | `(strategy_id) -> {flagged[{feature, issue: full_window_stat|future_correlation|label_transform, severity}]}` — static, in `crates/strategy-validator` | `validate_strategy` | M | P1 |
 | `forking_paths_audit` | W | write (trials) | `(strategy_id, specification_space, n_samples=200) -> {m_value, percentile_of_reported, verdict}` — space hash must predate the family's first trial or the tool refuses | `run_study` | L | P2 |
 | `metric_integrity` | T | read | `(ticket_id) -> {flags[selective_window|metric_recomputed_inconsistently|null_comparison_skipped], recomputed, matches_reported}` — recomputes from platform-logged calls (`agent_messages`), not from the agent's text | — | M | P0 |
+
+> **Amended 2026-09-22 (ADR-D-19).** §5.4 previously named **two different tests as
+> one tool**. `future_perturbation_test`'s signature is `shift_bars`, which is **column
+> perturbation** — move one feature column forward and see whether the edge survives —
+> while the shipped Freqtrade precedent the row cited, `lookahead-analysis`, is **data
+> truncation**: run the same strategy over a shorter window and check that the shorter
+> run's signals are a prefix of the longer run's.
+>
+> They detect overlapping but **distinct** defects, and only truncation is buildable on
+> this platform today: `preview_signals` already gives the prefix invariant, while
+> nothing anywhere in the workspace mentions `shift_bars`, `shift_column`,
+> `mask_column`, `jitter_bars`, `fill_delay_ms` or `perturbation_pct`. Collapsing them
+> would lose the one we can have, and shipping the truncation test under the name
+> `shift_bars` would **claim a computation it did not perform** — so neither was built
+> and the catalogue now names both. The perturbation row keeps its signature and stops
+> citing the truncation precedent; the truncation row states the prefix invariant and
+> nothing more. Its `Effort`/`Pri` cells are set to match its sibling's priority and
+> are the only cells not given by the decision. `audit`'s cap-check moves 12 → 13 of
+> 16 in §2.1, recomputed here rather than left stale.
 
 ### 5.5 `falsification` (+6, joining the seven that exist)
 
@@ -321,10 +365,37 @@ Priority is the research brief's (P0 first), effort S/M/L, tier T = typed, P = t
 |---|---|---|---|---|---|
 | `ablation_sweep` | T | `(strategy_id, run_config, components[]?) -> {baseline, components[{ref, deltas, pct_trades_affected, verdict: load_bearing|redundant|harmful}]}` — deltas must clear the null-library CI, not raw point deltas | Falsification | S | P1 |
 | `parameter_fragility_map` | T | `(strategy_id, params[], perturbation_pct=0.2, n_samples=200) -> {surface_handle, fragility_index, chosen_point_percentile}` | Falsification | M | P1 |
-| `trade_reshuffle_bootstrap` | P | `(run_id, mode=reshuffle|bootstrap|block, n_paths=5000, capital_levels[]) -> {max_dd_pctiles, tuw_pctiles, ruin_prob_by_capital, endpoint_dispersion?}` — refuses to label reshuffle-only output "worst case" | none | S | P0 |
+| `trade_reshuffle_bootstrap` | T | `(run_id, mode=reshuffle|bootstrap|block, n_paths=5000, capital_levels[]) -> {max_dd_pctiles, tuw_pctiles, ruin_prob_by_capital, endpoint_dispersion?}` — refuses to label reshuffle-only output "worst case" | none | S | P0 |
 | `timing_jitter_sensitivity` | T | `(strategy_id, jitter_bars=[0,1,2,3,5], fill_delay_ms=[0,250,1000]) -> {decay_curve[], lookahead_suspicion}` | Falsification | S–M | P1 |
-| `cost_shock_curve` | P | `(run_id, multipliers=[1,1.5,2,3,5], live_cost_bps?) -> {curve[], breakeven_multiplier, safety_margin?}` — default grid starts from measured venue spreads | none | S | P0 |
-| `regime_failure_search` | T | `(run_id, method, n_regimes=3, min_obs=250) -> {regimes[], worst, unrepresented_risk}` — BH/Romano-Wolf across regimes | none | M | P1 |
+| `cost_shock_curve` | T | `(run_id, multipliers=[1,1.5,2,3,5], live_cost_bps?) -> {curve[], breakeven_multiplier, safety_margin?}` — default grid starts from measured venue spreads | none | S | P0 |
+| `regime_failure_search` | T | `(run_id, method, n_regimes=3, min_obs=250) -> {regimes[], worst, unrepresented_risk}` — BH/Romano-Wolf across regimes; **the re-read form**: it partitions a completed run's per-period returns, dispatching no compute and looking at no new data | none | M | P1 |
+
+> **Amended 2026-09-22 (ADR-D-13).** `trade_reshuffle_bootstrap` and
+> `cost_shock_curve` were tier **`P`** (templated), here and in §9's build-order table.
+> Both are now tier **`T`**. A template's rows arrive only as `SeriesKind::Ohlcv` or
+> `SeriesKind::TrialReturns` (`crates/skills/src/template.rs:98`), and **neither
+> carries per-trade `pnl` or `costs_paid`** — which both tools need, and which their
+> own signatures in this table imply. The tier as written is **unimplementable**, not
+> merely inconvenient. P6 keeps the tier invisible to the model, so nothing about the
+> contract changes; the correction exists so the next reader following §5.5 literally
+> does not lose a day to it.
+
+> **Recorded 2026-09-22 (ADR-D-12).** `regime_failure_search`'s trial declaration of
+> **`none`** was contradicted elsewhere by *"All spend `Falsification` trials"*, which
+> is a correctness bug in either direction and not a metadata slip: a spending tool
+> declared free is an **unrecorded look** (INV-1), and a free tool declared spending
+> charges research for nothing and raises `N_eff` against work nobody did — and every
+> selection-adjusted statistic on this platform divides by that count.
+>
+> The disagreement dissolves by construction, so the row now states which construction
+> it is. **The re-read form** dispatches no compute and reads no new data, so `none` is
+> correct and INV-1 is untouched; it is also the form whose inputs can exist, because
+> the returns are recorded. A variant that **dispatches per-regime re-runs** is a
+> different tool with a different signature and its own name, declaring
+> `spends_trial: Falsification` **at the declaration and never by a runtime branch** —
+> a tool whose trial cost depends on its arguments cannot be audited from the
+> catalogue. The dispatching form also multiplies trials against a hypothesis chosen
+> after seeing the data, which is what Gate 9 exists to punish.
 
 ### 5.6 `execution` (+6)
 
@@ -405,7 +476,7 @@ The funnel (`advance_gate`, `get_funnel`) is amended so that Gate 2 requires a `
 | Phase | Items | Why in this order |
 |---|---|---|
 | **1 — the contract** (≈ 2 days) | `ToolSpec` + `ToolResult` (§2.3–2.4); generate taxonomy/profile/envelope lists; fix `promote_model_version` gating; description rewrite (§3.1); `get_authoring_guide(section)`; hosted `seen_ids` check (§2.5) | Everything after this is "add a spec", and the two defects are closed |
-| **2 — templated tier** (≈ 3 days) | `templated.rs` + build-time template loading (§3.3); the `analysis` namespace (§5.2); `trade_reshuffle_bootstrap`, `cost_shock_curve`, `deflated_sharpe`, `min_track_record` | Delivers the unbuilt AGENT-002 §6.3 suite at template cost and the four cheapest P0 honesty tools |
+| **2 — templated tier** (≈ 3 days) | `templated.rs` + build-time template loading (§3.3); the `analysis` namespace (§5.2); `trade_reshuffle_bootstrap`, `cost_shock_curve` (both **typed**, tier `T` — ADR-D-13), `deflated_sharpe`, `min_track_record` | Delivers the unbuilt AGENT-002 §6.3 suite at template cost and the four cheapest P0 honesty tools |
 | **3 — honesty and leakage** (≈ 3 days) | `audit` typed tools (§5.4 P0/P1), `memory` (§5.8), `leakage_audit`, `selection_bias_verdict`, `hypothesis_precheck`; funnel amendments (§6) | The gates become evidence-backed; the agent stops re-testing dead ideas |
 | **4 — adversarial and execution** (≈ 4 days) | `falsification` additions, `execution` P0s, `precapital_battery`, `go_live_readiness`; `Falsification` trial kind | Composes with the in-flight `falsification.rs`, `capacity.rs`, `costs.rs` |
 | **5 — attribution, portfolio, model** (≈ 3 days) | §5.3, §5.7, `signal_identity` | Needs the templated tier and the crypto factor proxy set |

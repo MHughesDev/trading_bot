@@ -13,22 +13,26 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/primitives/Button'
 import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'
-import type { AwayDigest as AwayDigestData, DigestLine } from '@/api/desk'
+import type { AwayDigest as AwayDigestData, DigestGap, DigestLine } from '@/api/desk'
 import { ProvenanceBadge } from './Shared'
 
 /**
- * What the digest is blind to, as a sentence.
+ * The kinds this digest is blind to, in the order the server declared them.
  *
  * A pure function because the rule is worth a test and rendering it is not. The
  * server names the kinds it has no source for; the panel used to drop the field
  * entirely, so a digest that could not see refutations rendered exactly like one
- * where nothing had been refuted. Returns `null` only when the server said
- * nothing was uncovered — never when it simply was not asked.
+ * where nothing had been refuted.
+ *
+ * This replaces `blindSpotNote`, which joined every reason into one sentence
+ * with `; `. That was written when the reasons were short constants. They are
+ * not any more — `kinds_not_covered` is computed per request now and quotes what
+ * each source said, so the four possible rows concatenate into a paragraph
+ * nobody finishes. Returns `[]` only when the server said nothing was uncovered,
+ * never when it simply was not asked.
  */
-export function blindSpotNote(data: AwayDigestData | null): string | null {
-  const gaps = data?.kinds_not_covered ?? []
-  if (gaps.length === 0) return null
-  return `Not covered here: ${gaps.map((g) => `${g.kind} (${g.why})`).join('; ')}.`
+export function blindSpots(data: AwayDigestData | null): DigestGap[] {
+  return data?.kinds_not_covered ?? []
 }
 
 /**
@@ -87,6 +91,36 @@ export function linesInGap(lines: DigestLine[], since: number, until: number): D
   })
 }
 
+/**
+ * The window to filter against — **the server's, whenever it sent one.**
+ *
+ * The filter was run against `lastVisit` and the browser's `Date.now()`, and
+ * every timestamp it compares them to was stamped by the server. Two clocks,
+ * and the difference between them is subtracted from the digest.
+ *
+ * It bites hardest on the one line that matters most. `desk_digest.rs` stamps
+ * the budget line at `until = Utc::now()` — the newest timestamp in the whole
+ * response, by construction — so a server clock even a second ahead of the
+ * browser's put it past `now` and dropped it. The panel then rendered every
+ * other line and no spend figure, which reads as a window in which nothing was
+ * spent. That is this route's own stated non-negotiable, undone in the client:
+ * an absent measurement rendered as a zero.
+ *
+ * `since` and `until` are the window the server says it covered, so filtering
+ * against them cannot subtract anything the server included. The browser's
+ * marker is the fallback for a response that carried no window, and it is only
+ * ever a fallback.
+ */
+export function digestWindow(
+  data: Pick<AwayDigestData, 'since' | 'until'>,
+  lastVisit: number,
+  now: number,
+): [number, number] {
+  const since = Date.parse(data.since ?? '')
+  const until = Date.parse(data.until ?? '')
+  return [Number.isFinite(since) ? since : lastVisit, Number.isFinite(until) ? until : now]
+}
+
 export function AwayDigestPanel({
   data,
   lastVisit,
@@ -128,9 +162,10 @@ export function AwayDigestPanel({
     )
   }
 
-  const lines = linesInGap(data.lines, lastVisit, now)
+  const [since, until] = digestWindow(data, lastVisit, now)
+  const lines = linesInGap(data.lines, since, until)
   if (!hasSomethingToSay(data, lines.length)) return null
-  const blind = blindSpotNote(data)
+  const gaps = blindSpots(data)
 
   return (
     <Panel>
@@ -154,11 +189,35 @@ export function AwayDigestPanel({
           </ul>
         )}
         {/* Said out loud, beside the lines rather than behind a disclosure: the
-            reader is deciding whether they have seen everything. */}
-        {blind && (
-          <p className="sub" data-testid="digest-blind-spots">
-            {blind}
-          </p>
+            reader is deciding whether they have seen everything.
+
+            **One row per kind, not one sentence.** `blindSpotNote` joins every
+            reason with `; `, and since the route stopped asserting its gaps and
+            started measuring them the reasons have become paragraphs — the
+            budget one alone is three clauses about what an absent measurement is
+            not. Four of them concatenated into a single `.sub` is a wall an
+            operator skims past, and the whole purpose of this field is that it
+            is the thing they read before deciding to stop looking.
+
+            The `budget` row is why this matters most. `Budget::Unmeasured`
+            deliberately emits **no line at all** — `budget_line` returns `None`
+            for it — so the gap row is the only trace in the entire response that
+            runs were active and nothing recorded what they cost. If that row is
+            unreadable, the digest has silently become one that reports a window
+            of spending as a window of silence. */}
+        {gaps.length > 0 && (
+          <div className="sub" data-testid="digest-blind-spots">
+            <p style={{ margin: '0 0 var(--s-1)' }}>
+              Not covered here — this is what the desk could not see, not what did not happen:
+            </p>
+            <ul style={{ margin: 0, paddingLeft: 'var(--s-4)' }}>
+              {gaps.map((g) => (
+                <li key={g.kind} data-testid={`digest-gap-${g.kind}`}>
+                  <strong>{g.kind}</strong> — {g.why}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
         <Button
           size="xs"

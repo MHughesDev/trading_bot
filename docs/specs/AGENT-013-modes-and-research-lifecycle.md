@@ -329,12 +329,33 @@ Everything above runs on every tier through the same loop. What differs:
 | | frontier / local_high | local_mid | local_small / degraded |
 |---|---|---|---|
 | Workflows available | all seven | all but `optimise` (the worker sub-run needs a plan of moves) | `survey`, `investigate` with ≤ 1 refinement, `replicate` |
-| Pre-registration | model drafts, platform validates | model fills a **skeleton** under grammar (the fields are enums and numbers) | skeleton from the question's constraints; model confirms |
+| Pre-registration (`preregistration: free \| skeleton_grammar \| skeleton_confirm`) | `free` — model drafts, platform validates | `skeleton_grammar` — model fills a **skeleton** under grammar (the fields are enums and numbers) | `skeleton_confirm` — skeleton from the question's constraints; model confirms |
 | Falsifier authoring | free text → validated | grammar over `(metric, comparator, threshold)` | grammar; one metric offered |
 | Refinement chain | ≤ 3 | ≤ 2 | ≤ 1 |
 | Critic at report | fresh-session model | checklist | checklist |
 
 Each of these is a profile value with a conformance reader (`tests/conformance.rs`), and the scorecard's `judgement` suite measures whether the tier completes the workflows its profile claims.
+
+> **Amended 2026-09-22 (ADR-D-05).** The Pre-registration row described three
+> authoring modes in prose and named no field, which left a gap a second, unsafe field
+> was proposed to fill. It is now named: **`preregistration: free | skeleton_grammar |
+> skeleton_confirm`**, a profile value like every other row here, with **no variant
+> meaning "none"**.
+>
+> **There is no `preregistration_required` boolean, and there will not be one.**
+> Whether a pre-registration is required at all is not a profile value: it is the
+> **task demand** — a `SingleLookup` needs none, everything else needs one, at every
+> tier including frontier — which is what `sealed_registration` in `local_driver`
+> already enforces by giving `Prereg::NotRequired` to a lookup and `Prereg::Missing`
+> to everything else. A boolean defaulting to `true` that nobody ever sets is a field
+> that does nothing; the first configuration that sets it `false` gets a tier spending
+> trials against a hypothesis that can only ever be **confirmed** — the exact failure
+> §7.2 exists to close — and INV-16 would not catch it, because a per-Experiment
+> `prereg_hash` satisfies the constraint while carrying no falsifier at all. A field
+> whose only purpose is to be set to the unsafe value should not exist.
+>
+> `preregistration_required` in §6.1 and §13.3 is the name of the **refusal**, not of
+> a field, and stays. `max_prereg_amendments` is unaffected.
 
 ## 12. Build order
 
