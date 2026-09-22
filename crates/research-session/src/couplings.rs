@@ -46,8 +46,15 @@ pub const DEFECT_TRIPS_AT: usize = 2;
 /// A fact about the world the driver either measured or did not.
 ///
 /// The third value is the point. See the module header.
+/// Adjacently tagged, not internally tagged, and the difference is a landmine
+/// rather than a style choice. `#[serde(tag = "kind")]` on a newtype variant
+/// writes the payload's **fields** beside the tag, so a unit enum came out as
+/// `{"kind":"is","armed":null}` — the measurement rendered as a key with a null
+/// against it — and a payload that is not a map at all (an `f64`, a `String`)
+/// fails at runtime with nothing failing at compile time. `content` puts the
+/// value under its own key, which works for every `T`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Observed<T> {
     /// Read, and this is what it said.
     Is(T),
@@ -256,6 +263,27 @@ impl PauseReason {
 
     /// The pause words, in the order [`evaluate`] reports them.
     pub const WORDS: &'static [&'static str] = &["kill_switch", "tier", "platform_defect"];
+
+    /// Whether live children drain at the boundary, or are left to finish
+    /// (AGENT-014 §7, rows 8-10).
+    ///
+    /// The three rows do **not** say the same thing and the difference is not
+    /// cosmetic. Row 8: *"live children finish the step and suspend"*. Row 10:
+    /// *"budget spent on a broken platform is not research"*, which is a
+    /// sentence about stopping the spend now. Row 9 is the odd one: *"children
+    /// in flight **finish**"* — a degraded profile is still a profile, the work
+    /// already paid for is worth having, and suspending it would throw away a
+    /// run that was going to produce something.
+    ///
+    /// An exhaustive match rather than a default arm, so a fourth coupling has
+    /// to state which it is instead of inheriting whichever was written last.
+    #[must_use]
+    pub fn drains_live_children(&self) -> bool {
+        match self {
+            PauseReason::KillSwitch | PauseReason::PlatformDefect { .. } => true,
+            PauseReason::Tier { .. } => false,
+        }
+    }
 
     /// One sentence for the digest.
     #[must_use]
@@ -658,6 +686,52 @@ mod tests {
         assert_eq!(
             reasons.iter().map(PauseReason::word).collect::<Vec<_>>(),
             PauseReason::WORDS
+        );
+    }
+
+    #[test]
+    fn the_three_rows_do_not_all_drain_and_the_one_that_does_not_is_the_tier() {
+        // §7 row 9 says children in flight **finish**; rows 8 and 10 say they
+        // suspend. A single "pause means drain" rule would throw away a run a
+        // degraded profile was about to complete.
+        assert!(PauseReason::KillSwitch.drains_live_children());
+        assert!(PauseReason::PlatformDefect {
+            tool: "backtest".into(),
+            runs: vec![run(1)],
+        }
+        .drains_live_children());
+        assert!(!PauseReason::Tier {
+            profile: "opus".into(),
+            health: "degraded".into(),
+        }
+        .drains_live_children());
+    }
+
+    #[test]
+    fn an_observation_survives_a_round_trip_whatever_it_carries() {
+        // The tagging this enum used to have wrote a unit payload out as a
+        // *key* — `{"kind":"is","armed":null}` — and would have failed outright
+        // on an `Observed<f64>`, which is the shape `execute` needs. Both
+        // directions are asserted here because the wire form is the thing a
+        // reader of a stored event sees, and it had never been looked at.
+        let a = Observed::Is(KillSwitch::Tripped);
+        let j = serde_json::to_string(&a).expect("a unit payload");
+        assert_eq!(j, r#"{"kind":"is","value":"tripped"}"#);
+        assert_eq!(
+            serde_json::from_str::<Observed<KillSwitch>>(&j).expect("back again"),
+            a
+        );
+
+        let n: Observed<i64> = Observed::Is(7);
+        let j = serde_json::to_string(&n).expect("a primitive payload, which used to fail");
+        assert_eq!(j, r#"{"kind":"is","value":7}"#);
+
+        let u: Observed<KillSwitch> = Observed::unknown("monitor.events did not answer");
+        let j = serde_json::to_string(&u).expect("an absence");
+        assert_eq!(
+            serde_json::from_str::<Observed<KillSwitch>>(&j).expect("back again"),
+            u,
+            "an absence that deserialised as a value would be the whole bug"
         );
     }
 }

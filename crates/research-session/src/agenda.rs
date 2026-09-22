@@ -398,6 +398,10 @@ pub enum DedupeLayer {
 }
 
 impl DedupeLayer {
+    /// The three layers, in the order an offer meets them.
+    pub const ALL: &'static [DedupeLayer] =
+        &[DedupeLayer::Key, DedupeLayer::Intake, DedupeLayer::Ledger];
+
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -405,6 +409,168 @@ impl DedupeLayer {
             DedupeLayer::Intake => "intake",
             DedupeLayer::Ledger => "ledger",
         }
+    }
+
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|l| l.as_str() == s)
+    }
+
+    /// What the scorecard calls it.
+    #[must_use]
+    pub fn in_prose(self) -> &'static str {
+        match self {
+            DedupeLayer::Key => "the dedupe key, before anything was inserted",
+            DedupeLayer::Intake => "`hypothesis_precheck`, before a trial was charged",
+            DedupeLayer::Ledger => "the ledger's trial count, through `novelty`",
+        }
+    }
+
+    /// Which layer an [`Insert`] represents, if it caught anything.
+    ///
+    /// [`Insert::Added`] answers `None` rather than a layer, because an offer
+    /// that was not a duplicate was not caught by anything.
+    #[must_use]
+    pub fn of_insert(insert: &Insert) -> Option<Self> {
+        match insert {
+            Insert::Added(_) => None,
+            Insert::Merged { .. } => Some(DedupeLayer::Key),
+        }
+    }
+}
+
+/// How many duplicates a layer caught, or that nobody asked it.
+///
+/// Two states, because a zero and a silence are not the same reading and the
+/// difference is not hypothetical here: layer three reports through `novelty`,
+/// which only exists once the scorer has run, so a period in which nothing was
+/// scored has **no count** for it rather than a count of none. A scorecard
+/// printing `ledger: 0` for that period tells a human the third layer caught
+/// nothing, and the true sentence is that nobody asked it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum LayerCount {
+    Caught(usize),
+    NotReported,
+}
+
+impl LayerCount {
+    /// The number, if one was measured.
+    ///
+    /// `Option` and not a default, and there is deliberately no `unwrap_or`
+    /// anywhere in this module to pair with it.
+    #[must_use]
+    pub fn count(self) -> Option<usize> {
+        match self {
+            LayerCount::Caught(n) => Some(n),
+            LayerCount::NotReported => None,
+        }
+    }
+}
+
+/// P3's last clause: *"the scorecard reports which layer caught each
+/// duplicate"* (AGENT-014 §4, §6.5).
+///
+/// The three layers refuse the same thing at three different costs — a key
+/// match costs nothing, an intake match costs a precheck, a ledger match costs
+/// a ranking — so the interesting number is not how many duplicates there were
+/// but **where** they were stopped. A session whose duplicates are all being
+/// caught at layer three is a session whose dedupe key is not doing its job.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DedupeScorecard {
+    /// Offers made in the period.
+    pub offers: usize,
+    /// Offers that became new items.
+    pub inserted: usize,
+    pub key: LayerCount,
+    pub intake: LayerCount,
+    pub ledger: LayerCount,
+}
+
+impl DedupeScorecard {
+    /// Count layer one straight off the offers the period made.
+    ///
+    /// Layers two and three open as [`LayerCount::NotReported`] and are filled
+    /// by [`Self::with_intake`] and [`Self::with_ledger`] — a caller that holds
+    /// one of those counts says so, and a caller that does not leaves the
+    /// silence visible rather than passing a zero.
+    #[must_use]
+    pub fn over(inserts: &[Insert]) -> Self {
+        let merged = inserts
+            .iter()
+            .filter(|i| DedupeLayer::of_insert(i) == Some(DedupeLayer::Key))
+            .count();
+        Self {
+            offers: inserts.len(),
+            inserted: inserts.len() - merged,
+            key: LayerCount::Caught(merged),
+            intake: LayerCount::NotReported,
+            ledger: LayerCount::NotReported,
+        }
+    }
+
+    #[must_use]
+    pub fn with_intake(mut self, caught: usize) -> Self {
+        self.intake = LayerCount::Caught(caught);
+        self
+    }
+
+    #[must_use]
+    pub fn with_ledger(mut self, caught: usize) -> Self {
+        self.ledger = LayerCount::Caught(caught);
+        self
+    }
+
+    #[must_use]
+    pub fn of(&self, layer: DedupeLayer) -> LayerCount {
+        match layer {
+            DedupeLayer::Key => self.key,
+            DedupeLayer::Intake => self.intake,
+            DedupeLayer::Ledger => self.ledger,
+        }
+    }
+
+    /// Duplicates caught, over the layers that reported.
+    ///
+    /// Not a total over all three: adding an unreported layer in as a zero is
+    /// how a sum comes to be quoted as though it were complete.
+    #[must_use]
+    pub fn caught_where_reported(&self) -> usize {
+        DedupeLayer::ALL
+            .iter()
+            .filter_map(|l| self.of(*l).count())
+            .sum()
+    }
+
+    /// The layers nobody asked.
+    #[must_use]
+    pub fn unreported(&self) -> Vec<DedupeLayer> {
+        DedupeLayer::ALL
+            .iter()
+            .copied()
+            .filter(|l| self.of(*l) == LayerCount::NotReported)
+            .collect()
+    }
+
+    /// One line per layer, for the digest. A layer nobody asked says so.
+    #[must_use]
+    pub fn lines(&self) -> Vec<String> {
+        DedupeLayer::ALL
+            .iter()
+            .map(|l| match self.of(*l) {
+                LayerCount::Caught(n) => format!(
+                    "{}: {n} refused at {}",
+                    l.as_str(),
+                    l.in_prose()
+                ),
+                LayerCount::NotReported => format!(
+                    "{}: not reported this period — {} was not consulted, which is not the same \
+                     as catching nothing",
+                    l.as_str(),
+                    l.in_prose()
+                ),
+            })
+            .collect()
     }
 }
 
@@ -661,5 +827,83 @@ mod tests {
         ];
         let words: Vec<&str> = all.iter().map(ItemStatus::word).collect();
         assert_eq!(words, ItemStatus::WORDS);
+    }
+
+    // ── The scorecard (AGENT-014 P3) ────────────────────────────────────────
+
+
+    #[test]
+    fn the_scorecard_counts_layer_one_off_the_offers_it_was_given() {
+        let mut agenda = vec![AgendaItem::new(session(), "does x work?", "btc", Source::User)];
+        let inserts = vec![
+            offer(
+                &mut agenda,
+                AgendaItem::new(session(), "does x work?", "btc", Source::OpenQuestion),
+            ),
+            offer(
+                &mut agenda,
+                AgendaItem::new(session(), "does y work?", "btc", Source::OpenQuestion),
+            ),
+        ];
+        let card = DedupeScorecard::over(&inserts);
+        assert_eq!(card.offers, 2);
+        assert_eq!(card.inserted, 1);
+        assert_eq!(card.key, LayerCount::Caught(1));
+    }
+
+    #[test]
+    fn a_layer_nobody_asked_is_not_a_layer_that_caught_nothing() {
+        // The rule this crate is built on, at the one place where the zero is
+        // most tempting: layer three reports through `novelty`, so a period in
+        // which nothing was scored has no count for it at all.
+        let card = DedupeScorecard::over(&[]).with_intake(2);
+        assert_eq!(card.ledger, LayerCount::NotReported);
+        assert_eq!(card.ledger.count(), None);
+        assert_eq!(card.unreported(), vec![DedupeLayer::Ledger]);
+        assert_eq!(
+            card.caught_where_reported(),
+            2,
+            "the sum is over what reported, not over three"
+        );
+        let lines = card.lines();
+        assert_eq!(lines.len(), DedupeLayer::ALL.len());
+        let ledger_line = lines
+            .iter()
+            .find(|l| l.starts_with("ledger:"))
+            .expect("a line per layer");
+        assert!(ledger_line.contains("not reported"), "{ledger_line}");
+        assert!(
+            !ledger_line.contains(": 0 "),
+            "an unreported layer must never render a zero: {ledger_line}"
+        );
+    }
+
+    #[test]
+    fn a_layer_that_reported_nothing_says_zero_and_means_it() {
+        let card = DedupeScorecard::over(&[]).with_intake(0).with_ledger(0);
+        assert!(card.unreported().is_empty());
+        assert_eq!(card.caught_where_reported(), 0);
+        assert!(card.lines().iter().all(|l| l.contains("refused at")), "{:?}", card.lines());
+    }
+
+    #[test]
+    fn every_layer_word_round_trips_and_has_a_sentence_of_its_own() {
+        let mut seen: Vec<&str> = Vec::new();
+        for l in DedupeLayer::ALL {
+            assert_eq!(DedupeLayer::parse(l.as_str()), Some(*l));
+            assert!(!seen.contains(&l.in_prose()), "{l:?} reuses a sentence");
+            seen.push(l.in_prose());
+        }
+        assert_eq!(DedupeLayer::parse("family"), None);
+    }
+
+    #[test]
+    fn an_offer_that_inserted_was_caught_by_nothing() {
+        let mut agenda: Vec<AgendaItem> = Vec::new();
+        let i = offer(
+            &mut agenda,
+            AgendaItem::new(session(), "does x work?", "btc", Source::User),
+        );
+        assert_eq!(DedupeLayer::of_insert(&i), None);
     }
 }

@@ -26,7 +26,13 @@
 //! * [`schedule`] — whether the session may claim now, when it may claim next,
 //!   and when the child running now has to drain;
 //! * [`harvest`] — what a finished run puts back: the questions it becomes, and
-//!   the proposals it hands to a human rather than to itself.
+//!   the proposals it hands to a human rather than to itself;
+//! * [`execute`] — the other end of the same run: the brief it is handed, the
+//!   lease it may spend, and what the session does this iteration;
+//! * [`couplings`] — the three things outside the session that stop it;
+//! * [`sources`] — the five subscriptions that put work on the agenda without
+//!   anybody asking;
+//! * [`replenish`] — what a drained agenda does when the endless setting is on.
 //!
 //! The driver that turns a fold into work lives in `api::session_driver`,
 //! because it needs the job service and the conversation front door. What it may
@@ -36,6 +42,7 @@ pub mod agenda;
 pub mod charter;
 pub mod couplings;
 pub mod digest;
+pub mod execute;
 pub mod fold;
 pub mod harvest;
 pub mod replenish;
@@ -44,19 +51,27 @@ pub mod select;
 pub mod sources;
 pub mod stall;
 
-pub use agenda::{AgendaItem, DedupeLayer, Insert, ItemStatus, Score, Source};
+pub use agenda::{
+    AgendaItem, DedupeLayer, DedupeScorecard, Insert, ItemStatus, LayerCount, Score, Source,
+};
 pub use charter::{
     admit, Admitted, Autonomy, Charter, CharterError, ExplorationShare, Judgement, Objective,
     Profile, ReviewEvery, Schedule, Scope, Seed, SessionBudget, StopWhen, TierRefusal, Window,
     EXPLORATION_FLOOR,
 };
 pub use couplings::{evaluate as evaluate_couplings, PauseReason, Signals, Verdict};
-pub use digest::{
-    Digest, DigestInput, Heading, Line, Period, Ref, RefKind, Section, SpendUnit,
+pub use digest::{Digest, DigestInput, Heading, Line, Period, Ref, RefKind, Section, SpendUnit};
+pub use execute::{
+    brief, day_bound, day_budget, lease, plan, redirect, stop, total_bound, Bound, Brief,
+    BriefInput, CapKind, DayBudget, HoldReason, Lease, LeaseRefusal, LeaseRequest, Meter, Redirect,
+    SiblingRun, Situation, Step, StopVerdict, Stopping, TrialCap,
 };
 pub use fold::{fold, Anomaly, EventKind, Folded, SessionEvent, SessionState};
 pub use replenish::{absorb, on_drain, Drain, Replenished, SurveyReport};
-pub use select::{Inputs, Provenance, Scored, Selection, Signal};
+pub use select::{
+    novelty_from, precheck_factor, Declared, Inputs, PolicyField, PrecheckFactor, Provenance,
+    Scored, SelectionPolicy, Selection, Signal,
+};
 pub use sources::{ingest, Fired, Ingest, World};
 pub use stall::{detect, Amendment, Diagnosis, FinishedRun, Precheck, Rule, Tripped};
 

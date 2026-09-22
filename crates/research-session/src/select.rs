@@ -45,7 +45,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::agenda::{AgendaItem, Score, COST_FLOOR_USD};
+use crate::agenda::{AgendaItem, Score, Source, COST_FLOOR_USD};
+use crate::charter::EXPLORATION_FLOOR;
+use crate::stall::Precheck;
 
 /// The selection policy's name and version, as `mlops.decision` requires.
 ///
@@ -448,6 +450,280 @@ pub fn by_item(scored: &[Scored]) -> BTreeMap<Uuid, Score> {
     scored.iter().map(|s| (s.item, s.normalised)).collect()
 }
 
+// ── The precheck's half of `novelty` (§5.1) ─────────────────────────────────
+
+/// §5.1: `hypothesis_precheck` `proceed_new` → 1.0.
+pub const PRECHECK_PROCEED_NEW: f64 = 1.0;
+/// §5.1: `hypothesis_precheck` `proceed_as_variant` → 0.6.
+pub const PRECHECK_PROCEED_AS_VARIANT: f64 = 0.6;
+
+/// The factor the precheck contributes to `novelty`, or that it contributed
+/// none.
+///
+/// **There is no `1.0` for an unrecorded precheck**, and that is the whole
+/// point of this type. `1.0` is `proceed_new`'s factor: an item nobody
+/// prechecked, given it, ranks exactly as though the precheck had positively
+/// called it new — ahead of an item the precheck honestly called a variant. The
+/// absence is handed to the caller instead, so it can ride on the `decision`
+/// row beside the score it did not contribute to.
+///
+/// [`crate::stall::Precheck::NotRecorded`] is the **common** case on this
+/// platform: `hypothesis_precheck` files `blocked | duplicate | new` and most
+/// runs have no verdict row at all.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PrecheckFactor {
+    Recorded { factor: f64, verdict: &'static str },
+    NotRecorded,
+}
+
+impl PrecheckFactor {
+    /// The factor, if one was recorded. No `unwrap_or` pairs with this.
+    #[must_use]
+    pub fn factor(self) -> Option<f64> {
+        match self {
+            PrecheckFactor::Recorded { factor, .. } => Some(factor),
+            PrecheckFactor::NotRecorded => None,
+        }
+    }
+
+    /// What the decision row's `not_estimated` list says about it.
+    #[must_use]
+    pub fn note(self) -> Option<&'static str> {
+        match self {
+            PrecheckFactor::Recorded { .. } => None,
+            PrecheckFactor::NotRecorded => Some(
+                "novelty.precheck: no `hypothesis_precheck` verdict was recorded for this \
+                 question, so §5.1's precheck factor was not applied to its novelty",
+            ),
+        }
+    }
+}
+
+/// §5.1's precheck factor for a verdict.
+#[must_use]
+pub fn precheck_factor(precheck: Precheck) -> PrecheckFactor {
+    match precheck {
+        Precheck::ProceedNew => PrecheckFactor::Recorded {
+            factor: PRECHECK_PROCEED_NEW,
+            verdict: Precheck::ProceedNew.as_str(),
+        },
+        Precheck::ProceedAsVariant => PrecheckFactor::Recorded {
+            factor: PRECHECK_PROCEED_AS_VARIANT,
+            verdict: Precheck::ProceedAsVariant.as_str(),
+        },
+        Precheck::NotRecorded => PrecheckFactor::NotRecorded,
+    }
+}
+
+/// `novelty` from both of §5.1's inputs: the precheck verdict and the count of
+/// prior statements of the same question.
+///
+/// Returns the factor **alongside** the signal rather than folding it in
+/// silently, because the caller has to record which of the two halves it got.
+/// A caller that wanted only the number could have called
+/// [`novelty_from_prior`]; this one returns two things so that dropping the
+/// second is a visible act.
+#[must_use]
+pub fn novelty_from(precheck: Precheck, n_prior: i64) -> (Signal, PrecheckFactor) {
+    let pf = precheck_factor(precheck);
+    let prior = novelty_from_prior(n_prior);
+    match pf.factor() {
+        Some(f) => (Signal::measured(f * prior.raw, n_prior), pf),
+        // The prior half is still measured and is still applied; what is
+        // missing is the factor, and `pf` is what says so.
+        None => (prior, pf),
+    }
+}
+
+// ── The policy, and a reader per field (§5.1) ───────────────────────────────
+
+/// AGENT-014 §5.1's own table, transcribed.
+///
+/// This is the **declaration**, not the implementation: [`Source::weight`] is
+/// the implementation and there is exactly one of it. The pair exists so that a
+/// conformance reader can compare them, which is what §5.1's *"versioned
+/// `SelectionPolicy` object with a conformance reader per field"* is for. A
+/// policy object holding its own copy of these numbers *instead of* the enum
+/// would be a second place to write them and the first thing to drift; a copy
+/// that is compared every build is the opposite.
+const SPEC_SOURCE_WEIGHTS: &[(Source, Declared)] = &[
+    (Source::User, Declared::UnboundedViaBypass),
+    (Source::Contradiction, Declared::Number(1.5)),
+    (Source::RetryConditionMet, Declared::Number(1.3)),
+    (Source::OpenQuestionBlocking, Declared::Number(1.3)),
+    (Source::Observation, Declared::Number(1.2)),
+    (Source::StaleFinding, Declared::Number(1.0)),
+    (Source::CharterSeed, Declared::Number(1.0)),
+    (Source::OpenQuestion, Declared::Number(1.0)),
+    (Source::RefinementFollowup, Declared::Number(0.8)),
+    // §5.1 writes "`replenish` as estimated": the survey's own value estimate
+    // rides on the item, so the source contributes the identity.
+    (Source::Replenish, Declared::Number(1.0)),
+    (Source::ProposalFromRun, Declared::Number(1.0)),
+];
+
+/// What the spec declares for one field.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum Declared {
+    Number(f64),
+    /// §5.1 writes `∞` for `user`. This build implements it as
+    /// [`Source::bypasses_scoring`] rather than as a float, because a weight
+    /// large enough to mean "always" poisons every percentile normalisation it
+    /// touches. The reader therefore checks the **bypass**, not a number.
+    UnboundedViaBypass,
+}
+
+/// One field of the policy: what the spec says, what this build does, and
+/// where the build's number was read from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PolicyField {
+    pub name: String,
+    pub declared: Declared,
+    /// What this build computes for the field.
+    pub read: f64,
+    /// Whether the item bypasses scoring — the implementation of `∞`.
+    pub bypass: bool,
+    /// The single definition [`Self::read`] was read out of, so a reader who
+    /// disagrees with a number knows which line to change.
+    pub from: &'static str,
+}
+
+impl PolicyField {
+    /// Whether the build matches the declaration.
+    #[must_use]
+    pub fn conforms(&self) -> bool {
+        match self.declared {
+            // Exact: every one of these is a literal written in two places and
+            // a tolerance here would let a third place be nearly right.
+            Declared::Number(d) => !self.bypass && (d - self.read).abs() < 1e-12,
+            Declared::UnboundedViaBypass => self.bypass,
+        }
+    }
+
+    /// One sentence for a reader looking at a failure.
+    #[must_use]
+    pub fn sentence(&self) -> String {
+        match self.declared {
+            Declared::Number(d) if self.bypass => format!(
+                "{}: §5.1 declares {d} and this build bypasses scoring for it entirely ({})",
+                self.name, self.from
+            ),
+            Declared::Number(d) => format!(
+                "{}: §5.1 declares {d}, this build reads {} ({})",
+                self.name, self.read, self.from
+            ),
+            Declared::UnboundedViaBypass => format!(
+                "{}: §5.1 declares ∞, implemented as a scoring bypass — this build {} ({})",
+                self.name,
+                if self.bypass {
+                    "bypasses"
+                } else {
+                    "does not bypass"
+                },
+                self.from
+            ),
+        }
+    }
+}
+
+/// §5.1's *"versioned `SelectionPolicy` object with a conformance reader per
+/// field"*, as a **reader** over the one definition of each number.
+///
+/// The version is [`POLICY_VERSION`] and it is the same one that goes on the
+/// `mlops.decision` row, so a later analysis can say which policy a ranking was
+/// made under and then read what that policy was.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SelectionPolicy {
+    pub policy: &'static str,
+    pub version: i32,
+}
+
+impl Default for SelectionPolicy {
+    fn default() -> Self {
+        Self::current()
+    }
+}
+
+impl SelectionPolicy {
+    #[must_use]
+    pub fn current() -> Self {
+        Self {
+            policy: POLICY,
+            version: POLICY_VERSION,
+        }
+    }
+
+    /// Every field, read out of the definition that holds it.
+    #[must_use]
+    pub fn fields(&self) -> Vec<PolicyField> {
+        let mut out: Vec<PolicyField> = SPEC_SOURCE_WEIGHTS
+            .iter()
+            .map(|(source, declared)| PolicyField {
+                name: format!("source.{}", source.as_str()),
+                declared: *declared,
+                read: source.weight(),
+                bypass: source.bypasses_scoring(),
+                from: "agenda::Source::weight",
+            })
+            .collect();
+        out.push(PolicyField {
+            name: "novelty.halflife".into(),
+            declared: Declared::Number(20.0),
+            read: NOVELTY_HALFLIFE,
+            bypass: false,
+            from: "select::NOVELTY_HALFLIFE",
+        });
+        out.push(PolicyField {
+            name: "novelty.precheck.proceed_new".into(),
+            declared: Declared::Number(1.0),
+            read: PRECHECK_PROCEED_NEW,
+            bypass: false,
+            from: "select::PRECHECK_PROCEED_NEW",
+        });
+        out.push(PolicyField {
+            name: "novelty.precheck.proceed_as_variant".into(),
+            declared: Declared::Number(0.6),
+            read: PRECHECK_PROCEED_AS_VARIANT,
+            bypass: false,
+            from: "select::PRECHECK_PROCEED_AS_VARIANT",
+        });
+        out.push(PolicyField {
+            name: "cost.floor_usd".into(),
+            declared: Declared::Number(0.10),
+            read: COST_FLOOR_USD,
+            bypass: false,
+            from: "agenda::COST_FLOOR_USD",
+        });
+        out.push(PolicyField {
+            name: "exploration.floor".into(),
+            declared: Declared::Number(0.10),
+            read: EXPLORATION_FLOOR,
+            bypass: false,
+            from: "charter::EXPLORATION_FLOOR",
+        });
+        out
+    }
+
+    /// Every field where the build and §5.1 disagree. Empty is the only
+    /// acceptable answer and a test says so.
+    #[must_use]
+    pub fn nonconformances(&self) -> Vec<PolicyField> {
+        self.fields()
+            .into_iter()
+            .filter(|f| !f.conforms())
+            .collect()
+    }
+
+    /// Every source §5.1's table names, so a source added to the enum without
+    /// a declared weight is a hole a test can find rather than a silent 1.0.
+    #[must_use]
+    pub fn declared_sources(&self) -> Vec<Source> {
+        SPEC_SOURCE_WEIGHTS.iter().map(|(s, _)| *s).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -613,14 +889,21 @@ mod tests {
             .map(|n| (item(&format!("q{n}"), Source::CharterSeed), inputs(f64::from(n) + 1.0, 1.0, 1.0, 1.0)))
             .collect();
         let scored = score(&slate);
-        let session = Uuid::new_v4();
+        // Both ids are fixed. The second half of this test asserts that two
+        // sessions produce *different* sequences, and over five items at a
+        // share of 0.3 two random ids agree on all ten draws about one run in
+        // eight hundred — the same shape of flake
+        // `the_exploration_share_is_achieved_over_forty_selections` was
+        // corrected for above, one order of magnitude rarer and therefore
+        // harder to catch when it lands.
+        let session = Uuid::from_u128(0x5E55_1074_0000_0000_0000_0000_0000_0002);
         for seq in 0..10 {
             let a = select(&scored, 0.3, seed_for(session, seq)).expect("a choice");
             let b = select(&scored, 0.3, seed_for(session, seq)).expect("a choice");
             assert_eq!(a, b, "the draw is not reproducible, so its propensity is a claim");
         }
         // And two sessions do not march in step.
-        let other = Uuid::new_v4();
+        let other = Uuid::from_u128(0x5E55_1074_0000_0000_0000_0000_0000_0003);
         let mine: Vec<Uuid> = (0..10)
             .map(|s| select(&scored, 0.3, seed_for(session, s)).expect("a").chosen)
             .collect();
@@ -731,5 +1014,137 @@ mod tests {
             select(&scored, 0.15, 1).is_none(),
             "nothing to choose is a different answer from choosing badly"
         );
+    }
+
+    // ── The policy and its conformance readers (§5.1) ───────────────────────
+
+    #[test]
+    fn every_field_of_the_policy_matches_what_the_spec_declares() {
+        let p = SelectionPolicy::current();
+        let bad = p.nonconformances();
+        assert!(
+            bad.is_empty(),
+            "{}",
+            bad.iter()
+                .map(PolicyField::sentence)
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        assert_eq!(p.policy, POLICY);
+        assert_eq!(p.version, POLICY_VERSION);
+    }
+
+    #[test]
+    fn the_conformance_reader_would_catch_a_drift() {
+        // A reader nobody has seen fail is a reader that might be comparing
+        // nothing. Two planted violations, one per shape of `Declared`.
+        let drifted = PolicyField {
+            name: "source.contradiction".into(),
+            declared: Declared::Number(1.5),
+            read: 1.4,
+            bypass: false,
+            from: "agenda::Source::weight",
+        };
+        assert!(!drifted.conforms());
+        assert!(drifted.sentence().contains("1.5"), "{}", drifted.sentence());
+
+        let lost_bypass = PolicyField {
+            name: "source.user".into(),
+            declared: Declared::UnboundedViaBypass,
+            read: 1.0,
+            bypass: false,
+            from: "agenda::Source::weight",
+        };
+        assert!(
+            !lost_bypass.conforms(),
+            "`user`'s ∞ is the bypass; a 1.0 without it is a `user` item ranked like a seed"
+        );
+        assert!(
+            lost_bypass.sentence().contains("does not bypass"),
+            "{}",
+            lost_bypass.sentence()
+        );
+    }
+
+    #[test]
+    fn a_source_with_no_declared_weight_is_a_hole_the_reader_finds() {
+        // §5.1's table and the enum have to name the same set. A source added
+        // to the enum and not to the table would otherwise pick up
+        // `Source::weight`'s default and rank against a number nobody declared.
+        let declared = SelectionPolicy::current().declared_sources();
+        for s in Source::ALL {
+            assert!(declared.contains(s), "{s:?} has no declared weight in §5.1");
+        }
+        assert_eq!(declared.len(), Source::ALL.len());
+    }
+
+    #[test]
+    fn the_policy_names_the_definition_each_number_was_read_from() {
+        for f in SelectionPolicy::current().fields() {
+            assert!(!f.from.is_empty(), "{}", f.name);
+            assert!(
+                f.from.contains("::"),
+                "`from` names a definition, not a prose gloss: {}",
+                f.from
+            );
+        }
+    }
+
+    // ── The precheck's half of novelty (§5.1) ───────────────────────────────
+
+    #[test]
+    fn a_recorded_precheck_multiplies_novelty_and_an_absent_one_does_not() {
+        let (new, pf_new) = novelty_from(Precheck::ProceedNew, 0);
+        assert!(matches!(pf_new, PrecheckFactor::Recorded { .. }));
+        let (variant, pf_var) = novelty_from(Precheck::ProceedAsVariant, 0);
+        assert_eq!(pf_var.factor(), Some(PRECHECK_PROCEED_AS_VARIANT));
+        assert!(
+            variant.raw < new.raw,
+            "a variant is less novel than a new question: {} vs {}",
+            variant.raw,
+            new.raw
+        );
+        assert!((variant.raw - 0.6 * new.raw).abs() < 1e-12);
+    }
+
+    #[test]
+    fn an_unrecorded_precheck_is_not_a_proceed_new() {
+        // The rule this crate is built on, at the place where the 1.0 is
+        // invisible: `proceed_new`'s factor *is* 1.0, so folding an absent
+        // verdict in as 1.0 ranks an unprechecked question exactly as though
+        // the precheck had called it new.
+        let (absent, pf) = novelty_from(Precheck::NotRecorded, 3);
+        let (new, _) = novelty_from(Precheck::ProceedNew, 3);
+        assert_eq!(pf, PrecheckFactor::NotRecorded);
+        assert_eq!(pf.factor(), None, "there is no number to read here");
+        assert!(
+            pf.note().is_some_and(|n| n.contains("was not applied")),
+            "the absence rides on the decision row: {:?}",
+            pf.note()
+        );
+        // The numbers coincide — that is exactly why the *factor* has to be
+        // carried separately rather than being inferred from the score.
+        assert!((absent.raw - new.raw).abs() < 1e-12);
+        assert_ne!(pf, precheck_factor(Precheck::ProceedNew));
+    }
+
+    #[test]
+    fn every_precheck_word_has_a_factor_or_an_honest_absence() {
+        for p in Precheck::ALL {
+            let f = precheck_factor(*p);
+            assert_eq!(f.factor().is_some(), p.is_recorded(), "{p:?}");
+            assert_eq!(f.note().is_none(), p.is_recorded(), "{p:?}");
+        }
+    }
+
+    #[test]
+    fn the_prior_half_is_still_applied_when_the_precheck_is_absent() {
+        let (few, _) = novelty_from(Precheck::NotRecorded, 0);
+        let (many, _) = novelty_from(Precheck::NotRecorded, 200);
+        assert!(
+            many.raw < few.raw,
+            "the ledger half is measured and is not thrown away with the factor"
+        );
+        assert_eq!(many.provenance, Provenance::Measured { n: 200 });
     }
 }

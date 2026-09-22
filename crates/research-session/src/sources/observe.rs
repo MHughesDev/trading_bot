@@ -364,7 +364,12 @@ mod tests {
         let charter = charter_over(&["btc"]);
         let mut agenda = empty_agenda();
         let o = flip("2026-09-01");
-        let _ = observations(&charter, &[o.clone()], &Raised::default(), &mut agenda);
+        let _ = observations(
+            &charter,
+            std::slice::from_ref(&o),
+            &Raised::default(),
+            &mut agenda,
+        );
         assert_eq!(agenda[1].source_refs, vec![o.fingerprint()]);
         assert!(Raised::from_refs(agenda[1].source_refs.clone()).contains(&o.fingerprint()));
     }
