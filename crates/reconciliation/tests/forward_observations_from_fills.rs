@@ -23,7 +23,7 @@ use ledger::neff::ReturnSeries;
 use reconciliation::forward::{
     DeploymentSpec, DivergenceThresholds, ExpectedBar, PaperVenue, RealisedSeries,
 };
-use reconciliation::ForwardRecorder;
+use reconciliation::{ForwardRecorder, ForwardRecorders};
 use risk::{GateContext, GlobalRiskLimits, KillSwitch, RiskGate, StrategyHaltRegistry};
 use rust_decimal::Decimal;
 use uuid::Uuid;
@@ -115,9 +115,12 @@ fn flat() -> ExpectedBar {
 async fn a_fill_reaches_the_forward_record_within_one_bar() {
     ensure_journal();
     let halts = Arc::new(StrategyHaltRegistry::new());
-    let recorder = Arc::new(
-        ForwardRecorder::new(spec(Numeraire::Usd), dec("10000"), Arc::clone(&halts)).unwrap(),
-    );
+    // Through the registry, because that is the only way a recorder is ever
+    // attached to the fill stream — including here. A test that wired itself
+    // up by hand would be testing a path production does not have.
+    let recorder = ForwardRecorders::install()
+        .deploy(spec(Numeraire::Usd), dec("10000"), Arc::clone(&halts))
+        .unwrap();
 
     let mut mock = MockBroker::new();
     mock.filled_qty = dec("10");
@@ -129,9 +132,9 @@ async fn a_fill_reaches_the_forward_record_within_one_bar() {
     // when a fill is both new to the processor AND newly inserted into `fills`.
     // A per-engine `with_fill_observer` would have been a second, weaker path —
     // it fires on `FillResult::Applied` alone, which a redelivery satisfies.
-    execution::fills::register_observer(
-        Arc::clone(&recorder) as Arc<dyn execution::fills::FillObserver>
-    );
+    // `ForwardRecorders::install` (above, inside `deploy`) is that one
+    // subscription and it is idempotent, so the second test in this binary
+    // joins it rather than doubling it.
     let engine = ExecutionEngine::new(Arc::clone(&broker) as Arc<dyn Broker>);
 
     let kill_switch = Arc::new(KillSwitch::new(false));
@@ -217,9 +220,12 @@ async fn a_fill_reaches_the_forward_record_within_one_bar() {
 async fn a_redelivered_fill_does_not_double_count() {
     ensure_journal();
     let halts = Arc::new(StrategyHaltRegistry::new());
-    let recorder = Arc::new(
-        ForwardRecorder::new(spec(Numeraire::Usd), dec("10000"), Arc::clone(&halts)).unwrap(),
-    );
+    // Through the registry, because that is the only way a recorder is ever
+    // attached to the fill stream — including here. A test that wired itself
+    // up by hand would be testing a path production does not have.
+    let recorder = ForwardRecorders::install()
+        .deploy(spec(Numeraire::Usd), dec("10000"), Arc::clone(&halts))
+        .unwrap();
 
     let mut mock = MockBroker::new();
     mock.filled_qty = dec("10");
@@ -231,9 +237,9 @@ async fn a_redelivered_fill_does_not_double_count() {
     // when a fill is both new to the processor AND newly inserted into `fills`.
     // A per-engine `with_fill_observer` would have been a second, weaker path —
     // it fires on `FillResult::Applied` alone, which a redelivery satisfies.
-    execution::fills::register_observer(
-        Arc::clone(&recorder) as Arc<dyn execution::fills::FillObserver>
-    );
+    // `ForwardRecorders::install` (above, inside `deploy`) is that one
+    // subscription and it is idempotent, so the second test in this binary
+    // joins it rather than doubling it.
     let engine = ExecutionEngine::new(Arc::clone(&broker) as Arc<dyn Broker>);
 
     let intent = buy_intent();

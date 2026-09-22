@@ -327,12 +327,14 @@ pub fn census(
         _ => 0,
     };
     let missing_bars = expected_bars.saturating_sub(present_bars);
-    let missing_bps = if expected_bars == 0 {
-        0
-    } else {
-        // Integer arithmetic on purpose: a float here would make two runs of the
-        // census differ in the last digit on different hardware.
-        u32::try_from(missing_bars.saturating_mul(10_000) / expected_bars).unwrap_or(10_000)
+    // Integer arithmetic on purpose: a float here would make two runs of the census
+    // differ in the last digit on different hardware. `checked_div` carries the
+    // "nothing was expected" case in the type rather than in a surrounding `if`, so
+    // the divide-by-zero cannot be reintroduced by editing the guard away.
+    let missing_bps = match missing_bars.saturating_mul(10_000).checked_div(expected_bars) {
+        // Nothing expected means nothing can be missing.
+        None => 0,
+        Some(bps) => u32::try_from(bps).unwrap_or(10_000),
     };
 
     let (longest_gap_periods, longest_continuous_bars) = runs(&opens, period_ns, calendar);

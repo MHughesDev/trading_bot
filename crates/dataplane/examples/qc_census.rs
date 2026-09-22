@@ -43,6 +43,27 @@
 //!   (BTC-USD/kraken/1m over `kraken_ws`) sits exactly on the boundary at a 60s lag.
 //!   A measured zero, not an absent measurement — but a bar knowable mid-period
 //!   would now pass, and closing that needs the period inside the check.
+//! - **A generated series is graded but not counted.** `market_bar` serves
+//!   `SYN-PLANTED-AR1-424242` — 5,000 1h bars from the `synthetic` source, written by
+//!   `crates/api/src/synthetic_worker.rs` through the same `BarStore` as vendor data —
+//!   beside real venue feeds, and it is the longest-spanning series in the table. It
+//!   is printed under `kind = SYN` and kept out of the blast-radius total, which is a
+//!   claim about market data. Detection is on `source_dim.kind = 'derived'`, not on
+//!   the name: a fixture renamed tomorrow is still a fixture.
+//!
+//! # What the canonical table actually grades (2026-09-22)
+//!
+//! Of 8 live venue series: **0 A, 2 B, 2 C, 4 D**. Every D is coverage — 43% to 99.99%
+//! of expected bars missing — not a timestamp or price fault, and both Bs are tiny
+//! series (121 and 48 bars) where `cross_source` and `survivorship` could not run at
+//! all, so the grade reflects what went unmeasured rather than what passed.
+//!
+//! Stated plainly, because the number reads better than the situation: the
+//! best-attested series in this census is the synthetic fixture, and it is excluded.
+//! No live venue series earns an A. These grades replace the P-2.6 figures, which were
+//! taken on `market_bars_v2` and are void; they are not comparable with them, and the
+//! difference is mostly the canonical table honestly showing gaps the stale one had no
+//! rows to reveal.
 
 use std::collections::BTreeMap;
 
@@ -101,6 +122,15 @@ struct Series {
     venue: String,
     timeframe: String,
     bars: u64,
+    /// Every bar of this series came from a source whose `source_dim.kind` is
+    /// `derived` — a generator, not a venue.
+    ///
+    /// Taken from the source dimension rather than matched against a name, because
+    /// the thing that makes a series synthetic is where its numbers came from, and a
+    /// fixture renamed tomorrow is still a fixture. A source that does not resolve in
+    /// the dimension reads as **not** derived: an unrecognised source is a finding to
+    /// be graded, not a fixture to be set aside.
+    synthetic: bool,
 }
 
 /// The label for a bar period. Anything off the known grid is printed as its own
@@ -124,11 +154,13 @@ fn main() -> Result<(), String> {
     // that vanishes from a census reads exactly like a series that has no problems.
     let inventory = query(&format!(
         "SELECT b.instrument_id, b.venue_id, b.period_secs, count() AS bars, \
-                any(d.symbol) AS symbol, any(v.name) AS venue \
+                any(d.symbol) AS symbol, any(v.name) AS venue, \
+                min(s.kind = 'derived') AS all_derived \
          FROM trading.market_bar AS b \
          LEFT JOIN trading.instrument_symbol_dim AS d \
                 ON d.instrument_id = b.instrument_id AND d.venue_id = b.venue_id \
          LEFT JOIN trading.venue_dim AS v ON v.venue_id = b.venue_id \
+         LEFT JOIN trading.source_dim AS s ON s.source_id = b.source_id \
          GROUP BY b.instrument_id, b.venue_id, b.period_secs \
          ORDER BY bars DESC {TSV}"
     ))?;
@@ -138,7 +170,7 @@ fn main() -> Result<(), String> {
         .skip(1)
         .filter_map(|l| {
             let f: Vec<&str> = l.split('\t').collect();
-            if f.len() < 6 {
+            if f.len() < 7 {
                 return None;
             }
             let instrument_id: i64 = f[0].parse().ok()?;
@@ -159,6 +191,7 @@ fn main() -> Result<(), String> {
                 venue: name(f[5], format!("venue#{venue_id}")),
                 timeframe: timeframe_label(period_secs),
                 bars: f[3].parse().unwrap_or(0),
+                synthetic: f[6].trim() == "1",
             })
         })
         .collect();
@@ -166,10 +199,10 @@ fn main() -> Result<(), String> {
     let cfg = QcConfig::default();
     println!("config version {}\n", cfg.version());
     println!(
-        "{:<28} {:<10} {:<5} {:>8}  {:<5} first reason",
-        "instrument", "venue", "tf", "bars", "grade"
+        "{:<28} {:<10} {:<5} {:>8}  {:<5} {:<4} first reason",
+        "instrument", "venue", "tf", "bars", "grade", "kind"
     );
-    let rule: String = std::iter::repeat_n('-', 118).collect();
+    let rule: String = std::iter::repeat_n('-', 124).collect();
     println!("{rule}");
 
     // Series keyed for the cross-source lookup: the same instrument and
@@ -183,6 +216,7 @@ fn main() -> Result<(), String> {
     }
 
     let mut tally: BTreeMap<&'static str, usize> = BTreeMap::new();
+    let mut synthetic_tally: BTreeMap<&'static str, usize> = BTreeMap::new();
     let mut d_reasons: Vec<String> = Vec::new();
 
     for s in &series {
@@ -223,20 +257,25 @@ fn main() -> Result<(), String> {
 
         let report = qc::run(&bars, &subject, &cfg, &ctx);
         let grade = report.graded.grade;
-        *tally.entry(grade.as_str()).or_default() += 1;
+        if s.synthetic {
+            *synthetic_tally.entry(grade.as_str()).or_default() += 1;
+        } else {
+            *tally.entry(grade.as_str()).or_default() += 1;
+        }
 
         let first = report.graded.reasons.first().cloned().unwrap_or_default();
         println!(
-            "{:<28} {:<10} {:<5} {:>8}  {:<5} {}",
+            "{:<28} {:<10} {:<5} {:>8}  {:<5} {:<4} {}",
             s.instrument,
             s.venue,
             s.timeframe,
             s.bars,
             grade.as_str(),
+            if s.synthetic { "SYN" } else { "live" },
             first.chars().take(58).collect::<String>()
         );
 
-        if grade == Grade::D {
+        if grade == Grade::D && !s.synthetic {
             d_reasons.push(format!(
                 "{}/{}/{}: {}",
                 s.instrument, s.venue, s.timeframe, first
@@ -244,7 +283,17 @@ fn main() -> Result<(), String> {
         }
     }
 
-    println!("\n── blast radius ──");
+    // The blast radius is a claim about the platform's *market data*, so a generated
+    // series may not be counted into it. `market_bar` serves SYN-PLANTED-AR1-424242
+    // — 5,000 1h bars from the `synthetic` source — beside real venue feeds, and it
+    // is the longest-spanning series in the table. Folding it into this denominator
+    // would let a fixture's grade move a number that is read as a statement about
+    // vendor data. It is graded and printed, on its own line, and kept out of the
+    // total.
+    let live_count = series.iter().filter(|s| !s.synthetic).count();
+    let synthetic_count = series.len() - live_count;
+
+    println!("\n── blast radius (live venue series only) ──");
     for g in ["A", "B", "C", "D"] {
         println!("  {g}: {}", tally.get(g).copied().unwrap_or(0));
     }
@@ -252,9 +301,23 @@ fn main() -> Result<(), String> {
     let waiver = tally.get("C").copied().unwrap_or(0);
     println!(
         "\n{refused} series would be REFUSED outright and {waiver} would need a human waiver \
-         if P-2.3 were switched on today, out of {}.",
-        series.len()
+         if P-2.3 were switched on today, out of {live_count} live venue series."
     );
+    if synthetic_count > 0 {
+        let grades: Vec<String> = ["A", "B", "C", "D"]
+            .iter()
+            .filter_map(|g| {
+                let n = synthetic_tally.get(g).copied().unwrap_or(0);
+                (n > 0).then(|| format!("{n}{g}"))
+            })
+            .collect();
+        println!(
+            "\n{synthetic_count} generated series excluded from that total ({}). \
+             These are fixtures written by a `derived` source, not vendor data; their \
+             grades describe the generator and must not be quoted as data quality.",
+            grades.join(", ")
+        );
+    }
     if !d_reasons.is_empty() {
         println!("\nWhy the D grades:");
         for r in &d_reasons {
@@ -307,9 +370,4 @@ fn load(instrument_id: i64, venue_id: i32, period_secs: i64) -> Result<Vec<QcBar
             })
         })
         .collect())
-}
-
-fn planted_violation_do_not_keep() -> Result<String, String> {
-    query("INSERT INTO trading.market_bars_v2 (open) VALUES (1)")?;
-    query("OPTIMIZE TABLE market_bars_v2 FINAL")
 }

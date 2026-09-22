@@ -422,12 +422,21 @@ fn check_bars_v1_frozen() {
 /// Writers of `market_bars_v2` that predate the freeze, with the number of write
 /// sites each file still holds.
 ///
-/// These four are the whole of the pre-freeze debt, measured on 2026-09-21. They
-/// live outside the dataplane and were left in place deliberately: every one of
-/// them is inert against the live database (the `market_bars` → v2 backfill has
-/// zero rows left to copy, and the v2 → `market_bar` migration recorded all 17 of
-/// its chunks as copied at 21:19:28 that day), so removing them is a cleanup for
-/// the crate's owner rather than a correctness fix this check should force.
+/// These four are the whole of the pre-freeze debt. They live outside the dataplane
+/// and are left in place deliberately, on two measurements taken against the live
+/// database on 2026-09-22:
+///
+/// - the `market_bars` → v2 backfill has nothing left to copy — a fingerprint
+///   anti-join of all 99,789 v1 rows against v2 returns 0 missing;
+/// - the v2 → `market_bar` migration is complete — `canonical_migration_chunk`
+///   records all 17 `(timeframe, month)` chunks copied at 2026-09-21 21:19:28,
+///   156,817 rows, matching v2's 156,817 distinct `event_id`s exactly.
+///
+/// So all four are inert, and removing them is a cleanup for the crate's owner
+/// rather than a correctness fix this check should force. Deleting them is in fact
+/// the *riskier* move: `market_bars` → v2 → `market_bar` is the only path by which
+/// a box still holding v1-era bars reaches the canonical table, and a freeze that
+/// severs it would strand that data rather than protect it.
 ///
 /// The count is pinned in both directions on purpose. A new write site in one of
 /// these files fails the check, and so does *removing* one without shrinking the
@@ -455,79 +464,106 @@ const V2_PRE_FREEZE_WRITERS: &[(&str, usize)] = &[
 /// chose, inherited from a sort key. The canonical `market_bar` carries
 /// `knowledge_time` inside its sorting key and does not have this failure.
 ///
-/// The hazard is not theoretical. On 2026-09-21 the live table held 1,441 sorting-key
-/// groups with two physical rows each, differing only in `ingested_time` — 1,441 rows
-/// queued for silent destruction on the next merge. They happened to agree on price
-/// and on `available_time`, so nothing of value was lost *that* time; the mechanism
-/// that would lose it was fully armed.
+/// The hazard is not theoretical. Measured on the live table on 2026-09-22, v2 held
+/// 158,258 physical rows over 156,817 distinct `event_id`s: 1,441 sorting-key groups
+/// with two rows each — 1,441 rows queued for silent destruction on the next merge.
+/// Column by column, those pairs agree on OHLCV, on `trade_count`, on `available_time`,
+/// on `event_id` and on `sequence`; they differ in `ingested_time` **and in
+/// `snapshot_id`** (1,441 groups apiece). So no price and no knowledge time would be
+/// lost on that merge, but the record of *which ingest batch delivered the row* would
+/// be, for every one of the 1,441. An earlier note here said the pairs differ only in
+/// `ingested_time`; that was one column short, and the missing column is the
+/// provenance one. The canonical table has no equivalent hazard: `market_bar` holds
+/// zero groups sharing its full sorting key.
 ///
-/// Authority went to `market_bar` on the evidence: it was ingesting minutes ago
-/// while v2's newest row was a week old, it holds every bar v2 holds (an anti-join
-/// over all nine series returned zero rows unique to v2, and all 156,817 shared bars
-/// agree on OHLCV to 1e-6), and it holds 13,747 BTC-USD/coinbase 1m bars besides.
+/// It may already have fired once. Six files in this workspace record v2 as holding
+/// 158,259 rows on 2026-09-15; it holds 158,258 now, and `system.part_log` shows a
+/// `MergeParts` on `trading.market_bars_v2` at 2026-09-16 11:22:03, between the two
+/// readings. That is circumstantial — `part_log` does not say which row a merge
+/// dropped — but the arithmetic and the timing agree, and 1,441 more are queued
+/// behind it. Those files are not edited to say 158,258: each is a dated statement
+/// that was true when it was written, and the *change* between the two readings is
+/// the finding, not a typo to paper over.
+///
+/// Authority went to `market_bar` on the evidence, all of it re-measured 2026-09-22:
+///
+/// - **Freshness.** `market_bar`'s newest event is 2026-09-22 02:05, ingested 02:06.
+///   v2's newest is 2026-09-14 01:00 — eight days stale, and nothing has written it
+///   since. Read honestly, this is a gap of eight days between the two tables and
+///   *not* a live feed against a dead one: re-checked at 19:19 on 2026-09-22,
+///   `market_bar`'s own writer had also been silent for seventeen hours (its last
+///   hourly buckets run 2026-09-21 21:00 through 2026-09-22 02:00, then stop). An
+///   earlier reading described `market_bar` as ingesting "minutes ago", which was
+///   true when it was taken. Authority rests on the eight-day gap and on containment
+///   below, neither of which a paused collector changes.
+/// - **Containment.** An anti-join of every v2 bar (keyed on instrument, venue,
+///   period and `bar_open_time`, which is v2's open and `market_bar`'s `event_time`)
+///   against `market_bar` returns **zero** rows unique to v2, across all nine series
+///   and all 158,258 rows — every one of which resolves through the identity dims,
+///   so nothing was dropped by the join.
+/// - **Surplus.** `market_bar` holds 170,924 rows over 170,851 distinct bars to v2's
+///   158,258 rows over 156,817 — 14,034 distinct bars the frozen table does not have.
+///   On BTC-USD/coinbase/1m alone it holds 105,760 rows against v2's 93,453 physical
+///   (92,013 distinct): 12,307 more rows, 13,747 more distinct bars.
+/// - **Agreement.** On the 156,817 bars both tables carry, a point-in-time resolution
+///   of each side (`argMax` on `ingested_time` for v2, on `(knowledge_time,
+///   revision_seq)` for `market_bar`) agrees on open, high, low, close *and* volume
+///   to 1e-6 on every one. Zero disagreements, so the surplus is strictly additional
+///   and not a second opinion.
+///
+/// # Freezing v2 strands nothing
+///
+/// The one way a freeze could destroy data is by severing `market_bars` → v2 →
+/// `market_bar` while v1 still held bars that had not reached the canonical table.
+/// Checked against the destination directly on 2026-09-22 rather than inferred from
+/// the middle of the chain: all 99,789 rows of `market_bars` resolve through the
+/// identity dimensions, and anti-joined against `market_bar` on (instrument, venue,
+/// period, open time — v1 stamps the close, so the period is subtracted) **zero** are
+/// missing. The chain has nothing left to carry in either of its two hops.
+///
+/// # What only v2 holds — why it is frozen and not dropped
+///
+/// Not one bar: the anti-join above is zero in that direction too. What v2 still
+/// holds alone is provenance, in four columns `market_bar` has no home for, counted
+/// on 2026-09-22:
+///
+/// - `event_id` / `dedup_key` — 156,817 distinct apiece, one per logical bar: the
+///   identity under which those bars were first ingested.
+/// - `snapshot_id` — 10,521 distinct: which ingest batch delivered each row.
+/// - `sequence` — 112,769 distinct.
+/// - `lane` (2 values) and `trust_tier` (2) are derivable from timeframe and venue
+///   and hold nothing extra.
+///
+/// So dropping v2 would cost the ingest-batch and event-identity history of the
+/// platform's first 156,817 bars and no market data whatsoever. That is a real cost,
+/// small, and not this check's to spend — hence frozen, not dropped, and no migration
+/// written here.
+///
+/// One more thing worth stating because it bounds the damage: `available_time`, the
+/// column whose absence from the sorting key *is* this hazard, equals `event_time` on
+/// **all 158,258 rows** — every bar v2 holds was stamped as knowable at its own close.
+/// The column is degenerate in the data actually present. The mechanism is armed and
+/// the guard is warranted, but no knowledge time is currently distinguishable enough
+/// for a merge to destroy. This is a measurement, not an assumption, and it is a
+/// statement about today's rows only: the mechanism would destroy a *future*
+/// restatement, which is exactly why nothing may write here again.
 ///
 /// A source guard rather than a `REVOKE INSERT`, for the same reason
 /// [`check_bars_v1_frozen`] is one: the ClickHouse user is defined in `users_xml`,
 /// which SQL cannot modify, and a grant would not survive a container rebuild.
+///
+/// # Scope
+///
+/// Rust sources only, like [`check_bars_v1_frozen`] — `clickhouse/*.sql` still
+/// carries v2's `CREATE TABLE`, which must stay so the table remains readable.
 fn check_bars_v2_frozen() {
-    let output = Command::new("git")
-        .args(["ls-files", "--", "*.rs"])
-        .output()
-        .expect("git ls-files failed");
-
-    if !output.status.success() {
-        eprintln!("git ls-files failed");
-        std::process::exit(2);
-    }
-
-    let file_list = String::from_utf8(output.stdout).expect("invalid utf8 from git ls-files");
-    let mut violations: Vec<String> = vec![];
-    let mut allowed_seen: Vec<(&str, usize)> =
-        V2_PRE_FREEZE_WRITERS.iter().map(|(p, _)| (*p, 0)).collect();
-
-    for file in file_list.lines() {
-        if file.contains("target/") {
-            continue;
+    let (violations, drift) = match scan_v2_writers(None) {
+        Ok(found) => found,
+        Err(e) => {
+            eprintln!("check-bars-v2-frozen: {e}");
+            std::process::exit(2);
         }
-        // Tests write v2 deliberately, to demonstrate the collapse that is the
-        // premise of this whole rule. A test that could not write the broken table
-        // could not prove it is broken.
-        if file.contains("/tests/") {
-            continue;
-        }
-        // The guard names the forbidden patterns, so it necessarily contains them.
-        if file.ends_with("xtask/src/main.rs") {
-            continue;
-        }
-
-        let content = match std::fs::read_to_string(file) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        for (idx, line) in content.lines().enumerate() {
-            if !line_writes_v2(line) {
-                continue;
-            }
-            match allowed_seen.iter_mut().find(|(p, _)| file.ends_with(p)) {
-                Some((_, n)) => *n += 1,
-                None => violations.push(format!("{}:{}: {}", file, idx + 1, line.trim())),
-            }
-        }
-    }
-
-    let mut drift: Vec<String> = vec![];
-    for (path, expected) in V2_PRE_FREEZE_WRITERS {
-        let found = allowed_seen
-            .iter()
-            .find(|(p, _)| p == path)
-            .map_or(0, |(_, n)| *n);
-        if found != *expected {
-            drift.push(format!(
-                "  {path}: allowlist expects {expected} write site(s), found {found}"
-            ));
-        }
-    }
+    };
 
     if violations.is_empty() && drift.is_empty() {
         println!(
@@ -567,32 +603,168 @@ fn check_bars_v2_frozen() {
     std::process::exit(1);
 }
 
+/// Walk the workspace's Rust sources and classify every line that writes
+/// `market_bars_v2`.
+///
+/// Returns `(violations, drift)`: write sites in files the allowlist does not name,
+/// and files whose site count no longer matches [`V2_PRE_FREEZE_WRITERS`].
+///
+/// `root` is the repository root. `None` means the current directory, which is what
+/// `cargo xtask` gets; the self-test passes an explicit path so it does not depend
+/// on where the harness happens to be standing.
+fn scan_v2_writers(root: Option<&std::path::Path>) -> Result<(Vec<String>, Vec<String>), String> {
+    let mut git = Command::new("git");
+    if let Some(r) = root {
+        git.arg("-C").arg(r);
+    }
+    let output = git
+        .args(["ls-files", "--full-name", "--", "*.rs"])
+        .output()
+        .map_err(|e| format!("git ls-files failed: {e}"))?;
+
+    if !output.status.success() {
+        return Err("git ls-files failed".into());
+    }
+
+    let file_list =
+        String::from_utf8(output.stdout).map_err(|_| "invalid utf8 from git ls-files".to_string())?;
+    let mut violations: Vec<String> = vec![];
+    let mut allowed_seen: Vec<(&str, usize)> =
+        V2_PRE_FREEZE_WRITERS.iter().map(|(p, _)| (*p, 0)).collect();
+
+    for file in file_list.lines() {
+        if file.contains("target/") {
+            continue;
+        }
+        // Tests write v2 deliberately, to demonstrate the collapse that is the
+        // premise of this whole rule. A test that could not write the broken table
+        // could not prove it is broken.
+        if file.contains("/tests/") {
+            continue;
+        }
+        // The guard names the forbidden patterns, so it necessarily contains them.
+        if file.ends_with("xtask/src/main.rs") {
+            continue;
+        }
+
+        let on_disk = root.map_or_else(
+            || std::path::PathBuf::from(file),
+            |r| r.join(file.replace('/', std::path::MAIN_SEPARATOR_STR)),
+        );
+        let content = match std::fs::read_to_string(&on_disk) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        for (idx, line) in content.lines().enumerate() {
+            if !line_writes_v2(line) {
+                continue;
+            }
+            match allowed_seen.iter_mut().find(|(p, _)| file.ends_with(p)) {
+                Some((_, n)) => *n += 1,
+                None => violations.push(format!("{}:{}: {}", file, idx + 1, line.trim())),
+            }
+        }
+    }
+
+    let mut drift: Vec<String> = vec![];
+    for (path, expected) in V2_PRE_FREEZE_WRITERS {
+        let found = allowed_seen
+            .iter()
+            .find(|(p, _)| p == path)
+            .map_or(0, |(_, n)| *n);
+        if found != *expected {
+            drift.push(format!(
+                "  {path}: allowlist expects {expected} write site(s), found {found}"
+            ));
+        }
+    }
+
+    Ok((violations, drift))
+}
+
+/// The two spellings of the frozen table. `trading.market_bars_v2` is not
+/// hypothetical: the database-qualified form is how `qc_census.rs` read the table
+/// straight past AT-01 in `crates/invariants`, whose regex expects the table name to
+/// follow `FROM`/`INTO` immediately.
+const V2_TABLE_NAMES: [&str; 2] = ["market_bars_v2", "trading.market_bars_v2"];
+
+/// SQL verbs that change what `market_bars_v2` contains, each matched as
+/// `<verb> <table>`.
+///
+/// `INSERT INTO` is the obvious one. The rest are here because a freeze that only
+/// stops inserts is not a freeze:
+///
+/// - `OPTIMIZE TABLE` is the single most dangerous line anyone could write against
+///   this table. The 1,441 doomed rows die on *a merge*; `OPTIMIZE ... FINAL` is how
+///   you ask for that merge on demand. It reads like maintenance and it is the
+///   trigger.
+/// - `ALTER TABLE ... DELETE|UPDATE` mutates rows in place.
+/// - `DROP`/`TRUNCATE`/`DETACH` remove them outright.
+/// - `EXCHANGE TABLES`/`RENAME TABLE`/`ATTACH TABLE` substitute a different table's
+///   contents under v2's name, which replaces every row it holds.
+const V2_WRITE_VERBS: &[&str] = &[
+    "INSERT INTO",
+    "OPTIMIZE TABLE",
+    "ALTER TABLE",
+    "DROP TABLE",
+    "DROP TABLE IF EXISTS",
+    "TRUNCATE TABLE",
+    "TRUNCATE TABLE IF EXISTS",
+    "EXCHANGE TABLES",
+    "RENAME TABLE",
+    "ATTACH TABLE",
+    "DETACH TABLE",
+];
+
+/// True when `hay` (already lowercased) contains `needle` as a whole SQL identifier —
+/// not followed by a character that could continue one.
+///
+/// The boundary is load-bearing rather than tidy. `migrate.rs` names its staging and
+/// archive tables `market_bars_v2_rebuild_<ts>` and `market_bars_v2_premerge_<ts>`,
+/// and the live database holds a `market_bars_v2_premerge_20260911184559`. Writing
+/// *those* is how the rebuild preserved the data; a prefix match would call it a
+/// violation and make the check cry wolf at the one operation that saved the rows.
+fn mentions_identifier(hay: &str, needle: &str) -> bool {
+    let mut from = 0;
+    while let Some(rel) = hay[from..].find(needle) {
+        let end = from + rel + needle.len();
+        let continues = hay[end..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !continues {
+            return true;
+        }
+        from += rel + needle.len();
+    }
+    false
+}
+
 /// True when this line writes `market_bars_v2`, in any of the forms the workspace
 /// actually uses to do it.
 ///
-/// `trading.market_bars_v2` is matched as well as the bare name. The database-
-/// qualified spelling is not hypothetical: it is how `qc_census.rs` read the table
-/// straight past AT-01 in `crates/invariants`, whose regex expects the table name to
-/// follow `FROM` immediately.
+/// Reads stay legal and must: the v2 → `market_bar` migration has to read the table
+/// it is draining, and a check that forbade that would forbid the fix.
 fn line_writes_v2(line: &str) -> bool {
     let trimmed = line.trim_start();
     if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with('*') {
         return false;
     }
-    for name in ["market_bars_v2", "trading.market_bars_v2"] {
-        // A direct insert, in SQL or through the client builder.
-        if line.contains(&format!("INSERT INTO {name} "))
-            || line.contains(&format!("INSERT INTO {name}("))
-            || line.trim_end().ends_with(&format!("INSERT INTO {name}"))
-            || line.contains(&format!("insert(\"{name}\")"))
-        {
+    // Keywords are matched case-insensitively. The workspace spells its SQL in
+    // upper case today, and a guard that a lower-case `insert into` walks past is
+    // a guard that documents a rule instead of enforcing one.
+    let lower = line.to_ascii_lowercase();
+    for name in V2_TABLE_NAMES {
+        // The client builder's typed form: `.insert("market_bars_v2")`.
+        if lower.contains(&format!("insert(\"{name}\")")) {
             return true;
         }
-        // Swapping another table into v2's name replaces every row it holds.
-        if line.contains(&format!("EXCHANGE TABLES {name} "))
-            || line.contains(&format!("RENAME TABLE {name} "))
-        {
-            return true;
+        for verb in V2_WRITE_VERBS {
+            let pat = format!("{} {name}", verb.to_ascii_lowercase());
+            if mentions_identifier(&lower, &pat) {
+                return true;
+            }
         }
     }
     // Calling the backfill writes v2 just as surely as the INSERT inside it does.
@@ -645,6 +817,66 @@ mod tests {
         assert!(!line_writes_v2("pub async fn backfill_market_bars_v2("));
     }
 
+    /// `OPTIMIZE ... FINAL` is the line that actually kills the bars. The 1,441
+    /// doomed rows in v2 die *on a merge*; this is how you ask for one on demand. A
+    /// freeze that stopped inserts and let this through would stop nothing.
+    #[test]
+    fn forcing_a_merge_is_a_write() {
+        assert!(line_writes_v2(
+            r#"    .query("OPTIMIZE TABLE market_bars_v2 FINAL")"#
+        ));
+        assert!(line_writes_v2(
+            r#"    .query("OPTIMIZE TABLE trading.market_bars_v2 FINAL")"#
+        ));
+    }
+
+    /// Mutating and removing rows count too — a frozen table that anyone may
+    /// `ALTER ... DELETE` is not frozen.
+    #[test]
+    fn mutations_and_removals_are_writes() {
+        assert!(line_writes_v2(
+            r#"    .query("ALTER TABLE market_bars_v2 DELETE WHERE timeframe = '1h'")"#
+        ));
+        assert!(line_writes_v2(
+            r#"    .query("ALTER TABLE market_bars_v2 UPDATE revision = 1 WHERE 1")"#
+        ));
+        assert!(line_writes_v2(r#"    .query("TRUNCATE TABLE market_bars_v2")"#));
+        assert!(line_writes_v2(r#"    .query("DROP TABLE market_bars_v2")"#));
+        assert!(line_writes_v2(
+            r#"    .query("DROP TABLE IF EXISTS market_bars_v2")"#
+        ));
+        assert!(line_writes_v2(r#"    .query("DETACH TABLE market_bars_v2")"#));
+    }
+
+    /// Lower-case SQL is the same SQL. A guard that only knows one casing documents
+    /// the rule rather than enforcing it.
+    #[test]
+    fn casing_does_not_matter() {
+        assert!(line_writes_v2(
+            r#"    .query("insert into market_bars_v2 (a) values (1)")"#
+        ));
+        assert!(line_writes_v2(
+            r#"    .query("Optimize Table market_bars_v2 Final")"#
+        ));
+    }
+
+    /// The staging and archive tables the rebuild creates are *different tables*,
+    /// and writing them is how the rebuild preserved the rows. A prefix match would
+    /// flag the one operation that saved the data. The live database holds a
+    /// `market_bars_v2_premerge_20260911184559` from exactly that rebuild.
+    #[test]
+    fn the_staging_and_archive_tables_are_not_the_frozen_one() {
+        assert!(!line_writes_v2(
+            r#"    .query(&format!("INSERT INTO market_bars_v2_rebuild_{stamp} SELECT 1"))"#
+        ));
+        assert!(!line_writes_v2(
+            r#"    .query("DROP TABLE market_bars_v2_premerge_20260911184559")"#
+        ));
+        assert!(!line_writes_v2(
+            r#"    .query("OPTIMIZE TABLE market_bars_v2_rebuild_7 FINAL")"#
+        ));
+    }
+
     /// Reads stay legal: the v2 → `market_bar` migration has to read the table it is
     /// draining, and a check that forbade that would forbid the fix.
     #[test]
@@ -654,8 +886,62 @@ mod tests {
             r#"    .query("SELECT * FROM trading.market_bars_v2 FINAL")"#
         ));
         assert!(!line_writes_v2(r#"    .query("INSERT INTO market_bar (a) VALUES (1)")"#));
+        assert!(!line_writes_v2(
+            r#"    .query(&format!("CREATE TABLE {staging} AS market_bars_v2"))"#
+        ));
+        assert!(!line_writes_v2(
+            r#"    .query("INSERT INTO {staging} SELECT DISTINCT * FROM market_bars_v2")"#
+        ));
         assert!(!line_writes_v2("// INSERT INTO market_bars_v2 is forbidden"));
         assert!(!line_writes_v2("//! writes its bars to `market_bars_v2` with"));
         assert!(!line_writes_v2(" * INSERT INTO market_bars_v2"));
+    }
+
+    /// The check, run for real against this checkout.
+    ///
+    /// Without this the guard is a binary nobody invokes: `cargo test --workspace
+    /// --lib` does not reach a `[[bin]]`'s tests, and `.github/workflows/ci.yml`
+    /// has a `check-bars-v1-frozen` job with no v2 sibling. A rule enforced only by
+    /// a workflow step that does not exist is a comment. This makes `cargo test -p
+    /// xtask` fail the moment a new writer appears, whatever CI is or is not
+    /// configured to run.
+    ///
+    /// # Seen to fail
+    ///
+    /// A guard nobody has watched fail is a guard nobody has tested. Both halves were
+    /// exercised against this checkout on 2026-09-22:
+    ///
+    /// - **Violation.** `const PLANTED_P4_PROBE: &str = "insert into
+    ///   trading.market_bars_v2 (open) values (1)";` appended to
+    ///   `crates/dataplane/src/census.rs` — lower case and database-qualified, the two
+    ///   evasions the matcher was widened for. The test failed naming
+    ///   `crates/dataplane/src/census.rs:766`. Removed; the file is byte-identical to
+    ///   its committed form.
+    /// - **Drift.** The `backfill.rs` entry below was flipped from 1 to 2. The test
+    ///   failed with "allowlist expects 2 write site(s), found 1". Reverted.
+    ///
+    /// The drift half is what stops this test passing vacuously. If the path handling
+    /// broke and `scan_v2_writers` read nothing at all, every allowlisted count would
+    /// come back 0 against an expected 1 and the test would fail rather than report a
+    /// clean workspace — which is the failure mode a scanner-based guard actually dies
+    /// of.
+    #[test]
+    fn nothing_new_writes_the_frozen_v2_table() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask/ has a parent")
+            .to_path_buf();
+        let (violations, drift) =
+            super::scan_v2_writers(Some(&root)).expect("scan the workspace for v2 writers");
+        assert!(
+            violations.is_empty(),
+            "new writes to the frozen market_bars_v2 table:\n{}",
+            violations.join("\n")
+        );
+        assert!(
+            drift.is_empty(),
+            "V2_PRE_FREEZE_WRITERS is out of date:\n{}",
+            drift.join("\n")
+        );
     }
 }

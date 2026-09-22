@@ -762,9 +762,9 @@ mod tests {
     #[test]
     fn timestamps_accepts_a_long_restatement_chain() {
         let mut bars = clean(10);
-        let anchor = bars[5].clone();
+        let anchor = bars[5];
         for k in 1..=54 {
-            let mut b = anchor.clone();
+            let mut b = anchor;
             b.knowledge_ns = anchor.knowledge_ns + k * MIN;
             b.revised = true;
             bars.insert(5 + k as usize, b);

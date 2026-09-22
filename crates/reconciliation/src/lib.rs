@@ -24,5 +24,8 @@ pub use positions::{
     compare_all, compare_one, reconcile_all, reconcile_one, reconcile_with_broker,
     InternalPosition, SweepError,
 };
-pub use recorder::ForwardRecorder;
+pub use recorder::{
+    ForwardRecorder, ForwardRecorders, ForwardRecordingEvidence, ForwardRecordingGap,
+    ForwardRecordingVerdict,
+};
 pub use sequence::SequenceTracker;

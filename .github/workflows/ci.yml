@@ -200,6 +200,26 @@ jobs:
       - name: Run market_bars write check
         run: cargo xtask check-bars-v1-frozen
 
+  # `market_bars_v2` is frozen for a durability reason rather than a tidiness
+  # one (ADR-D-29): `knowledge_time` is absent from its sorting key, so two
+  # revisions of one bar collapse on a background merge and a restatement is
+  # destroyed silently. Measured on the live store: 1,441 sorting-key
+  # collisions on v2 against 0 on `market_bar`.
+  #
+  # `cargo test -p xtask` already enforces this through the guard's own
+  # self-test, so the rule is mechanism rather than comment either way. The job
+  # exists so a violation is named in CI by the thing it violated, instead of
+  # arriving as one failing unit test in another crate's suite.
+  check-bars-v2-frozen:
+    name: Bars schema (nothing writes the frozen market_bars_v2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run market_bars_v2 write check
+        run: cargo xtask check-bars-v2-frozen
+
   auditor-suite:
     name: Auditor suite (AGENT-004 AE-02)
     runs-on: ubuntu-latest
