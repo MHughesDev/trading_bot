@@ -64,7 +64,18 @@ pub fn preamble_lines() -> usize {
 /// A template asking for more than its namespace allows is a parse error, not a
 /// silent clamp — a template written expecting 300 s and clamped to 30 s does not
 /// fail, it produces a `killed` outcome that reads like a bug in the statistics.
-const WALL_CEILING: &[(&str, u64)] = &[("analysis", 120), ("audit", 300), ("attribution", 300)];
+///
+/// `model` is allowed the same two minutes as `analysis` and for the same
+/// reason: it reads the same materialised bars and does the same shape of work
+/// on them. `detect_drift` permutes a kernel two-sample test, which is the one
+/// thing in that namespace that cannot be done in the default thirty seconds and
+/// whose failure at second twenty-five would read as a hang rather than a limit.
+const WALL_CEILING: &[(&str, u64)] = &[
+    ("analysis", 120),
+    ("audit", 300),
+    ("attribution", 300),
+    ("model", 120),
+];
 
 /// The runner's default, for namespaces not named above.
 const WALL_DEFAULT: u64 = 30;
@@ -692,5 +703,72 @@ mod tests {
             newer_horizon.path(root),
             "two horizons must not share a cache file"
         );
+    }
+
+    /// Every template that ships parses with the parser that ships.
+    ///
+    /// This crate owns [`parse`] and, until now, tested it only against headers
+    /// built in this file. The templates it is actually pointed at live two
+    /// directories up and were checked only by `crates/mcp-server`, where a
+    /// malformed one **panics at catalogue construction** — so a header with a
+    /// typo'd field was a crash in another crate rather than a failed assertion
+    /// in this one, and the author found out from a backtrace in a binary they
+    /// were not editing.
+    ///
+    /// Read from disk rather than from a generated list, and not a
+    /// reconciliation: mcp-server's `every_template_on_disk_reached_the_catalogue`
+    /// proves its two sides agree, which is a different claim from either side
+    /// being well formed (ADR-I-01).
+    #[test]
+    fn every_shipped_template_parses() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("crates/<name> sits two below the root")
+            .join("apps/skill-runner/templates");
+        if !root.is_dir() {
+            return;
+        }
+        let mut seen = 0usize;
+        for namespace in std::fs::read_dir(&root).expect("readable").filter_map(Result::ok) {
+            if !namespace.path().is_dir() {
+                continue;
+            }
+            let ns = namespace.file_name().to_string_lossy().to_string();
+            for file in std::fs::read_dir(namespace.path())
+                .expect("readable")
+                .filter_map(Result::ok)
+            {
+                let path = file.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("py") {
+                    continue;
+                }
+                let name = path.file_name().expect("a file").to_string_lossy().to_string();
+                let rel = format!("{ns}/{name}");
+                let text = std::fs::read_to_string(&path).expect("readable");
+                let template = parse(&rel, &text)
+                    .unwrap_or_else(|e| panic!("a shipped template does not parse: {e}"));
+
+                // The two properties a header can satisfy the parser with and
+                // still be wrong at the boundary it is read across: a series
+                // role the harness has no fixture for shows up as a panic in
+                // another crate's test suite, and a detail field that is not a
+                // pair renders as a hole in the one line a flat-tier model
+                // reads first.
+                for series in &template.header().series {
+                    assert!(
+                        !series.role.trim().is_empty(),
+                        "{rel} declares a series with an empty role"
+                    );
+                }
+                assert!(
+                    template.limits().cpu_seconds <= template.limits().wall_seconds,
+                    "{rel} would be killed by the CPU limit before its wall clock, which reads \
+                     as a hang rather than a limit"
+                );
+                seen += 1;
+            }
+        }
+        assert!(seen > 0, "no templates were found under {}", root.display());
     }
 }
