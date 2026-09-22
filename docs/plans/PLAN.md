@@ -17,7 +17,7 @@ worse than no map, because people steer by it.
 
 ---
 
-## 1. Where we are — **42% left**
+## 1. Where we are — **41% left**
 
 Derived 2026-09-21 from the `### <TASK-ID>` headings and their status markers
 across sets P, S and T. Size-weighted **S = 1, M = 2, L = 4**: 189 tasks of
@@ -26,11 +26,11 @@ wildly different sizes averaged flat would flatter us.
 | counting rule | % of the work left |
 |---|---|
 | strict — only `DONE` counts | 65% |
-| **`PARTIAL` counts half** | **42%** |
-| generous — `PARTIAL` counts done | 20% |
+| **`PARTIAL` counts half** | **41%** |
+| generous — `PARTIAL` counts done | 18% |
 
 Take the middle number and treat it as **±10**, not as a measurement. `PARTIAL`
-is 227 of 531 units and in this repository it spans "complete, one database test
+is 250 of 531 units and in this repository it spans "complete, one database test
 unwritten" to "the types exist and nothing calls them". The spread between the
 strict and generous rows *is* the uncertainty, and it is honest to show it rather
 than pick one and present it as precision.
@@ -39,7 +39,7 @@ than pick one and present it as precision.
 
 | set | subject | tasks | units | done | partial | % left |
 |---|---|---:|---:|---:|---:|---:|
-| **S** | The Agent Platform | 189 | 446 | 178 | 228 | **35%** |
+| **S** | The Agent Platform | 189 | 446 | 178 | 237 | **34%** |
 | **P** | Data Reach | 30 | 51 | 6 | 9 | **79%** |
 | **T** | Forward Evidence | 17 | 34 | 2 | 4 | **88%** |
 

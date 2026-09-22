@@ -1,6 +1,6 @@
 # Phase 11 — Continuous research: Research with the toggle on
 
-**Completion: 0% (0 / 14 tasks), plus 6 `PARTIAL`** — S-11.1 (the object, the fold, the driver), S-11.3 (the scored agenda) and S-11.14 (the API and the three read tools) landed 2026-09-21; each names what it does not cover.
+**Completion: 0% (0 / 14 tasks), plus 11 `PARTIAL`** — no task is closed and eleven have a built, tested crate half. **Five of those eleven read `NOT STARTED` until 2026-09-22**, over modules of 443–1,063 lines carrying 11–21 tests each; the markers were corrected against the tree, not against a report. The reason none is `DONE` is one sentence: `api::session_driver::SessionWorker` calls `schedule`, `harvest`, `stall` and `digest` and nothing else, so `sources::ingest`, `couplings::evaluate`, `charter::admit`, `replenish::on_drain` and all of `execute` are complete and unreached.
 
 > **The four pure modules have a caller, 2026-09-21 — and wiring them found a
 > live bug in the driver that every test had passed over.**
@@ -200,7 +200,15 @@ to be an investigation. One value feeds both. `agent_conversations` also gained
 tells a child of a session apart from a conversation a human opened.
 
 ### S-11.2 Memory-fed sources: open questions, retry conditions, contradictions, stale findings, follow-ups — M
-`NOT STARTED`
+`PARTIAL` — **corrected 2026-09-22; the marker said `NOT STARTED`.**
+`sources/memory.rs` (443 lines, 11 tests) covers §4.3 open questions, §4.5
+contradictions and §4.6 stale findings; `sources/ledger.rs` (539 lines, 11
+tests) covers §4.4 retry conditions. `sources/mod.rs` carries `World`, `ingest`,
+`offer_all` and `admitted`, with `Fired` **three**-valued — `NotEvaluable` is
+not a `No`.
+
+**The crate half is built and has no production caller.** `api::session_driver::SessionWorker` calls `schedule`, `harvest`, `stall` and `digest` and nothing else, so this module is complete, tested and unreached — this repository's dominant defect shape, now five modules deep in one crate. `PARTIAL` rather than `DONE` for exactly that reason.
+
 
 Sources 4.3–4.6 and 4.8 as subscriptions the driver evaluates each iteration over memory and
 the ledger: in-scope `open_question`s (`blocking` first), `negative_result`s whose
@@ -466,7 +474,18 @@ mixing zones or for the always-open default, and the calendar returns `None`
 rather than inventing a midnight in a zone nobody named.
 
 ### S-11.7 The couplings: kill switch, tier, platform defects — M
-`NOT STARTED`
+`PARTIAL` — **corrected 2026-09-22; the marker said `NOT STARTED`.**
+`couplings.rs` is 737 lines with 20 tests: `Observed<T>`, `KillSwitch`,
+`ProfileHealth`, `DefectBreaker` (§6.6 — the rule `harvest` structurally cannot
+decide), `evaluate`, and `Verdict::CannotDecide`.
+
+One defect found and fixed in it: `Observed<T>` was **internally tagged**, so
+`Observed::Is(KillSwitch::Armed)` serialised the measurement as a *key* and an
+`Observed<f64>` would have failed at runtime with nothing failing at compile
+time.
+
+**The crate half is built and has no production caller.** `api::session_driver::SessionWorker` calls `schedule`, `harvest`, `stall` and `digest` and nothing else, so this module is complete, tested and unreached — this repository's dominant defect shape, now five modules deep in one crate. `PARTIAL` rather than `DONE` for exactly that reason.
+
 
 A `monitor.events` kill-switch trip pauses every running continuous session within one event
 (`paused{kill_switch}`), children suspend at the boundary, and no `deploy_paper` proposal can be
@@ -526,7 +545,19 @@ table. **`AgendaItem` has no `family`**, and two of the four rules group on one,
 so it must come from the run's hypothesis. Nothing appends `session_stalled` yet.
 
 ### S-11.9 Autonomy, the frontier-only rule, and the `judgement` threshold — S
-`NOT STARTED`
+`PARTIAL` — **corrected 2026-09-22; the marker said `NOT STARTED`.**
+The crate half is `charter.rs` (1,063 lines, 21 tests): `Judgement`,
+`Profile`, `admit`, `TierRefusal`, and `AlwaysAsks::asks`, which takes autonomy
+and ignores it on purpose.
+
+**`charter::StopWhen` had no reader anywhere in the repository** — five words, a
+`Serialize`, and nothing that evaluated one. It has one now, and
+`ScheduleEnd` is reported **not evaluable** with its reason rather than silently
+never firing: `Schedule` holds weekly windows and no end date, so a charter
+listing it believes the session will stop and it will not.
+
+**The crate half is built and has no production caller.** `api::session_driver::SessionWorker` calls `schedule`, `harvest`, `stall` and `digest` and nothing else, so this module is complete, tested and unreached — this repository's dominant defect shape, now five modules deep in one crate. `PARTIAL` rather than `DONE` for exactly that reason.
+
 
 `supervised | notify | autonomous` governs *starting* only; **default `notify`**. Continuous
 may be switched on only for a **frontier** profile that is `measured` and passes `judgement`
@@ -546,7 +577,13 @@ below threshold is refused at the boundary; a new session defaults to `notify`; 
 ## Sources that watch the world, and the endless setting
 
 ### S-11.10 Observation subscriptions: regime, coverage, monitor — M
-`NOT STARTED`
+`PARTIAL` — **corrected 2026-09-22; the marker said `NOT STARTED`.**
+`sources/observe.rs` (474 lines, 11 tests) carries the regime, coverage and
+monitor subscriptions, rate-limited on a fingerprint held in `source_refs`
+rather than in a fourth table.
+
+**The crate half is built and has no production caller.** `api::session_driver::SessionWorker` calls `schedule`, `harvest`, `stall` and `digest` and nothing else, so this module is complete, tested and unreached — this repository's dominant defect shape, now five modules deep in one crate. `PARTIAL` rather than `DONE` for exactly that reason.
+
 
 Source 4.7: an instrument-profile regime flip (S-4.7's profiler) → one `investigate` item per
 flip; new data coverage in scope → `investigate`; a monitor `divergence` or `scaled_down` event on
@@ -561,7 +598,14 @@ out-of-scope strategy inserts nothing.
 **Traces:** AGENT-014 §4.7; §12.8 (observation half).
 
 ### S-11.11 Replenish — the endless setting — M
-`NOT STARTED`
+`PARTIAL` — **corrected 2026-09-22; the marker said `NOT STARTED`.**
+`replenish.rs` (614 lines, 18 tests): `Drain{NotDrained,Waiting,Replenish,Complete}`,
+`on_drain`, `absorb`, and a fruitless survey handed to `stall` as
+`knowledge_units = 0` rather than as an absence the stall detector would
+mistake for silence.
+
+**The crate half is built and has no production caller.** `api::session_driver::SessionWorker` calls `schedule`, `harvest`, `stall` and `digest` and nothing else, so this module is complete, tested and unreached — this repository's dominant defect shape, now five modules deep in one crate. `PARTIAL` rather than `DONE` for exactly that reason.
+
 
 With `replenish = true` ("keep generating questions" in the desk) and a drained agenda, the
 driver claims a synthetic `survey` item over the charter and everything in scope; the
