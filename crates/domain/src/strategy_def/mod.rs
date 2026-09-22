@@ -96,6 +96,25 @@ pub struct StrategyDefinition {
     /// strategy from before the question was asked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exits: Option<ExitPolicy>,
+    /// Authored intent, keyed by the clause it explains (v1.3, additive).
+    ///
+    /// A threshold of 0.6 is not recoverable from the number. A strategy is read
+    /// by a reviewer, by the model on its next turn, and by whoever opens the
+    /// dossier in six months, and until this field existed the *why* was lost at
+    /// exactly the point it was needed: the author's comment survived the text
+    /// and died at the compile (AGENT-011 §3).
+    ///
+    /// Keys name a clause — `strategy`, `entry_0`, `exit_1`, `input_trend`,
+    /// `param_fast`, `risk_0`, `size` — so a note survives reordering of the
+    /// nodes but not renaming of the thing it describes, which is correct: a
+    /// note about a clause that no longer exists is worse than no note.
+    ///
+    /// Part of the document, therefore part of `strategy_version`. Two revisions
+    /// that differ only in why they did something are different artifacts, on
+    /// purpose: the reason is evidence, and `apply_move` appends the move's
+    /// reason here so the lineage of a change is readable without the diff.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub notes: BTreeMap<String, String>,
 }
 
 impl StrategyDefinition {
