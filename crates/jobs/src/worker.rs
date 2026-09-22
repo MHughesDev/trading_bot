@@ -14,6 +14,7 @@ use std::time::Duration;
 use serde_json::Value;
 use tracing::{debug, error, info, warn};
 
+use crate::checkpoint::{remaining_budget, BudgetStatus, ResumePlan};
 use crate::store::{Job, JobStore, LEASE_SECONDS};
 use crate::types::*;
 
@@ -24,6 +25,23 @@ pub struct JobContext {
     /// worker without one (INV-16).
     pub trial: Option<ledger::TrialTicket>,
     pub project_id: Option<uuid::Uuid>,
+    /// How this attempt was told to pick the job up (2.5, ADR-P2-07).
+    ///
+    /// `None` means this is the job's first attempt and there is nothing to
+    /// continue. `Some(Resume { step, from })` is an instruction, not a hint: the
+    /// worker continues from `from` at `step`, **under the same trial**, and says
+    /// so. `Some(Restart { .. })` carries the reason it could not, which the
+    /// claim already wrote to the job's event stream and to the trial's
+    /// `Recovering` transition.
+    ///
+    /// `Abandon` never reaches here — [`WorkerPool::execute`] fails the job
+    /// before the worker runs, because a checkpoint that fails the §9 contract is
+    /// one nobody can vouch for and continuing from it would produce a model
+    /// whose lineage says something untrue.
+    pub resume: Option<ResumePlan>,
+    /// Seconds this attempt may run for, after subtracting what earlier attempts
+    /// already spent. `None` for the classes that declare no GPU ceiling.
+    pub budget_remaining: Option<Duration>,
     store: Arc<JobStore>,
     cancelled: Arc<AtomicBool>,
     last_progress: std::sync::Mutex<std::time::Instant>,
@@ -51,6 +69,19 @@ impl JobContext {
     /// Whether cancellation has been requested. Long-running workers must poll this.
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Relaxed)
+    }
+
+    /// The checkpoint to continue from, when the claim decided to resume.
+    ///
+    /// Returns `(step, reference)`. A worker that ignores this restarts, which is
+    /// always *safe* — it is the same look at the same data either way — and
+    /// always wasteful.
+    #[must_use]
+    pub fn resume_from(&self) -> Option<(u64, &str)> {
+        match &self.resume {
+            Some(ResumePlan::Resume { step, from }) => Some((*step, from.as_str())),
+            _ => None,
+        }
     }
 }
 
@@ -181,11 +212,51 @@ impl WorkerPool {
             None
         };
 
+        // 2.5, ADR-P2-07. `claim` already asked `plan_resume` and recorded the
+        // answer on the job's event stream and on the trial. This is where the
+        // answer is acted on.
+        //
+        // `Abandon` is the one outcome that does not run the job. A stored
+        // checkpoint that fails the §9 contract should never have been stored —
+        // the registry refuses one at `put` — so finding one means something
+        // wrote it past that check. Restarting quietly would hide that; resuming
+        // from it would produce a model whose lineage says something untrue.
+        if let Some(ResumePlan::Abandon { reason }) = &job.resume {
+            let error = JobError::terminal(
+                ledger::TerminalReason::PreemptedAbandoned,
+                "checkpoint_invalid",
+                reason.clone(),
+            );
+            match self.store.fail(&job.job_id, error).await {
+                Ok(_) => warn!(job = %job.job_id, %reason, "abandoned: the stored checkpoint does not satisfy the contract"),
+                Err(e) => error!(job = %job.job_id, error = %e, "failing an abandoned job failed"),
+            }
+            return;
+        }
+        match &job.resume {
+            Some(ResumePlan::Resume { step, from }) => {
+                info!(job = %job.job_id, step, %from, trial = ?job.trial_id, "resuming from a checkpoint under the same trial")
+            }
+            Some(ResumePlan::Restart { reason }) => {
+                info!(job = %job.job_id, %reason, trial = ?job.trial_id, "restarting from step 0 under the same trial")
+            }
+            _ => {}
+        }
+
+        // The remaining ceiling, not the declared one. A job that already spent
+        // 0.9 of its hour gets 0.1 of an hour, however many times it has died.
+        let budget = gpu_budget(&job).map(|limit| remaining_budget(limit, job.gpu_seconds_spent));
+
         let cancelled = Arc::new(AtomicBool::new(false));
         let ctx = JobContext {
             trial,
             job_id: job.job_id.clone(),
             project_id: job.project_id,
+            resume: job.resume.clone(),
+            budget_remaining: match budget {
+                Some(BudgetStatus::Remaining(d)) => Some(d),
+                _ => None,
+            },
             store: Arc::clone(&self.store),
             cancelled: Arc::clone(&cancelled),
             last_progress: std::sync::Mutex::new(
@@ -219,16 +290,35 @@ impl WorkerPool {
         // A job that has spent its budget is killed where it stands and settles
         // `budget_exceeded`, which INV-17 censors `right_budget` — a censored
         // observation, not a failure, because nothing went wrong with the work.
-        let outcome = match gpu_budget(&job) {
-            Some(limit) => {
-                let deadline = Duration::from_secs_f64(limit * 3600.0);
+        //
+        // The deadline is the **remainder**, not the declared ceiling. It used to
+        // be the ceiling, which was correct exactly once per job: a re-queued job
+        // got a fresh `max_gpu_hours` on every attempt, so before resume existed
+        // a job that died at 0.9 h of a 1 h cap could run for 1.9 h, and once
+        // resume exists dying repeatedly becomes a reliable way to spend without
+        // bound. `store::charge_attempt` accumulates the spend from the lease on
+        // every ending — completed, failed, and above all reaped, because the
+        // reaped attempt is the one whose worker is gone and will never report.
+        let outcome = match budget {
+            Some(BudgetStatus::Exhausted { declared_s, spent_s }) => Err(JobError::terminal(
+                ledger::TerminalReason::BudgetExceeded,
+                "budget_exceeded",
+                format!(
+                    "earlier attempts of this job already spent {spent_s:.0} s of its \
+                     {declared_s:.0} s ceiling; it is not started again"
+                ),
+            )),
+            Some(BudgetStatus::Remaining(deadline)) => {
                 match tokio::time::timeout(deadline, worker.run(&ctx, &job.manifest)).await {
                     Ok(result) => result,
                     Err(_) => Err(JobError::terminal(
                         ledger::TerminalReason::BudgetExceeded,
                         "budget_exceeded",
                         format!(
-                            "the job declared max_gpu_hours = {limit} and was stopped at the limit"
+                            "the job declared max_gpu_hours = {:?} and was stopped with \
+                             {:.0} s of it left after earlier attempts",
+                            gpu_budget(&job),
+                            deadline.as_secs_f64()
                         ),
                     )),
                 }

@@ -24,9 +24,12 @@ pub mod types;
 pub mod worker;
 
 pub use artifacts::{Artifact, ArtifactRegistry};
+pub use checkpoint::{
+    plan_resume, BudgetStatus, CheckpointManifest, ResumePlan, ResumeSupport,
+};
 pub use store::{
     ExplorationEntry, Job, JobStore, JobStoreError, PgTrialCounter, RefuseTrials, Submission,
-    Submitted, TrialCounter,
+    Submitted, TrialCounter, CHECKPOINT_ROLE, CHECKPOINT_TYPE,
 };
 pub use types::{
     Cost, JobError, JobKind, JobOutput, JobState, Progress, Queue, SubmittedBy, WorkerClass,

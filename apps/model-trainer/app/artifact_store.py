@@ -35,11 +35,22 @@ class ArtifactStore:
             uri = f"s3://{self.bucket}/{key}"
             return uri, sha, size
 
-        # fs backend
+        # fs backend.
+        #
+        # Staged and renamed rather than written in place. `os.replace` is atomic
+        # on POSIX and on Windows, so a reader either sees the whole object or
+        # sees nothing — it can never see a prefix. That matters most for
+        # checkpoints, which exist precisely for the case where the writing
+        # process is killed: a half-written checkpoint that a resume then loaded
+        # would be the failure this whole path is insurance against.
         path = os.path.join(self.base_path, key)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "wb") as f:
+        staging = f"{path}.partial"
+        with open(staging, "wb") as f:
             f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(staging, path)
         uri = f"file://{os.path.abspath(path)}"
         return uri, sha, size
 

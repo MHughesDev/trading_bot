@@ -40,7 +40,27 @@ def _build_model(arch: str, input_dim: int, hidden: int):
     return MLP(input_dim, hidden)
 
 
-def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
+def train(
+    definition: dict,
+    df,
+    emit_progress,
+    checkpoint: "engine.CheckpointPolicy | None" = None,
+) -> tuple[bytes, dict]:
+    """Train a point torch model, optionally checkpointing and resuming.
+
+    `checkpoint` is the producing half of 2.5 (ADR-P2-07): when the caller
+    supplies a policy this run writes a resumable checkpoint at the declared
+    interval, and when the policy carries a blob it continues from it instead of
+    starting at epoch 0. The adapter itself decides nothing about either — not
+    the interval, not whether the resume is bit-identical — because both are
+    facts the caller measured (`checkpoint.resume_support`) rather than opinions
+    this file is entitled to hold.
+
+    This is the **only** adapter that takes one. The others are not omissions:
+    sklearn and garch fit in a single call and have no step to resume from, and
+    xgboost/lightgbm resume bit-identically only with row and column sampling
+    off, which `hpo.py` switches on for essentially every trial (ADR-P6-11).
+    """
     engine.seed_everything(definition)
     p = engine.prepare(definition, df)
     hp = p.hp
@@ -67,6 +87,7 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
         emit_progress=emit_progress,
         weight_decay=weight_decay,
         sample_weight=p.w_tr,
+        checkpoint=checkpoint,
     )
 
     def predict_scores(X):

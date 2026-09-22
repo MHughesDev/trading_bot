@@ -21,6 +21,50 @@ class FoldSpec(BaseModel):
     test_end: int
 
 
+class CheckpointConfig(BaseModel):
+    """What the caller must supply before this run may write a checkpoint (2.4/2.5).
+
+    Absent, the run writes nothing. That is deliberate and it is the safe
+    default: a checkpoint is only resumable *into the same computation*, so the
+    three identity fields below are not decorations the trainer could invent —
+    they are what `jobs::checkpoint::plan_resume` compares a stored checkpoint
+    against before it will let anything continue from it. A trainer that made
+    them up would produce checkpoints that always match and mean nothing.
+
+    `interval_seconds` likewise has no default. `jobs::checkpoint::
+    checkpoint_interval_seconds` returns `None` for an unmeasured checkpoint cost
+    rather than a number, for the same reason.
+    """
+
+    interval_seconds: float
+    # The computation this checkpoint belongs to. Stamped by the dispatcher, not
+    # the trainer, and compared field-for-field on the way back in.
+    code_hash: str
+    image_digest: str
+    dataset_id: str
+    # Set by the dispatcher when `plan_resume` answered `Resume`. `resume_from`
+    # is the URI of the blob; `resume_step` is the step the manifest claimed, and
+    # is checked against the blob rather than trusted.
+    resume_from: Optional[str] = None
+    resume_step: Optional[int] = None
+
+
+class CheckpointWritten(BaseModel):
+    """One checkpoint this run produced, for the caller to register.
+
+    The bytes are already stored; this carries where and the §9 manifest the
+    artifact registry will re-validate. It is deliberately **not** `artifact_uri`
+    on the response: a checkpoint is a partial model, and the one field anything
+    downstream reads as "the trained model" must never be able to hold one.
+    """
+
+    uri: str
+    sha256: str
+    size_bytes: int
+    step: int
+    manifest: dict
+
+
 class TrainRequest(BaseModel):
     run_id: str
     model_id: str
@@ -39,6 +83,9 @@ class TrainRequest(BaseModel):
     # sidecar uses these ranges to slice the Parquet; when absent it falls back
     # to the ordinal split_indices path.
     folds: Optional[list[FoldSpec]] = None
+    # Checkpointing for this run (2.4/2.5). Absent = no checkpoint is written and
+    # a killed run restarts from step 0 under the same trial.
+    checkpoint: Optional[CheckpointConfig] = None
 
 
 class TrainResponse(BaseModel):
@@ -53,6 +100,13 @@ class TrainResponse(BaseModel):
     # by `failures.classify`. `None` on success. The caller does not parse
     # `error` to work this out; see app/failures.py.
     terminal: Optional[str] = None
+    # Checkpoints this run wrote, oldest first. Empty when none were asked for or
+    # the run was too short to reach the interval.
+    checkpoints: List[CheckpointWritten] = []
+    # The step this run started from, when it continued an earlier attempt.
+    # `None` means it started at 0 — which is a different fact from "it resumed
+    # and we did not record where", and the two must not look alike.
+    resumed_from_step: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------

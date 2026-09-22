@@ -23,7 +23,9 @@ import json
 import os
 import random
 import struct
+import time
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -517,6 +519,34 @@ def assemble_metrics(
 # --------------------------------------------------------------------------- #
 # Torch minibatch training helper
 # --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class CheckpointPolicy:
+    """Checkpointing for one training run. Every field is decided by the caller.
+
+    `interval_seconds` has **no default** anywhere in this file. The Young–Daly
+    optimum is `√(2·cost·MTBF)` (`jobs::checkpoint::checkpoint_interval_seconds`,
+    which returns `None` for an unmeasured cost) and a made-up interval is
+    indistinguishable from a measured one once it is in a config file. A run
+    whose caller supplies no policy writes no checkpoint, which is the state the
+    platform was in before this existed and is an honest one.
+
+    `write` is called at an epoch boundary with `(step, blob)`. `step` is the
+    number of **completed** epochs, so it is exactly what `resume_step` must be
+    on the way back in. Exceptions from `write` are not caught here: a checkpoint
+    the caller believes was taken and was not is the failure this whole contract
+    exists to prevent.
+    """
+
+    interval_seconds: float
+    write: Any
+    #: The blob to resume from, and the step it claims. Both or neither.
+    resume_blob: bytes | None = None
+    resume_step: int | None = None
+
+    def resuming(self) -> bool:
+        return self.resume_blob is not None and self.resume_step is not None
+
+
 def train_torch_model(
     model,
     X_tr: np.ndarray,
@@ -531,6 +561,7 @@ def train_torch_model(
     emit_progress,
     weight_decay: float = 0.0,
     sample_weight: np.ndarray | None = None,
+    checkpoint: CheckpointPolicy | None = None,
 ):
     import torch
     import torch.nn as nn
@@ -564,7 +595,37 @@ def train_torch_model(
     train_loss = float("nan")
     val_loss = float("nan")
 
-    for epoch in range(epochs):
+    # ----------------------------------------------------------------------- #
+    # Resume (2.5, ADR-P2-07, AT-61)
+    # ----------------------------------------------------------------------- #
+    # The epoch boundary is the step boundary. At the top of epoch `k` the only
+    # state that decides everything after it is the model, the optimizer and the
+    # three RNGs — the dataloader position is 0 by construction and `perm` has
+    # not been drawn yet. So a checkpoint taken here restores to *exactly* the
+    # stream position an uninterrupted run would be at, and the `torch.randperm`
+    # below draws the same permutation it would have drawn. That is what makes
+    # this loop's resume bit-identical rather than merely plausible, and AT-61
+    # measures this module's `capture`/`restore`, not a copy of them.
+    start_epoch = 0
+    if checkpoint is not None and checkpoint.resuming():
+        from . import torch_checkpoint
+
+        restored = torch_checkpoint.restore(
+            checkpoint.resume_blob,
+            expected_step=checkpoint.resume_step,
+            model=model,
+            optimizer=opt,
+        )
+        start_epoch = restored.step
+        if start_epoch > epochs:
+            raise ValueError(
+                f"the checkpoint is at epoch {start_epoch} of a run configured for "
+                f"{epochs}; resuming would run a negative number of epochs"
+            )
+
+    last_checkpoint_at = time.monotonic()
+
+    for epoch in range(start_epoch, epochs):
         model.train()
         perm = torch.randperm(n)
         running = 0.0
@@ -603,7 +664,33 @@ def train_torch_model(
             {"epoch": epoch + 1, "train_loss": train_loss, "val_loss": val_loss},
         )
 
-    return model, {"final_train_loss": train_loss, "final_val_loss": val_loss}
+        # The checkpoint is written *after* the progress report and at the end of
+        # the epoch body, which is the boundary described above. Never inside the
+        # batch loop: a half-applied epoch has a dataloader position this loop
+        # does not track, and a checkpoint that quietly resumed at the top of the
+        # epoch would show the model some rows twice and some not at all.
+        if checkpoint is not None and epoch + 1 < epochs:
+            now = time.monotonic()
+            if now - last_checkpoint_at >= checkpoint.interval_seconds:
+                from . import torch_checkpoint
+
+                checkpoint.write(
+                    epoch + 1,
+                    torch_checkpoint.capture(
+                        step=epoch + 1, model=model, optimizer=opt
+                    ),
+                )
+                last_checkpoint_at = now
+
+    return model, {
+        "final_train_loss": train_loss,
+        "final_val_loss": val_loss,
+        # What the record has to say to be accurate about this trial: not "a run
+        # happened" but "a run happened, in two parts, and the second one began
+        # here". A trial that consumed three partial runs and reported one is the
+        # ledger describing something that did not occur.
+        "resumed_from_epoch": start_epoch if start_epoch else None,
+    }
 
 
 # --------------------------------------------------------------------------- #

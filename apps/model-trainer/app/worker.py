@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from .schemas import (
+    CheckpointWritten,
     TrainRequest,
     TrainResponse,
     EvalRequest,
@@ -14,6 +15,8 @@ from .schemas import (
     PostHocResponse,
     PostHocStep,
 )
+from . import checkpoint as checkpoint_mod
+from . import engine as engine_mod
 from . import failures
 from . import posthoc as posthoc_mod
 from .artifact_store import get_store
@@ -77,6 +80,107 @@ def _route(framework: str, model_kind: str, definition: dict | None = None):
     raise ValueError(f"unsupported framework: {framework}")
 
 
+#: The adapters that can write a checkpoint mid-run and continue from one.
+#:
+#: One entry, and the shortness is the finding rather than an omission. AT-61
+#: measured all five frameworks (ADR-P6-11): torch resumes bit-identically under
+#: every configuration the platform can produce; sklearn and garch fit in a
+#: single call and have no step to resume from at all; xgboost and lightgbm
+#: resume bit-identically **only with row and column sampling off**, and
+#: `hpo.py` samples `subsample`/`colsample_bytree` on [0.5, 1.0], so essentially
+#: every HPO trial draws a fraction below 1.0 and is not resumable.
+#:
+#: Adding a name here without a measurement behind it would make
+#: `checkpoint.resume_support` the only thing standing between a sampled GBDT run
+#: and a trial record that claims a reproduction nobody performed. It fails
+#: closed, and this list must not be the place that undoes that.
+CHECKPOINTABLE_ADAPTERS = (torch_adapter.train,)
+
+
+def _build_checkpoint_policy(
+    req: TrainRequest,
+    train_fn,
+    store,
+    hyperparameters: dict,
+    written: list[CheckpointWritten],
+) -> "engine_mod.CheckpointPolicy | None":
+    """The producing half of 2.5, or `None` when this run cannot checkpoint.
+
+    Returns `None` — meaning "a kill costs the whole run" — in three cases, and
+    each of them is a stated answer rather than a silent fallback:
+
+    * the caller declared no `checkpoint` block, so nobody chose an interval;
+    * the routed adapter is not in `CHECKPOINTABLE_ADAPTERS`;
+    * `checkpoint.resume_support` says this framework and these hyperparameters
+      are not bit-identical. Writing a checkpoint nothing may resume from is the
+      one outcome worth less than writing none: it looks like insurance.
+    """
+    config = req.checkpoint
+    if config is None or train_fn not in CHECKPOINTABLE_ADAPTERS:
+        return None
+
+    support = checkpoint_mod.resume_support(
+        req.framework, hyperparameters=hyperparameters
+    )
+    if support != "bit_identical":
+        return None
+
+    prefix = req.output_prefix.rstrip("/").replace("file://", "")
+
+    def write(step: int, blob: bytes) -> None:
+        uri, sha256, size = store.put(f"{prefix}/checkpoints/step-{step}.ckpt", blob)
+        manifest = checkpoint_mod.build_manifest(
+            framework=req.framework,
+            step=step,
+            # The whole of the state is one blob, so every reference points at
+            # it. `plan_resume` hands `optimizer_state_ref` back as the thing to
+            # resume from, which is why it is the blob and not a sub-object.
+            optimizer_state_ref=uri,
+            # This loop is plain Adam with AMP off, so there is no schedule and
+            # no loss scale to restore. Said, not left blank: the contract
+            # refuses an empty reference, and "there is nothing here" and "the
+            # reference was lost" must not look alike.
+            lr_scheduler_state_ref=checkpoint_mod.NO_LR_SCHEDULER,
+            # An epoch boundary. The permutation for the next epoch has not been
+            # drawn yet, which is what makes the boundary resumable at all.
+            dataloader_position=0,
+            amp_scaler_state=checkpoint_mod.NO_AMP_SCALER,
+            code_hash=config.code_hash,
+            image_digest=config.image_digest,
+            dataset_id=config.dataset_id,
+            # Never hardcoded. `build_manifest` asks `resume_support`, which is
+            # a record of what AT-61 measured for exactly these hyperparameters.
+            hyperparameters=hyperparameters,
+        )
+        # Validated here, in the process that could still fix it, rather than
+        # after the upload where the only options are refuse or store a
+        # checkpoint nobody can resume from.
+        checkpoint_mod.validate(manifest)
+        written.append(
+            CheckpointWritten(
+                uri=uri,
+                sha256=sha256,
+                size_bytes=size,
+                step=step,
+                manifest=manifest,
+            )
+        )
+
+    resume_blob = None
+    if config.resume_from is not None and config.resume_step is not None:
+        # Let a failure here fail the run. A dispatcher that said "resume from
+        # this" and got a run that quietly started at zero would have a trial
+        # record saying one run happened where two did.
+        resume_blob = store.get(config.resume_from)
+
+    return engine_mod.CheckpointPolicy(
+        interval_seconds=float(config.interval_seconds),
+        write=write,
+        resume_blob=resume_blob,
+        resume_step=config.resume_step if resume_blob is not None else None,
+    )
+
+
 async def run_training(req: TrainRequest) -> TrainResponse:
     publisher = NatsPublisher()
     await publisher.connect()
@@ -90,6 +194,12 @@ async def run_training(req: TrainRequest) -> TrainResponse:
             payload["metric"] = metric
         asyncio.run_coroutine_threadsafe(publisher.publish(subject, payload), loop)
 
+    # Declared before the try so a failure still reports what reached the disk. A
+    # run that wrote three checkpoints and then diverged has three checkpoints; a
+    # response that omitted them would send the retry back to step 0 with the
+    # work sitting in the store unreferenced.
+    checkpoints: list[CheckpointWritten] = []
+
     try:
         await publisher.publish(subject, {"run_id": req.run_id, "phase": "loading_dataset", "progress": 5.0})
         store = get_store()
@@ -101,9 +211,22 @@ async def run_training(req: TrainRequest) -> TrainResponse:
         if req.folds:
             req.definition["_wf_fold"] = req.folds[0].model_dump()
 
-        artifact_bytes, metrics = await loop.run_in_executor(
-            None, lambda: train_fn(req.definition, df, emit)
+        policy = _build_checkpoint_policy(
+            req,
+            train_fn,
+            store,
+            req.definition.get("hyperparameters", {}) or {},
+            checkpoints,
         )
+
+        if policy is None:
+            artifact_bytes, metrics = await loop.run_in_executor(
+                None, lambda: train_fn(req.definition, df, emit)
+            )
+        else:
+            artifact_bytes, metrics = await loop.run_in_executor(
+                None, lambda: train_fn(req.definition, df, emit, checkpoint=policy)
+            )
 
         key = f"{req.output_prefix.rstrip('/')}/model.bin"
         key = key.replace("file://", "")
@@ -111,11 +234,18 @@ async def run_training(req: TrainRequest) -> TrainResponse:
 
         resp = TrainResponse(
             status="succeeded",
+            # The completed bundle, and only ever that. Checkpoints go in their
+            # own field: a partial model must not be reachable through the one
+            # field the registry reads as the trained artifact.
             artifact_uri=uri,
             sha256=sha256,
             size_bytes=size,
             metrics=metrics,
             framework_version=str(metrics.get("framework_version")) if metrics else None,
+            checkpoints=checkpoints,
+            resumed_from_step=(
+                policy.resume_step if policy is not None and policy.resuming() else None
+            ),
         )
         await publisher.publish(subject, {
             "run_id": req.run_id, "phase": "succeeded", "progress": 100.0,
@@ -123,7 +253,9 @@ async def run_training(req: TrainRequest) -> TrainResponse:
         })
     except Exception as e:  # noqa: BLE001
         terminal = failures.classify(e)
-        resp = TrainResponse(status="failed", error=str(e), terminal=terminal)
+        resp = TrainResponse(
+            status="failed", error=str(e), terminal=terminal, checkpoints=checkpoints
+        )
         await publisher.publish(subject, {
             "run_id": req.run_id, "phase": "failed", "progress": 100.0,
             "metric": {"error": str(e), "terminal": terminal},

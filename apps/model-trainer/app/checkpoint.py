@@ -107,6 +107,18 @@ DETERMINISM_FLAGS: dict[str, dict[str, str]] = {
 }
 
 
+# A loop with no learning-rate schedule and a loop whose schedule reference was
+# lost are different facts, and the manifest contract refuses an empty string for
+# either. These are what a loop that genuinely has neither writes: a statement
+# that there is nothing to restore, rather than a reference to nothing.
+#
+# `engine.train_torch_model` is such a loop — plain Adam, no schedule, AMP off on
+# CPU — so these are not hypothetical. Spelling them once means a reader grepping
+# for `no_lr_scheduler` finds every manifest that made the claim.
+NO_LR_SCHEDULER = "none:no_lr_scheduler"
+NO_AMP_SCALER = "none:amp_disabled"
+
+
 def _encode(b: bytes) -> str:
     return base64.b64encode(b).decode("ascii")
 

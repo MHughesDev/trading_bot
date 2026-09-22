@@ -557,6 +557,205 @@ pub fn plan_resume(
     }
 }
 
+/// The three fields that decide whether a checkpoint belongs to the computation
+/// about to resume it.
+///
+/// One function, because the producing and consuming ends must spell them
+/// identically or every resume is a restart with a confusing reason. The trainer
+/// is *told* this triple at dispatch and stamps it into the manifest; the worker
+/// computes it again here and compares. It is the same spelling the Trial
+/// Ledger's `TrialSubject` uses (`store::PgTrialCounter`), so a checkpoint's
+/// identity and its trial's agree by construction rather than by review.
+///
+/// `code_hashes` is joined rather than hashed: the point is that two different
+/// code sets produce two different strings, and a join does that while staying
+/// readable in a restart reason.
+#[must_use]
+pub fn computation_identity(
+    code_hashes: &[String],
+    worker_class: crate::types::WorkerClass,
+    data_snapshot_id: &str,
+) -> (String, String, String) {
+    (
+        code_hashes.join(","),
+        format!("worker:{}", worker_class.as_str()),
+        format!("snapshot:{data_snapshot_id}"),
+    )
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// The budget across a resume (SPEC §8, AT-66)
+// ───────────────────────────────────────────────────────────────────────────────
+
+/// What an attempt of a `Trainer`-class job may still spend.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BudgetStatus {
+    /// Seconds left of the declared ceiling.
+    Remaining(std::time::Duration),
+    /// The ceiling is already spent. The job settles `budget_exceeded` **without
+    /// running**, which INV-17 censors `right_budget`.
+    Exhausted { declared_s: f64, spent_s: f64 },
+}
+
+/// Divide a declared GPU ceiling by what earlier attempts already consumed.
+///
+/// This is the whole of resume's budget story, and it is the subtlest thing 2.5
+/// touches. `max_gpu_hours` is REQUIRED with no default, refused at submission
+/// and killed at in the worker — but the kill used to be a fresh
+/// `max_gpu_hours` timeout on *every attempt*. Re-queue a job that died at 0.9 h
+/// of a 1 h ceiling and it got another full hour. Once a resume exists that is
+/// no longer a rare accident: dying repeatedly becomes a reliable way to turn a
+/// hard cap into a per-attempt allowance, and the ceiling stops being a ceiling.
+///
+/// So the remainder is `declared − spent`, and `spent` is accumulated by the
+/// **database** from the lease (`store::charge_attempt`) rather than reported by
+/// the worker. A worker that was killed reports nothing, and that is exactly the
+/// attempt whose spend must still be charged.
+///
+/// A non-positive remainder is `Exhausted`, not a zero-length timeout: "you may
+/// run for 0 seconds" and "you may not run" settle the same way here, but only
+/// one of them says why.
+#[must_use]
+pub fn remaining_budget(max_gpu_hours: f64, spent_s: f64) -> BudgetStatus {
+    let declared_s = max_gpu_hours * 3600.0;
+    // A spend that is not a finite number is not a spend anyone measured, and
+    // the conservative reading of "unmeasured" is "all of it" — the same
+    // direction every other default in this module errs in.
+    let spent_s = if spent_s.is_finite() && spent_s > 0.0 {
+        spent_s
+    } else if spent_s.is_finite() {
+        0.0
+    } else {
+        declared_s
+    };
+    let left = declared_s - spent_s;
+    if left.is_finite() && left > 0.0 {
+        BudgetStatus::Remaining(std::time::Duration::from_secs_f64(left))
+    } else {
+        BudgetStatus::Exhausted {
+            declared_s,
+            spent_s,
+        }
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    /// The arithmetic, and the direction it errs in.
+    #[test]
+    fn a_resumed_attempt_gets_only_what_is_left() {
+        let hour = 1.0;
+        assert_eq!(
+            remaining_budget(hour, 0.0),
+            BudgetStatus::Remaining(std::time::Duration::from_secs(3600))
+        );
+        assert_eq!(
+            remaining_budget(hour, 900.0),
+            BudgetStatus::Remaining(std::time::Duration::from_secs(2700))
+        );
+    }
+
+    /// The property that matters: however many times a job dies and resumes, the
+    /// total it may run for is the ceiling it declared. Before this, each attempt
+    /// got the whole ceiling and the sum was unbounded.
+    #[test]
+    fn dying_repeatedly_cannot_buy_more_than_the_ceiling() {
+        let declared = 2.0; // hours
+        let mut spent = 0.0_f64;
+        let mut attempts = 0;
+        loop {
+            match remaining_budget(declared, spent) {
+                BudgetStatus::Remaining(d) => {
+                    // Every attempt is killed after consuming all it was allowed.
+                    spent += d.as_secs_f64();
+                    attempts += 1;
+                    assert!(attempts < 100, "the budget never ran out");
+                }
+                BudgetStatus::Exhausted { declared_s, spent_s } => {
+                    assert_eq!(attempts, 1, "the first attempt should spend the lot");
+                    assert!((spent_s - declared_s).abs() < 1e-6, "{spent_s} vs {declared_s}");
+                    break;
+                }
+            }
+        }
+
+        // And in smaller bites: ten deaths, each charged, still total the ceiling.
+        let mut spent = 0.0_f64;
+        for _ in 0..10 {
+            if let BudgetStatus::Remaining(_) = remaining_budget(declared, spent) {
+                spent += 720.0;
+            }
+        }
+        assert_eq!(
+            remaining_budget(declared, spent),
+            BudgetStatus::Exhausted { declared_s: 7200.0, spent_s: 7200.0 }
+        );
+    }
+
+    /// An exhausted budget is a refusal to run, not a zero-length run.
+    #[test]
+    fn an_exhausted_budget_never_becomes_a_tiny_timeout() {
+        for spent in [3600.0, 3600.1, 10_000.0] {
+            match remaining_budget(1.0, spent) {
+                BudgetStatus::Exhausted { declared_s, spent_s } => {
+                    assert_eq!(declared_s, 3600.0);
+                    assert_eq!(spent_s, spent);
+                }
+                other => panic!("{spent} spent of 3600 gave {other:?}"),
+            }
+        }
+    }
+
+    /// An unmeasured spend is charged in full. Erring this way costs a resume;
+    /// erring the other way costs the cap.
+    #[test]
+    fn an_unreadable_spend_is_treated_as_the_whole_budget() {
+        assert!(matches!(
+            remaining_budget(1.0, f64::NAN),
+            BudgetStatus::Exhausted { .. }
+        ));
+        assert!(matches!(
+            remaining_budget(1.0, f64::INFINITY),
+            BudgetStatus::Exhausted { .. }
+        ));
+        // A negative spend is nonsense from the other direction and is read as
+        // zero rather than as a credit.
+        assert_eq!(
+            remaining_budget(1.0, -100.0),
+            BudgetStatus::Remaining(std::time::Duration::from_secs(3600))
+        );
+    }
+
+    /// The producing and consuming ends agree because they are the same function.
+    #[test]
+    fn the_computation_identity_is_one_function() {
+        let hashes = vec!["sha256:a".to_string(), "sha256:b".to_string()];
+        let a = computation_identity(&hashes, crate::types::WorkerClass::Trainer, "snap1");
+        let b = computation_identity(&hashes, crate::types::WorkerClass::Trainer, "snap1");
+        assert_eq!(a, b);
+        assert_eq!(a.0, "sha256:a,sha256:b");
+        assert_eq!(a.1, "worker:trainer");
+        assert_eq!(a.2, "snapshot:snap1");
+
+        // Each component actually moves the identity, so a difference in any of
+        // the three is a restart rather than a silent match.
+        assert_ne!(
+            a,
+            computation_identity(&hashes, crate::types::WorkerClass::Eval, "snap1")
+        );
+        assert_ne!(
+            a,
+            computation_identity(&hashes, crate::types::WorkerClass::Trainer, "snap2")
+        );
+        assert_ne!(
+            a,
+            computation_identity(&["sha256:a".into()], crate::types::WorkerClass::Trainer, "snap1")
+        );
+    }
+}
+
 #[cfg(test)]
 mod resume_tests {
     use super::*;

@@ -5,11 +5,22 @@ use serde_json::Value;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+use crate::checkpoint::{computation_identity, plan_resume, ResumePlan};
 use crate::manifest;
 use crate::types::*;
 
 /// How long a lease lasts before a job is considered abandoned (COMP-005 §5).
 pub const LEASE_SECONDS: i64 = 60;
+
+/// The artifact type a resumable training checkpoint is stored under.
+pub const CHECKPOINT_TYPE: &str = "checkpoint";
+
+/// The only `job_artifacts` role a checkpoint may occupy.
+///
+/// Its own role, and only its own: a checkpoint under `model` or `result` is a
+/// partial model in the slot a finished one belongs in, which is how a half
+/// trained network ends up serving or being scored.
+pub const CHECKPOINT_ROLE: &str = "checkpoint";
 
 /// Infrastructure re-queues allowed before a job fails with `lost_worker`.
 pub const MAX_ATTEMPTS: i16 = 2;
@@ -121,6 +132,26 @@ pub struct Job {
     pub created_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
+    /// The code the submission declared, and the data snapshot it pinned. Two of
+    /// the three halves of the checkpoint's computation identity (migration
+    /// 0122); the third is the worker class. Kept as columns rather than
+    /// recovered from `manifest_hash`, because a hash tells you two things are
+    /// the same and never what they were.
+    pub code_hashes: Vec<String>,
+    pub data_snapshot_id: String,
+    /// Wall-clock seconds this job has consumed across **every** attempt.
+    ///
+    /// Charged by the database when an attempt ends, from the lease rather than
+    /// from a worker's self-report — a killed worker reports nothing, and that is
+    /// precisely the attempt whose spend must still count against
+    /// `max_gpu_hours`.
+    pub gpu_seconds_spent: f64,
+    /// How this claim decided to pick the job up (2.5, ADR-P2-07).
+    ///
+    /// `None` for a job that was not claimed by this call: `get` and `list`
+    /// describe a row, they do not make a decision, and a plan invented by a
+    /// reader would be a decision nobody recorded.
+    pub resume: Option<ResumePlan>,
 }
 
 /// Hook called inside the submission transaction to count a trial (INV-1, JB-03).
@@ -409,8 +440,9 @@ impl JobStore {
         sqlx::query(
             "INSERT INTO jobs (job_id, kind, project_id, user_id, session_id, submitted_by, \
                                experiment_id, parent_job_id, member_index, queue, worker_class, \
-                               priority, manifest, manifest_hash, state, estimate, trial_id) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'queued',$15,$16)",
+                               priority, manifest, manifest_hash, state, estimate, trial_id, \
+                               code_hashes, data_snapshot_id) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'queued',$15,$16,$17,$18)",
         )
         .bind(&job_id)
         .bind(req.kind.as_str())
@@ -428,6 +460,11 @@ impl JobStore {
         .bind(&hash)
         .bind(&estimate)
         .bind(trial_id)
+        // Kept, not only hashed. Without these a re-queued job has nothing to
+        // compare a stored checkpoint's `code_hash`/`dataset_id` against, and
+        // `plan_resume` cannot be asked a truthful question (migration 0122).
+        .bind(&req.code_hashes)
+        .bind(&req.data_snapshot_id)
         .execute(&mut *tx)
         .await?;
 
@@ -451,6 +488,21 @@ impl JobStore {
     ///
     /// Ordering is queue weight, then priority, then oldest-first. `FOR UPDATE SKIP
     /// LOCKED` lets many workers claim concurrently without blocking one another.
+    ///
+    /// ## A job that has run before is asked how to pick up (2.5, ADR-P2-07)
+    ///
+    /// This is the worker's startup path, and it is where
+    /// [`crate::checkpoint::plan_resume`] is consulted — once, inside the
+    /// claiming transaction, so the decision and the lease commit together. The
+    /// answer is recorded three ways before anything acts on it: on the job's
+    /// event stream, on the returned [`Job`], and — the one that makes the trial
+    /// record accurate — in the `detail` of the trial's `Recovering` transition.
+    ///
+    /// All three outcomes stay under the **same trial**. A re-queued job is the
+    /// same look at the same data; minting a second trial for it would inflate
+    /// the count every significance correction divides by. And a restart records
+    /// *why* it could not resume, because a restart that does not say why is
+    /// indistinguishable from a resume that silently failed.
     pub async fn claim(
         &self,
         worker_class: WorkerClass,
@@ -459,7 +511,8 @@ impl JobStore {
         let mut tx = self.pool.begin().await?;
 
         let row = sqlx::query(
-            "SELECT job_id FROM jobs \
+            "SELECT job_id, started_at, attempts, code_hashes, data_snapshot_id \
+               FROM jobs \
               WHERE state = 'queued' AND worker_class = $1 AND cancel_requested = false \
               ORDER BY CASE queue WHEN 'human' THEN 0 WHEN 'agent' THEN 1 ELSE 2 END, \
                        priority DESC, created_at \
@@ -474,11 +527,34 @@ impl JobStore {
             return Ok(None);
         };
         let job_id: String = row.get("job_id");
+        let previously_started: Option<DateTime<Utc>> = row.get("started_at");
+        let attempts: i16 = row.get("attempts");
+        let code_hashes: Vec<String> = row.get("code_hashes");
+        let data_snapshot_id: String = row.get("data_snapshot_id");
         let expires = Utc::now() + Duration::seconds(LEASE_SECONDS);
+
+        // A job that has run before. `started_at` is set on the first claim and
+        // never cleared, so it is the honest test for "this is not the first
+        // time" — `attempts` alone misses a job whose worker died and whose lease
+        // was reaped without incrementing anything yet.
+        let plan = if previously_started.is_some() || attempts > 0 {
+            let (code_hash, image_digest, dataset_id) =
+                computation_identity(&code_hashes, worker_class, &data_snapshot_id);
+            let candidate = latest_checkpoint(&mut tx, &job_id).await?;
+            Some(plan_resume(
+                candidate.as_ref(),
+                &code_hash,
+                &image_digest,
+                &dataset_id,
+            ))
+        } else {
+            None
+        };
 
         sqlx::query(
             "UPDATE jobs SET state='running', lease_owner=$2, lease_expires_at=$3, \
-                             heartbeat_at=now(), started_at=coalesce(started_at, now()) \
+                             heartbeat_at=now(), started_at=coalesce(started_at, now()), \
+                             attempt_started_at=now() \
              WHERE job_id=$1",
         )
         .bind(&job_id)
@@ -487,16 +563,25 @@ impl JobStore {
         .execute(&mut *tx)
         .await?;
 
-        trial_event(&mut tx, &job_id, |state| match state {
-            ledger::TrialState::Preempted => vec![
-                ledger::TrialEvent::to(ledger::TrialState::Recovering),
-                ledger::TrialEvent::to(ledger::TrialState::Running),
-            ],
+        let detail = plan.as_ref().map(resume_detail);
+        trial_event(&mut tx, &job_id, move |state| match state {
+            ledger::TrialState::Preempted => {
+                // The decision rides on the transition it explains. This is the
+                // event a reader looks at to answer "did this trial resume, or
+                // did it start over?", and before 2.5's consumer existed there
+                // was no answer to find.
+                let mut recovering = ledger::TrialEvent::to(ledger::TrialState::Recovering);
+                recovering.detail = detail;
+                vec![recovering, ledger::TrialEvent::to(ledger::TrialState::Running)]
+            }
             ledger::TrialState::Running => Vec::new(),
             _ => vec![ledger::TrialEvent::to(ledger::TrialState::Running)],
         })
         .await?;
 
+        if let Some(plan) = &plan {
+            append_event(&mut tx, &job_id, "resume", resume_detail(plan)).await?;
+        }
         append_event(
             &mut tx,
             &job_id,
@@ -506,7 +591,9 @@ impl JobStore {
         .await?;
         tx.commit().await?;
 
-        self.get(&job_id).await.map(Some)
+        let mut job = self.get(&job_id).await?;
+        job.resume = plan;
+        Ok(Some(job))
     }
 
     /// Extends a lease. Returns false when the job was cancelled meanwhile, which is
@@ -565,7 +652,30 @@ impl JobStore {
         .execute(&mut *tx)
         .await?;
 
+        charge_attempt(&mut tx, job_id, AttemptEnd::Now).await?;
+
         for (handle, role) in &output.artifacts {
+            // A checkpoint written mid-run is a **partial** model, and nothing
+            // downstream may read one as if it were a finished artifact. This is
+            // the one place a job's outputs become its evidence, so it is the
+            // place the distinction has to be a mechanism rather than a habit:
+            // a `checkpoint` artifact may be attached under the `checkpoint`
+            // role and no other. Resuming from a half-trained model is correct;
+            // serving from one, scoring one, or citing one in a verdict is not,
+            // and the two are the same bytes on disk.
+            let stored_type: Option<String> =
+                sqlx::query_scalar("SELECT type FROM artifacts WHERE handle = $1")
+                    .bind(handle)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            if stored_type.as_deref() == Some(CHECKPOINT_TYPE) && role != CHECKPOINT_ROLE {
+                return Err(JobStoreError::Invalid(format!(
+                    "artifact {handle} is a checkpoint and was attached to job {job_id} as \
+                     `{role}`; a checkpoint is a partial model and may only be attached as \
+                     `{CHECKPOINT_ROLE}`"
+                )));
+            }
+
             sqlx::query(
                 "INSERT INTO job_artifacts (job_id, handle, role) VALUES ($1,$2,$3) \
                  ON CONFLICT DO NOTHING",
@@ -612,6 +722,12 @@ impl JobStore {
             .fetch_one(&mut *tx)
             .await?
             .get("attempts");
+
+        // Charged before the branch. An attempt that failed spent the time it
+        // spent, and whether the job is about to be re-queued or ended has
+        // nothing to do with it — a job that re-queues is exactly the case where
+        // forgetting to charge hands the next attempt the whole ceiling again.
+        charge_attempt(&mut tx, job_id, AttemptEnd::Now).await?;
 
         let state = if retryable && attempts + 1 < MAX_ATTEMPTS {
             sqlx::query(
@@ -718,6 +834,14 @@ impl JobStore {
             let job_id: String = row.get("job_id");
             let attempts: i16 = row.get("attempts");
             let mut tx = self.pool.begin().await?;
+            // The attempt nobody reported on. This is the whole reason the spend
+            // is charged by the database: the worker that was holding this lease
+            // is gone, it will never tell anyone what it used, and if that time
+            // went uncharged then "die and be re-queued" would be a way to spend
+            // more than `max_gpu_hours`. Charged to the lease expiry rather than
+            // to now, because that is the last instant the slot was held and the
+            // reaper's own latency is not the job's to pay for.
+            charge_attempt(&mut tx, &job_id, AttemptEnd::LeaseExpiry).await?;
             if attempts + 1 < MAX_ATTEMPTS {
                 sqlx::query(
                     "UPDATE jobs SET state='queued', attempts=attempts+1, lease_owner=NULL, \
@@ -926,7 +1050,96 @@ fn row_to_job(row: &sqlx::postgres::PgRow) -> Result<Job, JobStoreError> {
         created_at: row.get("created_at"),
         started_at: row.get("started_at"),
         finished_at: row.get("finished_at"),
+        code_hashes: row.get("code_hashes"),
+        data_snapshot_id: row.get("data_snapshot_id"),
+        gpu_seconds_spent: row.get("gpu_seconds_spent"),
+        resume: None,
     })
+}
+
+/// When an attempt is considered to have ended, for charging purposes.
+///
+/// The distinction exists because the two ways an attempt ends are observed at
+/// different moments. A worker that reported its own ending is charged to now; a
+/// worker that stopped answering is charged to the moment its lease ran out,
+/// which is the last instant it was holding the slot and the last instant anyone
+/// can say it was not working. Charging a reaped attempt to `now()` instead would
+/// bill it for however long the reaper took to notice.
+#[derive(Clone, Copy, Debug)]
+enum AttemptEnd {
+    Now,
+    LeaseExpiry,
+}
+
+/// Add this attempt's wall-clock to the job's running total (SPEC §8, AT-66).
+///
+/// Idempotent by construction: it clears `attempt_started_at`, so charging twice
+/// charges once. That matters because `fail` can be reached for a job the reaper
+/// has already handled.
+async fn charge_attempt(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    job_id: &str,
+    end: AttemptEnd,
+) -> Result<(), JobStoreError> {
+    let until = match end {
+        AttemptEnd::Now => "now()",
+        // `lease_expires_at` can be NULL if the lease was cleared already; then
+        // the coalesce falls back to the start, charging zero rather than
+        // charging from the epoch.
+        AttemptEnd::LeaseExpiry => "coalesce(lease_expires_at, attempt_started_at)",
+    };
+    let sql = format!(
+        "UPDATE jobs \
+            SET gpu_seconds_spent = gpu_seconds_spent \
+                  + greatest(0, extract(epoch from ({until} - attempt_started_at))), \
+                attempt_started_at = NULL \
+          WHERE job_id = $1 AND attempt_started_at IS NOT NULL"
+    );
+    sqlx::query(&sql).bind(job_id).execute(&mut **tx).await?;
+    Ok(())
+}
+
+/// The newest checkpoint this job produced, as its manifest.
+///
+/// Newest by write time, tie-broken by handle so the answer is deterministic.
+/// `None` when the job has produced none, which `plan_resume` reads as "restart,
+/// and here is why".
+async fn latest_checkpoint(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    job_id: &str,
+) -> Result<Option<Value>, JobStoreError> {
+    let row = sqlx::query(
+        "SELECT manifest FROM artifacts \
+          WHERE producer_job = $1 AND type = 'checkpoint' \
+          ORDER BY created_at DESC, handle DESC LIMIT 1",
+    )
+    .bind(job_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(row.map(|r| r.get("manifest")))
+}
+
+/// The plan, as the fact written to the job's event stream and the trial's.
+///
+/// Every variant names itself and carries why. A restart that does not say why
+/// is indistinguishable from a resume that silently failed, and those are very
+/// different things to find in a record six weeks later.
+fn resume_detail(plan: &ResumePlan) -> Value {
+    match plan {
+        ResumePlan::Resume { step, from } => serde_json::json!({
+            "action": "resume",
+            "step": step,
+            "from": from,
+        }),
+        ResumePlan::Restart { reason } => serde_json::json!({
+            "action": "restart",
+            "reason": reason,
+        }),
+        ResumePlan::Abandon { reason } => serde_json::json!({
+            "action": "abandon",
+            "reason": reason,
+        }),
+    }
 }
 
 /// A sortable, time-prefixed job id (`job_` + 26-char ULID-style string).

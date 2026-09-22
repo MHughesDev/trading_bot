@@ -69,6 +69,8 @@ from typing import Any, Callable
 
 import numpy as np
 
+from . import torch_checkpoint
+
 # ───────────────────────────────────────────────────────────────────────────────
 # The experiment
 # ───────────────────────────────────────────────────────────────────────────────
@@ -306,25 +308,22 @@ def _torch_segment(
     step = 0
 
     if state is not None:
-        # `weights_only=False`: this blob is one we wrote, one directory over,
-        # and it carries the optimizer, the schedule and three RNG states — none
-        # of which is a tensor.
-        blob = torch.load(io.BytesIO(state), weights_only=False)
-        if blob["step"] != from_step:
-            raise ValueError(
-                f"checkpoint is at step {blob['step']}, asked to resume from {from_step}"
-            )
-        model.load_state_dict(blob["model"])
-        opt.load_state_dict(blob["optimizer"])
-        sched.load_state_dict(blob["scheduler"])
-        scaler.load_state_dict(blob["scaler"])
-        sampler.set_state(blob["sampler"])
-        torch.set_rng_state(blob["torch_cpu_rng"])
-        np.random.set_state(blob["numpy_rng"])
-        random.setstate(blob["python_rng"])
-        perm = blob["permutation"]
-        position = blob["dataloader_position"]
-        step = blob["step"]
+        # `torch_checkpoint` is the same capture/restore the platform's training
+        # loop uses (`engine.train_torch_model`). That is deliberate: a
+        # measurement of a copy of the resume logic would be true of the copy and
+        # say nothing about the code a killed training job actually resumes from.
+        restored = torch_checkpoint.restore(
+            state,
+            expected_step=from_step,
+            model=model,
+            optimizer=opt,
+            scheduler=sched,
+            scaler=scaler,
+            sampler=sampler,
+        )
+        perm = restored.permutation
+        position = restored.dataloader_position
+        step = restored.step
 
     train_loss = float("nan")
     while step < to_step:
@@ -343,22 +342,15 @@ def _torch_segment(
         step += 1
         train_loss = float(loss.item())
 
-    new_state = io.BytesIO()
-    torch.save(
-        {
-            "step": step,
-            "model": model.state_dict(),
-            "optimizer": opt.state_dict(),
-            "scheduler": sched.state_dict(),
-            "scaler": scaler.state_dict(),
-            "sampler": sampler.get_state(),
-            "torch_cpu_rng": torch.get_rng_state(),
-            "numpy_rng": np.random.get_state(),
-            "python_rng": random.getstate(),
-            "permutation": perm,
-            "dataloader_position": position,
-        },
-        new_state,
+    new_state = torch_checkpoint.capture(
+        step=step,
+        model=model,
+        optimizer=opt,
+        scheduler=sched,
+        scaler=scaler,
+        sampler=sampler,
+        permutation=perm,
+        dataloader_position=position,
     )
 
     model.eval()
@@ -370,9 +362,7 @@ def _torch_segment(
         "final_val_loss": pack(val_loss),
         "learning_rate": pack(opt.param_groups[0]["lr"]),
     }
-    return new_state.getvalue(), Outputs(
-        _torch_weights(model), val_pred.tobytes(), metrics
-    )
+    return new_state, Outputs(_torch_weights(model), val_pred.tobytes(), metrics)
 
 
 # ───────────────────────────────────────────────────────────────────────────────
