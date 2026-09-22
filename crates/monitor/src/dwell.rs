@@ -219,18 +219,39 @@ mod tests {
     }
 
     #[test]
-    fn one_good_cadence_during_recovery_does_not_bank_progress_after_a_relapse() {
+    fn a_relapse_throws_away_the_recovery_progress_it_had_banked() {
+        // The adversarial case for hysteresis. A strategy that behaves for five
+        // cadences and then misbehaves again must not be one good cadence away
+        // from having its size restored — otherwise the 2× recovery window buys
+        // nothing against a metric that is intermittently bad, which is what a
+        // degrading strategy looks like.
         let mut t = tracker();
         for _ in 0..3 {
             t.observe("s", "fill_rate", true);
         }
-        for _ in 0..5 {
-            t.observe("s", "fill_rate", false);
+        for i in 0..5 {
+            assert_eq!(
+                t.observe("s", "fill_rate", false),
+                DwellVerdict::Recovering,
+                "cadence {i}"
+            );
         }
-        // Relapse: outside again. The recovery count must go back to zero, or a
-        // strategy that is still misbehaving gets its size back.
-        assert_eq!(t.observe("s", "fill_rate", true), DwellVerdict::Sustained);
-        assert_eq!(t.observe("s", "fill_rate", false), DwellVerdict::Recovering);
+
+        // Relapse. No new state change is due — the scale-down is already in
+        // force — so this is a blip, not a second trip that would write a
+        // duplicate trip record.
+        assert_eq!(t.observe("s", "fill_rate", true), DwellVerdict::Blip);
+
+        // And recovery starts again from zero: five more good cadences are still
+        // not enough, the sixth is.
+        for i in 0..5 {
+            assert_eq!(
+                t.observe("s", "fill_rate", false),
+                DwellVerdict::Recovering,
+                "post-relapse cadence {i} released too early"
+            );
+        }
+        assert_eq!(t.observe("s", "fill_rate", false), DwellVerdict::Recovered);
     }
 
     #[test]

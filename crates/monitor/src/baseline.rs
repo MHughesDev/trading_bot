@@ -74,10 +74,17 @@ impl Ewma {
     /// perfectly constant series. Returning `0.0` there would read as "right on
     /// the baseline", and an unmeasured band would quietly clear everything; the
     /// caller is made to decide what to do about not knowing.
+    /// Whether a spread exists to be measured against.
+    ///
+    /// The question is about the *spread*, not the sample count. A baseline seeded
+    /// from a completed paper run has one observation here and a perfectly good
+    /// sigma; a live series that has taken fifty identical readings has fifty and
+    /// none. Gating on the count got the seeded case wrong — which is the case
+    /// COMP-007 §3 says every default limit comes from.
     #[must_use]
     pub fn z(&self, x: f64) -> Option<f64> {
         let s = self.sigma();
-        if self.count < 2 || !s.is_finite() || s <= f64::EPSILON {
+        if !s.is_finite() || s <= f64::EPSILON {
             return None;
         }
         Some((x - self.mean) / s)
