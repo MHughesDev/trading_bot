@@ -149,6 +149,36 @@ pub fn embargo_inputs(features: &[String], horizon_bars: u64) -> EmbargoInputs {
     }
 }
 
+/// The embargo inputs of a pipeline **over a particular dataset**.
+///
+/// [`embargo_inputs`] reads the pipeline: how far back its features look and
+/// how late the features themselves declare their inputs to be. It cannot see
+/// the *data*, and the data is the other half of the question — a bar whose
+/// `knowledge_time` was derived from `close + declared vendor lag` was not
+/// necessarily knowable when it says it was.
+///
+/// ADR-P2-24 decided to flag such rows rather than block them, on the condition
+/// that the sentinel be absorbed **structurally**: the maximum declared lag
+/// across the dataset's contributing sources enters `max_knowledge_lag_ms`, so
+/// the computed embargo already exceeds any error the sentinel could introduce.
+/// This function is where that condition is met. Without it the decision is a
+/// paragraph in a document and the embargo is computed as if every bar had been
+/// observed at its close.
+///
+/// The maximum is taken over both halves — features and sources — because they
+/// are two independent reasons the same bar might not have been usable yet, and
+/// an embargo must clear the later of them.
+#[must_use]
+pub fn embargo_inputs_over(
+    features: &[String],
+    horizon_bars: u64,
+    mix: &dataplane::knowledge::KnowledgeMix,
+) -> EmbargoInputs {
+    let mut inputs = embargo_inputs(features, horizon_bars);
+    inputs.max_knowledge_lag_ms = inputs.max_knowledge_lag_ms.max(mix.max_declared_lag_ms());
+    inputs
+}
+
 /// Test-only: a pipeline with no feature lookback or lag.
 #[cfg(test)]
 pub(crate) fn horizon_only(horizon_bars: u64) -> EmbargoInputs {
@@ -163,6 +193,52 @@ pub(crate) fn horizon_only(horizon_bars: u64) -> EmbargoInputs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dataplane::knowledge::{KnowledgeMix, SourceRows};
+
+    fn mixed_sources() -> KnowledgeMix {
+        KnowledgeMix::new(vec![
+            SourceRows { source: "coinbase_rest".into(), declared_lag_ms: 60_000, rows: 900, backfilled_rows: 900 },
+            SourceRows { source: "alpaca_rest".into(), declared_lag_ms: 900_000, rows: 100, backfilled_rows: 100 },
+        ])
+    }
+
+    /// Set P P-1.6 / ADR-P2-24: a dataset built over a mixed window carries the
+    /// **maximum** declared lag of its sources into the embargo, so the
+    /// sentinel cannot flatter a result.
+    #[test]
+    fn a_dataset_s_source_lag_reaches_the_embargo_inputs() {
+        let pipeline_only = embargo_inputs(&[], 5);
+        assert_eq!(pipeline_only.max_knowledge_lag_ms, 0, "no feature declares a lag here");
+
+        let over_data = embargo_inputs_over(&[], 5, &mixed_sources());
+        assert_eq!(over_data.max_knowledge_lag_ms, 900_000, "Alpaca's 900 s, not Coinbase's 60 s and not the mean");
+
+        // And the embargo it produces is genuinely larger — the property that
+        // makes the absorption structural rather than decorative.
+        assert!(
+            compute_embargo(&over_data) > compute_embargo(&pipeline_only),
+            "an embargo that ignores the data's declared lag is the bug this closes"
+        );
+    }
+
+    /// The adversarial half: the source lag may only ever *raise* the embargo.
+    /// A dataset of observed rows must not shrink a feature's own declared lag.
+    #[test]
+    fn source_lag_never_shortens_an_embargo_the_pipeline_already_demanded() {
+        let observed = KnowledgeMix::new(vec![SourceRows {
+            source: "kraken_ws".into(),
+            declared_lag_ms: 0,
+            rows: 1_000,
+            backfilled_rows: 0,
+        }]);
+        let mut over = embargo_inputs_over(&[], 5, &observed);
+        over.max_knowledge_lag_ms = over.max_knowledge_lag_ms.max(300_000);
+        assert_eq!(over.max_knowledge_lag_ms, 300_000);
+
+        // Directly: an empty mix contributes nothing rather than resetting.
+        let empty = embargo_inputs_over(&[], 5, &KnowledgeMix::default());
+        assert_eq!(empty.max_knowledge_lag_ms, embargo_inputs(&[], 5).max_knowledge_lag_ms);
+    }
 
     fn spec(mode: WindowMode, folds: u32) -> WalkForwardSpec {
         WalkForwardSpec {

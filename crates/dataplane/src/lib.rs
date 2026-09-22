@@ -13,6 +13,7 @@ pub mod feature;
 pub mod futures;
 pub mod hash;
 pub mod identity;
+pub mod knowledge;
 pub mod label;
 pub mod options;
 pub mod quality;

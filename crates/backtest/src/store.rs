@@ -18,7 +18,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use clickhouse::Row;
-use dataplane::bar::{self, CanonicalBar, KnowledgeProvenance, VendorLag, PRICE_SCALE};
+use dataplane::bar::{self, CanonicalBar, VendorLag, PRICE_SCALE};
 use dataplane::identity::{AssetClass, InstrumentKey, VenueKey};
 use dataplane::quality::QualityFlags;
 use domain::payloads::bar::Timeframe;
@@ -675,7 +675,28 @@ impl BarStore {
                 revision_seq: 0,
                 source_id: src.source_id,
             };
-            let provenance = if src.live { bar::provenance_for(&cb, Duration::seconds(LIVE_TOLERANCE_SECS)) } else { KnowledgeProvenance::Backfilled };
+            // Provenance is decided by the RECEIPT, per row, never by the
+            // transport. Keying it on `src.live` (that is, on
+            // `dataplane.source.kind`) is wrong in both directions:
+            //
+            //  * a forward poll of a REST candle endpoint 30 s after the close
+            //    genuinely observed that bar, and marking it backfilled buries
+            //    a real receipt under a sentinel;
+            //  * a delayed source polled forward can receive a bar LATER than
+            //    its declared lag, and the sentinel `close + lag` would then
+            //    claim the platform knew it before it did — lookahead, the one
+            //    direction that flatters a result.
+            //
+            // The tolerance is the source's own declared lag plus a margin,
+            // because a vendor that publishes 900 s late cannot be observed
+            // sooner than 900 s. Inside that window the receipt is meaningful
+            // and `knowledge_time = max(ingest, close)`. Outside it — a bulk
+            // backfill run months after the fact — the receipt says nothing
+            // about when the bar could have been known, so the declared
+            // sentinel is used and the row is flagged (ADR-P2-24, Set P P-1.6).
+            let tolerance = Duration::from_std(src.declared_vendor_lag).unwrap_or_else(|_| Duration::zero())
+                + Duration::seconds(LIVE_TOLERANCE_SECS);
+            let provenance = bar::provenance_for(&cb, tolerance);
             bar::stamp_knowledge_time(&mut cb, provenance, &lag);
             if bar::validate(&cb).is_err() {
                 report.rejected += 1;
@@ -700,7 +721,7 @@ impl BarStore {
                 // shape of a PIT hole rather than a PIT store. The row keeps
                 // BACKFILLED_KNOWLEDGE_TIME — its provenance is still a
                 // backfill — so P-1.6's distinguishability is unaffected
-                // (Set P P-1.5; ADR-P1-01).
+                // (Set P P-1.5; ADR-SP1-02).
                 if cb.knowledge_time < cb.ingest_time {
                     cb.knowledge_time = cb.ingest_time;
                 }
