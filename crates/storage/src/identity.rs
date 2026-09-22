@@ -15,7 +15,9 @@ use serde::Serialize;
 use sqlx::PgPool;
 use tokio::sync::RwLock;
 
-use dataplane::identity::{AssetClass, InstrumentKey, VenueKey};
+// Re-exported so a caller can name an asset class without taking a direct
+// dependency on `dataplane` purely to call `ensure_instrument`.
+pub use dataplane::identity::{AssetClass, InstrumentKey, VenueKey};
 
 #[derive(Debug, thiserror::Error)]
 pub enum IdentityError {

@@ -35,6 +35,15 @@ use asset_lifecycle as al;
 
 /// Build the full API router tree.
 pub fn router(state: AppState) -> Router {
+    // The knowledge plane's writers (SPEC §5, checklist 3.1/3.7). Started here
+    // because this is the one function the platform calls with a fully built
+    // `AppState`; it is a no-op without a job service, and off entirely under
+    // `KNOWLEDGE_PLANE_SCHEDULER=off`.
+    crate::knowledge_scheduler::spawn(
+        state.pg.clone(),
+        state.clickhouse_url.clone(),
+        state.jobs.clone(),
+    );
     Router::new()
         // ── Auth ─────────────────────────────────────────────────────────────
         .route("/auth/register", post(handlers::register))

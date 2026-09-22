@@ -91,6 +91,14 @@ impl TensorProjection {
         // clustering exist: a fact in the "unknown regime" cell is still a fact,
         // and refusing to write one until the clustering lands would leave the
         // completion model with nothing to be fitted on when it arrives.
+        //
+        // The outcome comes off the trial's own latest event rather than the
+        // `mlops.trial_state` view, for two reasons. The view exposes `outcome`
+        // as the `mlops.outcome_vector` composite — there is no `outcome_vector`
+        // JSONB column anywhere in the schema, so the original spelling of this
+        // query could never have executed — and it drops `censor_at_step`
+        // entirely, which is half of the censored-regression input this table
+        // exists to carry (§5.5, INV-17). Reading the event gives both.
         let written = sqlx::query(
             "INSERT INTO knowledge.outcome_tensor_fact
                  (tenant_id, asset_cluster, venue_id, regime_id, strategy_family, config_hash,
@@ -104,22 +112,33 @@ impl TensorProjection {
                     t.config_hash,
                     t.trial_id,
                     'sharpe_net' AS metric_name,
-                    (s.outcome_vector ->> 'sharpe_net')::double precision,
+                    (e.outcome).sharpe_net,
                     t.propensity,
-                    s.censoring,
-                    NULL::int,
-                    now()
+                    coalesce(e.censoring, 'none'),
+                    e.censor_at_step,
+                    -- INV-01: the fact became knowable when the trial settled,
+                    -- not when the projection happened to run. Stamping `now()`
+                    -- would also make every rebuild rewrite every row, so a
+                    -- re-run would stop being the no-op that lets this be a
+                    -- projection rather than a log.
+                    e.occurred_at
              FROM mlops.trial t
-             JOIN mlops.trial_state s ON s.trial_id = t.trial_id
+             JOIN LATERAL (
+                 SELECT ev.outcome, ev.censoring, ev.censor_at_step, ev.occurred_at
+                 FROM mlops.trial_event ev
+                 WHERE ev.trial_id = t.trial_id
+                 ORDER BY ev.event_seq DESC
+                 LIMIT 1
+             ) e ON true
              WHERE t.tenant_id = $1
-               AND s.outcome_vector ? 'sharpe_net'
-               AND (s.outcome_vector ->> 'sharpe_net') IS NOT NULL
+               AND (e.outcome).sharpe_net IS NOT NULL
              ORDER BY t.registered_at
              LIMIT $2
              ON CONFLICT (tenant_id, trial_id, metric_name) DO UPDATE
-               SET metric_value = EXCLUDED.metric_value,
-                   propensity   = EXCLUDED.propensity,
-                   censoring    = EXCLUDED.censoring,
+               SET metric_value   = EXCLUDED.metric_value,
+                   propensity     = EXCLUDED.propensity,
+                   censoring      = EXCLUDED.censoring,
+                   censor_at_step = EXCLUDED.censor_at_step,
                    knowledge_time = EXCLUDED.knowledge_time",
         )
         .bind(tenant_id)
@@ -130,11 +149,15 @@ impl TensorProjection {
 
         let (skipped,): (i64,) = sqlx::query_as(
             "SELECT count(*) FROM mlops.trial t
-             JOIN mlops.trial_state s ON s.trial_id = t.trial_id
+             LEFT JOIN LATERAL (
+                 SELECT ev.outcome
+                 FROM mlops.trial_event ev
+                 WHERE ev.trial_id = t.trial_id
+                 ORDER BY ev.event_seq DESC
+                 LIMIT 1
+             ) e ON true
              WHERE t.tenant_id = $1
-               AND (s.outcome_vector IS NULL
-                    OR NOT (s.outcome_vector ? 'sharpe_net')
-                    OR (s.outcome_vector ->> 'sharpe_net') IS NULL)",
+               AND (e.outcome IS NULL OR (e.outcome).sharpe_net IS NULL)",
         )
         .bind(tenant_id)
         .fetch_one(&mut *tx)

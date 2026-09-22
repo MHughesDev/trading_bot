@@ -34,6 +34,12 @@ pub enum JobKind {
     SkillVerify,
     EvalTask,
     AssetInit,
+    /// Rebuild the outcome tensor from the ledger (SPEC §5.5, checklist 3.7).
+    ///
+    /// A projection, not an evaluation: it reads trials that have already been
+    /// counted and writes a derived table. It looks at nothing new, so it
+    /// counts no trial and logs no exploration.
+    TensorRebuild,
 }
 
 impl JobKind {
@@ -56,6 +62,7 @@ impl JobKind {
         JobKind::SkillVerify,
         JobKind::EvalTask,
         JobKind::AssetInit,
+        JobKind::TensorRebuild,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -78,6 +85,7 @@ impl JobKind {
             JobKind::SkillVerify => "skill_verify",
             JobKind::EvalTask => "eval_task",
             JobKind::AssetInit => "asset_init",
+            JobKind::TensorRebuild => "tensor_rebuild",
         }
     }
 
@@ -97,10 +105,14 @@ impl JobKind {
             | JobKind::SimulatePaths
             | JobKind::ResearchRun => WorkerClass::Research,
             JobKind::Train | JobKind::Hpo | JobKind::PredictSeries => WorkerClass::Trainer,
-            JobKind::Backfill
-            | JobKind::DataQc
-            | JobKind::InstrumentProfile
-            | JobKind::AssetInit => WorkerClass::Data,
+            JobKind::Backfill | JobKind::DataQc | JobKind::AssetInit => WorkerClass::Data,
+            // The knowledge plane's own writers (SPEC §5). They are a separate
+            // pool because the data pool must stay free for live collection,
+            // and because a pool that has no worker for a kind claims it and
+            // fails it with `no_worker` — so a kind whose worker lives in
+            // another process needs a class of its own rather than a share of
+            // one.
+            JobKind::InstrumentProfile | JobKind::TensorRebuild => WorkerClass::Knowledge,
             JobKind::SkillVerify | JobKind::EvalTask => WorkerClass::Eval,
         }
     }
@@ -155,6 +167,8 @@ pub enum WorkerClass {
     Trainer,
     Data,
     Eval,
+    /// The knowledge plane's writers (SPEC §5, checklist 3.1/3.7).
+    Knowledge,
 }
 
 impl WorkerClass {
@@ -164,6 +178,7 @@ impl WorkerClass {
         WorkerClass::Trainer,
         WorkerClass::Data,
         WorkerClass::Eval,
+        WorkerClass::Knowledge,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -173,6 +188,7 @@ impl WorkerClass {
             WorkerClass::Trainer => "trainer",
             WorkerClass::Data => "data",
             WorkerClass::Eval => "eval",
+            WorkerClass::Knowledge => "knowledge",
         }
     }
 
@@ -529,6 +545,33 @@ mod tests {
             vec!["backtest", "sweep", "study", "gate_advance", "train", "hpo"],
             "COMP-005 §2 fixes this list; changing it changes what the trial counter means"
         );
+    }
+
+    /// The knowledge plane's writers run on their own pool.
+    ///
+    /// Not tidiness: a pool with no worker registered for a kind claims that
+    /// kind's jobs and fails them `no_worker`. While `instrument_profile` sat in
+    /// the data class, the platform's data pool — which registers only
+    /// `data_qc` — would have killed every profile job the scheduler submitted,
+    /// and the failure is terminal, so the next tick's submission would
+    /// deduplicate onto the dead job and nothing would ever be written.
+    #[test]
+    fn the_knowledge_plane_writers_have_a_pool_of_their_own() {
+        let knowledge: Vec<&str> = JobKind::ALL
+            .iter()
+            .filter(|k| k.worker_class() == WorkerClass::Knowledge)
+            .map(|k| k.as_str())
+            .collect();
+        assert_eq!(knowledge, vec!["instrument_profile", "tensor_rebuild"]);
+    }
+
+    /// Projecting the ledger into the tensor is not a look at anything new:
+    /// every trial it reads was counted where it was submitted. Counting it
+    /// again would inflate N_eff by however often the projection happens to run.
+    #[test]
+    fn rebuilding_the_tensor_counts_no_trial_and_logs_no_exploration() {
+        assert!(!JobKind::TensorRebuild.counts_trial());
+        assert!(!JobKind::TensorRebuild.logs_exploration());
     }
 
     #[test]

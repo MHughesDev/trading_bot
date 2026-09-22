@@ -2,8 +2,11 @@ import asyncio
 
 from fastapi import FastAPI
 
-from .schemas import TrainRequest, EvalRequest, PostHocRequest
+import numpy as np
+
+from .schemas import TrainRequest, EvalRequest, PostHocRequest, ProfileRequest
 from .worker import run_training, run_evaluation, run_posthoc, RESULTS
+from . import fingerprint, profile
 
 app = FastAPI(title="model-trainer", version="0.1.0")
 
@@ -55,3 +58,47 @@ async def posthoc(req: PostHocRequest):
     """
     result = await run_posthoc(req)
     return result.model_dump()
+
+
+@app.post("/fingerprint")
+async def instrument_profile(req: ProfileRequest):
+    """Tier-1 fingerprints for a population (SPEC 5.2-5.3, checklist 3.1/3.4).
+
+    The `InstrumentProfile` job's compute half. Bars in, one row per instrument
+    out: the tier-1 vector in a declared order with `None` where a dimension
+    could not be measured, and the 48-d retrieval vector the knowledge plane
+    takes neighbours in.
+
+    It is a *population* endpoint because whitening is a population-level fit
+    (`embedding.fit_whitener`). Sending one instrument at a time would fit the
+    transform on a sample of one, and below sixty instruments it refuses
+    outright — in which case the response says `whitened: false` and every row
+    carries `QUALITY_UNWHITENED`, rather than a differently-computed vector
+    handed back under the same name.
+
+    The endpoint writes nothing. Storage, `knowledge_time` and the choice of
+    `embedding_version` all belong to the caller, which is the only side that
+    knows what was knowable when.
+    """
+    batch = [
+        (
+            i.instrument_id,
+            i.venue_id,
+            fingerprint.Bars(
+                ts_ns=np.asarray(i.bars.ts_ns, dtype=np.int64),
+                open=np.asarray(i.bars.open, dtype=np.float64),
+                high=np.asarray(i.bars.high, dtype=np.float64),
+                low=np.asarray(i.bars.low, dtype=np.float64),
+                close=np.asarray(i.bars.close, dtype=np.float64),
+                volume=np.asarray(i.bars.volume, dtype=np.float64),
+                signed_volume=(
+                    None
+                    if i.bars.signed_volume is None
+                    else np.asarray(i.bars.signed_volume, dtype=np.float64)
+                ),
+                continuous_venue=i.bars.continuous_venue,
+            ),
+        )
+        for i in req.instruments
+    ]
+    return profile.profile_population(batch, deflate=req.deflate).as_dict()

@@ -136,3 +136,75 @@ class PostHocResponse(BaseModel):
     threshold: Optional[float] = None
     error: Optional[str] = None
     terminal: Optional[str] = None
+
+
+# ── the InstrumentProfile job (SPEC 5.2-5.3, checklist 3.1) ──────────────────
+
+
+class ProfileBars(BaseModel):
+    """OHLCV for one instrument, on one clock. Every array is the same length.
+
+    The bars arrive from Rust rather than being queried here: the sidecar has no
+    bar reader (`clickhouse.py` was removed in I-0.8) and must not grow one. The
+    single PIT reader on the Rust side is what bounds these to what was knowable
+    at the job's `as_of`, and a second reader in this process would be a second
+    answer to that question.
+    """
+
+    ts_ns: List[int]
+    open: List[float]
+    high: List[float]
+    low: List[float]
+    close: List[float]
+    volume: List[float]
+    # Present only where the venue publishes trade sides. Absent is not zero:
+    # without it there is no Kyle lambda, and the fingerprint says so.
+    signed_volume: Optional[List[float]] = None
+    # A venue that never closes has no overnight gap to measure.
+    continuous_venue: bool = True
+
+
+class ProfileInstrument(BaseModel):
+    """One instrument in the batch, keyed by the surrogate ids the knowledge
+    plane stores. Venue is a coordinate, not an attribute (SPEC 1.1)."""
+
+    instrument_id: int
+    venue_id: int
+    bars: ProfileBars
+
+
+class ProfileRequest(BaseModel):
+    """A whole population, because whitening is a population-level fit.
+
+    Fitting the transform over the instruments a caller happened to ask about
+    would make the geometry depend on the question. The caller sends the
+    market-public population it wants embedded, and gets back the batch fitted
+    against itself.
+    """
+
+    as_of: str
+    window_spec: str
+    instruments: List[ProfileInstrument]
+    deflate: bool = True
+
+
+class ProfiledRow(BaseModel):
+    instrument_id: int
+    venue_id: int
+    # `None` where the dimension was not measured. Never 0.0 (checklist 3.1).
+    tier1: List[Optional[float]]
+    retrieval_vec: List[float]
+    absent: dict
+    quality_flags: int
+
+
+class ProfileResponse(BaseModel):
+    instruments: List[ProfiledRow]
+    # False when the population was below `embedding.MIN_POPULATION` and the
+    # projection is a standardisation rather than the fitted whitening.
+    whitened: bool
+    intrinsic_dim: Optional[float] = None
+    reason: Optional[str] = None
+    # The declared order of `tier1`. Returned so a caller can assert it rather
+    # than assume it: position is meaning in a bare REAL[].
+    dimensions: List[str]
