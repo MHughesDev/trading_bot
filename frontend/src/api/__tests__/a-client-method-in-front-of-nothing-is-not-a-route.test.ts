@@ -31,6 +31,7 @@ import { describe, expect, it } from 'vitest'
 
 import { researchApi } from '../research'
 import { deskApi } from '../desk'
+import { conversationsApi } from '../agent'
 
 describe('a method nobody calls, in front of a route nothing serves, is deleted', () => {
   it('no longer offers `report` for the next caller to find', () => {
@@ -45,6 +46,19 @@ describe('a method nobody calls, in front of a route nothing serves, is deleted'
     expect(typeof deskApi.state).toBe('function')
     expect(typeof deskApi.trajectory).toBe('function')
     expect(typeof deskApi.lifecycle).toBe('function')
+  })
+
+  it('offers no second client for a route that already has one', () => {
+    // `deskApi.conversations` called `/api/agent/conversations` — a mounted
+    // route, so it was not the shape above — and had no caller anywhere, while
+    // its doc comment claimed it was "the conversation list the desk rail
+    // renders". The rail calls `conversationsApi.list()`. A duplicate is worse
+    // than an orphan here because it is typed weaker:
+    // `Array<Record<string, unknown>>` against `Conversation[]`, so the next
+    // author who reached for the one in `deskApi` would have given up every
+    // field check on the rail without noticing.
+    expect('conversations' in deskApi).toBe(false)
+    expect(typeof conversationsApi.list).toBe('function')
   })
 
   it('still has no pause, resume or escalate control', () => {

@@ -118,6 +118,23 @@ export interface Prefs {
   notifyOnBacktestDone: boolean
   notifyOnAgentApproval: boolean
   notifyOnConnectionLoss: boolean
+
+  /* --- browser notifications and quiet hours ---------------------------------
+     Device-only, and not by oversight. The browser's permission is granted per
+     origin per device, so a `true` synced from a laptop to a phone that has
+     never been asked would be an opt-in the phone cannot honour. Quiet hours
+     stay beside it for the same reason one level up: the window is read against
+     **this device's clock**, and a 22:00–07:00 set in London would silence the
+     afternoon on a machine in Tokyo. Neither key is in `SYNCED_KEYS`.
+
+     `browserNotifications` defaults to **off**. §13 asks for an opt-in, and a
+     default-on notification setting is not one.
+     --------------------------------------------------------------------------- */
+  browserNotifications: boolean
+  quietHoursEnabled: boolean
+  /** `HH:MM`, 24-hour. Anything else is treated as unreadable, never as midnight. */
+  quietHoursStart: string
+  quietHoursEnd: string
 }
 
 export const PREF_DEFAULTS: Prefs = {
@@ -192,6 +209,11 @@ export const PREF_DEFAULTS: Prefs = {
   notifyOnBacktestDone: true,
   notifyOnAgentApproval: true,
   notifyOnConnectionLoss: true,
+
+  browserNotifications: false,
+  quietHoursEnabled: false,
+  quietHoursStart: '22:00',
+  quietHoursEnd: '07:00',
 }
 
 interface PrefsState extends Prefs {

@@ -14,6 +14,7 @@ import { registerInstruments } from '@/lib/format'
 import { fetchInstruments } from '@/api/portfolio'
 import { toSpecAssetClass } from '@/lib/assetClass'
 import { KillSwitchBanner } from '@/components/desk/KillSwitchBanner'
+import { LiveRegion } from '@/components/LiveRegion'
 
 /* Routes that own their own scroll and must fill the viewport exactly. */
 const FULL_HEIGHT_ROUTES = ['/trading', '/terminal', '/dashboard', '/desk', '/strategy']
@@ -143,6 +144,15 @@ export function AppLayout() {
         <Outlet />
       </main>
       <div id="env-live-region" className="sr-only" aria-live="polite" />
+      {/* The desk's own announcements — a new approval, a new question, a run
+          that finished (S-6.22). Mounted here rather than on the conversation
+          screen because a live region inserted at the same moment as its text
+          is not announced at all, so it has to exist before the news does.
+          Separate from `#env-live-region`, which is written by DOM from
+          `useEnvironmentAnnouncement` and holds one standing sentence about
+          paper-versus-live; appending a run's news to it would overwrite that
+          sentence and make the environment stop being announced on navigation. */}
+      <LiveRegion />
       <ToastContainer />
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
       <ShortcutSheet open={shortcuts} onClose={() => setShortcuts(false)} />

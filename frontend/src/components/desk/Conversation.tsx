@@ -19,6 +19,7 @@ import {
 import { conversationsApi } from '@/api/agent'
 import { costCalls, latestExposure, mergeCards, toCards, toolSearches, type WireEvent } from '@/lib/desk/events'
 import { useDeskStream } from '@/hooks/useDeskStream'
+import { useDeskAnnouncer } from '@/hooks/useDeskAnnouncer'
 import { isIrreversibleEnvelope } from './Cards'
 import { CardStream } from './CardStream'
 import { Composer, type ComposerHandle, type ComposerSubmission } from './Composer'
@@ -256,6 +257,20 @@ export function Conversation({
       : undefined
   const resolve = useMemo(() => makeResolver(workingState, cards), [workingState, cards])
   const approvals = useMemo(() => pendingApprovals(cards), [cards])
+
+  // §15's live regions, and the browser notification behind them (S-6.22).
+  //
+  // `running` is passed three-valued. `convo.data?.conversation.running ===
+  // true` is `false` for a conversation that has not loaded and for one the
+  // platform refused, and feeding that `false` in would announce **run
+  // finished** every time the desk lost sight of a run — the same defect as the
+  // header's old `paused` badge, said out loud.
+  useDeskAnnouncer({
+    conversationId,
+    cards,
+    running: convoKnown ? running : null,
+    title: convo.data?.conversation.title ?? null,
+  })
 
   // The two notes that were already on this conversation's stream and that the
   // right panel was passed a literal `[]` and `null` instead. `calls` is `null`

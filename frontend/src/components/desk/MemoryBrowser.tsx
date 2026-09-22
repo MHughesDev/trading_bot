@@ -243,6 +243,79 @@ export function MemoryRowCard({ row, onRetry }: { row: MemoryRow; onRetry?: (r: 
   )
 }
 
+/**
+ * Why a bucket could not be read — one sentence per refusal, not one for all.
+ *
+ * The panel used to print **"/api/memory/{bucket} is served, so this is the
+ * endpoint failing rather than the endpoint missing — check the API logs"** over
+ * every failure. For six buckets that is true. For `preferences` it is false in
+ * a way that costs somebody an afternoon: `GET /api/memory/preferences` answers
+ * **405**, because `routes/mod.rs` registers
+ *
+ *   `.route("/api/memory/preferences", post(memory::record_preference))`
+ *
+ * before
+ *
+ *   `.route("/api/memory/{bucket}", get(memory::list))`
+ *
+ * and axum's matcher prefers a static segment over a parameter. The literal
+ * route takes the path and then refuses the method, so `memory::list` is never
+ * reached for that one bucket, and the API log records nothing because nothing
+ * went wrong. Sending a reader to the logs for a route-table collision is the
+ * worst kind of empty state: it is confident, actionable, and points away from
+ * the cause.
+ *
+ * Keyed on the status the platform actually answered rather than on a list of
+ * known-shadowed buckets, so this sentence corrects itself when the route does.
+ */
+export function BucketRefusal({ bucket, status }: { bucket: string; status: number | null }) {
+  if (status === 405) {
+    return (
+      <EmptyState
+        message={`The ${bucket} bucket cannot be read`}
+        detail={
+          <>
+            <code>GET /api/memory/{bucket}</code> answers <strong>405 Method Not Allowed</strong>,
+            which is not a server failure and not an empty bucket. Another route is registered on
+            exactly this path for a different method — <code>POST /api/memory/preferences</code>{' '}
+            records what a user told the agent — and a literal path wins over{' '}
+            <code>/api/memory/&#123;bucket&#125;</code> in the router, so the list handler is never
+            reached. Nothing here can work around it and there is nothing in the API log to find:
+            it needs the route table changed. Entries written to this bucket are not lost, only
+            unreadable from this page.
+          </>
+        }
+      />
+    )
+  }
+  if (status === 404) {
+    return (
+      <EmptyState
+        message={`Nothing serves the ${bucket} bucket`}
+        detail="The route is not mounted on this platform — a 404 here, where every mounted route answers 401 unauthenticated. That is a fact about the build, not about your research."
+      />
+    )
+  }
+  if (status === 401 || status === 403) {
+    return (
+      <EmptyState
+        message="Not your memory to read"
+        detail="The platform refused this read for want of a credential. Sign in again; the store is there."
+      />
+    )
+  }
+  return (
+    <EmptyState
+      message="Memory is unavailable"
+      detail={
+        status === null
+          ? 'The request did not complete and carried no status — a dropped connection rather than an answer.'
+          : `/api/memory/${bucket} is served and answered ${status}, so this is the endpoint failing rather than the endpoint missing — the API log has it.`
+      }
+    />
+  )
+}
+
 /** A `?bucket=` a digest line put in the URL, or `null` if it named none this page has. */
 export function bucketFromParam(raw: string | null): Bucket | null {
   return BUCKETS.some((b) => b.value === raw) ? (raw as Bucket) : null
@@ -281,7 +354,11 @@ export function MemoryBrowser({ onOpenConversation }: { onOpenConversation?: (se
     queryFn: () => deskApi.memory(bucket),
   })
 
-  const rows = useMemo(() => (data.data?.rows ?? []) as unknown as MemoryRow[], [data.data])
+  const read = data.data ?? null
+  const rows = useMemo(
+    () => ((read?.ok ? read.data.rows : []) as unknown as MemoryRow[]),
+    [read],
+  )
   const closedCount = useMemo(
     () => rows.filter((r) => questionFields(r)?.closedBy).length,
     [rows],
@@ -307,31 +384,41 @@ export function MemoryBrowser({ onOpenConversation }: { onOpenConversation?: (se
       return !f || !f.closedBy
     })
   const pairs = useMemo(() => conflictPairs(rows), [rows])
+  /** Whether `rows` is a fact about the bucket rather than the shape of a failure. */
+  const readable = read?.ok === true
 
   return (
     <div className="desk-scroll">
       <Tabs<Bucket> value={bucket} onChange={setBucket} tabs={BUCKETS} ariaLabel="Memory" />
       <div className="desk-actions">
         <SearchInput value={q} onValueChange={setQ} placeholder="Search memory" />
+        {/* Counted off `rows`, and `rows` is empty both when the bucket holds
+            nothing and when the read failed. `Conflicts (0)` over a bucket
+            nobody could read is a measured zero standing in for an absent
+            measurement — the same defect as the budget meter's `0 / 40,000`,
+            on the one button whose number is a claim that your memory does not
+            disagree with itself. */}
         <Button size="xs" variant={conflictsOnly ? 'primary' : 'ghost'} onClick={() => setConflictsOnly((c) => !c)}>
-          Conflicts ({pairs.length})
+          {readable ? `Conflicts (${pairs.length})` : 'Conflicts (unknown)'}
         </Button>
         {bucket === 'questions' && (
           <Button size="xs" variant={hideClosed ? 'ghost' : 'primary'} onClick={() => setHideClosed((h) => !h)}>
-            {hideClosed ? `Show closed (${closedCount})` : `Hide closed (${closedCount})`}
+            {!readable
+              ? 'Closed questions (unknown)'
+              : hideClosed
+                ? `Show closed (${closedCount})`
+                : `Hide closed (${closedCount})`}
           </Button>
         )}
       </div>
 
-      {data.data === null && (
-        <EmptyState
-          message="Memory is unavailable"
-          detail="/api/memory/{bucket} is served, so this is the endpoint failing rather than the endpoint missing — check the API logs."
-        />
-      )}
+      {read && !read.ok && <BucketRefusal bucket={bucket} status={read.status} />}
 
       {conflictsOnly ? (
-        pairs.length === 0 ? (
+        /* "Nothing in this bucket disagrees with anything else" is a statement
+           about the bucket's contents, and an unread bucket has none to make it
+           about. The refusal above is the whole answer in that case. */
+        !readable ? null : pairs.length === 0 ? (
           <EmptyState message="No conflicts" detail="Nothing in this bucket disagrees with anything else." />
         ) : (
           pairs.map(([a, b]) => (
@@ -355,7 +442,7 @@ export function MemoryBrowser({ onOpenConversation }: { onOpenConversation?: (se
         )
       ) : data.isPending ? (
         <p className="sub">Reading {bucket}…</p>
-      ) : rows.length === 0 && data.data !== null ? (
+      ) : rows.length === 0 && read?.ok ? (
         /* Four states, not two. An empty bucket used to render as a blank
            panel — the same blank as a request in flight and as one that failed
            — and this file's own header argues the distinction: "you have
@@ -365,6 +452,14 @@ export function MemoryBrowser({ onOpenConversation }: { onOpenConversation?: (se
           message={`Nothing is recorded under ${bucket}`}
           detail="The store answered with an empty list, which is a fact about your research rather than about this page."
         />
+      ) : !readable ? (
+        /* Nothing more to say. The refusal above is the answer, and this branch
+           used to stack a second empty state under it reading **"0 rows are in
+           this bucket and none matches the filter"** — a count off an array
+           that is the shape of a failure, contradicting the sentence directly
+           above it. Found by rendering the pre-change component against a 405,
+           not by reading it. */
+        null
       ) : filtered.length === 0 ? (
         <EmptyState
           message="No row matches this search"

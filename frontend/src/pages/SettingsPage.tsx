@@ -25,6 +25,7 @@ import { ConfirmDialog, Modal } from '@/components/primitives/Modal'
 import { EmptyState } from '@/components/primitives/States'
 import { VenueCredentials } from '@/components/settings/VenueCredentials'
 import { ApiAccessCard } from '@/components/settings/ApiAccessCard'
+import { BrowserNotifications } from '@/components/settings/BrowserNotifications'
 import { cn } from '@/lib/utils'
 
 /* =============================================================================
@@ -149,7 +150,7 @@ export function SettingsPage() {
           <S id="agent" title="Research agent" refs={refs} blurb="What the agent may do without asking, and what it costs."><AgentSection /></S>
           <S id="api" title="API access" refs={refs} blurb="Service tokens for headless and MCP access."><ApiAccessCard /></S>
 
-          <S id="notifications" title="Notifications" refs={refs} blurb="What interrupts you."><NotificationsSection /></S>
+          <S id="notifications" title="Notifications" refs={refs} blurb="What interrupts you."><NotificationsSection /><BrowserNotifications /></S>
           <S id="keyboard" title="Keyboard" refs={refs} blurb="Every shortcut in the product."><KeyboardSection /></S>
           <S id="account" title="Account" refs={refs}><AccountSection /></S>
           <S id="about" title="About" refs={refs}><AboutSection /></S>
@@ -1207,8 +1208,14 @@ function NotificationsSection() {
         <div className="callout neutral" style={{ marginTop: 'var(--s-4)' }}>
           <Bell size={13} aria-hidden style={{ flex: 'none', marginTop: 2 }} />
           <span>
-            In-app only for now. Email and push need a notification service; these choices carry over when
-            one exists.
+            {/* This used to read "in-app only for now", which stopped being the
+                whole truth when the panel below shipped: a browser notification
+                needs no service at all, only the browser's permission. Email
+                and push still do. */}
+            These switches are in-app and screen-reader announcements. <strong>Email</strong> and{' '}
+            <strong>push</strong> need a notification service nobody has built; those choices carry
+            over when one exists. Browser notifications are a separate opt-in, below, and need no
+            service.
           </span>
         </div>
       </PanelBody>

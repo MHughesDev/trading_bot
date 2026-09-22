@@ -1241,6 +1241,35 @@ async function served<T>(p: Promise<{ data: T }>): Promise<ServedRead<T>> {
 }
 
 /**
+ * A read that keeps the **status** rather than folding it to an absence.
+ *
+ * `optional()` and `served()` both throw away *which* refusal it was, and for
+ * one surface that difference is the whole answer. `GET /api/memory/preferences`
+ * returns **405**, not 404 and not 401: `routes/mod.rs` registers
+ * `/api/memory/preferences` as a `post` (recording what the user told the agent)
+ * *before* `/api/memory/{bucket}` as a `get`, and axum matches a static segment
+ * ahead of a parameter — so the literal route wins the path and then refuses the
+ * method. One of the memory browser's seven tabs therefore cannot be read at
+ * all, and through `optional()` it arrived as the same `null` as a server that
+ * fell over, under the sentence "check the API logs", where there is nothing to
+ * find.
+ *
+ * Carrying the number rather than a hardcoded list of shadowed buckets means the
+ * panel's sentence changes by itself on the day the route is fixed. A list would
+ * have to be found again.
+ */
+export type StatusRead<T> = { ok: true; data: T } | { ok: false; status: number | null }
+
+async function withStatus<T>(p: Promise<{ data: T }>): Promise<StatusRead<T>> {
+  try {
+    return { ok: true, data: (await p).data }
+  } catch (e) {
+    const status = (e as { response?: { status?: number } }).response?.status
+    return { ok: false, status: typeof status === 'number' ? status : null }
+  }
+}
+
+/**
  * The wire shape `/api/trading/status` actually answers with today. COMP-007
  * (Set S phase 7) adds scope, who tripped it and why; until then the desk shows
  * the two fields that exist rather than inventing the other three.
@@ -1434,9 +1463,19 @@ async function readVerify(p: Promise<{ data: VerifyResult }>): Promise<VerifyRes
 }
 
 export const deskApi = {
-  /** Existing: the conversation list the desk rail renders. */
-  conversations: () =>
-    client.get<{ conversations: Array<Record<string, unknown>> }>('/api/agent/conversations'),
+  /* `conversations` was here, and its own doc comment said it was "the
+     conversation list the desk rail renders". It was not. The rail, the desk
+     home and `DeskPage` all call `conversationsApi.list()` in `api/agent.ts`,
+     against the same `/api/agent/conversations`, and this one had **no caller
+     anywhere in `frontend/src`**.
+     
+     Deleted rather than left, for the reason this file already states where it
+     deleted `pause`, `resume` and `escalate`: a dead name is a name the next
+     caller reaches for. This one was the worse of the two to reach for — it
+     typed the rows as `Array<Record<string, unknown>>` where `conversationsApi`
+     types them `Conversation[]`, so adopting it would have silently given up
+     every field check on the desk's own rail. Asserted by
+     `a-client-method-in-front-of-nothing-is-not-a-route.test.ts`. */
 
   /** Existing: `/api/agent/runs/{id}/messages`, the fallback when SSE is closed. */
   messages: (runId: string, afterSeq?: number) =>
@@ -1490,8 +1529,14 @@ export const deskApi = {
     optional<{ tools: ToolCard[]; reasons: Record<string, string> }>(
       client.get('/api/catalogue/exposure', { params: { profile, goal } }),
     ),
+  /**
+   * One memory bucket, with the refusal kept (see `withStatus`).
+   *
+   * Not `optional()`: a 405 here is a route-table collision and a 500 is a
+   * server, and the browser prints a different sentence for each.
+   */
   memory: (bucket: string) =>
-    optional<{ rows: Array<Record<string, unknown>> }>(client.get(`/api/memory/${bucket}`)),
+    withStatus<{ rows: Array<Record<string, unknown>> }>(client.get(`/api/memory/${bucket}`)),
   forget: (bucket: string, id: string) => client.delete(`/api/memory/${bucket}/${id}`),
   /**
    * `GET /api/dossiers/{ticket}` — **and this route is mounted.**

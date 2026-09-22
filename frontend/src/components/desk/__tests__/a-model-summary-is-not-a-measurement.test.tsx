@@ -16,6 +16,12 @@
  * own header argues exactly this distinction about the server's refusals — "an
  * empty list would read as 'you have recorded no playbooks'" — and then the
  * component made the reader guess between three of them.
+ *
+ * `deskApi.memory` now answers a `StatusRead` — `{ ok: true, data }` or
+ * `{ ok: false, status }` — rather than `T | null`, because one of the seven
+ * buckets answers **405** and the folded `null` sent the reader to an API log
+ * with nothing in it. The mocks below carry the new shape; the claims are
+ * unchanged.
  */
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -82,17 +88,20 @@ describe('the evidence class survives the trip from the endpoint to the badge', 
     // The wire shape `crates/api/src/routes/memory.rs` `row()` builds, including
     // the field it did not serve until 2026-09-21.
     memory.mockResolvedValue({
-      rows: [
-        {
-          id: 'm_1',
-          subject: 'BTC-USD',
-          claim: 'the overnight gap pays',
-          confidence: 'suggestive',
-          evidence_class: 'model_summary',
-          n: null,
-          provenance: { run: 'run_9', tool: 'fetch_page' },
-        },
-      ],
+      ok: true,
+      data: {
+        rows: [
+          {
+            id: 'm_1',
+            subject: 'BTC-USD',
+            claim: 'the overnight gap pays',
+            confidence: 'suggestive',
+            evidence_class: 'model_summary',
+            n: null,
+            provenance: { run: 'run_9', tool: 'fetch_page' },
+          },
+        ],
+      },
     })
     withClient(<MemoryBrowser />)
     await waitFor(() => expect(screen.getByText('model summary')).toBeInTheDocument())
@@ -104,7 +113,7 @@ describe('an empty bucket is not the same blank as a failed read', () => {
   beforeEach(() => memory.mockReset())
 
   it('says the store answered with nothing', async () => {
-    memory.mockResolvedValue({ rows: [] })
+    memory.mockResolvedValue({ ok: true, data: { rows: [] } })
     withClient(<MemoryBrowser />)
     await waitFor(() =>
       expect(screen.getByText(/Nothing is recorded under findings/)).toBeInTheDocument(),
@@ -113,14 +122,17 @@ describe('an empty bucket is not the same blank as a failed read', () => {
   })
 
   it('says the endpoint did not answer, which is a different sentence', async () => {
-    memory.mockResolvedValue(null)
+    memory.mockResolvedValue({ ok: false, status: 500 })
     withClient(<MemoryBrowser />)
     await waitFor(() => expect(screen.getByText(/Memory is unavailable/)).toBeInTheDocument())
     expect(screen.queryByText(/Nothing is recorded under/)).toBeNull()
   })
 
   it('counts the rows a filter hid rather than showing a blank list', async () => {
-    memory.mockResolvedValue({ rows: [{ id: 'm_1', subject: 'BTC-USD', claim: 'the gap pays' }] })
+    memory.mockResolvedValue({
+      ok: true,
+      data: { rows: [{ id: 'm_1', subject: 'BTC-USD', claim: 'the gap pays' }] },
+    })
     const { getByLabelText } = withClient(<MemoryBrowser />)
     await waitFor(() => expect(screen.getByText('the gap pays')).toBeInTheDocument())
     const search = getByLabelText('Search memory') as HTMLInputElement

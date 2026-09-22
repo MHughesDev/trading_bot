@@ -30,6 +30,7 @@ import { deskApi } from '@/api/desk'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const conversation = readFileSync(resolve(here, '../Conversation.tsx'), 'utf8')
+const appLayout = readFileSync(resolve(here, '../../layout/AppLayout.tsx'), 'utf8')
 
 describe('the conversation passes the handlers the composer declared', () => {
   it('gives Write strategy somewhere to go', () => {
@@ -91,5 +92,26 @@ describe('the desk keeps no method for a route that is not mounted', () => {
     // reaches the platform or it does not happen.
     expect(Object.keys(deskApi)).toContain('state')
     expect(Object.keys(deskApi)).toContain('trajectory')
+  })
+})
+
+describe('the live region is mounted and the desk actually announces into it', () => {
+  // Same lesson as the pin button and the memory tab, applied to the thing
+  // built in this pass. A hook with no caller and a region with no mount are
+  // both green in their own tests and silent on the screen, which is the exact
+  // failure S-6.22's third clause describes: "no aria-live region announces a
+  // new approval, a new question, or a finished run".
+  it('mounts the region in the shell, where it exists before the news does', () => {
+    expect(appLayout).toContain('<LiveRegion />')
+  })
+
+  it('calls the announcer from the conversation', () => {
+    expect(conversation).toContain('useDeskAnnouncer({')
+  })
+
+  it('passes running three-valued, not as a boolean that reads false when unknown', () => {
+    // `running: running` would announce "run finished" for every conversation
+    // the desk lost sight of. `convoKnown` is the third value.
+    expect(conversation).toMatch(/running:\s*convoKnown \? running : null/)
   })
 })
