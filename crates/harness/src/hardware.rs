@@ -306,7 +306,11 @@ impl TaskDemand {
 }
 
 /// What the harness does when a task outgrows its tier.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+///
+/// `Deserialize` because an admission verdict arrives as an `Input`, and every input
+/// is written to the effect log before it is fed in so that a resume can replay it
+/// (`crate::resume`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Admission {
     /// The configuration can run this task.
     Admit,

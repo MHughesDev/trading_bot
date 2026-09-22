@@ -52,7 +52,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::context::{self, Block, CompactionReport, Section};
@@ -393,7 +393,12 @@ pub enum Note {
 }
 
 /// What came back.
-#[derive(Debug, Clone)]
+///
+/// Serialisable because the effect log records every input **before** it is fed
+/// back, and a resume replays them (AGENT-010 §5, [`crate::resume`]). An input that
+/// could not be written down would be a hole in the run's own record of itself.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "input", rename_all = "snake_case")]
 pub enum Input {
     /// The hardware verdict. The loop decides nothing about hardware; probing devices
     /// is IO, and the answer arrives here.

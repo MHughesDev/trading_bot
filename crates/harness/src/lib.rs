@@ -40,6 +40,7 @@ pub mod policy;
 pub mod profile;
 pub mod provenance;
 pub mod registry;
+pub mod resume;
 pub mod state;
 pub mod trace;
 pub mod validation;
