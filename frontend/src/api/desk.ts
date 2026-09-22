@@ -127,12 +127,68 @@ export interface PreregRef {
   [k: string]: unknown
 }
 
+/**
+ * Whether an acceptance criterion holds — **three** states, on the wire as
+ * `true | false | null` (`crates/harness/src/state.rs`, `enum Met`).
+ *
+ * `null` is `Met::Unevaluated`: nobody has looked. It is not `false`, and the
+ * Rust type goes out of its way to make that unwritable — no `is_met()`, no
+ * `From<Met> for bool`, only a three-armed `fold`. TypeScript cannot forbid
+ * `?? false` the same way, so the rule lives here in words and in
+ * `an-unevaluated-criterion-is-not-a-failed-one.test.tsx`: **nothing may
+ * collapse `null` into either boolean.** Every criterion this harness produces
+ * is `null` today, so a renderer that reads `null` as failure reports every run
+ * as failing everything it was asked to do.
+ */
+export type Met = boolean | null
+
+/** One thing that has to be true for the run to be done, and whether it is. */
+export interface AcceptanceCriterion {
+  text: string
+  /** `null` until something evaluates it. Nothing on this platform does yet. */
+  met: Met
+}
+
+/**
+ * What is left to spend, and out of what.
+ *
+ * A cap and a remainder are two different facts, and **every axis needs both**
+ * (ADR-D-25, ADR-D-08; `BudgetView` in `crates/harness/src/state.rs`). A bar
+ * handed one will reach for the other: this desk computed
+ * `tokensCap = tokens_remaining`, which made `used` identically zero and printed
+ * `0 / 40,000` for a run that had burned half a million tokens.
+ *
+ * So the caps are here, and every field that is not measured or not capped is
+ * `null` — never `0`. What is actually known today:
+ *
+ * | axis | cap | burn |
+ * |---|---|---|
+ * | steps | `steps_total`, always sent and enforced | `steps_remaining`, counted |
+ * | tokens | `tokens_cap`, a real number (2m / 40m) | **never counted** (OQ-16) |
+ * | dollars | refused — no price table (ADR-D-03) | not counted |
+ * | trials | no such cap exists in a profile | `trials_spent`, written |
+ */
 export interface BudgetView {
   steps_remaining: number
+  /**
+   * The step cap. Not nullable: the loop refuses to run without one, so steps is
+   * the one axis that is always both capped and counted.
+   */
   steps_total: number
-  tokens_remaining: number
-  /** Tenths of a cent. Money is integer arithmetic here too (SC-1). */
-  usd_tenth_cents_remaining: number
+  /** `budgets.max_tokens_per_task`, or `null` when the profile declares none. */
+  tokens_cap: number | null
+  /**
+   * Tokens left of that cap — **`null` on every run today**, because nothing in
+   * the loop counts tokens. Knowing the ceiling is not knowing the burn, and a
+   * renderer must not derive one from the other.
+   */
+  tokens_remaining: number | null
+  /** Tenths of a cent. Money is integer arithmetic here too (SC-1). Always `null`. */
+  usd_tenth_cents_cap: number | null
+  /** Always `null`: no price table, and nothing counts spend per run. */
+  usd_tenth_cents_remaining: number | null
+  /** Always `null` — no trial cap exists in a profile (ADR-D-08 assumed one). */
+  trials_cap: number | null
   trials_spent: number
   n_eff: number | null
 }
@@ -146,7 +202,7 @@ export interface WorkingState {
   ring: Ring
   stage: Stage
   prereg: PreregRef | null
-  acceptance: string[]
+  acceptance: AcceptanceCriterion[]
   hypothesis: Hypothesis | null
   plan: PlannedStep[]
   evidence: EvidenceRef[]
@@ -174,11 +230,20 @@ export function emptyWorkingState(goal = ''): WorkingState {
     findings: [],
     open_questions: [],
     last_error: null,
+    // Every optional axis starts `null`, and the distinction is the whole
+    // point: `0` here is a *measurement*, and `used = cap − 0 = cap` renders a
+    // run that has burned nothing as a budget fully spent. `0 ?? x` is `0`, so a
+    // zero placed here cannot be rescued downstream by any defaulting a later
+    // caller writes. Only the two axes the loop always counts start at zero, and
+    // `budgetBars` reads `steps_total: 0` as "no total", not as a cap of zero.
     budget: {
       steps_remaining: 0,
       steps_total: 0,
-      tokens_remaining: 0,
-      usd_tenth_cents_remaining: 0,
+      tokens_cap: null,
+      tokens_remaining: null,
+      usd_tenth_cents_cap: null,
+      usd_tenth_cents_remaining: null,
+      trials_cap: null,
       trials_spent: 0,
       n_eff: null,
     },

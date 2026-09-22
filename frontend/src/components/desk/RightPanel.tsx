@@ -21,6 +21,7 @@ import type {
   AmendmentView,
   CharterView,
   DeskCard,
+  Met,
   Mode,
   ToolCard,
   WorkingState,
@@ -48,6 +49,39 @@ const STEP_GLYPH: Record<string, string> = {
   done: '[x]',
   skipped: '[-]',
   failed: '[!]',
+}
+
+/**
+ * How one acceptance criterion reads. **Three states, and `null` is a state.**
+ *
+ * `met` arrives as `true | false | null` (ADR-D-25; `enum Met` in
+ * `crates/harness/src/state.rs`), and `null` means nobody has evaluated it.
+ * Nothing on this platform evaluates acceptance criteria yet, so **every
+ * criterion on every run is `null` today** — which makes the two-state rendering
+ * this panel would otherwise fall into a report that every run is failing
+ * everything it was asked to do.
+ *
+ * So `null` gets neither mark. Not a cross, which is a measurement that came
+ * back negative; not a tick, which is the opposite one; not an empty checkbox
+ * beside ticked ones, which reads as a cross to anyone scanning the list. It
+ * gets the words *not yet evaluated* and a neutral tone, and those words are the
+ * same ones the harness card prints (`Met::mark`), so the desk and the transcript
+ * say the same thing about the same criterion.
+ *
+ * Exported so the claim can be tested without a DOM, and so no second caller
+ * restates the rule and gets it wrong — that is how the "hosted means measured"
+ * badge survived three fixes on this codebase.
+ */
+export function acceptanceMark(met: Met): {
+  key: 'met' | 'not-met' | 'unevaluated'
+  word: string
+  glyph: string | null
+  tone: 'pos' | 'neg' | 'neutral'
+} {
+  if (met === null) return { key: 'unevaluated', word: 'not yet evaluated', glyph: null, tone: 'neutral' }
+  return met
+    ? { key: 'met', word: 'met', glyph: '✓', tone: 'pos' }
+    : { key: 'not-met', word: 'NOT met', glyph: '✕', tone: 'neg' }
 }
 
 /** What the run is waiting on, in the words a person would use. */
@@ -154,10 +188,21 @@ export function StateTab({
         {state.acceptance.length === 0 ? (
           <p className="sub">No acceptance criteria were derived for this goal.</p>
         ) : (
-          <ul style={{ margin: 'var(--s-1) 0 0', paddingLeft: 'var(--s-4)', fontSize: 'var(--t-12)' }}>
-            {state.acceptance.map((a) => (
-              <li key={a}>{a}</li>
-            ))}
+          <ul
+            style={{ margin: 'var(--s-1) 0 0', paddingLeft: 'var(--s-4)', fontSize: 'var(--t-12)' }}
+          >
+            {state.acceptance.map((a, i) => {
+              const m = acceptanceMark(a.met)
+              return (
+                <li key={`${i}:${a.text}`} data-met={m.key}>
+                  <Badge tone={m.tone}>
+                    {m.glyph && <span aria-hidden>{m.glyph}</span>}
+                    {m.word}
+                  </Badge>{' '}
+                  {a.text}
+                </li>
+              )
+            })}
           </ul>
         )}
       </section>

@@ -28,8 +28,11 @@ function budget(over: Partial<BudgetView> = {}): BudgetView {
   return {
     steps_remaining: 6,
     steps_total: 20,
+    tokens_cap: null,
     tokens_remaining: 40_000,
+    usd_tenth_cents_cap: null,
     usd_tenth_cents_remaining: 12_000,
+    trials_cap: null,
     trials_spent: 4,
     n_eff: 2.4,
     ...over,

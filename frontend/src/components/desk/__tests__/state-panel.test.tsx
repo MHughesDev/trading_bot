@@ -19,7 +19,7 @@ function runningState(): WorkingState {
     workflow: 'falsify',
     ring: 'research',
     stage: 'run',
-    acceptance: ['a verdict against the sealed delta_practical'],
+    acceptance: [{ text: 'a verdict against the sealed delta_practical', met: null }],
     hypothesis: {
       family_id: 'fam_gap',
       statement: 'the overnight gap mean-reverts',
@@ -40,8 +40,11 @@ function runningState(): WorkingState {
     budget: {
       steps_remaining: 6,
       steps_total: 20,
+      tokens_cap: null,
       tokens_remaining: 40_000,
+      usd_tenth_cents_cap: null,
       usd_tenth_cents_remaining: 12_000,
+      trials_cap: null,
       trials_spent: 4,
       n_eff: 2.4,
     },

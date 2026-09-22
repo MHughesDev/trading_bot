@@ -414,8 +414,11 @@ export function DesignSystemPage() {
                   budget={{
                     steps_remaining: 4,
                     steps_total: 20,
+                    tokens_cap: 80000,
                     tokens_remaining: 12000,
+                    usd_tenth_cents_cap: 25000,
                     usd_tenth_cents_remaining: 900,
+                    trials_cap: 10,
                     trials_spent: 7,
                     n_eff: 3.1,
                   }}
@@ -423,22 +426,45 @@ export function DesignSystemPage() {
                 />
                 <div style={{ height: 'var(--s-3)' }} />
                 {/*
-                  The same meter with no caps — and the state a reviewer will
-                  actually meet, because nothing on this platform serves a token,
-                  dollar or trial cap for a run. S-6.13's acceptance is that
-                  every shared component appears here; a component whose only
-                  reachable state is missing from the page is half-reviewable,
-                  and this is the half where the rule lives: no fill is drawn,
-                  because a bar at 0% says "none used" and the truth is that
-                  nobody said what the cap is.
+                  The same meter with no caps. S-6.13's acceptance is that every
+                  shared component appears here; a component whose reachable
+                  states are missing from the page is half-reviewable, and these
+                  are the halves where the rule lives: no fill is drawn, because
+                  a bar at 0% says "none used" and the truth is that nobody said
+                  what the cap is.
                 */}
                 <span className="lbl">with no caps recorded</span>
                 <BudgetMeter
                   budget={{
                     steps_remaining: 4,
                     steps_total: 0,
+                    tokens_cap: null,
                     tokens_remaining: 12000,
+                    usd_tenth_cents_cap: null,
                     usd_tenth_cents_remaining: 900,
+                    trials_cap: null,
+                    trials_spent: 7,
+                    n_eff: null,
+                  }}
+                />
+                <div style={{ height: 'var(--s-3)' }} />
+                {/*
+                  And the snapshot a reviewer will actually meet (ADR-D-25): the
+                  token cap is real and the token burn is counted nowhere, the
+                  dollar axis has neither half, and only steps is a proportion.
+                  Three different absences, three different sentences — none of
+                  them a number.
+                */}
+                <span className="lbl">as the harness sends it today</span>
+                <BudgetMeter
+                  budget={{
+                    steps_remaining: 4,
+                    steps_total: 20,
+                    tokens_cap: 2_000_000,
+                    tokens_remaining: null,
+                    usd_tenth_cents_cap: null,
+                    usd_tenth_cents_remaining: null,
+                    trials_cap: null,
                     trials_spent: 7,
                     n_eff: null,
                   }}

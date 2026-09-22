@@ -114,20 +114,32 @@ function tone(p: number): '' | 'warn' | 'neg' {
 /**
  * What a bar knows.
  *
- * `capped` is the only shape that can be drawn as a proportion. `uncapped` is a
- * figure with no denominator — and the two must not collapse, because the
- * collapse is a lie in both directions: a `tokens` bar whose cap was never sent
- * used to compute `used = cap - remaining` with `cap = remaining`, printing
- * **"0 / 40,000"** for a run that had spent half a million tokens, and a
- * `trials` bar with no cap used `max(spent, 1)` as its own cap, printing
- * "4 / 4 · 90%+" — a run reported as out of trials when nothing had said how
- * many it had.
+ * A cap and a burn are two independent facts, so four combinations exist and
+ * **only one of them can be drawn as a proportion**. Collapsing any of the other
+ * three into it is a lie, and each lie has already shipped: a `tokens` bar whose
+ * cap was never sent computed `used = cap - remaining` with `cap = remaining`
+ * and printed **"0 / 40,000"** for a run that had spent half a million tokens; a
+ * `trials` bar with no cap used `max(spent, 1)` as its own cap and printed
+ * "4 / 4 · 90%+" for a run nothing had capped.
+ *
+ * ADR-D-25 added the fourth quadrant to the wire: `tokens_cap` is a real number
+ * (2m, 40m) while `tokens_remaining` is `null` on every run, because nothing on
+ * this platform counts tokens (OQ-16). The ceiling is known and the position
+ * under it is not, which is neither of the two shapes this type used to have —
+ * rendering it as uncapped prints "null remaining", and rendering it as capped
+ * needs a `used` nobody measured.
  *
  * Zero means measured and it was zero. Absent means nobody said.
  */
 export type BarValue =
+  /** Cap and burn both known: the one shape with a fill. */
   | { capped: true; used: number; cap: number }
+  /** Burn known, cap not: a figure with no denominator. */
   | { capped: false; value: number; word: 'remaining' | 'spent' }
+  /** Cap known, burn never measured. `used: null` is not a zero and not a fill. */
+  | { capped: true; used: null; cap: number }
+  /** Neither recorded. The `$` axis, on every run this platform has had. */
+  | { capped: false; value: null }
 
 function BudgetBar({
   label,
@@ -139,6 +151,26 @@ function BudgetBar({
   format: (n: number) => string
 }) {
   if (!value.capped) {
+    if (value.value === null) {
+      // Nothing is known on this axis: no ceiling, and no reading under it. The
+      // `$` bar, on every run — there is no price table (ADR-D-03) and nothing
+      // counts spend per run, so `format(0)` here would print "$0.00", which is
+      // a measurement saying the run has been free.
+      return (
+        <div className="budget-row">
+          <span className="lbl-t">{label}</span>
+          <div
+            className="budget-track unknown"
+            role="meter"
+            aria-label={`${label} used`}
+            aria-valuetext="no cap recorded and no usage recorded"
+          >
+            <b style={{ left: '90%' }} aria-hidden />
+          </div>
+          <span className="val">not recorded</span>
+        </div>
+      )
+    }
     return (
       <div className="budget-row">
         <span className="lbl-t">{label}</span>
@@ -155,6 +187,28 @@ function BudgetBar({
         <span className="val">
           {format(value.value)} {value.word} · no cap recorded
         </span>
+      </div>
+    )
+  }
+  if (value.used === null) {
+    // The ceiling is known and the position under it is not. An honest bar here
+    // draws the *track* — the cap is real and worth stating — and **no fill**,
+    // because a fill is a position and nobody measured one. `used: null` never
+    // becomes `0`: at 0% the bar reads "none of the two million used", which is
+    // the reassuring end of a measurement that was never taken, and at
+    // `cap - null` it reads as fully spent. Both are claims; the words are not.
+    return (
+      <div className="budget-row">
+        <span className="lbl-t">{label}</span>
+        <div
+          className="budget-track unknown"
+          role="meter"
+          aria-label={`${label} used`}
+          aria-valuetext={`cap ${format(value.cap)}; usage not recorded`}
+        >
+          <b style={{ left: '90%' }} aria-hidden />
+        </div>
+        <span className="val">cap {format(value.cap)} · usage not recorded</span>
       </div>
     )
   }
@@ -185,18 +239,44 @@ function BudgetBar({
 }
 
 /**
+ * The one place a cap and a remainder become a bar, for the three axes where
+ * either half can be absent.
+ *
+ * `cap` and `remaining` are independent, so this is a two-by-two and not a
+ * fallback chain — there is deliberately no `??` between them in either
+ * direction, because every historical bug on this component was one half
+ * standing in for the other.
+ */
+function fromCapAndRemaining(
+  cap: number | null,
+  remaining: number | null,
+  word: 'remaining' | 'spent',
+): BarValue {
+  if (cap === null) {
+    return remaining === null ? { capped: false, value: null } : { capped: false, value: remaining, word }
+  }
+  if (remaining === null) return { capped: true, used: null, cap }
+  return { capped: true, used: Math.max(0, cap - remaining), cap }
+}
+
+/**
  * What each of the four bars can honestly say, given a snapshot and whatever
  * caps the caller was told.
  *
- * Exported because the rule is worth a test and the rendering is not: only
- * `steps` carries its own denominator (`steps_total`), so the other three are
- * uncapped unless the caller passes a cap it was actually given.
+ * Exported because the rule is worth a test and the rendering is not.
+ *
+ * A cap may now arrive on the snapshot itself (`tokens_cap`, ADR-D-25) as well
+ * as from the caller, and the caller wins — it is the more specific fact, and
+ * `?? ` keeps a caller's `0` rather than discarding it. Everything else stays
+ * as it was: `steps_total: 0` reads as "no total, not a cap of zero", and an
+ * axis nothing capped renders uncapped rather than borrowing a number that
+ * happens to be lying around.
  */
 export function budgetBars(budget: BudgetView, caps?: Partial<BudgetCaps>): Array<{ label: string; value: BarValue; money?: boolean }> {
   const stepsCap = caps?.steps ?? (budget.steps_total > 0 ? budget.steps_total : null)
-  const tokensCap = caps?.tokens ?? null
-  const usdCap = caps?.usdTenthCents ?? null
-  const trialsCap = caps?.trials ?? null
+  const tokensCap = caps?.tokens ?? budget.tokens_cap
+  const usdCap = caps?.usdTenthCents ?? budget.usd_tenth_cents_cap
+  const trialsCap = caps?.trials ?? budget.trials_cap
   return [
     {
       label: 'steps',
@@ -207,24 +287,16 @@ export function budgetBars(budget: BudgetView, caps?: Partial<BudgetCaps>): Arra
     },
     {
       label: 'tokens',
-      value:
-        tokensCap === null
-          ? { capped: false, value: budget.tokens_remaining, word: 'remaining' }
-          : { capped: true, used: Math.max(0, tokensCap - budget.tokens_remaining), cap: tokensCap },
+      value: fromCapAndRemaining(tokensCap, budget.tokens_remaining, 'remaining'),
     },
     {
       label: '$',
       money: true,
-      value:
-        usdCap === null
-          ? { capped: false, value: budget.usd_tenth_cents_remaining, word: 'remaining' }
-          : {
-              capped: true,
-              used: Math.max(0, usdCap - budget.usd_tenth_cents_remaining),
-              cap: usdCap,
-            },
+      value: fromCapAndRemaining(usdCap, budget.usd_tenth_cents_remaining, 'remaining'),
     },
     {
+      // Trials are counted upward, so `trials_spent` *is* the burn: it needs no
+      // remainder, and it is never absent. Only the cap can be missing here.
       label: 'trials',
       value:
         trialsCap === null
