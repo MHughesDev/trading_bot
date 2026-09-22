@@ -5,12 +5,10 @@ use std::sync::Arc;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Query, State,
+        State,
     },
-    http::StatusCode,
-    response::{IntoResponse, Response},
+    response::Response,
 };
-use serde::Deserialize;
 use tracing::{debug, error};
 use ui_gateway::{
     transport::{ClientMessage, WsOutMessage},
@@ -18,23 +16,22 @@ use ui_gateway::{
 };
 
 use crate::state::AppState;
-
-#[derive(Deserialize)]
-pub struct WsQuery {
-    /// Bearer token passed as a query parameter (browser WS API doesn't support headers).
-    token: Option<String>,
-}
+use crate::ws::auth::WsBearerToken;
 
 /// GET /ws/live — WebSocket upgrade for live data streaming.
+///
+/// The token arrives as a query parameter because a browser `WebSocket` cannot
+/// set headers; [`WsBearerToken`] resolves it against the `sessions` table
+/// before the upgrade, and refuses it when it does not resolve. The socket's
+/// user id is therefore the same id the REST surface uses, which is also what
+/// makes a subscription registered over REST visible to this socket — keyed on
+/// the raw token string, it never was.
 pub async fn ws_live(
     ws: WebSocketUpgrade,
-    Query(query): Query<WsQuery>,
+    session: WsBearerToken,
     State(state): State<AppState>,
 ) -> Response {
-    let user_id = match query.token.as_deref().filter(|t| !t.is_empty()) {
-        Some(t) => t.to_owned(),
-        None => return (StatusCode::UNAUTHORIZED, "missing token query param").into_response(),
-    };
+    let user_id = session.user_id().to_string();
     let live = state.live.clone();
     ws.on_upgrade(move |socket| handle_ws(socket, state.gateway, live, user_id))
 }

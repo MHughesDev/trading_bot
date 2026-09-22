@@ -22,9 +22,96 @@ use crate::{auth::BearerToken, state::AppState};
 
 // ── Create ────────────────────────────────────────────────────────────────────
 
+/// Who the platform recorded as the author of a revision (ADR-D-22).
+///
+/// Migration 0058: `actor_kind` "distinguishes a human author from the research
+/// agent, which is the difference between a hypothesis and a sample". That
+/// difference is spent downstream in the multiple-testing accounting: a run the
+/// agent generated is one draw from a search, and a run a person wrote is one
+/// hypothesis. Recording an agent's revision as a person's understates the
+/// search width, which flatters every result derived from it — the one direction
+/// a misattribution is never harmless.
+///
+/// There is no `Default`, and no `Unknown` variant that gets written. A caller
+/// the platform cannot classify is refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActorKind {
+    Human,
+    Agent,
+}
+
+impl ActorKind {
+    /// The string migration 0058's CHECK accepts.
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Human => "human",
+            Self::Agent => "agent",
+        }
+    }
+
+    /// Classify a live session by `sessions.kind`.
+    ///
+    /// `kind` is the platform's own principal distinction (migration 0033): a
+    /// `web` row is an interactive login and a `service` row is a minted token
+    /// held by a headless client — the MCP server and the internal agent runs.
+    /// Scopes are the wrong discriminator here even though they look like one:
+    /// the login handler inserts a session without naming `scopes`, so a web
+    /// login created after migration 0038 carries `'{}'` and would classify as
+    /// a service token under any "has web:full" test.
+    ///
+    /// `kind` has a default and **no CHECK constraint**, so an unrecognised
+    /// value is reachable. It returns `None`, and the caller refuses.
+    fn from_session_kind(kind: &str) -> Option<Self> {
+        match kind {
+            "web" => Some(Self::Human),
+            "service" => Some(Self::Agent),
+            _ => None,
+        }
+    }
+}
+
+/// Look up the authenticated principal's kind.
+///
+/// Separate from the `BearerToken` extractor deliberately: widening the
+/// extractor would make every route in the crate carry a field only this one
+/// reads, and this one has to fail closed in a way a shared extractor cannot
+/// (a route that does not record an author has nothing to refuse over).
+async fn actor_kind_for(
+    tx: &mut sqlx::PgConnection,
+    token: &BearerToken,
+) -> Result<ActorKind, String> {
+    let kind: Option<String> =
+        sqlx::query_scalar("SELECT kind FROM sessions WHERE token = $1")
+            .bind(&token.token)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+
+    let Some(kind) = kind else {
+        return Err("the session carries no kind row".into());
+    };
+    ActorKind::from_session_kind(&kind)
+        .ok_or_else(|| format!("session kind {kind:?} is neither 'web' nor 'service'"))
+}
+
+/// Query parameters for the create route.
+#[derive(Debug, Default, Deserialize)]
+pub struct CreateParams {
+    /// An explicit lineage: the slug this definition was derived from, when it
+    /// was derived from a **different** lineage than its own (ADR-D-21).
+    ///
+    /// Optional, and never required. A first version genuinely has no parent,
+    /// and a required lineage field is a field that gets filled with something.
+    /// The ordinary case needs nothing here: re-saving under the same slug makes
+    /// the previous head the parent, because `strategy_revision` is append-only
+    /// and the pointer move does not discard what it pointed at.
+    pub parent_strategy_id: Option<String>,
+}
+
 /// POST /api/strategies — validate then persist a strategy definition.
 pub async fn create_strategy(
     State(state): State<AppState>,
+    Query(params): Query<CreateParams>,
     token: BearerToken,
     Json(def): Json<StrategyDefinition>,
 ) -> impl IntoResponse {
@@ -93,17 +180,124 @@ pub async fn create_strategy(
                 }
             };
 
+            // Who is writing this (ADR-D-22). Read before anything is inserted,
+            // so an unclassifiable caller costs a rolled-back transaction rather
+            // than a row attributed to a guess.
+            let actor = match actor_kind_for(&mut tx, &token).await {
+                Ok(a) => a,
+                Err(why) => {
+                    return (
+                        StatusCode::FORBIDDEN,
+                        Json(json!({
+                            "error": "unclassifiable_actor",
+                            "message": format!(
+                                "the author of a revision is recorded, not defaulted: {why}. \
+                                 Sign in with a web session or use a service token."
+                            ),
+                        })),
+                    )
+                        .into_response()
+                }
+            };
+
             // The parent is whatever this strategy currently points at. A first
             // save has none; a later one records what it was edited from, which
             // is what makes the revision history a chain rather than a pile.
-            let parent: Option<String> = sqlx::query_scalar(
+            //
+            // **Reusing the slug is the lineage mechanism** (ADR-D-21). The
+            // advice to mint `my_strat_v2` when iterating was written as though
+            // the pointer move discarded the previous definition; it does not,
+            // because `strategy_revision` is append-only and holds every version
+            // — which is the only reason `parent_hash` is derivable at all. A
+            // new slug has no head, so that advice produced exactly the NULL
+            // parent it was meant to avoid.
+            //
+            // The error is propagated rather than `.ok().flatten()`-ed away, as
+            // it used to be. A failed lookup and a slug with no history return
+            // the same `None` under that idiom, and the second is written to the
+            // row as "this is a first version" — an absent measurement recorded
+            // as a reading, in the one column whose whole job is to say what
+            // came before.
+            let own_head: Option<String> = match sqlx::query_scalar(
                 "SELECT head_revision FROM strategy_definitions WHERE strategy_id = $1",
             )
             .bind(&inner.strategy_id)
             .fetch_optional(&mut *tx)
             .await
-            .ok()
-            .flatten();
+            {
+                Ok(v) => v.flatten(),
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "parent_lookup_failed", "message": e.to_string() })),
+                    )
+                        .into_response()
+                }
+            };
+
+            // The case the slug rule cannot express: a definition derived from a
+            // *different* lineage. Resolved to that strategy's head, and refused
+            // rather than silently dropped when it names nothing — a lineage
+            // that was asked for and not recorded is worse than one never
+            // claimed, because the record then reads as a first version.
+            let parent: Option<String> = match params.parent_strategy_id.as_deref() {
+                None => own_head,
+                Some(slug) => {
+                    let named: Option<String> = match sqlx::query_scalar(
+                        "SELECT head_revision FROM strategy_definitions WHERE strategy_id = $1",
+                    )
+                    .bind(slug)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    {
+                        Ok(v) => v.flatten(),
+                        Err(e) => {
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({ "error": e.to_string() })),
+                            )
+                                .into_response()
+                        }
+                    };
+                    let Some(named) = named else {
+                        return (
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            Json(json!({
+                                "error": "unknown_parent_strategy",
+                                "message": format!(
+                                    "parent_strategy_id {slug:?} has no stored revision to \
+                                     descend from. Omit it if this is a first version."
+                                ),
+                            })),
+                        )
+                            .into_response();
+                    };
+                    // Both a slug chain and a declared fork, disagreeing. Two
+                    // answers is not a lineage, so neither is recorded.
+                    if let Some(head) = &own_head {
+                        if head != &named {
+                            return (
+                                StatusCode::UNPROCESSABLE_ENTITY,
+                                Json(json!({
+                                    "error": "ambiguous_parent",
+                                    "message": format!(
+                                        "{:?} already has a head revision, which is its parent. \
+                                         Pass parent_strategy_id only on the first revision of \
+                                         a slug derived from another lineage.",
+                                        inner.strategy_id
+                                    ),
+                                })),
+                            )
+                                .into_response();
+                        }
+                    }
+                    Some(named)
+                }
+            };
+
+            // A revision cannot be its own parent: re-saving an unchanged
+            // document is a no-op, not a self-referential link.
+            let parent_recorded = parent.filter(|p| p != revision.as_str());
 
             // Re-saving the identical document is not a new revision. The
             // content hash is the identity, so ON CONFLICT DO NOTHING is the
@@ -119,12 +313,12 @@ pub async fn create_strategy(
             )
             .bind(revision.as_str())
             .bind(&inner.strategy_id)
-            .bind(parent.filter(|p| p != revision.as_str()))
+            .bind(parent_recorded.clone())
             .bind(&inner.definition_version)
             .bind(&inner.asset_class)
             .bind(&def_json)
             .bind(canonical.as_bytes())
-            .bind("human")
+            .bind(actor.as_str())
             .bind(token.user_id().to_string())
             .execute(&mut *tx)
             .await
@@ -189,6 +383,11 @@ pub async fn create_strategy(
                     "id": inner.strategy_id,
                     "strategy_id": inner.strategy_id,
                     "revision_hash": revision.as_str(),
+                    // Echoed so a caller can see what was recorded rather than
+                    // assume it. A tool that reports "created" and nothing else
+                    // cannot tell a chained revision from a fresh lineage.
+                    "actor_kind": actor.as_str(),
+                    "parent_revision": parent_recorded,
                 })),
             )
                 .into_response()
@@ -548,4 +747,125 @@ fn all_lanes() -> Vec<domain::data_type::DataType> {
 pub struct StrategyListItem {
     pub id: String,
     pub strategy_id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ADR-D-22. The route bound `actor_kind = "human"` unconditionally while
+    /// migration 0058 defined that column as the thing that tells a person's
+    /// hypothesis from a search the agent ran. The mapping below is the whole
+    /// of the classification, asserted one principal at a time.
+    #[test]
+    fn a_web_session_is_a_human_and_a_service_token_is_an_agent() {
+        assert_eq!(ActorKind::from_session_kind("web"), Some(ActorKind::Human));
+        assert_eq!(
+            ActorKind::from_session_kind("service"),
+            Some(ActorKind::Agent)
+        );
+    }
+
+    /// **An unclassifiable actor is never a default.**
+    ///
+    /// `sessions.kind` is `TEXT NOT NULL DEFAULT 'web'` with **no CHECK**, so a
+    /// value outside the pair is reachable by anything that writes the row
+    /// directly. The honest answer is no answer; the caller turns this into a
+    /// refusal rather than picking the friendlier of the two.
+    #[test]
+    fn an_unrecognised_session_kind_classifies_as_nothing() {
+        for kind in ["", "Web", "SERVICE", "scheduler", "import", "bot", "unknown"] {
+            assert_eq!(
+                ActorKind::from_session_kind(kind),
+                None,
+                "{kind:?} must not resolve to an author"
+            );
+        }
+    }
+
+    /// The two spellings are exactly the ones migration 0058's CHECK accepts,
+    /// so a classified actor can never fail the insert.
+    #[test]
+    fn both_spellings_are_ones_the_check_constraint_accepts() {
+        // 0058: CHECK (actor_kind IN ('human','agent','scheduler','import'))
+        let allowed = ["human", "agent", "scheduler", "import"];
+        for actor in [ActorKind::Human, ActorKind::Agent] {
+            assert!(
+                allowed.contains(&actor.as_str()),
+                "{:?} would be refused by the column",
+                actor
+            );
+        }
+    }
+
+    /// Scopes look like a principal discriminator and are not one.
+    ///
+    /// This is the trap the decision brief pointed at: `permits()` treats
+    /// `web:full` as a web login, but `POST /auth/login` inserts a session
+    /// without naming `scopes`, so the column takes its `'{}'` default. Migration
+    /// 0038's `UPDATE … WHERE kind = 'web'` backfilled the rows that existed
+    /// then and nothing keeps new ones filled. A "holds web:full ⇒ human" test
+    /// would therefore record every login since as an agent.
+    #[test]
+    fn classification_is_by_session_kind_and_not_by_scopes() {
+        let file = include_str!("strategies.rs");
+        let body = file
+            .split("mod tests")
+            .next()
+            .expect("the module above the tests");
+        assert!(
+            body.contains("SELECT kind FROM sessions"),
+            "the author must be read from sessions.kind"
+        );
+        for reader in ["token.scopes", ".permits(", "scopes.contains"] {
+            assert!(
+                !body.contains(reader),
+                "{reader} classifies by scopes, and a web login created after 0038 carries none"
+            );
+        }
+    }
+
+    /// No literal author survives in the insert.
+    ///
+    /// Written as a scan rather than a behavioural assertion because the failure
+    /// it guards is textual: the bug was a hard-coded `"human"` sitting in a
+    /// bind list, and it is reintroduced by typing one, not by reasoning wrongly.
+    #[test]
+    fn the_revision_insert_binds_no_literal_actor() {
+        let file = include_str!("strategies.rs");
+        let body = file.split("mod tests").next().expect("the module");
+        for literal in ["\"human\"", "\"agent\"", "\"scheduler\"", "\"import\""] {
+            assert!(
+                !body.contains(&format!(".bind({literal})")),
+                "{literal} is bound as an author literal; the actor is read, not asserted"
+            );
+        }
+        assert!(
+            body.contains(".bind(actor.as_str())"),
+            "the insert must bind the classified actor"
+        );
+    }
+
+    /// The refusal exists and is a refusal, not a fallback.
+    #[test]
+    fn an_unclassifiable_caller_is_refused_rather_than_recorded() {
+        let file = include_str!("strategies.rs");
+        let body = file.split("mod tests").next().expect("the module");
+        assert!(body.contains("unclassifiable_actor"));
+        assert!(
+            body.contains("StatusCode::FORBIDDEN"),
+            "the unclassifiable caller must leave with a status, not a row"
+        );
+    }
+
+    /// ADR-D-21. `parent_strategy_id` is optional at the type level, which is
+    /// the only place "optional" can be enforced.
+    #[test]
+    fn the_explicit_lineage_is_optional() {
+        let params = CreateParams::default();
+        assert!(
+            params.parent_strategy_id.is_none(),
+            "a first version genuinely has no parent"
+        );
+    }
 }

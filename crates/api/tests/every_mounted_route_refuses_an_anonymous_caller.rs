@@ -35,9 +35,16 @@
 //! Not *authorisation* — whether the token that got in may do the thing. That
 //! is scope work, and `agent_authority.rs` and `monitor_authority.rs` hold it.
 //! This file asks the one question underneath: does anybody have to be someone
-//! at all. It also does not check the WebSocket handlers' token beyond the fact
-//! that they demand one; see [`Gate::UnverifiedQueryToken`], which exists to
-//! name that gap rather than paper over it.
+//! at all.
+//!
+//! There used to be a third `Gate` here, `UnverifiedQueryToken`, recording that
+//! the two WebSocket routes demanded a `?token=` they never checked — any
+//! non-empty string was a user on the live data feed. It is gone because the
+//! defect is: both now take `WsBearerToken`, which reads the token from the
+//! query string and resolves it against the `sessions` table exactly as
+//! `BearerToken` does from the header. Since the type's name contains
+//! `BearerToken`, the scan below counts them as authenticated and they need no
+//! row at all. `the_websocket_sockets_verify_their_token.rs` pins that.
 //!
 //! ```bash
 //! cargo test -j 2 -p api --test every_mounted_route_refuses_an_anonymous_caller
@@ -48,9 +55,11 @@ use std::path::{Path, PathBuf};
 
 /// What stands in the extractor's place on a route that takes no `BearerToken`.
 ///
-/// Three kinds, and no fourth: a row that does not fit one of these is a route
+/// Two kinds, and no third: a row that does not fit one of these is a route
 /// nobody has justified, and the right outcome is the failure rather than a new
-/// variant invented to accommodate it.
+/// variant invented to accommodate it. There was a third, `UnverifiedQueryToken`,
+/// and the way it ended is the point — a route was fixed, its rows left, and the
+/// variant went with them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Gate {
     /// There is no caller to identify yet. This route is how a caller obtains a
@@ -68,21 +77,6 @@ enum Gate {
     /// to exist and to reject — see
     /// [`every_in_handler_gate_names_a_check_the_handler_really_makes`].
     InHandler(&'static str),
-
-    /// The token arrives as a `?token=` query parameter, because the browser's
-    /// WebSocket API cannot set an `Authorization` header, and `BearerToken`
-    /// reads only the header.
-    ///
-    /// **These refuse a caller who sends no token and do not verify the one
-    /// they are sent.** That is a real defect, stated here rather than hidden:
-    /// `ws_live` uses the raw token string as the user id, and
-    /// `ws_backtest_suite` derives one from it without ever reading the
-    /// `sessions` table. Any non-empty string is a user.
-    ///
-    /// It is a ratchet, not a permission:
-    /// [`the_unverified_websocket_tokens_are_exactly_the_two_already_known`]
-    /// fails if a third route joins them.
-    UnverifiedQueryToken,
 }
 
 /// Routes that answer a caller holding no session, with the design that says so.
@@ -129,20 +123,6 @@ const PUBLIC: &[(&str, &str, Gate, &str)] = &[
         "the Agent SDK inside a sandbox points ANTHROPIC_BASE_URL here and sends its session \
          token itself, so the handler resolves it against the sessions table and requires the \
          llm:proxy scope before any upstream call — authenticated, just not by the extractor",
-    ),
-    (
-        "/ws/backtest-suite",
-        "ws_backtest_suite",
-        Gate::UnverifiedQueryToken,
-        "a browser WebSocket cannot set an Authorization header; the token is a query parameter, \
-         and this handler derives a user id from it without reading the sessions table",
-    ),
-    (
-        "/ws/live",
-        "ws_live",
-        Gate::UnverifiedQueryToken,
-        "a browser WebSocket cannot set an Authorization header; the token is a query parameter, \
-         and this handler uses the raw string as the user id without reading the sessions table",
     ),
 ];
 
@@ -554,58 +534,6 @@ fn every_in_handler_gate_names_a_check_the_handler_really_makes() {
         checked += 1;
     }
     assert!(checked > 0, "the scan matched no InHandler row");
-}
-
-/// The two WebSocket routes accept a token they never verify, and no third one
-/// joins them.
-///
-/// The exemption is not permission. It is a ratchet: the count and the names are
-/// pinned, so the next route that wants a query-parameter token has to change
-/// this test — which is the conversation that should happen.
-#[test]
-fn the_unverified_websocket_tokens_are_exactly_the_two_already_known() {
-    let named: BTreeSet<&str> = PUBLIC
-        .iter()
-        .filter(|(_, _, g, _)| *g == Gate::UnverifiedQueryToken)
-        .map(|(p, _, _, _)| *p)
-        .collect();
-    let expected: BTreeSet<&str> = ["/ws/backtest-suite", "/ws/live"].into_iter().collect();
-    assert_eq!(
-        named, expected,
-        "the set of routes authenticating on an unverified query-parameter token has changed. \
-         These two predate this file and are recorded, not approved: neither reads the sessions \
-         table, so any non-empty string is a user. A third is a new hole, and a fix to either \
-         removes a row here."
-    );
-}
-
-/// Each of them at least demands a token, so the gap is the verification and not
-/// the demand.
-#[test]
-fn the_query_parameter_routes_refuse_a_caller_who_sends_no_token() {
-    let (routes, _) = mounted();
-    for (path, handler, gate, _) in PUBLIC {
-        if *gate != Gate::UnverifiedQueryToken {
-            continue;
-        }
-        let route = routes
-            .iter()
-            .find(|r| r.path == *path && r.handler == *handler)
-            .unwrap_or_else(|| panic!("`{path}` is not mounted"));
-        let src = read(&route.file);
-        let name = handler.rsplit_once("::").map_or(*handler, |(_, n)| n);
-        let handler_body = body(&src, name).unwrap_or_else(|| panic!("no body for {handler}"));
-        assert!(
-            handler_body.contains("query.token"),
-            "`{path}` is exempt because it reads a token from the query string, and it reads no \
-             such thing"
-        );
-        assert!(
-            handler_body.contains("UNAUTHORIZED"),
-            "`{path}` is exempt on the claim that it refuses a caller who sends no token, and it \
-             refuses nobody"
-        );
-    }
 }
 
 // ── The readers themselves ───────────────────────────────────────────────────

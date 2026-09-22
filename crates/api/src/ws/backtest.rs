@@ -1,40 +1,36 @@
 //! GET /ws/backtest-suite — WebSocket progress lane for the backtest workbench
 //! (J-5.4). Mirrors the models/jobs lane: a broadcast channel on the manager,
-//! drained to the socket here. Frames are scoped to the connecting user by the
-//! same bearer-token-derived id the REST routes use, so a user never sees another
-//! user's run/study/gate progress.
+//! drained to the socket here. Frames are scoped to the connecting user, so a
+//! user never sees another user's run/study/gate progress.
+//!
+//! The scoping id is the `sessions`-table user id, which is what every REST
+//! caller stamps into a frame's `created_by`. It used to be a UUIDv5 derived
+//! from the token string instead — so the token was never verified, *and* the
+//! id it produced could not equal any real `created_by`, which is why this lane
+//! forwarded nothing at all.
 
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Query, State,
+        State,
     },
-    http::StatusCode,
-    response::{IntoResponse, Response},
+    response::Response,
 };
-use serde::Deserialize;
-
-use backtest::suite::user_id_from_token;
 
 use crate::state::AppState;
-
-#[derive(Deserialize)]
-pub struct WsQuery {
-    /// Bearer token as a query param (the browser WS API can't set headers).
-    token: Option<String>,
-}
+use crate::ws::auth::WsBearerToken;
 
 /// GET /ws/backtest-suite — upgrade and stream this user's progress frames.
+///
+/// The token arrives as a query parameter because a browser `WebSocket` cannot
+/// set headers; [`WsBearerToken`] resolves it against the `sessions` table
+/// before the upgrade, and refuses it when it does not resolve.
 pub async fn ws_backtest_suite(
     ws: WebSocketUpgrade,
-    Query(query): Query<WsQuery>,
+    session: WsBearerToken,
     State(state): State<AppState>,
 ) -> Response {
-    let token = match query.token.as_deref().filter(|t| !t.is_empty()) {
-        Some(t) => t.to_owned(),
-        None => return (StatusCode::UNAUTHORIZED, "missing token query param").into_response(),
-    };
-    let user_id = user_id_from_token(&token).to_string();
+    let user_id = session.user_id().to_string();
     let rx = state.suite.subscribe_progress();
     ws.on_upgrade(move |socket| handle_ws(socket, rx, user_id))
 }
