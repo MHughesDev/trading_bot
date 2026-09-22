@@ -19,6 +19,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use dataplane::calendar::{Calendar, CalendarVersion};
 use dataplane::census::{census, CensusBar, CoverageCensus, FloorVerdict};
+use tracing::error;
 
 use crate::store::BarStore;
 
@@ -82,9 +83,45 @@ where
         let bars = store.census_bars(&s.instrument_id, &s.venue, period_secs).await?;
         let cal = calendar_for(&s.venue);
         let c = census(&s.instrument_id, &s.venue, &s.timeframe, period_secs, &bars, &cal, as_of);
+        // A number on a page nobody reads is not a control. A series holding rows
+        // that claim an observed knowledge time their source could not have
+        // supported means something is still writing them, and it means this
+        // series' observed count — the only count Gate 15 may draw on — is
+        // overstated by exactly that much (INV-01, ADR-P2-24, D-P3).
+        if let Some(alarm) = c.provenance_alarm() {
+            error!(
+                instrument = %alarm.instrument,
+                venue = %alarm.venue,
+                timeframe = %alarm.timeframe,
+                unflagged_sentinel_bars = alarm.unflagged_sentinel_bars,
+                observed_knowledge_bars = alarm.observed_knowledge_bars,
+                defensibly_observed_bars = alarm.defensibly_observed_bars(),
+                "{alarm}"
+            );
+        }
         out.push(CensusRecord::new(c, SeriesKind::Historical));
     }
     Ok(out)
+}
+
+/// Every provenance alarm this census raised.
+///
+/// Returned as data so a caller can fail a job, page an operator, or refuse to
+/// promote a dataset built over the offending series — rather than having to
+/// re-derive the condition from the persisted rows.
+#[must_use]
+pub fn provenance_alarms(records: &[CensusRecord]) -> Vec<dataplane::census::ProvenanceAlarm> {
+    records.iter().filter_map(|r| r.census.provenance_alarm()).collect()
+}
+
+/// Rows across every series that may honestly be offered to Gate 15 as forward
+/// evidence (D-P3).
+///
+/// This is the platform's entire stock of admissible forward evidence, and it is a
+/// single number on purpose: it is the one an operator should be able to ask for.
+#[must_use]
+pub fn defensibly_observed_bars(records: &[CensusRecord]) -> u64 {
+    records.iter().map(|r| r.census.defensibly_observed_bars()).sum()
 }
 
 /// Census rows for the forward-only series (P-0.6 item 3), so the coverage page
@@ -110,6 +147,15 @@ pub fn forward_census(
             "forward series {series}@{venue} carries a derived knowledge_time at open_ns {}: a forward-only \
              series is observed by construction; a derived stamp means it was backfilled and is not forward evidence \
              (Set P D-P3)",
+            bad.open_ns
+        );
+    }
+    if let Some(bad) = observations.iter().find(|o| o.unflagged_sentinel) {
+        anyhow::bail!(
+            "forward series {series}@{venue} carries an observation at open_ns {} whose knowledge_time is \
+             earlier than its source could have published it, with no BACKFILLED_KNOWLEDGE_TIME flag. \
+             A forward series' whole value is that its receipts are real; an unsupportable one is refused \
+             rather than written, because it would be counted as Gate 15 evidence (Set P D-P3, ADR-P2-24)",
             bad.open_ns
         );
     }

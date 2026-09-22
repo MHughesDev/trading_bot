@@ -18,7 +18,8 @@ use std::collections::{BTreeSet, HashMap};
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use clickhouse::Row;
-use dataplane::bar::{self, CanonicalBar, KnowledgeProvenance, VendorLag, PRICE_SCALE};
+use dataplane::bar::{self, CanonicalBar, VendorLag, PRICE_SCALE};
+use tracing::warn;
 use dataplane::identity::{AssetClass, InstrumentKey, VenueKey};
 use dataplane::quality::QualityFlags;
 use domain::payloads::bar::Timeframe;
@@ -102,6 +103,16 @@ pub struct WriteReport {
     pub restated: usize,
     /// Bars the ingest validator refused.
     pub rejected: usize,
+    /// Bars whose ingest stamp was a credible forward receipt: `knowledge_time` is
+    /// that receipt, unflagged, and the row is Gate 15 forward evidence (D-P3).
+    pub observed: usize,
+    /// Bars given the declared sentinel and `BACKFILLED_KNOWLEDGE_TIME`.
+    pub backfilled: usize,
+    /// Bars whose ingest stamp preceded their own bar close. Included in
+    /// `backfilled` — never promoted to an observation — but counted apart, because
+    /// a non-zero value means a clock or a parser is wrong and should be found
+    /// rather than averaged away.
+    pub impossible_receipts: usize,
 }
 
 pub struct BarStore {
@@ -519,18 +530,33 @@ impl BarStore {
         struct CensusRow {
             open_ns: i64,
             derived: u8,
+            unflagged_sentinel: u8,
         }
         let horizon = self.horizon_ns();
+        // `unflagged_sentinel` is the alarm predicate: a knowledge time earlier than
+        // the instant this row's source could have published it, presented with no
+        // flag admitting it. It is exactly
+        // `dataplane::bar::is_unflagged_sentinel_violation`, in SQL. The declared lag
+        // comes from `source_dim`, the replicated copy of `dataplane.source`; a row
+        // whose source is missing from the dimension falls back to `unknown_legacy`'s
+        // 60 s rather than to zero, because zero would read as "observed live" —
+        // which is the fiction being hunted.
         let rows: Vec<CensusRow> = self
             .client
             .query(&format!(
                 "SELECT toInt64(toUnixTimestamp64Nano(m.event_time)) AS open_ns,
-                        toUInt8(max(bitAnd(m.quality_flags, {bf}) != 0)) AS derived
+                        toUInt8(max(bitAnd(m.quality_flags, {bf}) != 0)) AS derived,
+                        toUInt8(max(bitAnd(m.quality_flags, {bf}) = 0
+                                AND m.knowledge_time < m.event_time + toIntervalSecond(m.period_secs)
+                                                     + toIntervalMillisecond(if(sd.source_id = 0, 60000, sd.declared_vendor_lag_ms))))
+                          AS unflagged_sentinel
                    FROM market_bar AS m
                    INNER JOIN (SELECT DISTINCT instrument_id, venue_id, symbol FROM instrument_symbol_dim FINAL
                                 WHERE knowledge_time <= fromUnixTimestamp64Nano({horizon})) AS s
                      ON m.instrument_id = s.instrument_id AND m.venue_id = s.venue_id
                    INNER JOIN (SELECT venue_id, name FROM venue_dim FINAL) AS v ON m.venue_id = v.venue_id
+                   LEFT JOIN (SELECT source_id, declared_vendor_lag_ms FROM source_dim FINAL) AS sd
+                     ON m.source_id = sd.source_id
                   WHERE s.symbol = ? AND v.name = ? AND m.period_secs = {period_secs}
                     AND m.knowledge_time <= fromUnixTimestamp64Nano({horizon})
                   GROUP BY m.event_time
@@ -543,7 +569,11 @@ impl BarStore {
             .await?;
         Ok(rows
             .into_iter()
-            .map(|r| dataplane::census::CensusBar { open_ns: r.open_ns, knowledge_derived: r.derived != 0 })
+            .map(|r| dataplane::census::CensusBar {
+                open_ns: r.open_ns,
+                knowledge_derived: r.derived != 0,
+                unflagged_sentinel: r.unflagged_sentinel != 0,
+            })
             .collect())
     }
 
@@ -721,9 +751,33 @@ impl BarStore {
                 revision_seq: 0,
                 source_id: src.source_id,
             };
-            let provenance = if src.live { bar::provenance_for(&cb, Duration::seconds(LIVE_TOLERANCE_SECS)) } else { KnowledgeProvenance::Backfilled };
-            bar::stamp_knowledge_time(&mut cb, provenance, &lag);
-            if bar::validate(&cb).is_err() {
+            // Provenance is decided per row, from THIS row's receipt — not from
+            // `src.live`, which is the transport. A forward REST poll the platform
+            // watched arrive is observed and is Gate 15 evidence (Set P D-P3); a
+            // `live_stream` source's row that only reached us weeks later is not.
+            // One source supplies both legs, so the question belongs to the row.
+            let verdict = bar::stamp_from_receipt(&mut cb, &lag, bar::RECEIPT_GRACE);
+            match verdict {
+                bar::ReceiptVerdict::Receipt { .. } => report.observed += 1,
+                bar::ReceiptVerdict::HistoryPull { .. } => report.backfilled += 1,
+                bar::ReceiptVerdict::Impossible { .. } => {
+                    report.backfilled += 1;
+                    report.impossible_receipts += 1;
+                }
+            }
+            // `validate` alone accepted every one of the 158,259 rows that put
+            // `available_time = event_time` into `market_bars_v2`. The lag-aware
+            // form refuses a row claiming to have been knowable before its vendor
+            // published it, which is what those rows all claimed.
+            if let Err(e) = bar::validate_against_source(&cb, &lag) {
+                warn!(
+                    symbol = %symbol,
+                    venue = %venue,
+                    source = %source,
+                    event_time = %cb.event_time,
+                    error = %e,
+                    "bar refused at ingest"
+                );
                 report.rejected += 1;
                 continue;
             }
