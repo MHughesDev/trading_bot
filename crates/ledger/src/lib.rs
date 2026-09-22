@@ -914,6 +914,23 @@ impl InMemoryLedger {
         Self::default()
     }
 
+    /// The statistics recorded for a trial, mirroring
+    /// [`pg::PgTrialLedger::statistics_async`].
+    #[must_use]
+    pub fn statistics(
+        &self,
+        tenant_id: &str,
+        trial_id: Uuid,
+    ) -> std::collections::BTreeMap<String, f64> {
+        self.statistics
+            .lock()
+            .expect("ledger poisoned")
+            .iter()
+            .filter(|((t, id, _), _)| t == tenant_id && *id == trial_id)
+            .map(|((_, _, name), v)| (name.clone(), *v))
+            .collect()
+    }
+
     /// The shaped gate evidence recorded for a trial, or `None` when none was.
     ///
     /// `None` is the honest answer and is never an empty bundle: a caller that
