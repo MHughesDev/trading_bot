@@ -10,10 +10,29 @@
 //!   cargo run -p dataplane --example qc_census
 //! ```
 //!
-//! Reads `trading.market_bars_v2` directly rather than through `BarStore`,
-//! because the census (P-0.1) found `market_bar` — the table `BarStore` reads —
-//! does not exist in the live database, so every canonical read returns nothing.
-//! That is recorded as a finding rather than worked around silently.
+//! Reads the canonical `market_bar`. It used to read `trading.market_bars_v2`, on
+//! the strength of a P-0.1 finding that `market_bar` "does not exist in the live
+//! database". That premise expired: on 2026-09-21 `market_bar` held 170,924 rows
+//! with its newest ingested minutes earlier, while `market_bars_v2`'s newest row
+//! was a week old. The census was grading a table nothing had written since
+//! 2026-09-14.
+//!
+//! `market_bars_v2` is now frozen (ADR-D-29) and may not answer a point-in-time
+//! question: `available_time` is absent from its sorting key, so a restatement of a
+//! bar collapses into its original on the next merge and leaves nothing to read.
+//! `market_bar` keys on `knowledge_time` and keeps both rows, which is what makes
+//! the staleness and revision checks below mean anything. `cargo xtask
+//! check-bars-v2-frozen` keeps new writers off it.
+//!
+//! Two consequences for the numbers this prints, both real rather than cosmetic:
+//!
+//! - **Every grade published from the v2 table must be re-measured.** The
+//!   P-2.6 census grades were taken on the stale table and do not describe the
+//!   platform's data as it stands.
+//! - `market_bar` stores the bar's **open** time where v2 stored its **close**.
+//!   The loader adds `period_secs` so that `event_ns` still means the instant the
+//!   bar closed — which is what the knowledge-lag checks compare against, and what
+//!   the v2-era grades were computed from.
 
 use std::collections::BTreeMap;
 
@@ -62,29 +81,45 @@ fn urlencode(s: &str) -> String {
 }
 
 struct Series {
+    /// Surrogate keys, as `market_bar` actually stores them. Selection is done on
+    /// these, so a series whose name will not resolve is still censused.
+    instrument_id: i64,
+    venue_id: i32,
+    period_secs: i64,
+    /// Display, and the key for the cross-venue second opinion.
     instrument: String,
     venue: String,
     timeframe: String,
     bars: u64,
 }
 
-fn period_secs(tf: &str) -> i64 {
-    match tf {
-        "5m" => 300,
-        "15m" => 900,
-        "1h" => 3_600,
-        "4h" => 14_400,
-        "1d" => 86_400,
-        // 1m and anything unrecognised: a minute is the platform's base grid,
-        // and guessing wider would understate gaps.
-        _ => 60,
+/// The label for a bar period. Anything off the known grid is printed as its own
+/// second count rather than rounded into a neighbour — an unrecognised period is a
+/// finding, not a 1m bar.
+fn timeframe_label(period_secs: i64) -> String {
+    match period_secs {
+        60 => "1m".into(),
+        300 => "5m".into(),
+        900 => "15m".into(),
+        3_600 => "1h".into(),
+        14_400 => "4h".into(),
+        86_400 => "1d".into(),
+        n => format!("{n}s"),
     }
 }
 
 fn main() -> Result<(), String> {
+    // LEFT JOIN, not INNER: an instrument with no row in the symbol dimension must
+    // still appear, under its numeric id. An INNER JOIN would drop it, and a series
+    // that vanishes from a census reads exactly like a series that has no problems.
     let inventory = query(&format!(
-        "SELECT instrument_id, venue_id, timeframe, count() AS bars \
-         FROM trading.market_bars_v2 GROUP BY instrument_id, venue_id, timeframe \
+        "SELECT b.instrument_id, b.venue_id, b.period_secs, count() AS bars, \
+                any(d.symbol) AS symbol, any(v.name) AS venue \
+         FROM trading.market_bar AS b \
+         LEFT JOIN trading.instrument_symbol_dim AS d \
+                ON d.instrument_id = b.instrument_id AND d.venue_id = b.venue_id \
+         LEFT JOIN trading.venue_dim AS v ON v.venue_id = b.venue_id \
+         GROUP BY b.instrument_id, b.venue_id, b.period_secs \
          ORDER BY bars DESC {TSV}"
     ))?;
 
@@ -93,10 +128,26 @@ fn main() -> Result<(), String> {
         .skip(1)
         .filter_map(|l| {
             let f: Vec<&str> = l.split('\t').collect();
-            (f.len() >= 4).then(|| Series {
-                instrument: f[0].into(),
-                venue: f[1].into(),
-                timeframe: f[2].into(),
+            if f.len() < 6 {
+                return None;
+            }
+            let instrument_id: i64 = f[0].parse().ok()?;
+            let venue_id: i32 = f[1].parse().ok()?;
+            let period_secs: i64 = f[2].parse().ok()?;
+            let name = |s: &str, fallback: String| {
+                if s.is_empty() {
+                    fallback
+                } else {
+                    s.to_string()
+                }
+            };
+            Some(Series {
+                instrument_id,
+                venue_id,
+                period_secs,
+                instrument: name(f[4], format!("instrument#{instrument_id}")),
+                venue: name(f[5], format!("venue#{venue_id}")),
+                timeframe: timeframe_label(period_secs),
                 bars: f[3].parse().unwrap_or(0),
             })
         })
@@ -125,20 +176,20 @@ fn main() -> Result<(), String> {
     let mut d_reasons: Vec<String> = Vec::new();
 
     for s in &series {
-        let bars = load(&s.instrument, &s.venue, &s.timeframe)?;
+        let bars = load(s.instrument_id, s.venue_id, s.period_secs)?;
 
         // The second venue, if one covers the same instrument and timeframe.
         let secondary = by_key
             .get(&(s.instrument.clone(), s.timeframe.clone()))
             .and_then(|v| v.iter().find(|o| o.venue != s.venue))
-            .map(|o| load(&o.instrument, &o.venue, &o.timeframe))
+            .map(|o| load(o.instrument_id, o.venue_id, o.period_secs))
             .transpose()?;
 
         // Expected bars come from the census in production. Here the window is
         // taken from the series itself, which measures *internal* gaps and not
         // absence at the ends — stated rather than glossed, because it makes
         // these coverage numbers optimistic.
-        let period = period_secs(&s.timeframe);
+        let period = s.period_secs;
         let expected = bars
             .first()
             .zip(bars.last())
@@ -203,14 +254,28 @@ fn main() -> Result<(), String> {
     Ok(())
 }
 
-fn load(instrument: &str, venue: &str, timeframe: &str) -> Result<Vec<QcBar>, String> {
+/// Every bar of one series, oldest first, revisions included.
+///
+/// `QcBar::event_ns` is documented as the bar's **open**, and `market_bar.event_time`
+/// is the open, so the two map straight across. The v2 table stored the bar's *close*
+/// in its `event_time`, so the old census was quietly feeding a close time into a
+/// field that means open — one more thing the swap puts right.
+///
+/// Revisions are deliberately not collapsed: `QcBar::revised` is how the battery sees
+/// that a vendor restated a bar, and a `FINAL` or `argMax` read would hide exactly
+/// that. This is the property `market_bars_v2` could not offer — with `available_time`
+/// outside its sorting key the superseded row is already gone. It is not a small
+/// difference: this series carries 73 restatements that the v2 table showed as none.
+fn load(instrument_id: i64, venue_id: i32, period_secs: i64) -> Result<Vec<QcBar>, String> {
     let sql = format!(
-        "SELECT toUnixTimestamp64Nano(event_time), toUnixTimestamp64Nano(available_time), \
+        "SELECT toUnixTimestamp64Nano(event_time), \
+                toUnixTimestamp64Nano(knowledge_time), \
                 toFloat64(open), toFloat64(high), toFloat64(low), toFloat64(close), \
-                toFloat64(volume), revision \
-         FROM trading.market_bars_v2 \
-         WHERE instrument_id = '{instrument}' AND venue_id = '{venue}' AND timeframe = '{timeframe}' \
-         ORDER BY event_time FORMAT TSV"
+                toFloat64(volume), revision_seq \
+         FROM trading.market_bar \
+         WHERE instrument_id = {instrument_id} AND venue_id = {venue_id} \
+           AND period_secs = {period_secs} \
+         ORDER BY event_time, knowledge_time, revision_seq FORMAT TSV"
     );
     Ok(query(&sql)?
         .lines()

@@ -423,6 +423,23 @@ pub fn volume(bars: &[QcBar], cfg: &QcConfig) -> CheckResult {
 /// series where every point-in-time filter silently reads the future — and the
 /// census found that condition across all 158,259 rows the platform holds, so
 /// this is not a hypothetical.
+///
+/// # What counts as a duplicate
+///
+/// Two bars sharing an `event_ns` are a **restatement**, not a duplicate, when the
+/// later one carries a strictly greater `knowledge_ns`: a point-in-time read picks
+/// exactly one of them for any cutoff, which is the whole mechanism by which a
+/// vendor correction is representable at all. They are a duplicate only when they
+/// share a `knowledge_ns` too — then no cutoff can separate them and a PIT read has
+/// to choose arbitrarily, which is the defect this clause is for.
+///
+/// This distinction had nothing to bite on while the census read `market_bars_v2`.
+/// That table keeps `available_time` out of its sorting key, so a restatement was
+/// merged into its own original before anyone could read it and every series looked
+/// revision-free. Against the canonical `market_bar` (ADR-D-29) restatements survive
+/// and are ordinary: BTC-USD/kraken/1m alone holds 73, one bar of it revised 54
+/// times. Counting those as duplicates forced a D on the platform's best-attested
+/// series for doing precisely what the canonical table exists to do.
 #[must_use]
 pub fn timestamps(bars: &[QcBar]) -> CheckResult {
     let mut offending = Vec::new();
@@ -436,11 +453,11 @@ pub fn timestamps(bars: &[QcBar]) -> CheckResult {
             offending.push(i);
         }
         if i > 0 {
-            let prev = bars[i - 1].event_ns;
-            if b.event_ns < prev {
+            let prev = &bars[i - 1];
+            if b.event_ns < prev.event_ns {
                 out_of_order += 1;
                 offending.push(i);
-            } else if b.event_ns == prev {
+            } else if b.event_ns == prev.event_ns && b.knowledge_ns <= prev.knowledge_ns {
                 duplicates += 1;
                 offending.push(i);
             }
@@ -695,9 +712,57 @@ mod tests {
         out[30].event_ns = out[29].event_ns - MIN;
         assert!(timestamps(&out).detail.contains("1 out of order"));
 
+        // Same event_ns *and* no later knowledge: indistinguishable to a PIT read.
         let mut dup = clean(50);
         dup[30].event_ns = dup[29].event_ns;
+        dup[30].knowledge_ns = dup[29].knowledge_ns;
         assert!(timestamps(&dup).detail.contains("1 duplicate"));
+    }
+
+    /// A restatement is two rows at one `event_ns` separated by `knowledge_ns`. A
+    /// PIT read resolves it to exactly one bar per cutoff, so it is not a duplicate
+    /// and must not force grade D. `market_bars_v2` could never produce this case —
+    /// it merged the superseded row away — so it went unnoticed until the census
+    /// moved to the canonical table (ADR-D-29).
+    #[test]
+    fn timestamps_does_not_count_a_restatement_as_a_duplicate() {
+        let mut revised = clean(50);
+        revised[30].event_ns = revised[29].event_ns;
+        revised[30].knowledge_ns = revised[29].knowledge_ns + MIN;
+        revised[30].revised = true;
+
+        let r = timestamps(&revised);
+        assert!(r.detail.contains("0 duplicate"), "{}", r.detail);
+        assert_eq!(r.outcome, Outcome::Pass, "{}", r.detail);
+    }
+
+    /// One bar revised many times stays clean, however long the chain — 54 of them
+    /// is a real series on this platform, not a contrived bound.
+    #[test]
+    fn timestamps_accepts_a_long_restatement_chain() {
+        let mut bars = clean(10);
+        let anchor = bars[5].clone();
+        for k in 1..=54 {
+            let mut b = anchor.clone();
+            b.knowledge_ns = anchor.knowledge_ns + k * MIN;
+            b.revised = true;
+            bars.insert(5 + k as usize, b);
+        }
+        let r = timestamps(&bars);
+        assert!(r.detail.contains("0 duplicate"), "{}", r.detail);
+        assert_eq!(r.outcome, Outcome::Pass, "{}", r.detail);
+    }
+
+    /// A restatement stamped as knowable no later than the row it supersedes is
+    /// still a duplicate: the `revised` flag does not excuse it, because a PIT read
+    /// cannot separate the two whatever they are called.
+    #[test]
+    fn timestamps_still_catches_a_revision_flag_with_no_knowledge_gap() {
+        let mut bars = clean(50);
+        bars[30].event_ns = bars[29].event_ns;
+        bars[30].knowledge_ns = bars[29].knowledge_ns;
+        bars[30].revised = true;
+        assert!(timestamps(&bars).detail.contains("1 duplicate"));
     }
 
     #[test]

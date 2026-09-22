@@ -4,6 +4,7 @@
 //!   check-money-f64       — scan workspace for f64 usage on price/size (CI enforced)
 //!   lint-no-json-hotpath  — verify serde_json absent from market-lane hot paths (CI enforced)
 //!   check-bars-v1-frozen  — verify nothing writes the retired market_bars table (CI enforced)
+//!   check-bars-v2-frozen  — verify nothing new writes the frozen market_bars_v2 (CI enforced)
 
 use std::process::Command;
 
@@ -13,13 +14,14 @@ fn main() {
         Some("check-money-f64") => check_money_f64(),
         Some("lint-no-json-hotpath") => lint_no_json_hotpath(),
         Some("check-bars-v1-frozen") => check_bars_v1_frozen(),
+        Some("check-bars-v2-frozen") => check_bars_v2_frozen(),
         Some(t) => {
             eprintln!("Unknown xtask: {t}");
             std::process::exit(1);
         }
         None => {
             println!(
-                "Usage: cargo xtask <check-money-f64|lint-no-json-hotpath|check-bars-v1-frozen>"
+                "Usage: cargo xtask <check-money-f64|lint-no-json-hotpath|check-bars-v1-frozen|check-bars-v2-frozen>"
             );
         }
     }
@@ -412,6 +414,248 @@ fn check_bars_v1_frozen() {
     }
     eprintln!();
     eprintln!("market_bars collapses bars of different timeframes that close at the same");
-    eprintln!("instant (DATA-005 §3). Write market_bars_v2 instead.");
+    eprintln!("instant (DATA-005 §3). Write the canonical `market_bar` instead — not");
+    eprintln!("market_bars_v2, which is itself frozen (ADR-D-29, check-bars-v2-frozen).");
     std::process::exit(1);
+}
+
+/// Writers of `market_bars_v2` that predate the freeze, with the number of write
+/// sites each file still holds.
+///
+/// These four are the whole of the pre-freeze debt, measured on 2026-09-21. They
+/// live outside the dataplane and were left in place deliberately: every one of
+/// them is inert against the live database (the `market_bars` → v2 backfill has
+/// zero rows left to copy, and the v2 → `market_bar` migration recorded all 17 of
+/// its chunks as copied at 21:19:28 that day), so removing them is a cleanup for
+/// the crate's owner rather than a correctness fix this check should force.
+///
+/// The count is pinned in both directions on purpose. A new write site in one of
+/// these files fails the check, and so does *removing* one without shrinking the
+/// entry — which is what makes the allowlist retire itself instead of becoming a
+/// permanent licence.
+const V2_PRE_FREEZE_WRITERS: &[(&str, usize)] = &[
+    // `INSERT INTO market_bars_v2` — the one real insert.
+    ("crates/storage/src/clickhouse/backfill.rs", 1),
+    // `EXCHANGE TABLES market_bars_v2 AND <staging>` — replaces the table wholesale.
+    ("crates/storage/src/clickhouse/migrate.rs", 1),
+    // Calls the backfill: the standalone operator example, and platform boot.
+    ("crates/storage/examples/backfill_bars_v2.rs", 1),
+    ("apps/platform/src/main.rs", 1),
+];
+
+/// Verify that no new code writes the frozen `market_bars_v2` table (ADR-D-29).
+///
+/// `market_bars_v2` is `ReplacingMergeTree(ingested_time) ORDER BY (instrument_id,
+/// timeframe, venue_id, source, event_time, revision)`. `available_time` — the
+/// column that carries when a bar became knowable — is **not in that sorting key**.
+/// So two rows for the same bar and the same `revision` that differ only in when
+/// they became known collapse on a background merge, and the one kept is whichever
+/// arrived later by `ingested_time`. A restatement is destroyed with no error, no
+/// surviving row and nothing to read afterwards: a non-PIT read path that nobody
+/// chose, inherited from a sort key. The canonical `market_bar` carries
+/// `knowledge_time` inside its sorting key and does not have this failure.
+///
+/// The hazard is not theoretical. On 2026-09-21 the live table held 1,441 sorting-key
+/// groups with two physical rows each, differing only in `ingested_time` — 1,441 rows
+/// queued for silent destruction on the next merge. They happened to agree on price
+/// and on `available_time`, so nothing of value was lost *that* time; the mechanism
+/// that would lose it was fully armed.
+///
+/// Authority went to `market_bar` on the evidence: it was ingesting minutes ago
+/// while v2's newest row was a week old, it holds every bar v2 holds (an anti-join
+/// over all nine series returned zero rows unique to v2, and all 156,817 shared bars
+/// agree on OHLCV to 1e-6), and it holds 13,747 BTC-USD/coinbase 1m bars besides.
+///
+/// A source guard rather than a `REVOKE INSERT`, for the same reason
+/// [`check_bars_v1_frozen`] is one: the ClickHouse user is defined in `users_xml`,
+/// which SQL cannot modify, and a grant would not survive a container rebuild.
+fn check_bars_v2_frozen() {
+    let output = Command::new("git")
+        .args(["ls-files", "--", "*.rs"])
+        .output()
+        .expect("git ls-files failed");
+
+    if !output.status.success() {
+        eprintln!("git ls-files failed");
+        std::process::exit(2);
+    }
+
+    let file_list = String::from_utf8(output.stdout).expect("invalid utf8 from git ls-files");
+    let mut violations: Vec<String> = vec![];
+    let mut allowed_seen: Vec<(&str, usize)> =
+        V2_PRE_FREEZE_WRITERS.iter().map(|(p, _)| (*p, 0)).collect();
+
+    for file in file_list.lines() {
+        if file.contains("target/") {
+            continue;
+        }
+        // Tests write v2 deliberately, to demonstrate the collapse that is the
+        // premise of this whole rule. A test that could not write the broken table
+        // could not prove it is broken.
+        if file.contains("/tests/") {
+            continue;
+        }
+        // The guard names the forbidden patterns, so it necessarily contains them.
+        if file.ends_with("xtask/src/main.rs") {
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(file) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        for (idx, line) in content.lines().enumerate() {
+            if !line_writes_v2(line) {
+                continue;
+            }
+            match allowed_seen.iter_mut().find(|(p, _)| file.ends_with(p)) {
+                Some((_, n)) => *n += 1,
+                None => violations.push(format!("{}:{}: {}", file, idx + 1, line.trim())),
+            }
+        }
+    }
+
+    let mut drift: Vec<String> = vec![];
+    for (path, expected) in V2_PRE_FREEZE_WRITERS {
+        let found = allowed_seen
+            .iter()
+            .find(|(p, _)| p == path)
+            .map_or(0, |(_, n)| *n);
+        if found != *expected {
+            drift.push(format!(
+                "  {path}: allowlist expects {expected} write site(s), found {found}"
+            ));
+        }
+    }
+
+    if violations.is_empty() && drift.is_empty() {
+        println!(
+            "check-bars-v2-frozen: OK — no new writes to the frozen market_bars_v2 table \
+             ({} pre-freeze write site(s) accounted for)",
+            V2_PRE_FREEZE_WRITERS.iter().map(|(_, n)| n).sum::<usize>()
+        );
+        return;
+    }
+
+    if !violations.is_empty() {
+        eprintln!(
+            "check-bars-v2-frozen: FAILED — {} write(s) to the frozen market_bars_v2 table:",
+            violations.len()
+        );
+        for v in &violations {
+            eprintln!("  {v}");
+        }
+        eprintln!();
+        eprintln!("market_bars_v2 has no `available_time` in its sorting key, so a restatement");
+        eprintln!("of an existing bar is destroyed on the next merge with no error and no");
+        eprintln!("surviving row (ADR-D-29). Write the canonical `market_bar` instead, via");
+        eprintln!("`backtest::store::BarStore` — it keys on `knowledge_time` and keeps both.");
+    }
+
+    if !drift.is_empty() {
+        eprintln!();
+        eprintln!("check-bars-v2-frozen: FAILED — V2_PRE_FREEZE_WRITERS is out of date:");
+        for d in &drift {
+            eprintln!("{d}");
+        }
+        eprintln!();
+        eprintln!("If you removed a write site, shrink its entry (and delete the entry at 0).");
+        eprintln!("If you added one, it is a new write to a frozen table — remove it instead.");
+    }
+
+    std::process::exit(1);
+}
+
+/// True when this line writes `market_bars_v2`, in any of the forms the workspace
+/// actually uses to do it.
+///
+/// `trading.market_bars_v2` is matched as well as the bare name. The database-
+/// qualified spelling is not hypothetical: it is how `qc_census.rs` read the table
+/// straight past AT-01 in `crates/invariants`, whose regex expects the table name to
+/// follow `FROM` immediately.
+fn line_writes_v2(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with('*') {
+        return false;
+    }
+    for name in ["market_bars_v2", "trading.market_bars_v2"] {
+        // A direct insert, in SQL or through the client builder.
+        if line.contains(&format!("INSERT INTO {name} "))
+            || line.contains(&format!("INSERT INTO {name}("))
+            || line.trim_end().ends_with(&format!("INSERT INTO {name}"))
+            || line.contains(&format!("insert(\"{name}\")"))
+        {
+            return true;
+        }
+        // Swapping another table into v2's name replaces every row it holds.
+        if line.contains(&format!("EXCHANGE TABLES {name} "))
+            || line.contains(&format!("RENAME TABLE {name} "))
+        {
+            return true;
+        }
+    }
+    // Calling the backfill writes v2 just as surely as the INSERT inside it does.
+    // The definition itself is not a call.
+    if line.contains("backfill_market_bars_v2(") && !line.contains("fn backfill_market_bars_v2(") {
+        return true;
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::line_writes_v2;
+
+    #[test]
+    fn plain_inserts_are_writes() {
+        assert!(line_writes_v2(r#"    .query("INSERT INTO market_bars_v2 (a) VALUES (1)")"#));
+        assert!(line_writes_v2(r#"    .query("INSERT INTO market_bars_v2(a) VALUES (1)")"#));
+        assert!(line_writes_v2(r#"    .insert("market_bars_v2")"#));
+    }
+
+    /// The hole this check exists to close. `crates/invariants`' AT-01 expects the
+    /// table name to follow `FROM`/`INTO` immediately, so database-qualifying it
+    /// walks straight past — which is how the QC census read v2 unnoticed.
+    #[test]
+    fn database_qualified_writes_are_writes() {
+        assert!(line_writes_v2(
+            r#"    .query("INSERT INTO trading.market_bars_v2 (a) VALUES (1)")"#
+        ));
+        assert!(line_writes_v2(r#"    .insert("trading.market_bars_v2")"#));
+    }
+
+    /// Swapping a staging table into v2's name replaces every row it holds, which is
+    /// a write however little it looks like one.
+    #[test]
+    fn table_swaps_are_writes() {
+        assert!(line_writes_v2(
+            r#"    .query(&format!("EXCHANGE TABLES market_bars_v2 AND {staging}"))"#
+        ));
+        assert!(line_writes_v2(
+            r#"    .query(&format!("RENAME TABLE market_bars_v2 TO {archive}"))"#
+        ));
+    }
+
+    #[test]
+    fn calling_the_backfill_is_a_write_but_defining_it_is_not() {
+        assert!(line_writes_v2(
+            "    let r = storage::clickhouse::backfill::backfill_market_bars_v2(&url, &src)"
+        ));
+        assert!(!line_writes_v2("pub async fn backfill_market_bars_v2("));
+    }
+
+    /// Reads stay legal: the v2 → `market_bar` migration has to read the table it is
+    /// draining, and a check that forbade that would forbid the fix.
+    #[test]
+    fn reads_and_prose_are_not_writes() {
+        assert!(!line_writes_v2(r#"    .query("SELECT count() FROM market_bars_v2")"#));
+        assert!(!line_writes_v2(
+            r#"    .query("SELECT * FROM trading.market_bars_v2 FINAL")"#
+        ));
+        assert!(!line_writes_v2(r#"    .query("INSERT INTO market_bar (a) VALUES (1)")"#));
+        assert!(!line_writes_v2("// INSERT INTO market_bars_v2 is forbidden"));
+        assert!(!line_writes_v2("//! writes its bars to `market_bars_v2` with"));
+        assert!(!line_writes_v2(" * INSERT INTO market_bars_v2"));
+    }
 }
