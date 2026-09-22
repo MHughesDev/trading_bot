@@ -17,3 +17,4 @@ pub mod market;
 pub mod models;
 pub mod portfolio;
 pub mod research;
+pub mod templated;

@@ -545,6 +545,20 @@ async fn dispatch_untraced(
         "get_null_picker" => tools::research::get_null_picker(&ctx.api, params).await,
         "choose_null" => tools::research::choose_null(&ctx.api, params).await,
 
+        // ── Templated (AGENT-006 §2.2) ─────────────────────────────────────────
+        //
+        // One arm per template rather than a catch-all, so
+        // `every_dispatch_arm_has_a_spec_and_every_spec_has_an_arm` keeps
+        // covering this tier. A catch-all would make the templated tier the one
+        // place a tool can exist without the catalogue noticing, which is exactly
+        // the drift the tier is under suspicion for.
+        "describe_returns" => tools::templated::run(&ctx.api, tool_name, params).await,
+        "estimate_volatility" => tools::templated::run(&ctx.api, tool_name, params).await,
+        "seasonality" => tools::templated::run(&ctx.api, tool_name, params).await,
+        "stationarity" => tools::templated::run(&ctx.api, tool_name, params).await,
+        "cost_shock_curve" => tools::templated::run(&ctx.api, tool_name, params).await,
+        "trade_reshuffle_bootstrap" => tools::templated::run(&ctx.api, tool_name, params).await,
+
         unknown => {
             json!({ "error": "unknown_tool", "tool": unknown })
         }

@@ -329,6 +329,13 @@ pub fn catalog() -> &'static [ToolSpec] {
         specs.extend(crate::tools::models::specs());
         specs.extend(crate::tools::automations::specs());
         specs.extend(crate::tools::research::specs());
+        // The templated tier last, and generated rather than written: its entries
+        // come from the headers of the Python files under
+        // `apps/skill-runner/templates/`, read by `build.rs` (§2.2, §3.3). A
+        // template is a catalogue tool in every other respect — same namespace
+        // cap, same description budget, same risk, same trial rule — which is
+        // what stops the tier becoming a second, unaudited way to add tools.
+        specs.extend(crate::tools::templated::specs());
         assert_no_duplicates(&specs);
         specs
     })
