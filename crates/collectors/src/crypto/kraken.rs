@@ -204,6 +204,7 @@ impl KrakenCollector {
                 }
             };
 
+            // json-at-boundary: Kraken WebSocket subscribe frame, in the venue's wire format
             let subscribe_msg = serde_json::json!({
                 "method": "subscribe",
                 "params": { "channel": "trade", "symbol": [self.symbol] },
@@ -236,6 +237,7 @@ impl KrakenCollector {
                     Some(Ok(Message::Text(text))) => {
                         let raw = text.as_bytes().to_vec();
                         // Borrow directly from `text` — no per-field String allocations.
+                        // json-at-boundary: a Kraken WebSocket frame, decoded before it becomes an envelope
                         let parsed: Result<KrakenMessage<'_>, _> = serde_json::from_str(&text);
                         match parsed {
                             Err(e) => {
@@ -322,6 +324,7 @@ impl Collector for KrakenCollector {
                 }
             };
 
+            // json-at-boundary: Kraken WebSocket subscribe frame, in the venue's wire format
             let subscribe_msg = serde_json::json!({
                 "method": "subscribe",
                 "params": {
@@ -355,6 +358,7 @@ impl Collector for KrakenCollector {
                     Some(Ok(Message::Text(text))) => {
                         let raw = text.as_bytes().to_vec();
                         // Borrow directly from `text` — no per-field String allocations.
+                        // json-at-boundary: a Kraken WebSocket frame, decoded before it becomes an envelope
                         let parsed: Result<KrakenMessage<'_>, _> = serde_json::from_str(&text);
                         match parsed {
                             Err(e) => {

@@ -190,6 +190,32 @@ jobs:
       - name: Run f64 check
         run: cargo xtask check-money-f64
 
+  # The market lane carries rkyv-encoded envelopes (ADR-0003); serde_json on it is
+  # either a mistake or a decode of a venue's own REST/WebSocket bytes, and only the
+  # author can tell those apart. So the check demands a `// json-at-boundary: <reason>`
+  # at the call site rather than guessing from the source text.
+  #
+  # It ran red and unwired from the day it was written until 2026-09-22: its escape
+  # hatch required the spelling `serde_json::from_str::<T>(&body[..])`, which is
+  # `clippy::redundant_slicing`, which the clippy job above rejects. Nothing could
+  # satisfy both, so fifteen legitimate boundary parses piled up under a check nobody
+  # could make green and nothing ran. This job is the half that was missing.
+  lint-no-json-hotpath:
+    name: Hot path (no unmarked serde_json on the market lane)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run hot-path JSON check
+        run: cargo xtask lint-no-json-hotpath
+      # `cargo test --workspace --lib` above does not reach a binary crate, so the
+      # classifiers behind this check and the frozen-table ones have no other run in
+      # CI. Their unit tests are what keep the checks from quietly agreeing with
+      # whatever the tree happens to contain.
+      - name: Run the guards' own tests
+        run: cargo test -p xtask
+
   check-bars-v1-frozen:
     name: Bars schema (nothing writes the retired market_bars)
     runs-on: ubuntu-latest

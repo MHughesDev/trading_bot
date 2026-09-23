@@ -46,6 +46,7 @@ ADR that replaces it.
 | [ADR-0036](0036-context-as-retrieval.md) | Context Assembly Is Retrieval Over a Run Store, Not Accumulation in a Buffer | Proposed | 2026-09-14 |
 | [ADR-0037](0037-two-modes-continuous-toggle.md) | Two Agent Modes — Chat and Research — with a Continuous Toggle on Research; "Endless" Is the Toggle's `replenish` Setting | Proposed | 2026-09-15 |
 | [ADR-0038](0038-one-live-evaluation-path.md) | One Live Evaluation Path — Automations Declare, the Hot Path Evaluates | Accepted | 2026-09-15 |
+| [ADR-0039](0039-hot-path-json-is-marked-at-the-boundary.md) | Hot-Path JSON Is Marked at the Boundary, Not Guessed From Source Text | Accepted | 2026-09-22 |
 
 ## Decision Relationships
 

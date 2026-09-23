@@ -191,6 +191,7 @@ impl Collector for TradovateCollector {
                 }
                 Ok(resp) => {
                     let raw = resp.bytes().await.unwrap_or_default();
+                    // json-at-boundary: Tradovate's chart REST response, not one of our envelopes
                     match serde_json::from_slice::<ChartResponse>(&raw) {
                         Err(e) => {
                             let norm_err = NormalizeError::Deserialize(e.to_string());

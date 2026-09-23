@@ -212,6 +212,7 @@ impl Collector for RedditCollector {
                 }
                 Ok(resp) => {
                     let raw = resp.bytes().await.unwrap_or_default();
+                    // json-at-boundary: a Reddit listing on the satellite lane, not a market envelope
                     match serde_json::from_slice::<RedditListing>(&raw) {
                         Err(e) => {
                             let norm_err = NormalizeError::Deserialize(e.to_string());

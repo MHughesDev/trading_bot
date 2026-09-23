@@ -192,6 +192,7 @@ impl Collector for KalshiCollector {
                 }
                 Ok(resp) => {
                     let raw = resp.bytes().await.unwrap_or_default();
+                    // json-at-boundary: Kalshi's markets REST response, not one of our envelopes
                     match serde_json::from_slice::<MarketResponse>(&raw) {
                         Err(e) => {
                             let norm_err = NormalizeError::Deserialize(e.to_string());

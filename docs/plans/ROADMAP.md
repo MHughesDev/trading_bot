@@ -125,7 +125,7 @@ Verified against the repository, not against the plan files' own claims.
 | **Phase 3 writers unscheduled** | `asset_embedding` and the outcome tensor have code and tests but nothing writes them | HANDOFF §5.4 |
 | **The external MCP front door writes no audit trail** | a named exemption, not an oversight, but a real hole | AT-64 |
 | **Data depth unmeasured and believed thin** | gates the entire evidence clock | DATA-005 S1 → **Set P** |
-| Four `storage` live suites + `lint-no-json-hotpath` fail | pre-existing; documented do-not-chase | HANDOFF §3 |
+| Four `storage` live suites fail | pre-existing; documented do-not-chase. `lint-no-json-hotpath` was on this row and is **fixed and CI-wired as of 2026-09-22** | HANDOFF §3 |
 | **Every simulator run ever produced was charged zero commission** | the SDK's instrument constructors leave maker/taker unset and the engine's default fee model reads that as zero, so the simulator computed a **gross** number and labelled it **net**. Found 2026-09-15 by track 15, fixed via `FeeBook::resolve` (ADR-P6-12). Affects every run, not only exit-declaring ones | ADR-P6-12; `mlops.defective_engine_version` + the `backtest_runs_integrity` view separate the populations at read time |
 | **Every simulator `Trade` carried a size of zero** | a closed nautilus `Position` reports `quantity` as the *open* size; nothing noticed because no metric divided by it. Found the same day, fixed as `peak_qty` | ADR-P6-13 |
 | **Exits fire in replay but not live** | track 15 wired the simulator to `ExitTracker`; the live runtime still does not call it. A declared stop-loss now bounds a backtest and not a deployment — an **SC-3 violation**, and the most dangerous state the platform has been in | dispatched as track 19 |

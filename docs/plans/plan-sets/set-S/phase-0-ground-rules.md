@@ -183,12 +183,15 @@ shared one was abandoned:
 | `cargo test -p ledger --lib` | 116 passed, 0 failed |
 | `cargo test -p invariants --test static_invariants` | 27 passed, 0 failed |
 
-**Recommendation, not done.** `cargo xtask lint-no-json-hotpath` enforces a rule a prior phase
-established, is **not wired into CI**, and fails on one pre-existing line in
-`crates/collectors/src/crypto/kraken.rs`. Wiring it into `.github/workflows/ci.yml` is one job
-block and would cost nothing once that line is resolved — but a lint added to CI while it is
-red just makes every PR red, so the order is: fix the line, then wire it. Left for whoever owns
-that line.
+**Recommendation — taken on 2026-09-22.** `cargo xtask lint-no-json-hotpath` enforces a rule a
+prior phase established and was **not wired into CI**. The order proposed here (fix the line,
+then wire it) was right; the diagnosis was not. It was not one line but fifteen, and the check
+itself was the defect: it matched substrings of the argument spelling, so `serde_json::Number`
+field types counted as payload encoding, and the only spelling that satisfied its escape hatch
+for a `&str` body was `clippy::redundant_slicing` — which the clippy gate rejects. No code
+could satisfy both. The check now flags codec calls only and takes a
+`// json-at-boundary: <reason>` marker at the call site; both it and `cargo test -p xtask` run
+in `.github/workflows/ci.yml`.
 
 **What would unblock it.** The user says which of (c) is theirs, and decides gate H-1:
 whether an agent may add the two workspace-member lines to `Cargo.toml`, or whether the user

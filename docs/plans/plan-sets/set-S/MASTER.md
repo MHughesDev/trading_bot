@@ -379,8 +379,9 @@ un` aside before launching.
 - **Pre-existing failures. Do not chase them, do not "fix" them into your PR:** four
   `storage` live suites (`ledger_append`, `ledger_writer`, `pnl_schema` want a
   `ledger_events` table no migration creates; `registry_seed` expects 8 asset classes
-  where 0006 seeds 6) and `cargo xtask lint-no-json-hotpath`. All were failing before
-  Set S. Record them, leave them.
+  where 0006 seeds 6). Both were failing before Set S. Record them, leave them.
+  `cargo xtask lint-no-json-hotpath` was on this list and came off it on 2026-09-22: the
+  check is fixed, green and wired into CI, so a new violation is now yours.
 - **The working tree is dirty and some of it is the user's.** `BS-007/HANDOFF.MD` §6
   names files an agent must not commit: `Cargo.lock`, `Cargo.toml`,
   `apps/platform/src/main.rs`, `crates/config/Cargo.toml`, `crates/config/src/lib.rs`.

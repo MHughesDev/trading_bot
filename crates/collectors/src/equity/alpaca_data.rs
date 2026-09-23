@@ -241,6 +241,7 @@ impl AlpacaDataCollector {
                 }
             };
 
+            // json-at-boundary: Alpaca WebSocket auth frame, in the venue's wire format
             let auth_msg = serde_json::json!({
                 "action": "auth", "key": api_key, "secret": api_secret
             });
@@ -249,6 +250,7 @@ impl AlpacaDataCollector {
                 policy.wait().await;
                 continue;
             }
+            // json-at-boundary: Alpaca WebSocket subscribe frame, in the venue's wire format
             let sub_msg = serde_json::json!({
                 "action": "subscribe", "trades": [self.symbol]
             });
@@ -267,6 +269,7 @@ impl AlpacaDataCollector {
                     None | Some(Err(_)) => break,
                     Some(Ok(Message::Text(text))) => {
                         let raw = text.as_bytes().to_vec();
+                        // json-at-boundary: an Alpaca WebSocket frame, decoded before it becomes an envelope
                         let messages: Vec<AlpacaMessage<'_>> = match serde_json::from_str(&text) {
                             Ok(v) => v,
                             Err(_) => continue,
@@ -339,6 +342,7 @@ impl Collector for AlpacaDataCollector {
                 }
             };
 
+            // json-at-boundary: Alpaca WebSocket auth frame, in the venue's wire format
             let auth_msg = serde_json::json!({
                 "action": "auth",
                 "key": api_key,
@@ -350,6 +354,7 @@ impl Collector for AlpacaDataCollector {
                 continue;
             }
 
+            // json-at-boundary: Alpaca WebSocket subscribe frame, in the venue's wire format
             let subscribe_msg = serde_json::json!({
                 "action": "subscribe",
                 "trades": [self.symbol],
@@ -381,6 +386,7 @@ impl Collector for AlpacaDataCollector {
                     Some(Ok(Message::Text(text))) => {
                         let raw = text.as_bytes().to_vec();
                         // Borrow directly from `text` — no per-field String allocations.
+                        // json-at-boundary: an Alpaca WebSocket frame, decoded before it becomes an envelope
                         let messages: Vec<AlpacaMessage<'_>> = match serde_json::from_str(&text) {
                             Ok(v) => v,
                             Err(e) => {

@@ -92,8 +92,9 @@ struct Ohlc<'a>(
 /// # Errors
 /// A Kraken `error` array, a missing pair key, or an unreadable field.
 pub fn parse_ohlc(body: &[u8], period_secs: u32) -> Result<Vec<BackfillBar>, FetchError> {
-    let env: OhlcEnvelope =
-        serde_json::from_slice(body).map_err(|e| FetchError::Integrity(format!("kraken ohlc: {e}")))?;
+    // json-at-boundary: Kraken's OHLC REST response, not one of our envelopes
+    let env: OhlcEnvelope = serde_json::from_slice(body)
+        .map_err(|e| FetchError::Integrity(format!("kraken ohlc: {e}")))?;
     if let Some(first) = env.error.first() {
         // Kraken signals its own rate limiting in the body, with HTTP 200, and
         // spells it at least two ways (`EAPI:Rate limit exceeded`,
@@ -112,6 +113,7 @@ pub fn parse_ohlc(body: &[u8], period_secs: u32) -> Result<Vec<BackfillBar>, Fet
     let rows = env
         .result
         .values()
+        // json-at-boundary: the venue's own candle rows, read out of the RawValue held above
         .find_map(|v| serde_json::from_str::<Vec<Ohlc>>(v.get()).ok())
         .ok_or_else(|| FetchError::Integrity("kraken ohlc: no candle array in the result".into()))?;
 

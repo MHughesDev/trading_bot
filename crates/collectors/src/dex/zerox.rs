@@ -157,6 +157,7 @@ impl Collector for ZeroXCollector {
                 }
                 Ok(resp) => {
                     let raw = resp.bytes().await.unwrap_or_default();
+                    // json-at-boundary: 0x's quote REST response, not one of our envelopes
                     match serde_json::from_slice::<ZeroXQuoteResponse>(&raw) {
                         Err(e) => {
                             let norm_err = NormalizeError::Deserialize(e.to_string());

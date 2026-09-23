@@ -196,143 +196,376 @@ fn check_money_f64() {
     }
 }
 
-/// Scan market-lane hot-path crates for `serde_json` imports.
+/// Path segments under `serde_json::` that turn a value into JSON or JSON back
+/// into a value, plus the dynamic document that carries one.
 ///
-/// `serde_json` is only allowed in:
-/// - `crates/api/` (REST API boundary)
-/// - `crates/event-bus/src/quarantine.rs` (quarantine lane, intentional)
-/// - `crates/storage/` (Parquet archive writer)
-/// - `crates/domain/` (serde test helpers, not on hot path)
-/// - `*/tests/*` directories
-/// - `#[cfg(test)]` blocks
+/// Everything else `serde_json` exports — `RawValue`, `Number`, `Error` — describes
+/// the *shape* of bytes somebody else already sent us. Naming one of those in a
+/// struct field or a signature is not payload encoding, and the version of this
+/// check that ran until 2026-09-22 counted all nine `Option<serde_json::Number>`
+/// fields in `derivs/funding.rs` as violations of a rule about how *we* encode events.
+const JSON_CODEC_ITEMS: &[&str] = &[
+    "from_reader",
+    "from_slice",
+    "from_str",
+    "from_value",
+    "json",
+    "to_string",
+    "to_string_pretty",
+    "to_value",
+    "to_vec",
+    "to_vec_pretty",
+    "to_writer",
+    "to_writer_pretty",
+    "Map",
+    "Value",
+];
+
+/// The one way to use `serde_json` in a hot-path crate and keep the check green.
 ///
-/// Any other occurrence in the hot-path crates is a CI failure.
+/// It is a marker rather than a spelling because no pattern over source text can tell
+/// a venue's response body from one of our own event payloads — only the author
+/// knows, so the author writes it down. The reason after the colon is mandatory: an
+/// exemption nobody had to justify is an exemption nobody reviews.
+const BOUNDARY_MARKER: &str = "json-at-boundary:";
+
+/// Crates that carry `EventEnvelope` payloads on the market-data hot path.
+const JSON_HOTPATH_CRATES: &[&str] = &[
+    "crates/collectors",
+    "crates/event-bus",
+    "crates/strategy-runtime",
+    "crates/features",
+];
+
+/// Forbid `serde_json` payload encoding in the market-lane hot-path crates, where
+/// ADR-0003's in-process pipeline carries rkyv-encoded envelopes.
+///
+/// The rule is narrow and worth stating exactly, because the version that ran until
+/// 2026-09-22 enforced a different and unsatisfiable one:
+///
+/// - **Flagged:** a call into `serde_json`'s codec API (`to_vec`, `from_str`,
+///   `json!`, …) or a use of the dynamic `serde_json::Value`/`Map` document.
+/// - **Not flagged:** `use serde_json::value::RawValue;`, `serde_json::Number` in a
+///   field type, `serde_json::Error` in a signature. Those name someone else's bytes.
+/// - **Exempt:** any flagged line carrying `// json-at-boundary: <reason>`, either
+///   trailing on the line itself or alone on the line directly above it.
+///
+/// The old check matched substrings of the *argument spelling*: a `from_str` line
+/// passed if it contained `&body`, `&raw`, `&text` or `&buf`. For a `&str` body the
+/// only spelling that satisfied it was `serde_json::from_str::<T>(&body[..])`, which
+/// is `clippy::redundant_slicing`, which `-D warnings` rejects. The escape hatch and
+/// the clippy gate were mutually unsatisfiable, so this check sat red and unwired
+/// while fifteen legitimate boundary parses accumulated under it.
+///
+/// Skips: `*/tests/*`, `#[cfg(test)]` blocks, and `event-bus`'s quarantine lane,
+/// which is JSON on purpose.
 fn lint_no_json_hotpath() {
-    // Only crates that encode/decode EventEnvelope payloads on the market-data
-    // hot path.  Execution and risk crates talk to REST APIs and legitimately
-    // use serde_json to parse venue responses.
-    let hot_path_crates = [
-        "crates/collectors",
-        "crates/event-bus",
-        "crates/strategy-runtime",
-        "crates/features",
-    ];
+    let (violations, files_scanned) = match scan_json_hotpath(None) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("lint-no-json-hotpath: {e}");
+            std::process::exit(2);
+        }
+    };
 
-    let output = Command::new("git")
-        .args(["ls-files", "--", "*.rs"])
-        .output()
-        .expect("git ls-files failed");
-
-    if !output.status.success() {
-        eprintln!("git ls-files failed");
+    // A scanner that reads nothing reports a clean workspace. Refuse to call that a
+    // pass: every hot-path crate listed above has Rust in it.
+    if files_scanned == 0 {
+        eprintln!(
+            "lint-no-json-hotpath: FAILED — scanned 0 files across {} hot-path crate(s). \
+             The scan is broken, not the workspace.",
+            JSON_HOTPATH_CRATES.len()
+        );
         std::process::exit(2);
     }
 
-    let file_list = String::from_utf8(output.stdout).expect("invalid utf8 from git ls-files");
-    let files: Vec<&str> = file_list.lines().collect();
+    if violations.is_empty() {
+        println!(
+            "lint-no-json-hotpath: OK — {files_scanned} file(s) checked, no unmarked serde_json \
+             codec use in the market-lane hot path"
+        );
+        return;
+    }
+
+    eprintln!(
+        "lint-no-json-hotpath: FAILED — {} violation(s):",
+        violations.len()
+    );
+    for v in &violations {
+        eprintln!("  {v}");
+    }
+    eprintln!();
+    eprintln!(
+        "Hot-path payloads are rkyv (ADR-0003). If a line decodes a venue's REST or\n\
+         WebSocket bytes rather than one of our envelopes, say so at the call site:\n\
+         \n    // {BOUNDARY_MARKER} Kraken OHLC REST response\
+         \n    let bars: Vec<Ohlc> = serde_json::from_str(body)?;\n\
+         \n\
+         The reason is required, and a marker covering nothing is itself a violation."
+    );
+    std::process::exit(1);
+}
+
+/// Walk the hot-path crates' Rust sources and return `(violations, files_scanned)`.
+///
+/// `root` is the repository root. `None` means the current directory, which is what
+/// `cargo xtask` gets; the self-test passes an explicit path so it does not depend on
+/// where the harness happens to be standing.
+fn scan_json_hotpath(root: Option<&std::path::Path>) -> Result<(Vec<String>, usize), String> {
+    let mut git = Command::new("git");
+    if let Some(r) = root {
+        git.arg("-C").arg(r);
+    }
+    let output = git
+        .args(["ls-files", "--full-name", "--", "*.rs"])
+        .output()
+        .map_err(|e| format!("git ls-files failed: {e}"))?;
+
+    if !output.status.success() {
+        return Err("git ls-files failed".into());
+    }
+
+    let file_list = String::from_utf8(output.stdout)
+        .map_err(|_| "invalid utf8 from git ls-files".to_string())?;
 
     let mut violations: Vec<String> = vec![];
+    let mut files_scanned = 0usize;
 
-    for file in &files {
+    for file in file_list.lines() {
         if file.contains("target/") || file.contains("/tests/") {
             continue;
         }
-
-        // Only check hot-path crates.
-        let in_hotpath = hot_path_crates
-            .iter()
-            .any(|prefix| file.starts_with(prefix));
-        if !in_hotpath {
+        if !JSON_HOTPATH_CRATES.iter().any(|p| file.starts_with(p)) {
             continue;
         }
-
-        // Quarantine publisher is intentionally JSON — skip it.
+        // The quarantine publisher is JSON by design: a payload that failed to decode
+        // has no typed form left to re-encode.
         if file.ends_with("quarantine.rs") {
             continue;
         }
 
-        let content = match std::fs::read_to_string(file) {
+        let path = match root {
+            Some(r) => r.join(file),
+            None => std::path::PathBuf::from(file),
+        };
+        let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
             Err(_) => continue,
         };
+        files_scanned += 1;
+        violations.extend(scan_json_hotpath_file(file, &content));
+    }
 
-        // Track #[cfg(test)] blocks by brace depth.
-        let mut in_test_depth: i32 = 0;
-        let mut brace_depth: i32 = 0;
+    Ok((violations, files_scanned))
+}
 
-        for (lineno, line) in content.lines().enumerate() {
-            let trimmed = line.trim();
+/// Classify every line of one file. Pure, so the rules above are testable without a
+/// workspace to scan.
+fn scan_json_hotpath_file(file: &str, content: &str) -> Vec<String> {
+    let mut violations: Vec<String> = vec![];
+    let mut in_test_depth: i32 = 0;
+    let mut brace_depth: i32 = 0;
+    // A marker standing on its own line, waiting for the line it covers.
+    let mut pending: Option<usize> = None;
 
-            if trimmed.contains("#[cfg(test)]") {
-                in_test_depth = brace_depth + 1;
-            }
+    let at = |lineno: usize, line: &str, msg: &str| {
+        format!("{}:{}: {}\n  {}", file, lineno + 1, msg, line.trim())
+    };
+    let stale = |lineno: usize| {
+        format!(
+            "{}:{}: `{BOUNDARY_MARKER}` marker covers no serde_json use — remove it or \
+             move it onto the line it exempts",
+            file,
+            lineno + 1
+        )
+    };
 
-            for ch in line.chars() {
-                match ch {
-                    '{' => brace_depth += 1,
-                    '}' => {
-                        brace_depth -= 1;
-                        if in_test_depth > 0 && brace_depth < in_test_depth {
-                            in_test_depth = 0;
-                        }
-                    }
-                    _ => {}
-                }
-            }
+    for (lineno, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
 
-            if in_test_depth > 0 || trimmed.starts_with("//") {
-                continue;
-            }
-
-            if line.contains("serde_json") {
-                // Allow venue API message construction (subscribe/auth JSON bodies).
-                // These are at the WS protocol boundary, not payload encoding.
-                if line.contains("serde_json::json!")
-                    || line.contains("serde_json::from_str")
-                    || line.contains("serde_json::from_slice::<")
-                {
-                    // Parsing raw bytes from external APIs is allowed.
-                    let is_raw_parse = line.contains("&raw")
-                        || line.contains("&text")
-                        || line.contains("&body")
-                        || line.contains("&buf");
-                    if is_raw_parse
-                        || line.contains("serde_json::json!")
-                        || line.contains("AlpacaMessage")
-                        || line.contains("KrakenMessage")
-                        || line.contains("ChartResponse")
-                        || line.contains("CandlesResponse")
-                        || line.contains("ZeroXQuoteResponse")
-                        || line.contains("MarketResponse")
-                        || line.contains("QuotesResponse")
-                        || line.contains("RedditListing")
-                    {
-                        continue;
+        if trimmed.contains("#[cfg(test)]") {
+            in_test_depth = brace_depth + 1;
+        }
+        for ch in line.chars() {
+            match ch {
+                '{' => brace_depth += 1,
+                '}' => {
+                    brace_depth -= 1;
+                    if in_test_depth > 0 && brace_depth < in_test_depth {
+                        in_test_depth = 0;
                     }
                 }
+                _ => {}
+            }
+        }
 
-                violations.push(format!(
-                    "{}:{}: serde_json in hot-path crate — use rkyv\n  {}",
-                    file,
-                    lineno + 1,
-                    line.trim()
+        if in_test_depth > 0 {
+            pending = None;
+            continue;
+        }
+
+        let comment_only =
+            trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with('*');
+        let code = if comment_only {
+            ""
+        } else {
+            code_before_comment(line)
+        };
+        let marker = boundary_reason(line);
+
+        // An import hides the `serde_json::` prefix from every call site below it, so a
+        // marker would have nothing left to attach to. Codec items stay qualified.
+        if let Some(item) = imported_codec_item(code) {
+            violations.push(at(
+                lineno,
+                line,
+                &format!(
+                    "`use serde_json::{item}` hides the call sites — keep the `serde_json::` \
+                     path so each one can carry its own `{BOUNDARY_MARKER}` marker"
+                ),
+            ));
+            pending = None;
+            continue;
+        }
+
+        match (json_codec_item(code), marker) {
+            (Some(_), Some(reason)) => {
+                if reason.is_empty() {
+                    violations.push(at(
+                        lineno,
+                        line,
+                        &format!("`{BOUNDARY_MARKER}` needs a reason after the colon"),
+                    ));
+                }
+                pending = None;
+            }
+            (Some(_), None) if pending.is_some() => {
+                pending = None;
+            }
+            (Some(item), None) => {
+                violations.push(at(
+                    lineno,
+                    line,
+                    &format!(
+                        "`serde_json::{item}` on the market-data hot path — payloads are rkyv; \
+                         mark a venue-boundary decode with `{BOUNDARY_MARKER} <reason>`"
+                    ),
                 ));
             }
+            (None, marker) => {
+                if let Some(orphan) = pending.take() {
+                    violations.push(stale(orphan));
+                }
+                match marker {
+                    Some("") => violations.push(at(
+                        lineno,
+                        line,
+                        &format!("`{BOUNDARY_MARKER}` needs a reason after the colon"),
+                    )),
+                    Some(_) if comment_only => pending = Some(lineno),
+                    Some(_) => violations.push(stale(lineno)),
+                    None => {}
+                }
+            }
         }
     }
 
-    if violations.is_empty() {
-        println!("lint-no-json-hotpath: OK — no serde_json in market-lane hot paths");
-    } else {
-        eprintln!(
-            "lint-no-json-hotpath: FAILED — {} violation(s):",
-            violations.len()
-        );
-        for v in &violations {
-            eprintln!("  {v}");
-        }
-        std::process::exit(1);
+    if let Some(orphan) = pending {
+        violations.push(stale(orphan));
     }
+
+    violations
+}
+
+/// The part of `line` before its `//` comment, with `//` inside a string literal left
+/// alone — a URL in a subscribe message must not truncate the code being classified.
+fn code_before_comment(line: &str) -> &str {
+    let bytes = line.as_bytes();
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if c == b'\\' {
+                escaped = true;
+            } else if c == b'"' {
+                in_string = false;
+            }
+        } else if c == b'"' {
+            in_string = true;
+        } else if c == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            return &line[..i];
+        }
+        i += 1;
+    }
+    line
+}
+
+/// The reason text of a `json-at-boundary:` marker, when the line carries one inside a
+/// comment. `Some("")` is a marker with no reason, a violation in its own right.
+fn boundary_reason(line: &str) -> Option<&str> {
+    let idx = line.find(BOUNDARY_MARKER)?;
+    // Inside a comment, not inside a string literal that happens to quote the marker.
+    if !line[..idx].contains("//") {
+        return None;
+    }
+    Some(line[idx + BOUNDARY_MARKER.len()..].trim())
+}
+
+/// The codec item a `use serde_json…` line brings into scope under a bare name, if any.
+///
+/// `use serde_json::value::RawValue;` is not one: `RawValue` borrows a venue's own
+/// bytes without decoding them, which is the opposite of the thing being forbidden.
+fn imported_codec_item(code: &str) -> Option<&'static str> {
+    let trimmed = code.trim_start();
+    if !(trimmed.starts_with("use ") || trimmed.starts_with("pub use ")) {
+        return None;
+    }
+    if !trimmed.contains("serde_json") {
+        return None;
+    }
+    identifiers(trimmed).find_map(|ident| JSON_CODEC_ITEMS.iter().copied().find(|i| *i == ident))
+}
+
+/// The codec item named on a `serde_json::…` path in `code`, if any.
+///
+/// Reads whole `::`-separated segments rather than substrings, so `serde_json::value`
+/// does not read as `serde_json::Value` and `serde_json::Number` does not match at all.
+fn json_codec_item(code: &str) -> Option<&'static str> {
+    const PREFIX: &str = "serde_json::";
+    let mut from = 0;
+    while let Some(rel) = code[from..].find(PREFIX) {
+        let mut pos = from + rel + PREFIX.len();
+        loop {
+            let rest = &code[pos..];
+            let len = rest
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(rest.len());
+            if len == 0 {
+                break;
+            }
+            let segment = &rest[..len];
+            if let Some(hit) = JSON_CODEC_ITEMS.iter().copied().find(|i| *i == segment) {
+                return Some(hit);
+            }
+            if rest[len..].starts_with("::") {
+                pos += len + 2;
+            } else {
+                break;
+            }
+        }
+        from += rel + PREFIX.len();
+    }
+    None
+}
+
+/// Every Rust identifier in `code`, in order.
+fn identifiers(code: &str) -> impl Iterator<Item = &str> {
+    code.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|s| !s.is_empty())
 }
 
 /// Verify that nothing writes the retired `market_bars` table (Set L, L-0.7).
@@ -777,6 +1010,209 @@ fn line_writes_v2(line: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    // ---- lint-no-json-hotpath -------------------------------------------------
+    //
+    // The rules below are the ones the previous version of this check got wrong.
+    // Each test names the line it used to mis-read.
+
+    use super::{boundary_reason, code_before_comment, imported_codec_item, json_codec_item};
+
+    /// What the check is actually for: JSON where an rkyv envelope belongs.
+    #[test]
+    fn codec_calls_are_hits() {
+        assert_eq!(
+            json_codec_item("serde_json::to_vec(&envelope)"),
+            Some("to_vec")
+        );
+        assert_eq!(
+            json_codec_item("let v: T = serde_json::from_slice(body)?;"),
+            Some("from_slice")
+        );
+        assert_eq!(
+            json_codec_item("serde_json::from_str(&text)"),
+            Some("from_str")
+        );
+        assert_eq!(
+            json_codec_item("let m = serde_json::json!({});"),
+            Some("json")
+        );
+        assert_eq!(
+            json_codec_item("let v: serde_json::Value = x;"),
+            Some("Value")
+        );
+    }
+
+    /// The hole this rewrite closes. `serde_json::Number` in a struct field and
+    /// `serde_json::value::RawValue` in a signature are declarations about *someone
+    /// else's* bytes — they encode nothing. The old substring check counted eleven of
+    /// them as violations of a rule about how we encode our own events, which is most
+    /// of why it sat red and unwired.
+    #[test]
+    fn type_mentions_are_not_hits() {
+        assert_eq!(
+            json_codec_item("    funding_rate: Option<serde_json::Number>,"),
+            None
+        );
+        assert_eq!(
+            json_codec_item("pub fn raw_u64(v: &serde_json::value::RawValue) -> Result<u64, E> {"),
+            None
+        );
+        assert_eq!(
+            json_codec_item("fn f() -> Result<T, serde_json::Error> {"),
+            None
+        );
+    }
+
+    /// `value` is not `Value`. A substring match on the dynamic document would swallow
+    /// every `RawValue` path in `backfill/`, which is the zero-copy reader that exists
+    /// precisely so venue numbers never round-trip through `f64`.
+    #[test]
+    fn segments_are_whole_not_substrings() {
+        assert_eq!(json_codec_item("serde_json::value::RawValue"), None);
+        assert_eq!(json_codec_item("serde_json::Value"), Some("Value"));
+        assert_eq!(
+            json_codec_item("serde_json::from_value(v)"),
+            Some("from_value")
+        );
+    }
+
+    /// The other half of the old failure: whether a line passed depended on how its
+    /// argument happened to be spelled. `&body[..]` passed, `body` did not — and
+    /// `&body[..]` is `clippy::redundant_slicing`, which `-D warnings` rejects. Both
+    /// spellings are now the same hit, and the marker is what decides.
+    #[test]
+    fn argument_spelling_does_not_decide() {
+        let plain = "    let p = serde_json::from_str::<T>(body)";
+        let sliced = "    let p = serde_json::from_str::<T>(&body[..])";
+        assert_eq!(json_codec_item(plain), json_codec_item(sliced));
+        assert_eq!(json_codec_item(plain), Some("from_str"));
+    }
+
+    #[test]
+    fn a_marker_needs_a_comment_and_a_reason() {
+        assert_eq!(
+            boundary_reason("    // json-at-boundary: Kraken OHLC"),
+            Some("Kraken OHLC")
+        );
+        assert_eq!(
+            boundary_reason("    let x = 1; // json-at-boundary: why"),
+            Some("why")
+        );
+        assert_eq!(boundary_reason("    // json-at-boundary:"), Some(""));
+        assert_eq!(
+            boundary_reason("    let s = \"json-at-boundary: not a comment\";"),
+            None
+        );
+        assert_eq!(boundary_reason("    let x = 1;"), None);
+    }
+
+    /// A `//` inside a URL must not truncate the code being classified, or a subscribe
+    /// frame would hide its own `json!` behind `wss://`.
+    #[test]
+    fn a_url_is_not_a_comment() {
+        let line = "    let url = \"wss://ws.kraken.com\"; serde_json::to_vec(&x)";
+        assert_eq!(json_codec_item(code_before_comment(line)), Some("to_vec"));
+        assert_eq!(
+            code_before_comment("    let x = 1; // serde_json::to_vec(&x)").trim(),
+            "let x = 1;"
+        );
+    }
+
+    #[test]
+    fn importing_a_codec_item_is_a_hit_but_importing_rawvalue_is_not() {
+        assert_eq!(
+            imported_codec_item("use serde_json::value::RawValue;"),
+            None
+        );
+        assert_eq!(imported_codec_item("use serde_json::Number;"), None);
+        assert_eq!(
+            imported_codec_item("use serde_json::{json, Value};"),
+            Some("json")
+        );
+        assert_eq!(imported_codec_item("use serde_json::Value;"), Some("Value"));
+        // Not an import at all.
+        assert_eq!(
+            imported_codec_item("let v = serde_json::Value::Null;"),
+            None
+        );
+    }
+
+    #[test]
+    fn an_unmarked_codec_call_is_a_violation() {
+        let v = super::scan_json_hotpath_file("f.rs", "fn f() {\n    serde_json::to_vec(&e);\n}\n");
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(v[0].starts_with("f.rs:2:"), "{v:?}");
+    }
+
+    #[test]
+    fn a_marker_exempts_the_line_above_it_and_its_own_line() {
+        let above = "fn f() {\n    // json-at-boundary: venue REST body\n    serde_json::from_str(body);\n}\n";
+        assert!(super::scan_json_hotpath_file("f.rs", above).is_empty());
+
+        let trailing =
+            "fn f() {\n    serde_json::from_str(body); // json-at-boundary: venue REST body\n}\n";
+        assert!(super::scan_json_hotpath_file("f.rs", trailing).is_empty());
+    }
+
+    /// An exemption nobody had to justify is an exemption nobody reviews.
+    #[test]
+    fn a_marker_without_a_reason_is_a_violation() {
+        let src = "fn f() {\n    // json-at-boundary:\n    serde_json::from_str(body);\n}\n";
+        let v = super::scan_json_hotpath_file("f.rs", src);
+        // Two: the marker is named as unusable, and the call it failed to cover is
+        // still unmarked. Reporting only the first would leave the author thinking the
+        // line below it had been accepted.
+        assert_eq!(v.len(), 2, "{v:?}");
+        assert!(v[0].contains("needs a reason"), "{v:?}");
+        assert!(v[1].contains("payloads are rkyv"), "{v:?}");
+    }
+
+    /// The rot the old allowlist died of, made loud. When the call a marker covered is
+    /// deleted or moved, the marker is reported instead of silently widening.
+    #[test]
+    fn a_marker_covering_nothing_is_a_violation() {
+        let orphan = "fn f() {\n    // json-at-boundary: venue REST body\n    let x = 1;\n}\n";
+        let v = super::scan_json_hotpath_file("f.rs", orphan);
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(v[0].contains("covers no serde_json use"), "{v:?}");
+
+        let at_eof = "fn f() {}\n// json-at-boundary: venue REST body\n";
+        assert_eq!(super::scan_json_hotpath_file("f.rs", at_eof).len(), 1);
+    }
+
+    /// Test code round-trips its own types through JSON on purpose; the rule is about
+    /// what ships.
+    #[test]
+    fn cfg_test_blocks_are_exempt() {
+        let src = "#[cfg(test)]\nmod tests {\n    fn f() {\n        serde_json::to_string(&x);\n    }\n}\n";
+        assert!(super::scan_json_hotpath_file("f.rs", src).is_empty());
+    }
+
+    /// The scan half of the guard, run against the real workspace.
+    ///
+    /// `files_scanned` is what stops this passing vacuously: if the path handling broke
+    /// and the scanner read nothing at all, `violations` would be empty and the check
+    /// would report a clean hot path — the failure mode a scanner-based guard actually
+    /// dies of. The floor is deliberately far below the current 76.
+    #[test]
+    fn the_hot_path_carries_no_unmarked_json() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask/ has a parent")
+            .to_path_buf();
+        let (violations, files_scanned) =
+            super::scan_json_hotpath(Some(&root)).expect("scan the hot-path crates");
+        assert!(
+            violations.is_empty(),
+            "unmarked serde_json on the market-data hot path:\n{}",
+            violations.join("\n")
+        );
+        assert!(
+            files_scanned >= 40,
+            "scanned only {files_scanned} hot-path files — the scan is broken, not the workspace"
+        );
+    }
+
     use super::line_writes_v2;
 
     #[test]

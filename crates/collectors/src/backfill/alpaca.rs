@@ -105,8 +105,9 @@ pub struct ParsedBars {
 /// # Errors
 /// Malformed JSON, an error `message` from the venue, or an unreadable field.
 pub fn parse_bars(body: &[u8], period_secs: u32) -> Result<ParsedBars, FetchError> {
-    let env: BarsEnvelope =
-        serde_json::from_slice(body).map_err(|e| FetchError::Integrity(format!("alpaca bars: {e}")))?;
+    // json-at-boundary: Alpaca's bars REST response, not one of our envelopes
+    let env: BarsEnvelope = serde_json::from_slice(body)
+        .map_err(|e| FetchError::Integrity(format!("alpaca bars: {e}")))?;
     if let Some(m) = env.message {
         // Alpaca answers plan violations with a message rather than a status a
         // client can branch on.

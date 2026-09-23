@@ -195,6 +195,7 @@ impl Collector for TradierOptionsCollector {
                 }
                 Ok(resp) => {
                     let raw = resp.bytes().await.unwrap_or_default();
+                    // json-at-boundary: Tradier's quotes REST response, not one of our envelopes
                     if let Ok(qr) = serde_json::from_slice::<QuotesResponse>(&raw) {
                         if let Some(q) = qr.quotes.and_then(|qi| qi.quote) {
                             seq += 1;

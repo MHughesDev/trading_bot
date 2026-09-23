@@ -139,6 +139,7 @@ impl Collector for OandaCollector {
                 }
                 Ok(resp) => {
                     let raw = resp.bytes().await.unwrap_or_default();
+                    // json-at-boundary: OANDA's candles REST response, not one of our envelopes
                     match serde_json::from_slice::<CandlesResponse>(&raw) {
                         Err(e) => {
                             let norm_err = NormalizeError::Deserialize(e.to_string());

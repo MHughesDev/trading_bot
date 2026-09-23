@@ -84,8 +84,9 @@ struct Candle<'a>(
 /// range — all [`FetchError::Integrity`], because a backfill that quietly drops
 /// the rows it could not read produces a gap nobody can attribute.
 pub fn parse_candles(body: &[u8], period_secs: u32) -> Result<Vec<BackfillBar>, FetchError> {
-    let candles: Vec<Candle> =
-        serde_json::from_slice(body).map_err(|e| FetchError::Integrity(format!("coinbase candles: {e}")))?;
+    // json-at-boundary: Coinbase's candles REST response, not one of our envelopes
+    let candles: Vec<Candle> = serde_json::from_slice(body)
+        .map_err(|e| FetchError::Integrity(format!("coinbase candles: {e}")))?;
     let mut out = Vec::with_capacity(candles.len());
     for c in candles {
         let open_s: i64 = raw_number(c.0)?

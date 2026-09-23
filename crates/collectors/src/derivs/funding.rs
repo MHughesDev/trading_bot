@@ -274,6 +274,7 @@ pub fn next_settlement(t: DateTime<Utc>) -> DateTime<Utc> {
 /// # Errors
 /// A non-success envelope, or malformed JSON.
 pub fn parse_tickers(body: &str, received_at: DateTime<Utc>) -> Result<TickerSnapshot, FundingError> {
+    // json-at-boundary: the venue's /tickers REST response, not one of our envelopes
     let env: TickersEnvelope = serde_json::from_str(body).map_err(|e| FundingError::Http(e.to_string()))?;
     if env.result.as_deref() != Some("success") {
         return Err(FundingError::VenueError(
@@ -385,6 +386,7 @@ pub fn parse_tickers(body: &str, received_at: DateTime<Utc>) -> Result<TickerSna
 /// # Errors
 /// A non-success envelope, malformed JSON, or an unparseable rate.
 pub fn parse_history(body: &str, instrument: &str, received_at: DateTime<Utc>) -> Result<Vec<FundingObservation>, FundingError> {
+    // json-at-boundary: the venue's /historical-funding-rates REST response
     let env: HistoryEnvelope = serde_json::from_str(body).map_err(|e| FundingError::Http(e.to_string()))?;
     if env.result.as_deref() != Some("success") {
         return Err(FundingError::VenueError(
