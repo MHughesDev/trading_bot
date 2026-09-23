@@ -626,6 +626,32 @@ until the field lands, because refusing is still better than converting.
 This decision is coupled to ADR-D-19: the validator must accept the new version, and it
 currently refuses even 1.3.
 
+**Landed 2026-09-22.** `domain::strategy_def::exits::ExitRule::{StopLoss,TakeProfit,
+TrailingStop}` now carry `distance: ExitDistance { magnitude, unit }`, `unit` defaulting
+to `FractionOfEntry` and omitted from the wire form at that default — a document from
+1.0/1.1/1.2 round-trips byte for byte, proven against three real rows pulled from the
+live `strategy_definitions` table. `strategy-validator`'s version gate is a bounded range
+(`1.0 ≤ v ≤ MAX_SUPPORTED = 1.4`) rather than a longer whitelist, closing the coupling to
+ADR-D-19 above. `crates/strategy-runtime` reads the new shape through
+`ExitDistance::as_fraction`, and a rule whose unit has no volatility reading available
+**stops** evaluation rather than being read as "didn't fire" — an unpriced stop is not a
+stop that declined to trigger.
+
+**The grammar's refusal is now narrower, and its own error text said the wrong thing
+until this note.** `unit_not_representable`'s fix used to read "an exit rule the schema
+does not have yet" — false as soon as the field landed. The compiler still refuses `atr`/
+`sigma` at parse time, but the reason is different and smaller: `Unit::Atr` and
+`Unit::Sigma` parse to a bare token with **no period attached**
+(`parse.rs`: `Tok::Ident(w) if w == "atr" => (Unit::Atr, …)`), and
+`DistanceUnit::Atr { period: u32 }` needs one from somewhere. Inventing a default period
+would be exactly the guess this compiler refuses everywhere else, so the refusal stands
+— corrected to name the grammar gap it actually is, not the schema gap it no longer is.
+
+**What is still open, and it is a grammar decision, not a schema one:** SLv2 needs syntax
+for the period — `1.5 atr_14`, `1.5 atr(14)`, or a document-level default — before this
+compiler can emit a scaled distance from text. Until then, a scaled stop can only be
+authored by writing `distance` directly into a stored v1.4 document.
+
 ---
 
 ## Q-S5-02 — `crossed_above` has no compilation target, and the sentence justifying it describes something that is not there
