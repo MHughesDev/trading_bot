@@ -178,7 +178,8 @@ fn the_preview_counts_the_entries_the_simulator_takes() {
     assert_eq!(
         previewed.len(),
         preview.entries,
-        "this comparison walks `sample_events`, which is capped; the fixture now takes {} entries          and only {} are reported, so shorten the fixture or compare another way",
+        "this comparison walks `sample_events`, which is capped; the fixture now takes {} entries \
+         and only {} are reported, so shorten the fixture or compare another way",
         preview.entries,
         previewed.len()
     );

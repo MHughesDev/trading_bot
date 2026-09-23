@@ -274,7 +274,8 @@ impl SimRunExecutor {
             return Err(ExecFailure::new(
                 TerminalReason::DataError,
                 anyhow!(
-                    "no {} bars stored for {instrument_id} in [{}, {}) — initialise the asset                      or run a backtest with auto-collect first (Runs never collect)",
+                    "no {} bars stored for {instrument_id} in [{}, {}) — initialise the asset \
+                     or run a backtest with auto-collect first (Runs never collect)",
                     timeframe.key(),
                     data_from.format("%Y-%m-%d"),
                     end.format("%Y-%m-%d"),

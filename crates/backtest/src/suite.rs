@@ -1786,30 +1786,29 @@ impl SuiteManager {
                     let engines: Vec<&str> = std::iter::once(observed_res.produced_by.as_str())
                         .chain(rungs.iter().map(|(_, _, _, v)| v.as_str()))
                         .collect();
-                    match capacity::one_engine(engines) {
-                        Err(why) => tracing::warn!(
+                    if let Err(why) = capacity::one_engine(engines) {
+                        tracing::warn!(
                             experiment = %id,
                             reason = %why,
                             "capacity ladder discarded"
-                        ),
-                        Ok(_) => {
-                            let points: Vec<(f64, Uuid, Vec<f64>)> = rungs
-                                .into_iter()
-                                .map(|(aum, trial, returns, _)| (aum, trial, returns))
-                                .collect();
-                            match capacity::Ladder::from_runs(
-                                &exposure, base_aum, true, years, &points,
-                            ) {
-                                Ok(ladder) => {
-                                    evidence.capacity_base = Some(ladder.base);
-                                    evidence.capacity_curve = ladder.points;
-                                }
-                                Err(why) => tracing::warn!(
-                                    experiment = %id,
-                                    reason = %why,
-                                    "capacity ladder not measurable"
-                                ),
+                        );
+                    } else {
+                        let points: Vec<(f64, Uuid, Vec<f64>)> = rungs
+                            .into_iter()
+                            .map(|(aum, trial, returns, _)| (aum, trial, returns))
+                            .collect();
+                        match capacity::Ladder::from_runs(
+                            &exposure, base_aum, true, years, &points,
+                        ) {
+                            Ok(ladder) => {
+                                evidence.capacity_base = Some(ladder.base);
+                                evidence.capacity_curve = ladder.points;
                             }
+                            Err(why) => tracing::warn!(
+                                experiment = %id,
+                                reason = %why,
+                                "capacity ladder not measurable"
+                            ),
                         }
                     }
                 }
@@ -2007,7 +2006,6 @@ impl SuiteManager {
 
     // ── vault ──────────────────────────────────────────────────────────────────
 
-    #[must_use]
     /// What `audit.deflated_sharpe` reports (Set S task S-3.6).
     ///
     /// This **reads the gate's recorded number**; it does not compute a second
