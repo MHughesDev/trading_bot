@@ -143,9 +143,16 @@ version:
 
 **Two more things the live system said that the plan did not expect:**
 
-- **All eleven completed backtest jobs have null metrics.** `stats_returns` is
-  `{Sharpe Ratio: null, Profit Factor: null, Average (Return): null, …}` on
-  every one. A fragility index computed from these would be dividing nulls.
+- **~~All eleven completed backtest jobs have null metrics.~~ Corrected
+  2026-09-23: this was measured from an incompletely-checked snapshot and is
+  false.** Re-queried live: **3 of the 11** completed `backtest_jobs` rows carry
+  real, non-null `Sharpe Ratio (252 days)` values (`7edd16d0…` = 9.79,
+  `09e044e0…` = -0.62, `76d8150a…` = -7.62); the other 8 are null. A fragility
+  index over the null 8 would still be dividing nulls, which is why the
+  conclusion drawn from this survived — but the sweeping form of the claim did
+  not, and this is the **measured-from-residue** pattern this programme has
+  already been caught by twice. A count asserted over "every one" needs every
+  one actually counted.
 - **`by_regime` is built, tested, and always empty.**
   `backtest::stats::diagnostics::by_regime` works and has a passing test; its
   only non-test caller, `crates/api/src/research/mod.rs:316`, passes `&[]`.
@@ -196,8 +203,10 @@ two answers to the same arithmetic. The statistics are written out against numpy
 A template is a Python file under `apps/skill-runner/templates/<ns>/<name>.py` whose module
 docstring carries a fenced JSON `ToolSpec`. `build.rs` reads the directory into `specs()`.
 The harness materialises the series the template asks for into a parquet file and passes
-`payload.data_path` — a skill has **no network and no database** (`taxonomy.rs:285` asserts
-it) so the data must arrive as a file. Limits default to the runner's 30 s / 512 MB / 4 MB;
+`payload.data_path` — a skill has **no network and no database**
+(`crates/skills/src/template.rs:374` refuses any template declaring otherwise; the
+citation here read `taxonomy.rs:285` until 2026-09-23, which moved when S-1.3 made
+`taxonomy.rs` a derived table) so the data must arrive as a file. Limits default to the runner's 30 s / 512 MB / 4 MB;
 a template may declare up to 120 s (analysis) or 300 s (audit/attribution, where block
 bootstraps are slow).
 
@@ -594,12 +603,24 @@ timestamp; the static scan flags a full-dataset normalisation.
 
 ### S-3.12 Reshuffle, bootstrap, cost shock — M
 `PARTIAL` — **downgraded from `DONE` on 2026-09-21.** All three tools are built and
-35 tests pass over fixtures. **None of them can execute.** They read
-`/api/evidence/trades`, whose query names a table that migration `0026` renamed
-away, and whose document has no trade array even when pointed at the right one
-— see the note at the head of this file. Built, tested, and unreachable. The
-marker said `DONE` because the tools were finished; nobody had asked whether the
-route under them answered.
+35 tests pass over fixtures. **None of them can execute.** The marker said `DONE`
+because the tools were finished; nobody had asked whether the route under them
+answered.
+
+**Re-audited 2026-09-23: still correctly `PARTIAL`, but the reason above is now
+stale and the real blocker is narrower.** The route half was fixed two days
+after this note was written: commit `f8c097f` (2026-09-21, "five outcomes where
+there were two") rewrote `crates/api/src/routes/evidence.rs` to read
+`backtest_jobs` rather than the table `0026` renamed away, with five distinct
+non-swallowing outcomes including an honest `trades_not_recorded` 422. So "whose
+query names a table that migration 0026 renamed away" describes a version that
+no longer exists. What remains is the deeper half, and it is not a route bug at
+all: the simulator's own `BacktestResult` (`crates/backtest/src/result.rs`)
+carries `total_orders`, `stats_pnls`, `stats_returns` and `summary` and **has no
+`trades` field at any point**, so there is nothing for a fixed route to serve.
+Confirmed live: all 11 completed `backtest_jobs` rows report
+`has_trades = false`. These tools stay unusable against real data until the
+simulator records per-trade rows — a producer gap, not a query gap.
 
 `trade_reshuffle_bootstrap` runs **two distinct** modes: reshuffle (path risk of a fixed
 outcome set) and bootstrap (estimation uncertainty of the endpoint). Conflating them is a
@@ -727,10 +748,21 @@ and `funding_rates` / `open_interest` / `option_chain_snapshots` exist at 0
 rows. So `probe_pit_provenance` is buildable today against real bars — it needs
 a route over `BarStore::as_of` that returns the as-of/latest **diff** rather
 than only bars. `get_funding_history` needs a `read_funding` in
-`storage::clickhouse::forward` (which exposes writers and no reader at all), a
-route, and rows in a table that has none — collection is wired
-(`KrakenFuturesClient::funding_history` → `write_funding`) and has never run
-here.
+`storage::clickhouse::forward`, a route, and rows in a table that has none —
+collection is wired (`KrakenFuturesClient::funding_history` → `write_funding`)
+and has never run here.
+
+**Re-checked 2026-09-23: the "exposes writers and no reader at all" half is now
+stale, and what replaced it is this file's own named defect shape.** Commit
+`831b925` (2026-09-22) added `read_funding`, `read_open_interest` and
+`funding_at` to `storage::clickhouse::forward` — one day after the claim above
+was written, and incidentally: that commit's actual subject is agent
+pause/resume and `Spend` typing, so these readers arrived as passengers. They
+have **zero callers anywhere outside their own file** — no MCP tool, no route,
+no execution-side consumer. So the reader exists and the task is no closer to
+done: `get_funding_history` still needs the route and the rows. This marker stays
+where it is, correctly, and the missing piece is one item shorter than the note
+said.
 
 `audit_survivorship` **is** genuinely blocked: **no membership calendar exists
 anywhere** in the workspace, `instruments` has four rows all `active = true`
