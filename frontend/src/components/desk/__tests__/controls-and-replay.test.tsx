@@ -22,6 +22,8 @@ function harness(overrides: Partial<DeskControls> = {}) {
     onReplay: vi.fn(),
     onFocusComposer: vi.fn(),
     onShortcuts: vi.fn(),
+    onPause: vi.fn(),
+    onResume: vi.fn(),
   }
   const props: DeskControls = {
     // Mid-call. Nothing below may be disabled by this.
@@ -30,6 +32,9 @@ function harness(overrides: Partial<DeskControls> = {}) {
     hasPendingApproval: true,
     approvalNeedsReason: false,
     detailsOpen: false,
+    // A live, measured pause — this file's subject is the keyboard map working
+    // mid-call, and `unobserved` would leave `space` bound to nothing.
+    pause: { kind: 'running' },
     ...spies,
     ...overrides,
   }

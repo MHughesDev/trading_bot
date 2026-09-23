@@ -16,28 +16,41 @@ import { ConfirmDialog } from '@/components/primitives/Modal'
 import { Tooltip } from '@/components/primitives/Overlay'
 
 /**
- * **Pause, Resume and Escalate were deleted from this row, not repaired.**
+ * What the **server** says about this run's pause. Never a local guess.
  *
- * They were three buttons in front of three routes this platform does not
- * mount. `POST /api/agent/runs/{id}/pause`, `…/resume` and `…/escalate` all
- * answer **404** where every mounted route answers 401, and `deskApi` sent all
- * three through `optional()`, which turns a 404 into `null` — so the click
- * produced no request that could be seen to fail, no toast, and no console
- * line.
+ * The history matters, because this type is the shape of the fix. Pause, Resume
+ * and Escalate were three buttons in front of three routes this platform did not
+ * mount; `deskApi` sent all three through `optional()`, which turns a 404 into
+ * `null`, so a click produced no request that could be seen to fail. Pause was
+ * the worst, because it did not merely do nothing: its caller set a local
+ * `paused` flag *before* the request, so the header read **paused** over a run
+ * that was still spending trials. All three were deleted.
  *
- * Pause was the worst of the three, because it did not merely do nothing. Its
- * caller set a local `paused` flag first, so the conversation header changed to
- * **paused** over a run that was still spending trials. That is not a dead
- * control, it is a false instrument reading, and `space` was bound to it.
- * "Pause instead" was also offered as the gentler alternative inside the Stop
- * dialog — the one place a person is talked out of the control that works, into
- * the one that does not.
+ * `…/pause` and `…/resume` landed with ADR-D-27, and they landed with the cure
+ * for that specific defect built in — `paused` and `paused_until` are on every
+ * **run read**, not only on the pause reply, so a client that reloads can ask.
+ * This type refuses to represent the flag that caused the bug: there is no
+ * variant for "I clicked pause, so we are paused". `unobserved` is a third
+ * state, not a synonym for `false` — `paused: null` means this replica is not
+ * driving the run and did not measure it, and a pause posted into that answers
+ * 409, so no control is drawn for it.
  *
- * **Stop stays**: `POST /api/agent/conversations/{id}/cancel` is mounted (405
- * to a GET, 401 to an unauthenticated POST), so `esc` and the dialog reach
- * something real.
+ * **Escalate is still deleted**: `…/runs/{id}/escalate` is still unmounted.
+ */
+export type PauseState =
+  | { kind: 'unobserved' }
+  | { kind: 'running' }
+  | { kind: 'paused'; until: string | null }
+
+/**
+ * **Stop stays what it was**: `POST /api/agent/conversations/{id}/cancel` is
+ * mounted, so `esc` and the dialog reach something real. Its dialog no longer
+ * claims there is no pause on this platform — there is one now — but it still
+ * does not offer one as the gentler alternative, because routing a person from
+ * the control that ends a run to one that delays it by fifteen minutes is how
+ * the original defect got its reach.
  *
- * Asserted by `a_control_the_platform_cannot_serve_is_not_drawn`.
+ * Asserted by `a-control-nobody-wired-is-not-a-control.test.tsx`.
  */
 export interface DeskControls {
   /** True while the agent is working — never used to disable anything. */
@@ -54,7 +67,14 @@ export interface DeskControls {
    */
   approvalNeedsReason: boolean
   detailsOpen: boolean
+  /**
+   * The run's pause as the server reports it. `unobserved` draws no pause
+   * control, because a pause this replica cannot hold is a 409 and not a button.
+   */
+  pause: PauseState
   onStop: () => void
+  onPause: () => void
+  onResume: () => void
   onSteer: () => void
   onApprove: () => void
   onDeny: () => void
@@ -91,6 +111,20 @@ export function useDeskKeymap(c: DeskControls) {
       }
       if (isTyping(e.target) || e.metaKey || e.ctrlKey || e.altKey) return
       switch (e.key) {
+        case ' ':
+          // `space` is bound only where the pause is *measured*. Under
+          // `unobserved` it does nothing at all rather than firing a request
+          // this replica cannot serve — the keyboard gets the same three-state
+          // treatment as the buttons, because a shortcut that silently 409s is
+          // the version of this control that was deleted.
+          if (k.pause.kind === 'running') {
+            e.preventDefault()
+            k.onPause()
+          } else if (k.pause.kind === 'paused') {
+            e.preventDefault()
+            k.onResume()
+          }
+          break
         case 'a':
           // Not `hasPendingApproval` alone: an approval that needs a reason
           // cannot be given one from the keyboard, and sending it without would
@@ -125,6 +159,29 @@ export function useDeskKeymap(c: DeskControls) {
   }, [])
 }
 
+/**
+ * The deadline as a clock time, or a stated absence.
+ *
+ * A pause whose `until` did not arrive is still a pause — the run is held — so
+ * the label says it is held and declines to invent a time. Printing "stops at
+ * —" or falling back to `now` would both be a deadline the reader is wrong
+ * about, which is the failure `pause_on_expiry` exists on the wire to prevent.
+ */
+function pausedLabel(until: string | null): string {
+  if (!until) return 'held · deadline not reported'
+  const t = new Date(until)
+  if (Number.isNaN(t.getTime())) return 'held · deadline not reported'
+  return `held until ${t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+}
+
+function pausedTooltip(until: string | null): string {
+  const tail = 'On expiry the run stops rather than resuming.'
+  if (!until) return `This run is held at a step boundary. ${tail}`
+  const t = new Date(until)
+  if (Number.isNaN(t.getTime())) return `This run is held at a step boundary. ${tail}`
+  return `Held until ${t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. ${tail}`
+}
+
 export function ControlsRow(props: DeskControls) {
   const [confirmStop, setConfirmStop] = useState(false)
   const needsStream = props.disconnected ? 'the event stream is down; this cannot land' : undefined
@@ -134,6 +191,29 @@ export function ControlsRow(props: DeskControls) {
       <Button size="xs" variant="secondary" onClick={() => setConfirmStop(true)} data-testid="stop">
         Stop <kbd>esc</kbd>
       </Button>
+      {props.pause.kind === 'running' && (
+        <Tooltip content="Hold the run at its next step boundary. Bounded: it stops on its own if nobody resumes it.">
+          <span>
+            <Button size="xs" variant="secondary" onClick={props.onPause} data-testid="pause">
+              Pause <kbd>space</kbd>
+            </Button>
+          </span>
+        </Tooltip>
+      )}
+      {props.pause.kind === 'paused' && (
+        <Tooltip content={pausedTooltip(props.pause.until)}>
+          <span>
+            <Button size="xs" variant="primary" onClick={props.onResume} data-testid="resume">
+              Resume <kbd>space</kbd>
+            </Button>
+          </span>
+        </Tooltip>
+      )}
+      {props.pause.kind === 'paused' && (
+        <span className="desk-controls-note" data-testid="paused-until">
+          {pausedLabel(props.pause.until)}
+        </span>
+      )}
       <Tooltip content={needsStream ?? 'Send an instruction into the running turn'}>
         <span>
           <Button size="xs" variant="secondary" onClick={props.onSteer} disabled={props.disconnected} data-testid="steer">
@@ -180,7 +260,7 @@ export function ControlsRow(props: DeskControls) {
         open={confirmStop}
         onCancel={() => setConfirmStop(false)}
         title="Stop this run?"
-        consequence="The working state is kept and the run can be forked from where it stopped. Nothing already spent is refunded. There is no pause on this platform, so this is the only way to make it stop working."
+        consequence="The working state is kept and the run can be forked from where it stopped. Nothing already spent is refunded. This ends the run — a pause only holds it for a bounded window and then stops it anyway."
         confirmLabel="Stop"
         onConfirm={() => {
           setConfirmStop(false)

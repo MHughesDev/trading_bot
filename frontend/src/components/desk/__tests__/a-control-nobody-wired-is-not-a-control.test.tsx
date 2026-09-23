@@ -19,7 +19,7 @@
  * | Attach… | no upload route at all | deleted |
  * | Write strategy | `/strategy` page, `/api/strategies` 401 | wired |
  * | `EvidenceEntry.view` | no route returns a tool result by id | deleted |
- * | Pause / Resume | `…/runs/{}/pause`, `…/resume` → 404 | deleted |
+ * | Pause / Resume | `…/runs/{}/pause`, `…/resume` → 404 | deleted — **re-wired 2026-09-23, see below** |
  * | Escalate… | `…/runs/{}/escalate` → 404 | deleted |
  * | Stop | `…/conversations/{}/cancel` → 401 | kept |
  * | Save as case | `GET /api/evals`, `…/trajectory` → 404 | deleted |
@@ -29,8 +29,19 @@
  * the previous code. The ones that failed are marked `[was failing]`; the ones
  * that would have passed anyway are marked `[held before]` and are here to stop
  * the fix from being undone, not to claim credit for finding it.
+ *
+ * **2026-09-23: the pause came back, and the rule did not change.** ADR-D-27
+ * mounted `…/runs/{id}/pause` and `…/resume`, so the row draws them again — but
+ * only where the server *measured* the pause. `paused` is `true`, `false`, or
+ * `null` on every run read, and `null` ("this replica is not driving the run")
+ * draws no control at all, because a pause posted into it answers 409. The
+ * original defect was a local `paused` flag set before the request; the fix that
+ * makes re-wiring safe is that the flag no longer exists — the state comes from
+ * the run row. Tests marked `[new]` here cover that three-state behaviour and
+ * the deadline label; the Escalate test is unchanged, because `…/escalate` is
+ * still 404.
  */
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -134,8 +145,12 @@ describe('a slash command nobody answers does not eat the question', () => {
   })
 
   it('[was failing] lists only commands that are answered, and never the pause', () => {
-    // `/pause` posted to a route that is not mounted; it left the list with the
-    // handler.
+    // `/pause` posted to a route that was not mounted; it left the list with the
+    // handler. The route exists since ADR-D-27 and the *button* is back, but the
+    // command is not: re-adding it means wiring `onSlash('/pause')` through the
+    // composer, and a command in this list with no handler is the defect this
+    // whole file is about. The button and `space` cover the control; the command
+    // comes back when something answers it.
     expect([...SLASH_COMMANDS]).not.toContain('/pause')
     expect([...SLASH_COMMANDS]).not.toContain('/pin')
     expect([...SLASH_COMMANDS]).toEqual(['/steer', '/why', '/budget'])
@@ -155,6 +170,8 @@ function controls(over: Partial<DeskControls> = {}) {
     onReplay: vi.fn(),
     onFocusComposer: vi.fn(),
     onShortcuts: vi.fn(),
+    onPause: vi.fn(),
+    onResume: vi.fn(),
   }
   const props: DeskControls = {
     busy: true,
@@ -162,6 +179,10 @@ function controls(over: Partial<DeskControls> = {}) {
     hasPendingApproval: true,
     approvalNeedsReason: false,
     detailsOpen: false,
+    // `unobserved` is the default here on purpose: it is what a run this replica
+    // is not driving reports, and the tests below assert that state draws no
+    // pause control at all. A default of `running` would make them vacuous.
+    pause: { kind: 'unobserved' },
     ...spies,
     ...over,
   }
@@ -174,32 +195,74 @@ function controls(over: Partial<DeskControls> = {}) {
 }
 
 describe('a run control the platform cannot serve is not drawn', () => {
-  it('[was failing] draws no Pause, because nothing answers a pause', () => {
-    // The worst of the three. `onPause` set a local flag *before* the request,
-    // so the header badge changed to "paused" over a run that was still
-    // spending trials, and the request itself went through `optional()`, which
-    // turns the 404 into `null`. A false instrument reading, bound to `space`.
-    controls()
+  // `…/pause` and `…/resume` are mounted now (ADR-D-27) and the pause is wired
+  // again — but only where the server *measured* it. These tests moved from "no
+  // pause exists" to "no pause is drawn over an unmeasured one", which is the
+  // same rule applied to a route that now answers. `…/escalate` is still 404 and
+  // still deleted, so its test is unchanged.
+
+  it('[was failing] draws no Pause over a run whose pause nobody measured', () => {
+    // `paused: null` means this replica is not driving the run. A Pause button
+    // here posts a request that answers 409, which is the deleted control
+    // rebuilt one layer down — so `unobserved` draws neither button.
+    controls({ pause: { kind: 'unobserved' } })
     expect(screen.queryByTestId('pause')).toBeNull()
     expect(screen.queryByTestId('resume')).toBeNull()
-    expect(screen.queryByText(/^Pause/)).toBeNull()
+    expect(screen.queryByTestId('paused-until')).toBeNull()
   })
 
-  it('[was failing] draws no Escalate…, for the same reason', () => {
-    controls()
+  it('[new] draws Pause for a running run and calls the handler', () => {
+    const s = controls({ pause: { kind: 'running' } })
+    expect(screen.queryByTestId('resume')).toBeNull()
+    fireEvent.click(screen.getByTestId('pause'))
+    expect(s.onPause).toHaveBeenCalledTimes(1)
+  })
+
+  it('[new] draws Resume for a paused run, with the deadline it was given', () => {
+    const until = new Date(Date.now() + 15 * 60_000).toISOString()
+    const s = controls({ pause: { kind: 'paused', until } })
+    expect(screen.queryByTestId('pause')).toBeNull()
+    expect(screen.getByTestId('paused-until')).toHaveTextContent(/held until \d{1,2}:\d{2}/i)
+    fireEvent.click(screen.getByTestId('resume'))
+    expect(s.onResume).toHaveBeenCalledTimes(1)
+  })
+
+  it('[new] says the deadline is unreported rather than inventing one', () => {
+    // A pause whose `until` did not arrive is still a pause. Printing a dash or
+    // falling back to `now` would both be a deadline the reader is wrong about.
+    controls({ pause: { kind: 'paused', until: null } })
+    expect(screen.getByTestId('paused-until')).toHaveTextContent('deadline not reported')
+
+    // And the same for a timestamp that arrived unparseable.
+    cleanup()
+    controls({ pause: { kind: 'paused', until: 'not a date' } })
+    expect(screen.getByTestId('paused-until')).toHaveTextContent('deadline not reported')
+  })
+
+  it('[held before] draws no Escalate…, because nothing answers an escalate', () => {
+    controls({ pause: { kind: 'running' } })
     expect(screen.queryByText(/escalate/i)).toBeNull()
   })
 
-  it('[held before, and only vacuously] does not bind space to a pause that cannot pause', () => {
-    // Honest accounting: this one passed against the old code too, because the
-    // old `space` branch called `k.onPause()` and this harness no longer has an
-    // `onPause` for it to call — it threw inside the listener instead of
-    // failing an assertion. The test that actually caught the pause is the
-    // first one in this block. This is here to keep the binding gone.
-    const s = controls()
+  it('[new] binds space only where the pause was measured', () => {
+    // Under `unobserved` the keyboard must do nothing at all, for the same
+    // reason the button is absent: a shortcut that silently 409s is the version
+    // of this control that was deleted.
+    const quiet = controls({ pause: { kind: 'unobserved' } })
     fireEvent.keyDown(document, { key: ' ' })
-    // Nothing at all should have fired; `space` no longer means anything here.
-    for (const fn of Object.values(s)) expect(fn).not.toHaveBeenCalled()
+    for (const fn of Object.values(quiet)) expect(fn).not.toHaveBeenCalled()
+    cleanup()
+
+    const live = controls({ pause: { kind: 'running' } })
+    fireEvent.keyDown(document, { key: ' ' })
+    expect(live.onPause).toHaveBeenCalledTimes(1)
+    expect(live.onResume).not.toHaveBeenCalled()
+    cleanup()
+
+    const held = controls({ pause: { kind: 'paused', until: null } })
+    fireEvent.keyDown(document, { key: ' ' })
+    expect(held.onResume).toHaveBeenCalledTimes(1)
+    expect(held.onPause).not.toHaveBeenCalled()
   })
 
   it('[held before] keeps Stop, which reaches a route that is mounted', () => {
@@ -209,14 +272,26 @@ describe('a run control the platform cannot serve is not drawn', () => {
     expect(s.onStop).toHaveBeenCalled()
   })
 
-  it('[was failing] does not offer a pause as the gentler alternative to stopping', () => {
-    // The stop dialog talked the person out of the control that works into the
-    // one that does not: "Pause instead".
-    controls()
+  it('[held before] does not offer a pause as the gentler alternative to stopping', () => {
+    // The stop dialog once talked the person out of the control that works into
+    // the one that did not: "Pause instead". A pause exists now and the dialog
+    // still must not route anyone into it — it delays by a bounded window and
+    // then stops the run anyway, so offering it beside Stop trades a decision
+    // for a deferral.
+    controls({ pause: { kind: 'running' } })
     fireEvent.click(screen.getByTestId('stop'))
     // The dialog is really open — otherwise the assertion below is vacuous.
     expect(screen.getByText(/Stop this run\?/i)).toBeTruthy()
     expect(screen.queryByText(/pause instead/i)).toBeNull()
+  })
+
+  it('[new] the stop dialog no longer claims this platform has no pause', () => {
+    // It said "There is no pause on this platform, so this is the only way to
+    // make it stop working." True when written, false since ADR-D-27, and the
+    // kind of sentence that survives because nobody re-reads a dialog.
+    controls({ pause: { kind: 'running' } })
+    fireEvent.click(screen.getByTestId('stop'))
+    expect(screen.queryByText(/there is no pause on this platform/i)).toBeNull()
   })
 })
 

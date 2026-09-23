@@ -193,6 +193,27 @@ export interface BudgetView {
   n_eff: number | null
 }
 
+/**
+ * One `agent_runs` row as `GET /api/agent/runs/{id}` serialises it.
+ *
+ * Only the fields the desk reads are typed here. The pause triple is the reason
+ * this interface exists at all — see `deskApi.run`.
+ */
+export interface RunRow {
+  run_id: string
+  status: string
+  /**
+   * `true`, `false`, or `null` for "this replica is not driving this run and so
+   * did not measure it". The route's own comment calls the third case the
+   * distinction its 409 makes in words, made here in a value — so a reader that
+   * collapses `null` to `false` is asserting an absence nobody measured.
+   */
+  paused: boolean | null
+  paused_until: string | null
+  /** Always `"stopped"`. Carried on every run read, not only on the pause reply. */
+  pause_on_expiry: string
+}
+
 /** AGENT-008 §2, as the harness serialises it. */
 export interface WorkingState {
   goal: string
@@ -1746,21 +1767,57 @@ export const deskApi = {
   resumeAll: (body: { confirm_scope: string; reason: string }) =>
     client.post<Record<string, unknown>>('/api/trading/resume', body),
 
-  // — Controls. Steer and cancel exist; **pause, resume and escalate are gone.**
+  // — Controls. Steer, cancel, pause and resume exist; **escalate is still gone.**
   //
-  //   They were three `optional()` posts to `POST /api/agent/runs/{id}/pause`,
-  //   `…/resume` and `…/escalate`, all three of which answer 404 on this
-  //   platform where every mounted route answers 401. `optional()` turns a 404
-  //   into `null`, so each call was a request that failed and reported nothing,
-  //   and `ControlsRow` drew a button for each. Keeping them here as "wired the
-  //   day they land" is what let the buttons stay: the next caller finds a
-  //   method on `deskApi`, and a method on `deskApi` reads as a route.
+  //   All four were once `optional()` posts to routes that answered 404, and
+  //   `optional()` turns a 404 into `null`, so each call was a request that
+  //   failed and reported nothing while `ControlsRow` drew a button for it.
+  //   Three of the four now have a route (`…/pause` and `…/resume` landed with
+  //   ADR-D-27); `…/escalate` does not, and stays deleted.
   //
-  //   The unbuilt reads above are a different case and stay: `state()` and
-  //   `trajectory()` return data the panel renders an honest absence for.
-  //   A *control* has no honest absence — a click either reaches the platform
-  //   or it does not happen. —
+  //   None of the three is wrapped in `optional()`, deliberately. The unbuilt
+  //   reads above are a different case: `state()` and `trajectory()` return data
+  //   a panel renders an honest absence for. A *control* has no honest absence —
+  //   a click either reaches the platform or it does not happen, and a 409 from
+  //   `…/pause` ("this process is not driving this run") is an answer the caller
+  //   must see rather than a `null` it will read as success. —
   steer: (sessionId: string, body: { kind: 'steer' | 'interrupt' | 'stop' | 'answer'; text?: string }) =>
     client.post(`/api/agent/sessions/${sessionId}/steer`, body),
   cancel: (conversationId: string) => client.post(`/api/agent/conversations/${conversationId}/cancel`),
+
+  /**
+   * One run row, which is where the pause's **server-side** truth lives.
+   *
+   * The pause is on the read and not only on the `…/pause` reply, and this
+   * method exists because of that: the defect that got the old Pause button
+   * deleted was a header that said `paused` from a local flag nobody could check
+   * against the server. A client that reloads has to be able to ask.
+   *
+   * `paused` is `true`, `false`, or **`null`** for a run this replica is not
+   * driving — the third case is not "not paused", it is "nobody measured", and
+   * `ControlsRow` draws no pause control for it at all rather than one that
+   * would 409.
+   */
+  run: (runId: string) => client.get<RunRow>(`/api/agent/runs/${runId}`),
+
+  /**
+   * Hold the run at its next step boundary (ADR-D-27).
+   *
+   * Bounded by construction: `seconds` is clamped into the platform's window
+   * (10s–2h, 15min default) and the response says what was actually granted,
+   * because a clamp the caller cannot see is a deadline they are wrong about.
+   * **On expiry the run stops rather than resuming** — `pause_on_expiry` says so
+   * on every run read, and the UI has to repeat it, because a pause that
+   * silently becomes a stop is the same class of false instrument reading as a
+   * pause that never happened.
+   */
+  pauseRun: (runId: string, seconds?: number) =>
+    client.post<{ paused: true; until: string; seconds: number; on_expiry: 'stopped' }>(
+      `/api/agent/runs/${runId}/pause`,
+      { seconds },
+    ),
+
+  /** Lift a pause this process is holding. 409 if the run has since ended. */
+  resumeRun: (runId: string) =>
+    client.post<{ resumed: true }>(`/api/agent/runs/${runId}/resume`),
 }

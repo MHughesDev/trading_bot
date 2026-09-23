@@ -181,6 +181,10 @@
 .desk-composer { display: flex; flex-direction: column; gap: var(--s-2); }
 .desk-composer .row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
 .desk-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1); }
+/* The pause deadline, beside Resume. Text and not a colour: a held run is a
+   state the operator has to read, and Meridian principle 3 forbids carrying it
+   on hue alone. */
+.desk-controls-note { font-size: var(--t-11); color: var(--fg-secondary); font-variant-numeric: tabular-nums; }
 .charter-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--s-3); }
 .charter-form .full { grid-column: 1 / -1; }
 

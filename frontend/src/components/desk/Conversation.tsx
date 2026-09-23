@@ -23,7 +23,7 @@ import { useDeskAnnouncer } from '@/hooks/useDeskAnnouncer'
 import { isIrreversibleEnvelope } from './Cards'
 import { CardStream } from './CardStream'
 import { Composer, type ComposerHandle, type ComposerSubmission } from './Composer'
-import { ControlsRow, useDeskKeymap } from './ControlsRow'
+import { ControlsRow, useDeskKeymap, type PauseState } from './ControlsRow'
 import {
   AgendaTab,
   CharterTab,
@@ -179,6 +179,19 @@ export function Conversation({
     refetchInterval: running ? 4_000 : false,
   })
 
+  // The run row, read for one reason: it is where the pause's server-side truth
+  // lives (ADR-D-27). Polled while the run is live rather than read once,
+  // because the deadline expires on the server's clock and a pause that has
+  // already lapsed into a stop must stop offering Resume. The previous version
+  // of this control kept a local `paused` flag instead, which is exactly the
+  // defect that got it deleted.
+  const run = useQuery({
+    queryKey: ['desk', 'run', runId],
+    queryFn: () => deskApi.run(runId as string).then((r) => r.data),
+    enabled: !!runId,
+    refetchInterval: running ? 4_000 : false,
+  })
+
   // `/api/catalogue` has been served since S-6.19 and nothing in the desk's own
   // conversation ever called it, so the Tools tab rendered "not built yet" over
   // a built endpoint. The catalogue is a registry, not a run, so it is cached
@@ -300,13 +313,34 @@ export function Conversation({
     [approvals],
   )
 
+  // Three states, from the server, with `null` kept apart from `false`. A run
+  // this replica is not driving reports `paused: null`, and collapsing that to
+  // "not paused" would draw a Pause button whose request answers 409 — the
+  // control that was deleted, rebuilt one layer down.
+  const pause: PauseState = useMemo(() => {
+    const row = run.data
+    if (!row || row.paused === null || row.paused === undefined) return { kind: 'unobserved' }
+    return row.paused ? { kind: 'paused', until: row.paused_until } : { kind: 'running' }
+  }, [run.data])
+
   const controls = {
     busy: running,
     disconnected: stream.state === 'stale' || stream.state === 'closed',
     hasPendingApproval: approvals.length > 0,
     approvalNeedsReason: frontApprovalNeedsReason,
     detailsOpen: detailsAll,
+    pause,
     onStop: () => void deskApi.cancel(conversationId),
+    // Both refetch rather than setting anything locally: the server owns this
+    // state and the reply is a confirmation, not the source.
+    onPause: () => {
+      if (!runId) return
+      void deskApi.pauseRun(runId).finally(() => void run.refetch())
+    },
+    onResume: () => {
+      if (!runId) return
+      void deskApi.resumeRun(runId).finally(() => void run.refetch())
+    },
     onSteer: () => composer.current?.focus(),
     onApprove: () => {
       const a = approvals[0]
@@ -326,7 +360,7 @@ export function Conversation({
     onFocusComposer: () => composer.current?.focus(),
     onShortcuts: () =>
       window.alert(
-        'esc stop · a approve · x deny · s steer · d details · r replay · / composer · ? this list',
+        'esc stop · space pause/resume · a approve · x deny · s steer · d details · r replay · / composer · ? this list',
       ),
   }
   useDeskKeymap(controls)
