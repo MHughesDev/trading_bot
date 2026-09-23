@@ -1,10 +1,12 @@
 # Phase 8 — Integration and honesty
 
-**Completion: 78% (7 / 9 tasks; S-8.3 and S-8.9 partial)**
+**Completion: 78% (7 / 9 tasks). S-8.3 and S-8.9 partial.**
 
-**Migration range:** the header below says 0085–0088; the set reached 0136 first. This
-phase wrote `0134` (the trial family), `0135` (a battery's verdict) and `0136`
-(dossiers and their comments).
+**Migration numbers actually used, corrected:** the declared range below (0085–0088) was
+allocated against a tree that has since moved past it — the same ADR-S3-08 collision
+recorded for S-3.7 and S-4.3. The set had reached migration 134 by the time this phase
+shipped, so it wrote `0134` (the trial family), `0135` (a battery's verdict) and `0136`
+(dossiers and their comments) instead.
 
 > **What "6 of 9" means, and what it does not.** S-8.1, S-8.4, S-8.5, S-8.6, S-8.7 and
 > S-8.8 are built and reached by a caller. S-8.2 and S-8.3 declare all six batteries

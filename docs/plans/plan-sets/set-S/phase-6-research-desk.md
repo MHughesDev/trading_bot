@@ -849,10 +849,10 @@ calibrated error; the cache sparkline is per call, not per run.
 **Traces:** AGENT-012 §3.5, principle 11.
 
 ### S-6.13 The shared components — M
-`DONE` — promoted 2026-09-21 by audit. All eight named components are
+`DONE` — promoted 2026-09-21 by audit, superseding the prior partial status
+(2026-09-16 — `Shared.tsx`, 375 lines). All eight named components are
 exported from `Shared.tsx` and imported into `DesignSystemPage.tsx` under its
-"Research desk" section, and `/design` is a public route. Superseded note:
-`PARTIAL` 2026-09-16 — `Shared.tsx` (375 lines).
+"Research desk" section, and `/design` is a public route.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
