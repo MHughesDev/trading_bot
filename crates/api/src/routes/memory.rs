@@ -20,6 +20,17 @@
 //! "this tab is not connected to anything", which is a fact about the platform.
 //! The first invites you to stop looking.
 //!
+//! # One path, every method
+//!
+//! `GET`, `POST` and `DELETE` all hang off `{bucket}`; there is no static
+//! segment under `/api/memory/`. That is deliberate and it is the fix for a real
+//! defect rather than a preference: `POST /api/memory/preferences` was mounted
+//! on its own literal path, `matchit` prefers a literal over a parameter, and so
+//! `GET /api/memory/preferences` answered **405 Method Not Allowed** while the
+//! other six buckets answered 200. Since [`kind_for`] enumerates the legitimate
+//! values of `{bucket}`, any literal written under this prefix is a second
+//! spelling of a bucket and will shadow it the same way. See [`record`].
+//!
 //! # Deleting is archiving
 //!
 //! `DELETE /api/memory/{bucket}/{id}` sets `archived`, and refuses outright when
@@ -29,7 +40,7 @@
 //! somebody could.
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{rejection::JsonRejection, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -55,6 +66,22 @@ fn kind_for(bucket: &str) -> Option<Kind> {
         "defects" => Kind::PlatformDefect,
         _ => return None,
     })
+}
+
+/// The one bucket a caller may *write*, and the kind that write lands under.
+///
+/// A closed match with no permissive arm, for the same reason `kind_for` has
+/// none: the other six kinds are written by the research loop out of a
+/// measurement it took, and a caller-supplied claim filed under `finding` or
+/// `negative_result` would be a measurement nobody made. A preference is the one
+/// kind whose authority *is* the caller — see `record`'s docs.
+///
+/// Pinned by [`tests::exactly_one_bucket_accepts_a_write_and_it_is_preferences`].
+fn user_writable_kind_for(bucket: &str) -> Option<Kind> {
+    match bucket {
+        "preferences" => Some(Kind::UserPreference),
+        _ => None,
+    }
 }
 
 /// `MemoryRow` in `frontend/src/components/desk/MemoryBrowser.tsx`.
@@ -156,7 +183,12 @@ pub async fn list(
         return unknown_bucket(&bucket);
     };
     let store = MemoryStore::new(state.pg.clone());
-    let fetched = match q.subject.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let fetched = match q
+        .subject
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         // Narrowed by subject, then by kind. The store's subject query is the
         // one that already carries the archived/superseded filter; filtering the
         // kind afterwards costs a few rows and keeps one query.
@@ -274,7 +306,30 @@ pub struct PreferenceBody {
     pub statement: String,
 }
 
-/// POST /api/memory/preferences — record what the user told the agent.
+/// POST /api/memory/{bucket} — record what the user told the agent.
+///
+/// Reachable as `POST /api/memory/preferences`, which is the only bucket that
+/// accepts a write. The caller's URL is unchanged from when this was mounted on
+/// its own literal path; what changed is that the literal no longer exists.
+///
+/// # Why the write shares the reader's path
+///
+/// It used to be `.route("/api/memory/preferences", post(record_preference))`,
+/// mounted beside `.route("/api/memory/{bucket}", get(list))`. `matchit` prefers
+/// a static segment over a parameter, so the literal took every request to that
+/// path and refused the method: `GET /api/memory/preferences` answered **405**
+/// while its six sibling buckets answered normally. `list` was never reached for
+/// the one bucket whose entries the user themselves wrote, and the 405 rendered
+/// in the browser as a tab that had nothing in it.
+///
+/// So the write moved onto the parameter instead of the literal being patched.
+/// Every legitimate value of `{bucket}` is enumerated by [`kind_for`], which
+/// makes a literal under `/api/memory/` a second spelling of a bucket by
+/// construction — the mistake is not documented here, it is unavailable, because
+/// there is no static segment left under this prefix to make it with. The
+/// general form is held by
+/// `crates/api/tests/a_static_route_does_not_shadow_its_parameterised_sibling.rs`,
+/// which found four more pairs of this shape in the router.
 ///
 /// # Why this needs no table of its own
 ///
@@ -295,11 +350,53 @@ pub struct PreferenceBody {
 /// `evidence_class` is `human` and the confidence is `established`, which is the
 /// one combination where `established` needs no verification pass — the user is
 /// the authority on their own preferences.
-pub async fn record_preference(
+pub async fn record(
     State(state): State<AppState>,
     token: BearerToken,
-    Json(body): Json<PreferenceBody>,
+    Path(bucket): Path<String>,
+    // Taken as a `Result` rather than extracted, so the bucket is judged first.
+    // With a plain `Json<PreferenceBody>` the extractor rejects before the
+    // handler runs, and a write to a bucket that takes no writes would be
+    // refused for the shape of its body instead of for the bucket — the caller
+    // would go and fix the body.
+    body: Result<Json<PreferenceBody>, JsonRejection>,
 ) -> impl IntoResponse {
+    if kind_for(&bucket).is_none() {
+        return unknown_bucket(&bucket);
+    }
+    if user_writable_kind_for(&bucket).is_none() {
+        // Deliberately not 405. This route's whole repair was a 405 that a reader
+        // could not tell from an empty bucket, and answering one here would put
+        // the same ambiguity back on the write side.
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "bucket_is_not_user_writable",
+                "bucket": bucket,
+                "writable": ["preferences"],
+                "message": "only `preferences` accepts a write. The other six kinds are \
+                            recorded by the research loop out of a measurement it took, and a \
+                            claim posted under one of those labels would be a measurement \
+                            nobody made — with a provenance saying otherwise. AGENT-007 §2.2.",
+            })),
+        )
+            .into_response();
+    }
+    let Json(body) = match body {
+        Ok(json) => json,
+        Err(rejection) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({
+                    "error": "malformed_body",
+                    "bucket": bucket,
+                    "message": rejection.body_text(),
+                })),
+            )
+                .into_response()
+        }
+    };
+
     let scope = body.scope.trim();
     let statement = body.statement.trim();
     if scope.is_empty() || statement.is_empty() {
@@ -307,7 +404,8 @@ pub async fn record_preference(
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(json!({
                 "error": "missing_field",
-                "message": "a preference needs a `scope` and a `statement`; `global` is a                             legitimate scope and an empty one is not",
+                "message": "a preference needs a `scope` and a `statement`; `global` is a \
+                            legitimate scope and an empty one is not",
             })),
         )
             .into_response();
@@ -399,8 +497,75 @@ mod tests {
         let mut seen: Vec<Kind> = Vec::new();
         for b in buckets {
             let k = kind_for(b).expect("a declared bucket resolves");
-            assert!(!seen.contains(&k), "two buckets both serve `{}`", k.as_str());
+            assert!(
+                !seen.contains(&k),
+                "two buckets both serve `{}`",
+                k.as_str()
+            );
             seen.push(k);
+        }
+    }
+
+    /// Exactly one bucket accepts a write, and it is `preferences`.
+    ///
+    /// `record` is mounted on `{bucket}`, so every bucket name reaches it. What
+    /// stops it writing a `finding` the caller made up is
+    /// `user_writable_kind_for`, and this is the test that says so: widening it
+    /// to a second bucket would give a caller a way to post a claim whose
+    /// provenance says the platform measured it.
+    #[test]
+    fn exactly_one_bucket_accepts_a_write_and_it_is_preferences() {
+        let buckets = [
+            "findings",
+            "negative",
+            "profiles",
+            "questions",
+            "preferences",
+            "signals",
+            "defects",
+        ];
+        let writable: Vec<&str> = buckets
+            .into_iter()
+            .filter(|b| user_writable_kind_for(b).is_some())
+            .collect();
+        assert_eq!(
+            writable,
+            ["preferences"],
+            "these buckets accept a caller-supplied write: {writable:?}. Only `preferences` may \
+             — the other six carry a provenance claiming the platform measured the thing."
+        );
+        assert_eq!(
+            user_writable_kind_for("preferences"),
+            Some(Kind::UserPreference),
+        );
+    }
+
+    /// Anything writable is readable: a bucket `record` accepts is one `list`
+    /// serves.
+    ///
+    /// The defect this module was repaired for was exactly the asymmetry — the
+    /// one bucket the user could write to was the one bucket nobody could read
+    /// back. A writable bucket that `kind_for` does not know would recreate it.
+    #[test]
+    fn a_bucket_that_accepts_a_write_can_also_be_read() {
+        for b in [
+            "findings",
+            "negative",
+            "profiles",
+            "questions",
+            "preferences",
+            "signals",
+            "defects",
+            "playbooks",
+            "nonsense",
+        ] {
+            if user_writable_kind_for(b).is_some() {
+                assert!(
+                    kind_for(b).is_some(),
+                    "`{b}` accepts a write and `list` does not serve it, so an entry could be \
+                     recorded into a bucket nothing can read back"
+                );
+            }
         }
     }
 
