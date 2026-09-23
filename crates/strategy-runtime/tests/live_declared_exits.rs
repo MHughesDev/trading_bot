@@ -15,7 +15,7 @@ use chrono::{DateTime, Duration, Utc};
 use domain::money::{Price, Size};
 use domain::order::Side;
 use domain::payloads::bar::{BarPayload, Timeframe};
-use domain::strategy_def::exits::{ExitPolicy, ExitRule, PositionSide};
+use domain::strategy_def::exits::{ExitDistance, ExitPolicy, ExitRule, PositionSide};
 use domain::strategy_def::StrategyDefinition;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -145,9 +145,7 @@ fn exit_on(per_event: &[Vec<domain::OrderIntent>]) -> Option<usize> {
 /// an order that lost 2%.
 #[test]
 fn a_declared_stop_loss_fires_live_on_the_breaching_bar() {
-    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss {
-        fraction: dec!(0.02),
-    }])));
+    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }])));
 
     let per_event = drive(
         &mut inst,
@@ -193,9 +191,7 @@ fn a_declared_stop_loss_fires_live_on_the_breaching_bar() {
 /// nobody earned.
 #[test]
 fn a_declared_take_profit_fires_live_at_its_level() {
-    let mut inst = instance(long_with_exits(rules(vec![ExitRule::TakeProfit {
-        fraction: dec!(0.05),
-    }])));
+    let mut inst = instance(long_with_exits(rules(vec![ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) }])));
 
     let per_event = drive(
         &mut inst,
@@ -262,8 +258,8 @@ fn a_declared_time_exit_fires_live_on_the_declared_bar() {
 #[test]
 fn a_bar_that_breached_both_books_the_stop_live_and_never_the_target() {
     let mut inst = instance(long_with_exits(rules(vec![
-        ExitRule::TakeProfit { fraction: dec!(0.05) },
-        ExitRule::StopLoss { fraction: dec!(0.02) },
+        ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) },
+        ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) },
     ])));
 
     let per_event = drive(
@@ -282,9 +278,7 @@ fn a_bar_that_breached_both_books_the_stop_live_and_never_the_target() {
 /// close, however tempting the low looks.
 #[test]
 fn the_entry_bar_cannot_stop_out_a_position_opened_at_its_close() {
-    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss {
-        fraction: dec!(0.02),
-    }])));
+    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }])));
 
     let per_event = drive(
         &mut inst,
@@ -410,9 +404,7 @@ fn a_tick_feed_counts_the_same_bars_as_a_bar_feed() {
 /// close is not the bound the strategy declared.
 #[test]
 fn a_live_stop_fires_on_the_tick_that_breaches_it() {
-    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss {
-        fraction: dec!(0.02),
-    }])));
+    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }])));
 
     let mut events = vec![tick_event(0, 0, dec!(100))];
     // Minute 1: drifts down, breaches 98 at the sixth tick, recovers.
@@ -481,9 +473,7 @@ fn risk_layer_only_closes_nothing_live() {
 /// stop then "closes" — which would send a sell for something not held.
 #[test]
 fn a_position_the_venue_reports_flat_releases_the_tracker() {
-    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss {
-        fraction: dec!(0.02),
-    }])));
+    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }])));
 
     inst.process_event(&flat_bar(0, dec!(100)));
     assert_eq!(inst.exit_bars_held(), Some(0), "the entry was assumed");
@@ -509,9 +499,7 @@ fn a_position_the_venue_reports_flat_releases_the_tracker() {
 /// bar 2's retrace to 105 breaches it.
 #[test]
 fn a_trailing_stop_ratchets_live_across_bars() {
-    let mut inst = instance(long_with_exits(rules(vec![ExitRule::TrailingStop {
-        fraction: dec!(0.03),
-    }])));
+    let mut inst = instance(long_with_exits(rules(vec![ExitRule::TrailingStop { distance: ExitDistance::of_entry(dec!(0.03)) }])));
 
     let per_event = drive(
         &mut inst,
@@ -578,8 +566,8 @@ fn the_exit_timestamp_comes_from_the_event_not_the_wall_clock() {
 fn live_and_replay_agree_bar_for_bar_on_a_mixed_policy() {
     let policy = || {
         vec![
-            ExitRule::StopLoss { fraction: dec!(0.03) },
-            ExitRule::TakeProfit { fraction: dec!(0.04) },
+            ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.03)) },
+            ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.04)) },
             ExitRule::MaxHoldingBars { bars: 5 },
         ]
     };

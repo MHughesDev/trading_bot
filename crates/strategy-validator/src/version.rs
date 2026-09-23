@@ -28,7 +28,7 @@
 
 use std::cmp::Ordering;
 
-use domain::strategy_def::{DEFINITION_VERSION, DEFINITION_VERSION_V1_3};
+use domain::strategy_def::{DEFINITION_VERSION, DEFINITION_VERSION_V1_4};
 
 /// The lowest `definition_version` this validator accepts.
 ///
@@ -40,7 +40,7 @@ pub const MIN_SUPPORTED: &str = DEFINITION_VERSION;
 /// **This is the one line that moves when the schema gains a version.** It is
 /// the domain's newest constant, so raising it is a single edit in `domain` plus
 /// this alias — not a new arm in a `matches!` that nobody is looking at.
-pub const MAX_SUPPORTED: &str = DEFINITION_VERSION_V1_3;
+pub const MAX_SUPPORTED: &str = DEFINITION_VERSION_V1_4;
 
 /// A parsed `MAJOR.MINOR` definition version.
 ///
@@ -122,7 +122,9 @@ impl std::fmt::Display for DefinitionVersion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::strategy_def::{DEFINITION_VERSION_V1_1, DEFINITION_VERSION_V1_2};
+    use domain::strategy_def::{
+        DEFINITION_VERSION_V1_1, DEFINITION_VERSION_V1_2, DEFINITION_VERSION_V1_3,
+    };
 
     #[test]
     fn every_version_the_domain_declares_is_inside_the_range() {
@@ -136,6 +138,7 @@ mod tests {
             DEFINITION_VERSION_V1_1,
             DEFINITION_VERSION_V1_2,
             DEFINITION_VERSION_V1_3,
+            DEFINITION_VERSION_V1_4,
         ] {
             let parsed = DefinitionVersion::parse(v).unwrap_or_else(|| panic!("{v} must parse"));
             assert!(parsed.is_supported(), "{v} is declared by domain and refused here");
@@ -145,7 +148,7 @@ mod tests {
     #[test]
     fn a_version_from_the_future_is_still_refused() {
         // The half of the whitelist that was doing real work.
-        for v in ["1.4", "2.0", "9.9"] {
+        for v in ["1.5", "2.0", "9.9"] {
             let parsed = DefinitionVersion::parse(v).expect("parses");
             assert!(!parsed.is_supported(), "{v} must be refused");
         }

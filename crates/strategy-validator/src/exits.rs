@@ -19,9 +19,29 @@
 //! exits. `RiskLayerOnly` stays legal, because a strategy whose entry signal
 //! reverses cleanly genuinely does not need one. The requirement is that the
 //! choice be stated.
+//!
+//! ## Units (1.4, ADR-D-09)
+//!
+//! From 1.4 a distance carries a [`DistanceUnit`]. Two checks come with it, and
+//! both are version checks rather than value checks:
+//!
+//! 4. **A scaled unit needs 1.4.** A document that declares 1.3 and carries
+//!    `unit: atr` is refused, for the same reason `exits_version_too_low` exists:
+//!    a runtime reading it at its declared version has no unit field, would read
+//!    the magnitude as a fraction of entry, and would place a 150%-of-entry stop
+//!    where a 1.5-ATR stop was meant. That is the one failure mode worse than a
+//!    refusal.
+//! 5. **A lookback must be one the engine will compute.** `atr(0)` is not "no
+//!    lookback", it is the feature name `atr_0`, which nothing serves — and which
+//!    would be discovered after the strategy was stored.
+//!
+//! The `(0, 1]` bound on a fraction is *not* applied to a scaled magnitude:
+//! `1.5` as a fraction of entry is a stop that can never fire on a long, and
+//! `1.5 atr` is the most ordinary stop in the domain. Holding one bound over both
+//! units is what made the language unable to say the second.
 
-use domain::strategy_def::exits::{ExitPolicy, ExitRule};
-use domain::strategy_def::{StrategyDefinition, DEFINITION_VERSION_V1_3};
+use domain::strategy_def::exits::{DistanceUnit, ExitDistance, ExitPolicy, ExitRule};
+use domain::strategy_def::{StrategyDefinition, DEFINITION_VERSION_V1_3, DEFINITION_VERSION_V1_4};
 
 use crate::version::DefinitionVersion;
 use crate::ValidationError;
@@ -68,14 +88,14 @@ pub fn validate_exits(def: &StrategyDefinition) -> Vec<ValidationError> {
                 def.definition_version, def.definition_version
             ),
         }),
-        (Some(policy), true) => errors.extend(validate_policy(policy)),
+        (Some(policy), true) => errors.extend(validate_policy(policy, version)),
         (None, false) => {}
     }
 
     errors
 }
 
-fn validate_policy(policy: &ExitPolicy) -> Vec<ValidationError> {
+fn validate_policy(policy: &ExitPolicy, version: DefinitionVersion) -> Vec<ValidationError> {
     let mut errors = Vec::new();
 
     if let ExitPolicy::Rules { rules } = policy {
@@ -91,6 +111,9 @@ fn validate_policy(policy: &ExitPolicy) -> Vec<ValidationError> {
             });
         }
 
+        let is_v14_or_later = version
+            >= DefinitionVersion::parse(DEFINITION_VERSION_V1_4).expect("1.4 is a valid version");
+
         for (i, rule) in rules.iter().enumerate() {
             if !rule.is_well_formed() {
                 errors.push(ValidationError {
@@ -99,20 +122,53 @@ fn validate_policy(policy: &ExitPolicy) -> Vec<ValidationError> {
                     message: explain(rule),
                 });
             }
+            // A unit the declared version cannot store. Refused rather than
+            // downgraded: `unit: atr` dropped by a 1.3 reader leaves a magnitude
+            // of `1.5` in a field that reader calls `fraction`, and a 150% stop
+            // is not a near-miss of a 1.5-ATR stop.
+            if !rule.unit().is_fraction_of_entry() && !is_v14_or_later {
+                errors.push(ValidationError {
+                    code: "exit_unit_version_too_low",
+                    path: format!("exits.rules[{i}].unit"),
+                    message: format!(
+                        "`{}` measures its distance in `{}`, which needs definition_version \
+                         {DEFINITION_VERSION_V1_4} or later; this document declares {version}. A \
+                         runtime reading it at {version} has no `unit` field, would take `{}` for \
+                         a fraction of the entry price, and would place a stop nothing like the \
+                         one written.",
+                        rule.kind(),
+                        rule.unit(),
+                        rule.distance()
+                            .map_or_else(String::new, |d| d.magnitude.to_string()),
+                    ),
+                });
+            }
         }
 
-        // Two rules of the same kind are almost always a copy-paste: the first
-        // one shadows the second for every state, so the second can never fire.
+        // Two rules of the same kind **in the same unit** are almost always a
+        // copy-paste: the first one shadows the second for every state, so the
+        // second can never fire.
+        //
+        // The unit is part of that key on purpose. A 2% stop and a 1.5-ATR stop
+        // are two stops where neither dominates — whichever is tighter on this
+        // bar fires, which is how "stop at the tighter of the two" is written in
+        // a first-match-wins policy. Keying on the kind alone would refuse a
+        // legitimate and common rule.
         for (i, rule) in rules.iter().enumerate() {
-            if let Some(j) = rules[..i].iter().position(|r| r.kind() == rule.kind()) {
+            if let Some(j) = rules[..i]
+                .iter()
+                .position(|r| r.kind() == rule.kind() && r.unit() == rule.unit())
+            {
                 errors.push(ValidationError {
                     code: "exit_rule_shadowed",
                     path: format!("exits.rules[{i}]"),
                     message: format!(
-                        "a second `{}` rule after the one at index {j}: rules are evaluated in \
-                         order and the first match wins, so whichever of the two is looser can \
-                         never fire. Keep one.",
-                        rule.kind()
+                        "a second `{}` rule in `{}` after the one at index {j}: rules are \
+                         evaluated in order and the first match wins, so whichever of the two is \
+                         looser can never fire. Keep one. (Two stops in *different* units are \
+                         legal — neither dominates.)",
+                        rule.kind(),
+                        rule.unit()
                     ),
                 });
             }
@@ -129,24 +185,25 @@ fn validate_policy(policy: &ExitPolicy) -> Vec<ValidationError> {
 /// zero holding bound are different edits — and one code for all of them would
 /// make the fix generic enough to be useless.
 fn explain_code(rule: &ExitRule) -> &'static str {
-    match rule {
-        ExitRule::StopLoss { .. } | ExitRule::TakeProfit { .. } | ExitRule::TrailingStop { .. } => {
-            "exit_fraction_out_of_range"
-        }
-        ExitRule::MaxHoldingBars { .. } => "exit_holding_bars_zero",
-        ExitRule::OnSignal { .. } => "exit_signal_name_empty",
+    match rule.distance() {
+        // A bad lookback and a bad magnitude are different edits, so they are
+        // different codes: `atr(0)` is fixed by writing a period, `0 atr(14)` by
+        // writing a multiple.
+        Some(d) if !d.unit.is_well_formed() => "exit_unit_period_out_of_range",
+        Some(d) if d.unit.is_fraction_of_entry() => "exit_fraction_out_of_range",
+        Some(_) => "exit_distance_not_positive",
+        None => match rule {
+            ExitRule::MaxHoldingBars { .. } => "exit_holding_bars_zero",
+            _ => "exit_signal_name_empty",
+        },
     }
 }
 
 fn explain(rule: &ExitRule) -> String {
     match rule {
-        ExitRule::StopLoss { fraction }
-        | ExitRule::TakeProfit { fraction }
-        | ExitRule::TrailingStop { fraction } => format!(
-            "`{}` takes a fraction of the reference price in (0, 1]; got {fraction}. A fraction \
-             above 1 can never fire on a long, and 0 or below fires on the entry bar.",
-            rule.kind()
-        ),
+        ExitRule::StopLoss { distance }
+        | ExitRule::TakeProfit { distance }
+        | ExitRule::TrailingStop { distance } => explain_distance(rule.kind(), distance),
         ExitRule::MaxHoldingBars { .. } => {
             "`max_holding_bars` must be at least 1: a bound of 0 closes the position on the bar \
              it opened, which is a round trip paid for nothing."
@@ -155,6 +212,37 @@ fn explain(rule: &ExitRule) -> String {
         ExitRule::OnSignal { .. } => {
             "`on_signal` needs a non-empty signal name to match against.".into()
         }
+    }
+}
+
+/// Why one distance is malformed. Branches on the unit, because the legal range
+/// of the magnitude depends on it.
+fn explain_distance(kind: &str, d: &ExitDistance) -> String {
+    if !d.unit.is_well_formed() {
+        let period = d.unit.period().unwrap_or(0);
+        return format!(
+            "`{kind}` measures its distance in `{}` over a {period}-bar lookback, and the feature \
+             engine computes `{}` for a lookback of {}..={} only. A period of {period} is not \
+             \"no lookback\": it is a feature name nothing serves, discovered after the strategy \
+             is stored.",
+            d.unit.as_str(),
+            d.unit.as_str(),
+            domain::strategy_def::exits::MIN_UNIT_PERIOD,
+            domain::strategy_def::exits::MAX_UNIT_PERIOD,
+        );
+    }
+    match d.unit {
+        DistanceUnit::FractionOfEntry => format!(
+            "`{kind}` takes a fraction of the reference price in (0, 1]; got {}. A fraction \
+             above 1 can never fire on a long, and 0 or below fires on the entry bar.",
+            d.magnitude
+        ),
+        DistanceUnit::Atr { .. } | DistanceUnit::Sigma { .. } => format!(
+            "`{kind}` takes a positive multiple of `{}`; got {}. There is no upper bound — a 5-ATR \
+             stop is wide, not malformed — but zero or negative is a stop on the wrong side of \
+             the entry.",
+            d.unit, d.magnitude
+        ),
     }
 }
 

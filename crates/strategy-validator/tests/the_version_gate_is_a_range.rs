@@ -17,7 +17,7 @@
 
 use domain::strategy_def::{
     StrategyDefinition, DEFINITION_VERSION, DEFINITION_VERSION_V1_1, DEFINITION_VERSION_V1_2,
-    DEFINITION_VERSION_V1_3,
+    DEFINITION_VERSION_V1_3, DEFINITION_VERSION_V1_4,
 };
 use serde_json::json;
 use strategy_validator::version::{DefinitionVersion, MAX_SUPPORTED, MIN_SUPPORTED};
@@ -98,6 +98,7 @@ fn every_declared_schema_version_is_accepted() {
         DEFINITION_VERSION_V1_1,
         DEFINITION_VERSION_V1_2,
         DEFINITION_VERSION_V1_3,
+        DEFINITION_VERSION_V1_4,
     ] {
         let errs = version_errors(&def_at(v));
         assert!(errs.is_empty(), "version {v} must be accepted: {errs:?}");
@@ -108,7 +109,7 @@ fn every_declared_schema_version_is_accepted() {
 /// not been taught the meaning of is still refused.
 #[test]
 fn a_version_past_the_ceiling_is_still_refused() {
-    for v in ["1.4", "2.0", "9.9"] {
+    for v in ["1.5", "2.0", "9.9"] {
         let errs = version_errors(&def_at(v));
         assert_eq!(errs.len(), 1, "version {v} must be refused: {errs:?}");
         assert!(
@@ -182,9 +183,7 @@ fn the_exits_pass_never_reads_a_later_version_as_earlier() {
 /// author following the diagnostic was sent back to the same refusal.
 #[test]
 fn the_fix_for_the_refusal_names_a_version_the_gate_accepts() {
-    let errs = strategy_validator::validate(&def_at("9.9"))
-        .err()
-        .expect("9.9 is refused");
+    let errs = strategy_validator::validate(&def_at("9.9")).expect_err("9.9 is refused");
     let err = errs
         .iter()
         .find(|e| e.code == "unknown_definition_version")
