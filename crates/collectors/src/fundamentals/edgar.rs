@@ -262,8 +262,7 @@ impl EdgarClient {
 /// fact accepted before its own period ended is refused rather than stored and
 /// trusted.
 pub fn parse_company_facts(body: &str) -> Result<Vec<FundamentalFact>, EdgarError> {
-    // Decoding a body fetched from an external REST API — see the note on the
-    // `lint-no-json-hotpath` exception in `collectors::macro::fred`.
+    // json-at-boundary: EDGAR's companyfacts REST response, not one of our envelopes
     let parsed = serde_json::from_str::<CompanyFactsResponse>(body)
         .map_err(|e| EdgarError::Parse(e.to_string()))?;
     let cik = parsed.cik;
@@ -311,7 +310,7 @@ pub fn parse_company_facts(body: &str) -> Result<Vec<FundamentalFact>, EdgarErro
 /// # Errors
 /// A malformed payload.
 pub fn parse_acceptance_times(body: &str) -> Result<BTreeMap<String, DateTime<Utc>>, EdgarError> {
-    // Decoding a body fetched from an external REST API — see the note above.
+    // json-at-boundary: EDGAR's submissions index, the venue's own REST response
     let parsed = serde_json::from_str::<SubmissionsResponse>(body)
         .map_err(|e| EdgarError::Parse(e.to_string()))?;
     let recent = parsed.filings.recent;

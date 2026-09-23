@@ -223,8 +223,7 @@ pub fn dividend_to_corporate_action(
 /// # Errors
 /// A malformed payload.
 pub fn parse_corporate_actions(body: &str) -> Result<CorporateActionsResponse, CorpActionError> {
-    // Decoding a body fetched from an external REST API — see the note on the
-    // `lint-no-json-hotpath` exception in `collectors::macro::fred`.
+    // json-at-boundary: Alpaca's corporate-actions REST response, not one of our envelopes
     serde_json::from_str::<CorporateActionsResponse>(body)
         .map_err(|e| CorpActionError::Parse(e.to_string()))
 }

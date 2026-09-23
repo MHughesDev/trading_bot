@@ -140,8 +140,7 @@ pub fn parse_candlesticks(
     ticker: &str,
     body: &str,
 ) -> Result<Vec<KalshiHistoryBar>, KalshiHistoryError> {
-    // Decoding a body fetched from an external REST API — see the note on the
-    // `lint-no-json-hotpath` exception in `collectors::macro::fred`.
+    // json-at-boundary: Kalshi's candlesticks REST response, not one of our envelopes
     let parsed = serde_json::from_str::<CandlesticksResponse>(body)
         .map_err(|e| KalshiHistoryError::Parse(e.to_string()))?;
     let mut out = Vec::with_capacity(parsed.candlesticks.len());

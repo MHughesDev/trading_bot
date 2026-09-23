@@ -163,8 +163,7 @@ pub fn to_text_items(
 /// # Errors
 /// A malformed payload.
 pub fn parse_news(body: &str) -> Result<AlpacaNewsResponse, NewsError> {
-    // Decoding a body fetched from an external REST API — see the note on the
-    // `lint-no-json-hotpath` exception in `collectors::macro::fred`.
+    // json-at-boundary: Alpaca's news REST response, not one of our envelopes
     serde_json::from_str::<AlpacaNewsResponse>(body)
         .map_err(|e| NewsError::Parse(e.to_string()))
 }

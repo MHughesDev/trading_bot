@@ -90,18 +90,18 @@ and behind `check-bars-v1-frozen` and `check-bars-v2-frozen` — had no run in C
 
 A check whose exemption mechanism cannot be satisfied is worse than no check. It produces
 a standing red that teaches everyone to ignore it, and it produces comments like the ones
-Set P phase 3's collectors carry — *"the documented exception in `cargo xtask
+Set P phase 3's collectors carried — *"the documented exception in `cargo xtask
 lint-no-json-hotpath`"* — pointing at an exception that does not work.
 
 Between "guess from the text" and "ask the author", only the second can decide the
-question the rule actually asks. The cost is one comment per venue-boundary call: 22 of
+question the rule actually asks. The cost is one comment per venue-boundary call: 28 of
 them across the collectors today. That cost is the point. Each one names a venue and a
 response, which is exactly the thing a reviewer needs in order to tell a legal decode from
 an illegal one, and which no amount of pattern matching could have recovered.
 
 ## Consequences
 
-- 22 call sites in `crates/collectors` now carry a `json-at-boundary:` marker naming the
+- 28 call sites in `crates/collectors` now carry a `json-at-boundary:` marker naming the
   venue payload they decode. Three statements in `backfill/` were reflowed so the call
   sits on the first line of its statement and the marker has something to sit above.
 - `crates/collectors/src/derivs/funding.rs`'s nine `serde_json::Number` fields and
@@ -109,10 +109,13 @@ an illegal one, and which no amount of pattern matching could have recovered.
 - A new `serde_json` call on the market lane now fails CI on the PR that adds it, rather
   than joining a backlog.
 - Set P phase 3's five new collectors (`macro/fred.rs`, `fundamentals/edgar.rs`,
-  `news/alpaca.rs`, `corp_actions/alpaca.rs`, `prediction/history.rs`) are on an unmerged
-  branch and were written against the broken escape hatch. Each carries a comment naming
-  it. When that branch lands, those comments come out and the calls take markers; the
-  check will say so by name.
+  `news/alpaca.rs`, `corp_actions/alpaca.rs`, `prediction/history.rs`) landed on `main` in
+  `3c352af` while this was being written. They were authored against the broken escape
+  hatch and each carried a comment saying so — `fred.rs`'s spelled out the whole
+  contradiction and concluded the code was "written to be correct rather than to satisfy
+  the grep", which was the right call. Their six call sites now carry markers and those
+  comments are gone. That is the check's first real test: it named all six by file and
+  line the moment `main` merged, which is what it is for.
 - The exemption list is now distributed across the call sites instead of centralised in
   `xtask`. A reviewer reads the reason next to the code, and `git grep json-at-boundary:`
   enumerates every exemption in the workspace.
@@ -125,7 +128,7 @@ convenience `serde_json::to_vec` gets added under time pressure. An unenforced r
 document is how the rule was lost the first time.
 
 **A per-file `#![allow]`-style marker.** Cheaper: six files would have carried one line
-each instead of 22 markers. Rejected because almost every collector file is a venue
+each instead of 28 markers. Rejected because almost every collector file is a venue
 boundary, so file-level opt-out would have exempted essentially all of `crates/collectors`
 — including a future `envelope.payload = serde_json::to_vec(&trade)` added inside an
 already-exempt file, which is precisely the regression the check exists to catch.
