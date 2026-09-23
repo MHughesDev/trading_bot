@@ -37,7 +37,11 @@ pub fn smoothing(period: usize) -> f64 {
 ///
 /// # Errors
 /// Whatever `at` returns.
-pub fn ema_try_fold<E>(period: usize, n: usize, mut at: impl FnMut(usize) -> Result<f64, E>) -> Result<f64, E> {
+pub fn ema_try_fold<E>(
+    period: usize,
+    n: usize,
+    mut at: impl FnMut(usize) -> Result<f64, E>,
+) -> Result<f64, E> {
     if n == 0 {
         return Ok(f64::NAN);
     }
@@ -70,7 +74,13 @@ impl Ema {
         assert!(period >= 1, "EMA period must be at least 1");
         let lookback = u32::try_from(period * EMA_LOOKBACK_PERIODS).unwrap_or(u32::MAX);
         Self {
-            def: crate::runtime::definition(&format!("ema_{period}"), "ema", EMA_FEATURE_VERSION, lookback, include_str!("ema.rs")),
+            def: crate::runtime::definition(
+                &format!("ema_{period}"),
+                "ema",
+                EMA_FEATURE_VERSION,
+                lookback,
+                include_str!("ema.rs"),
+            ),
             period,
         }
     }
@@ -95,7 +105,9 @@ mod tests {
     /// single bit: the kernel is the loop the feature used to run inline.
     #[test]
     fn the_kernel_is_the_recurrence_it_replaced() {
-        let values: Vec<f64> = (0..40).map(|i| (f64::from(i) * 0.31).sin() * 3.0 + 100.0).collect();
+        let values: Vec<f64> = (0..40)
+            .map(|i| (f64::from(i) * 0.31).sin() * 3.0 + 100.0)
+            .collect();
         for period in [1usize, 3, 7, 21] {
             #[allow(clippy::cast_precision_loss)]
             let k = 2.0 / (period as f64 + 1.0);
@@ -103,7 +115,11 @@ mod tests {
             for &x in &values[1..] {
                 v = x * k + v * (1.0 - k);
             }
-            assert_eq!(ema_from_oldest(&values, period).to_bits(), v.to_bits(), "period {period}");
+            assert_eq!(
+                ema_from_oldest(&values, period).to_bits(),
+                v.to_bits(),
+                "period {period}"
+            );
         }
     }
 

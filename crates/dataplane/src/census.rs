@@ -68,19 +68,31 @@ pub struct CensusBar {
 impl CensusBar {
     #[must_use]
     pub const fn observed(open_ns: i64) -> Self {
-        Self { open_ns, knowledge_derived: false, unflagged_sentinel: false }
+        Self {
+            open_ns,
+            knowledge_derived: false,
+            unflagged_sentinel: false,
+        }
     }
 
     #[must_use]
     pub const fn derived(open_ns: i64) -> Self {
-        Self { open_ns, knowledge_derived: true, unflagged_sentinel: false }
+        Self {
+            open_ns,
+            knowledge_derived: true,
+            unflagged_sentinel: false,
+        }
     }
 
     /// A row whose knowledge time is too early for its source and which does not
     /// admit it. Counted as observed — which is precisely the problem.
     #[must_use]
     pub const fn unflagged_sentinel(open_ns: i64) -> Self {
-        Self { open_ns, knowledge_derived: false, unflagged_sentinel: true }
+        Self {
+            open_ns,
+            knowledge_derived: false,
+            unflagged_sentinel: true,
+        }
     }
 }
 
@@ -92,7 +104,10 @@ pub enum FloorVerdict {
     Satisfied,
     /// It does not, and this many more days of collection at the observed cadence
     /// would clear it.
-    Short { shortfall_days: i64, days_at_current_rate: i64 },
+    Short {
+        shortfall_days: i64,
+        days_at_current_rate: i64,
+    },
     /// The series has no bars at all, so no rate can be observed and no date named.
     NoData,
 }
@@ -187,7 +202,8 @@ impl ProvenanceAlarm {
     /// Gate-15-admissible history (D-P3).
     #[must_use]
     pub const fn defensibly_observed_bars(&self) -> u64 {
-        self.observed_knowledge_bars.saturating_sub(self.unflagged_sentinel_bars)
+        self.observed_knowledge_bars
+            .saturating_sub(self.unflagged_sentinel_bars)
     }
 }
 
@@ -238,7 +254,8 @@ impl CoverageCensus {
     /// subtraction exists to remove.
     #[must_use]
     pub const fn defensibly_observed_bars(&self) -> u64 {
-        self.observed_knowledge_bars.saturating_sub(self.unflagged_sentinel_bars)
+        self.observed_knowledge_bars
+            .saturating_sub(self.unflagged_sentinel_bars)
     }
 
     /// `Some` when any row claims observed knowledge it cannot support.
@@ -331,14 +348,18 @@ pub fn census(
     // differ in the last digit on different hardware. `checked_div` carries the
     // "nothing was expected" case in the type rather than in a surrounding `if`, so
     // the divide-by-zero cannot be reintroduced by editing the guard away.
-    let missing_bps = match missing_bars.saturating_mul(10_000).checked_div(expected_bars) {
+    let missing_bps = match missing_bars
+        .saturating_mul(10_000)
+        .checked_div(expected_bars)
+    {
         // Nothing expected means nothing can be missing.
         None => 0,
         Some(bps) => u32::try_from(bps).unwrap_or(10_000),
     };
 
     let (longest_gap_periods, longest_continuous_bars) = runs(&opens, period_ns, calendar);
-    let longest_continuous_secs = longest_continuous_bars.saturating_mul(u64::from(period_secs.max(1)));
+    let longest_continuous_secs =
+        longest_continuous_bars.saturating_mul(u64::from(period_secs.max(1)));
     let longest_continuous_secs = i64::try_from(longest_continuous_secs).unwrap_or(i64::MAX);
 
     let continuous_days = longest_continuous_secs / 86_400;
@@ -458,7 +479,12 @@ fn expected_strictly_between(prev: i64, cur: i64, period_ns: i64, calendar: &Cal
 /// one its start and end dates imply. The rate is a projection, not a stored fact,
 /// which is why a float is acceptable here and nowhere else in this module — it
 /// never reaches a persisted count.
-fn observed_daily_rate(first_ns: Option<i64>, last_ns: Option<i64>, period_secs: u32, present: u64) -> Option<f64> {
+fn observed_daily_rate(
+    first_ns: Option<i64>,
+    last_ns: Option<i64>,
+    period_secs: u32,
+    present: u64,
+) -> Option<f64> {
     let (f, l) = (first_ns?, last_ns?);
     let span_secs = (l - f) / 1_000_000_000;
     if span_secs <= 0 || present == 0 {
@@ -483,12 +509,19 @@ fn verdict(continuous_days: i64, floor_days: i64, present: u64, rate: Option<f64
         Some(r) if r > 0.0 => ((shortfall_days as f64) / r).ceil() as i64,
         _ => shortfall_days,
     };
-    FloorVerdict::Short { shortfall_days, days_at_current_rate }
+    FloorVerdict::Short {
+        shortfall_days,
+        days_at_current_rate,
+    }
 }
 
 /// How old the most recent row is, for the forward-series silence alarm (P-0.6).
 #[must_use]
-pub fn staleness(last_bar_ns: Option<i64>, period_secs: u32, as_of: DateTime<Utc>) -> Option<Duration> {
+pub fn staleness(
+    last_bar_ns: Option<i64>,
+    period_secs: u32,
+    as_of: DateTime<Utc>,
+) -> Option<Duration> {
     let last = last_bar_ns?;
     let close = last + i64::from(period_secs) * 1_000_000_000;
     Some(as_of - DateTime::<Utc>::from_timestamp_nanos(close))
@@ -503,7 +536,9 @@ mod tests {
     const MIN: i64 = 60 * 1_000_000_000;
 
     fn crypto() -> Calendar {
-        Calendar::Continuous { version: CalendarVersion::crypto_24_7() }
+        Calendar::Continuous {
+            version: CalendarVersion::crypto_24_7(),
+        }
     }
 
     fn at(n: i64) -> DateTime<Utc> {
@@ -516,7 +551,15 @@ mod tests {
 
     #[test]
     fn dense_series_has_no_gap() {
-        let c = census("BTC-USD", "coinbase", "1m", 60, &dense(100), &crypto(), at(0));
+        let c = census(
+            "BTC-USD",
+            "coinbase",
+            "1m",
+            60,
+            &dense(100),
+            &crypto(),
+            at(0),
+        );
         assert_eq!(c.present_bars, 100);
         assert_eq!(c.expected_bars, 100);
         assert_eq!(c.missing_bars, 0);
@@ -562,13 +605,27 @@ mod tests {
     /// reports a number nobody can be fooled by.
     #[test]
     fn a_wholly_unflagged_sentinel_series_reports_zero_defensibly_observed() {
-        let bars: Vec<CensusBar> = (0..500).map(|i| CensusBar::unflagged_sentinel(i * MIN)).collect();
+        let bars: Vec<CensusBar> = (0..500)
+            .map(|i| CensusBar::unflagged_sentinel(i * MIN))
+            .collect();
         let c = census("BTC-USD", "coinbase", "1m", 60, &bars, &crypto(), at(0));
-        assert_eq!(c.derived_knowledge_bars, 0, "nothing was flagged — that is the bug, not the fix");
-        assert_eq!(c.observed_knowledge_bars, 500, "the naive split calls all 500 observed");
+        assert_eq!(
+            c.derived_knowledge_bars, 0,
+            "nothing was flagged — that is the bug, not the fix"
+        );
+        assert_eq!(
+            c.observed_knowledge_bars, 500,
+            "the naive split calls all 500 observed"
+        );
         assert_eq!(c.unflagged_sentinel_bars, 500);
-        assert_eq!(c.defensibly_observed_bars(), 0, "and none of them may reach Gate 15");
-        let alarm = c.provenance_alarm().expect("500 unsupportable claims must alarm");
+        assert_eq!(
+            c.defensibly_observed_bars(),
+            0,
+            "and none of them may reach Gate 15"
+        );
+        let alarm = c
+            .provenance_alarm()
+            .expect("500 unsupportable claims must alarm");
         assert_eq!(alarm.defensibly_observed_bars(), 0);
         assert!(alarm.to_string().contains("BACKFILLED_KNOWLEDGE_TIME"));
     }
@@ -609,7 +666,11 @@ mod tests {
     fn a_flagged_row_is_never_counted_twice() {
         let bars = vec![
             CensusBar::derived(0),
-            CensusBar { open_ns: 0, knowledge_derived: true, unflagged_sentinel: true },
+            CensusBar {
+                open_ns: 0,
+                knowledge_derived: true,
+                unflagged_sentinel: true,
+            },
         ];
         let c = census("X", "v", "1m", 60, &bars, &crypto(), at(0));
         assert_eq!(c.derived_knowledge_bars, 1);
@@ -646,7 +707,10 @@ mod tests {
         ];
         let c = census("X", "v", "1m", 60, &bars, &crypto(), at(0));
         assert_eq!(c.present_bars, 3, "the duplicate collapses to one bar");
-        assert_eq!(c.derived_knowledge_bars, 2, "the tainted duplicate counts as derived");
+        assert_eq!(
+            c.derived_knowledge_bars, 2,
+            "the tainted duplicate counts as derived"
+        );
         assert_eq!(c.observed_knowledge_bars, 1);
         assert_eq!(
             c.derived_knowledge_bars + c.observed_knowledge_bars,
@@ -686,7 +750,10 @@ mod tests {
         let a = census("X", "v", "1m", 60, &bars, &crypto(), at(0));
         let b = census("X", "v", "1m", 60, &bars, &crypto(), at(999 * MIN));
         assert_ne!(a.as_of, b.as_of);
-        let a2 = CoverageCensus { as_of: b.as_of, ..a.clone() };
+        let a2 = CoverageCensus {
+            as_of: b.as_of,
+            ..a.clone()
+        };
         assert_eq!(a2, b, "only as_of may differ between two runs");
     }
 
@@ -700,8 +767,16 @@ mod tests {
         };
         // Hourly bars, Friday 15:00 UTC then Monday 15:00 UTC. Continuous would call
         // that a 71-period hole; the session calendar calls it none.
-        let fri = Utc.with_ymd_and_hms(2026, 1, 16, 15, 0, 0).unwrap().timestamp_nanos_opt().unwrap();
-        let mon = Utc.with_ymd_and_hms(2026, 1, 20, 15, 0, 0).unwrap().timestamp_nanos_opt().unwrap();
+        let fri = Utc
+            .with_ymd_and_hms(2026, 1, 16, 15, 0, 0)
+            .unwrap()
+            .timestamp_nanos_opt()
+            .unwrap();
+        let mon = Utc
+            .with_ymd_and_hms(2026, 1, 20, 15, 0, 0)
+            .unwrap()
+            .timestamp_nanos_opt()
+            .unwrap();
         let hour = 3600 * 1_000_000_000;
         let bars = vec![CensusBar::observed(fri), CensusBar::observed(mon)];
         let c = census("SPY", "alpaca", "1h", 3600, &bars, &nyse, at(0));
@@ -710,7 +785,10 @@ mod tests {
             c.longest_gap_periods < continuous.longest_gap_periods,
             "a session calendar must not count closed hours as missing bars"
         );
-        assert_eq!(continuous.longest_gap_periods, ((mon - fri) / hour - 1).unsigned_abs());
+        assert_eq!(
+            continuous.longest_gap_periods,
+            ((mon - fri) / hour - 1).unsigned_abs()
+        );
         // 2026-01-19 is a holiday, so only the 2026-01-16 and 2026-01-20 sessions
         // contribute; the closed hours between them are not expected bars.
         assert!(c.longest_gap_periods <= 12);
@@ -721,19 +799,26 @@ mod tests {
         // Two years of hourly bars, but every 100th bar missing: plenty of bars,
         // no continuous span. strict_v1 must not be satisfied.
         let hour = 3600 * 1_000_000_000;
-        let bars: Vec<CensusBar> =
-            (0..24 * 365 * 2).filter(|i| i % 100 != 0).map(|i| CensusBar::observed(i * hour)).collect();
+        let bars: Vec<CensusBar> = (0..24 * 365 * 2)
+            .filter(|i| i % 100 != 0)
+            .map(|i| CensusBar::observed(i * hour))
+            .collect();
         let c = census("X", "v", "1h", 3600, &bars, &crypto(), at(0));
         assert!(c.present_bars > 17_000);
         assert!(!c.strict_v1.is_satisfied());
-        assert!(!c.paper_v1.is_satisfied(), "a 99-bar run is not a year of history");
+        assert!(
+            !c.paper_v1.is_satisfied(),
+            "a 99-bar run is not a year of history"
+        );
         assert!(matches!(c.strict_v1, FloorVerdict::Short { .. }));
     }
 
     #[test]
     fn five_years_continuous_satisfies_strict_v1() {
         let hour = 3600 * 1_000_000_000;
-        let bars: Vec<CensusBar> = (0..24 * 1830).map(|i| CensusBar::observed(i * hour)).collect();
+        let bars: Vec<CensusBar> = (0..24 * 1830)
+            .map(|i| CensusBar::observed(i * hour))
+            .collect();
         let c = census("X", "v", "1h", 3600, &bars, &crypto(), at(0));
         assert!(c.continuous_days() >= STRICT_V1_FLOOR_DAYS);
         assert_eq!(c.strict_v1, FloorVerdict::Satisfied);
@@ -744,7 +829,9 @@ mod tests {
     fn shortfall_is_stated_in_days() {
         let hour = 3600 * 1_000_000_000;
         // 30 days of hourly bars.
-        let bars: Vec<CensusBar> = (0..24 * 30).map(|i| CensusBar::observed(i * hour)).collect();
+        let bars: Vec<CensusBar> = (0..24 * 30)
+            .map(|i| CensusBar::observed(i * hour))
+            .collect();
         let c = census("BTC-USD", "coinbase", "1h", 3600, &bars, &crypto(), at(0));
         match c.paper_v1 {
             FloorVerdict::Short { shortfall_days, .. } => {

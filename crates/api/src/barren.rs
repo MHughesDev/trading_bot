@@ -86,7 +86,8 @@ pub async fn rates(pg: &PgPool, profiles: &ProfileSet, days: i32) -> Result<Rate
         let runs = u32::try_from(runs).unwrap_or(u32::MAX);
         let barren = u32::try_from(barren).unwrap_or(u32::MAX);
         let Some(name) = profile_name else {
-            out.unresolved.push((String::from("(no profile recorded)"), runs));
+            out.unresolved
+                .push((String::from("(no profile recorded)"), runs));
             continue;
         };
         let Ok(profile) = profiles.resolve(&name) else {

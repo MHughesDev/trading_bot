@@ -155,7 +155,10 @@ fn the_exits_pass_never_reads_a_later_version_as_earlier() {
     let v110 = DefinitionVersion::parse("1.10").expect("parses");
     let v13 = DefinitionVersion::parse(DEFINITION_VERSION_V1_3).expect("parses");
     assert!(v110 > v13, "1.10 is later than 1.3");
-    assert!("1.10" < "1.3", "...and the lexical order disagrees, which was the bug");
+    assert!(
+        "1.10" < "1.3",
+        "...and the lexical order disagrees, which was the bug"
+    );
 
     // 1.10 is above the ceiling, so the whole document is refused — but on the
     // version, once, and never with a contradictory second complaint about its

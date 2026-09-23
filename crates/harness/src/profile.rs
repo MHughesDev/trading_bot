@@ -92,11 +92,8 @@ impl PreregAuthoring {
     }
 
     /// Every mode, so a per-tier table cannot quietly omit one.
-    pub const ALL: &'static [PreregAuthoring] = &[
-        Self::Free,
-        Self::SkeletonGrammar,
-        Self::SkeletonConfirm,
-    ];
+    pub const ALL: &'static [PreregAuthoring] =
+        &[Self::Free, Self::SkeletonGrammar, Self::SkeletonConfirm];
 
     /// Whether the model writes the registration's text itself.
     ///
@@ -656,8 +653,7 @@ impl Profile {
                 "workflows is empty: a tier that may run nothing is a tier nobody can start a run on",
             ));
         }
-        if self.workflows.contains(&crate::state::Workflow::Optimise)
-            && self.tier < Tier::LocalHigh
+        if self.workflows.contains(&crate::state::Workflow::Optimise) && self.tier < Tier::LocalHigh
         {
             return Err(bad(
                 "this tier declares the `optimise` workflow, which AGENT-013 §11 puts at local_high and above: driving a campaign means planning a sequence of structural moves, and a tier that cannot do that spends the campaign's whole budget proving it",
@@ -1324,7 +1320,11 @@ mod evidence_tests {
         let hw = hardware::discrete(vec![hardware::gtx_1080ti()], false, 32);
         let (cap, _) = p.effective_tool_calling(&hw);
         assert_eq!(
-            hardware::admit(cap, hardware::TaskDemand::MultiStep, p.escalate_to.as_deref()),
+            hardware::admit(
+                cap,
+                hardware::TaskDemand::MultiStep,
+                p.escalate_to.as_deref()
+            ),
             hardware::Admission::Admit
         );
     }

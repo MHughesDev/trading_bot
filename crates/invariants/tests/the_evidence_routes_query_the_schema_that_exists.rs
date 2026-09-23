@@ -134,7 +134,9 @@ fn sql_literals(file: &str, src: &str) -> (Vec<FoundSql>, Vec<usize>) {
     // Byte offsets of each `sqlx::query…(` call.
     let mut i = 0usize;
     while i < src.len() {
-        let Some(rel) = src[i..].find("query") else { break };
+        let Some(rel) = src[i..].find("query") else {
+            break;
+        };
         let at = i + rel;
         i = at + 5;
 
@@ -309,7 +311,11 @@ fn live_schema() -> Schema {
         .filter(|p| p.extension().is_some_and(|x| x == "sql"))
         .collect();
     files.sort();
-    assert!(!files.is_empty(), "no migrations found in {}", dir.display());
+    assert!(
+        !files.is_empty(),
+        "no migrations found in {}",
+        dir.display()
+    );
 
     let name = r"[a-z_][a-z0-9_]*(?:\s*\.\s*[a-z_][a-z0-9_]*)?";
     let create_table = regex::Regex::new(&format!(
@@ -351,11 +357,17 @@ fn live_schema() -> Schema {
         for c in create_table.captures_iter(&sql) {
             let m = c.get(0).unwrap();
             let cols = column_list(&sql, c.get(1).unwrap().end());
-            events.push((m.start(), Event::Create(qualify(&c[1].replace(' ', "")), cols)));
+            events.push((
+                m.start(),
+                Event::Create(qualify(&c[1].replace(' ', "")), cols),
+            ));
         }
         for c in create_view.captures_iter(&sql) {
             let m = c.get(0).unwrap();
-            events.push((m.start(), Event::Create(qualify(&c[1].replace(' ', "")), None)));
+            events.push((
+                m.start(),
+                Event::Create(qualify(&c[1].replace(' ', "")), None),
+            ));
         }
         for c in rename_table.captures_iter(&sql) {
             let m = c.get(0).unwrap();
@@ -496,7 +508,14 @@ fn column_list(sql: &str, after_name: usize) -> Option<BTreeSet<String>> {
     items.push(&body[start..]);
 
     const NOT_A_COLUMN: &[&str] = &[
-        "constraint", "primary", "unique", "foreign", "check", "exclude", "like", "inherits",
+        "constraint",
+        "primary",
+        "unique",
+        "foreign",
+        "check",
+        "exclude",
+        "like",
+        "inherits",
     ];
     let mut cols = BTreeSet::new();
     for item in items {
@@ -565,9 +584,7 @@ fn columns_referenced(sql: &str) -> Option<BTreeSet<String>> {
     for item in list.split(',') {
         let item = item.trim();
         if item.is_empty()
-            || !item
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            || !item.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
             || item.chars().next().is_some_and(|c| c.is_ascii_digit())
         {
             return None;
@@ -741,10 +758,7 @@ async fn every_evidence_query_prepares_against_the_migrated_schema() {
          resolves to a runtime error the handler must not mistake for an empty result:\n  - {}",
         failures.join("\n  - ")
     );
-    assert!(
-        skipped.is_empty() || !sql.is_empty(),
-        "nothing was checked"
-    );
+    assert!(skipped.is_empty() || !sql.is_empty(), "nothing was checked");
     eprintln!(
         "prepared {} statement(s) from {} file(s); {} runtime-built statement(s) not checked",
         sql.len(),

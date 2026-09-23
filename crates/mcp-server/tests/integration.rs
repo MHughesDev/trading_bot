@@ -865,7 +865,12 @@ async fn at64_even_a_tool_answered_from_memory_is_refused_without_a_record() {
 #[tokio::test]
 async fn at64_a_failing_tool_still_closes_its_record() {
     let (ctx, state) = ctx().await;
-    let out = call(&ctx, "get_backtest", json!({ "backtest_id": "00000000-0000-0000-0000-000000000000" })).await;
+    let out = call(
+        &ctx,
+        "get_backtest",
+        json!({ "backtest_id": "00000000-0000-0000-0000-000000000000" }),
+    )
+    .await;
     assert!(out.get("error").is_some(), "the stub 404s this id: {out}");
     assert_eq!(audit_phases(&state), vec!["pre", "post"]);
 }

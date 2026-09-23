@@ -131,13 +131,11 @@ impl Reserve {
         }
         if let Some(f) = &self.family_id {
             if f.trim().is_empty() {
-                return invalid(
-                    concat!(
-                        "a blank family is worse than no family: it groups every ",
-                        "blank-family look on the platform into one denominator. ",
-                        "Send no family, or send its id"
-                    ),
-                );
+                return invalid(concat!(
+                    "a blank family is worse than no family: it groups every ",
+                    "blank-family look on the platform into one denominator. ",
+                    "Send no family, or send its id"
+                ));
             }
         }
         if let Some(w) = &self.workflow {
@@ -231,7 +229,9 @@ mod tests {
 
         let mut blank = reserve();
         blank.family_id = Some("   ".into());
-        let err = blank.validate().expect_err("a blank family is not a family");
+        let err = blank
+            .validate()
+            .expect_err("a blank family is not a family");
         assert!(format!("{err}").contains("denominator"), "{err}");
     }
 

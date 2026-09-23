@@ -177,8 +177,7 @@ fn the_exploration_floor_is_the_one_in_the_charter() {
 #[test]
 fn normalisation_cannot_make_an_impossible_item_possible() {
     assert!(
-        SELECT.contains("// A rank in (0, 1] as a divisor")
-            || SELECT.contains("cost_pct[n]"),
+        SELECT.contains("// A rank in (0, 1] as a divisor") || SELECT.contains("cost_pct[n]"),
         "the cost signal is no longer ranked, so one expensive outlier can flatten the slate"
     );
     let combine = SELECT

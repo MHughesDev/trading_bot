@@ -46,7 +46,11 @@ pub const MAX_CANDLES: i64 = 300;
 /// The limit the platform declares for itself, at or under the published one.
 #[must_use]
 pub const fn declared_rate_limit() -> RateLimit {
-    RateLimit { per_window: 8, window_ms: 1_000, burst: 8 }
+    RateLimit {
+        per_window: 8,
+        window_ms: 1_000,
+        burst: 8,
+    }
 }
 
 /// Coinbase exposes only a fixed set of granularities; anything else is a
@@ -84,17 +88,18 @@ struct Candle<'a>(
 /// range — all [`FetchError::Integrity`], because a backfill that quietly drops
 /// the rows it could not read produces a gap nobody can attribute.
 pub fn parse_candles(body: &[u8], period_secs: u32) -> Result<Vec<BackfillBar>, FetchError> {
-    let candles: Vec<Candle> =
-        serde_json::from_slice(body).map_err(|e| FetchError::Integrity(format!("coinbase candles: {e}")))?;
+    let candles: Vec<Candle> = serde_json::from_slice(body)
+        .map_err(|e| FetchError::Integrity(format!("coinbase candles: {e}")))?;
     let mut out = Vec::with_capacity(candles.len());
     for c in candles {
         let open_s: i64 = raw_number(c.0)?
             .parse()
             .map_err(|_| FetchError::Integrity("coinbase candle time is not an integer".into()))?;
-        let open_time = Utc
-            .timestamp_opt(open_s, 0)
-            .single()
-            .ok_or_else(|| FetchError::Integrity(format!("coinbase candle time {open_s} is not a valid instant")))?;
+        let open_time = Utc.timestamp_opt(open_s, 0).single().ok_or_else(|| {
+            FetchError::Integrity(format!(
+                "coinbase candle time {open_s} is not a valid instant"
+            ))
+        })?;
         out.push(BackfillBar {
             // The one conversion: venue open + period = platform close.
             close_time: open_time + chrono::Duration::seconds(i64::from(period_secs)),
@@ -127,7 +132,10 @@ pub struct CoinbaseBackfill {
 impl CoinbaseBackfill {
     #[must_use]
     pub fn new(http: Arc<dyn HttpGet>) -> Self {
-        Self { http, limiter: Limited::new(declared_rate_limit()) }
+        Self {
+            http,
+            limiter: Limited::new(declared_rate_limit()),
+        }
     }
 
     /// How much bar-close time one page can carry, given the venue's 300-candle
@@ -155,7 +163,8 @@ impl BackfillSource for CoinbaseBackfill {
         // Clip the page to what the venue will serve in one request, so the
         // engine's cursor advances by exactly what was actually covered.
         let span = Self::page_span_secs(req.period_secs);
-        let page_end: DateTime<Utc> = std::cmp::min(req.end, req.start + chrono::Duration::seconds(span));
+        let page_end: DateTime<Utc> =
+            std::cmp::min(req.end, req.start + chrono::Duration::seconds(span));
         if page_end <= req.start {
             return Ok(BackfillPage::end_of_window());
         }
@@ -177,7 +186,10 @@ impl BackfillSource for CoinbaseBackfill {
         // returns no candles for a real range is a gap in the data, not the end
         // of the window, and treating it as the end would truncate the backfill
         // at the first quiet hour.
-        Ok(BackfillPage { bars, covered_to: Some(page_end) })
+        Ok(BackfillPage {
+            bars,
+            covered_to: Some(page_end),
+        })
     }
 }
 
@@ -197,8 +209,14 @@ mod tests {
         let bars = parse_candles(BODY, 60).unwrap();
         assert_eq!(bars.len(), 3);
         // Oldest first, regardless of the venue's newest-first ordering.
-        assert_eq!(bars[0].close_time, Utc.timestamp_opt(1_700_000_060, 0).unwrap());
-        assert_eq!(bars[2].close_time, Utc.timestamp_opt(1_700_000_180, 0).unwrap());
+        assert_eq!(
+            bars[0].close_time,
+            Utc.timestamp_opt(1_700_000_060, 0).unwrap()
+        );
+        assert_eq!(
+            bars[2].close_time,
+            Utc.timestamp_opt(1_700_000_180, 0).unwrap()
+        );
         // The venue's field order is [time, low, high, open, close, volume] —
         // not OHLC. Getting this wrong produces bars that still validate.
         assert_eq!(bars[2].low, "74000.11");
@@ -212,18 +230,27 @@ mod tests {
     fn the_period_is_what_shifts_a_bar_from_open_to_close() {
         let m1 = parse_candles(BODY, 60).unwrap();
         let h1 = parse_candles(BODY, 3_600).unwrap();
-        assert_eq!(h1[0].close_time - m1[0].close_time, Duration::seconds(3_540));
+        assert_eq!(
+            h1[0].close_time - m1[0].close_time,
+            Duration::seconds(3_540)
+        );
     }
 
     #[test]
     fn a_granularity_the_venue_does_not_serve_is_refused_rather_than_resampled() {
         assert!(granularity(60).is_ok());
-        assert!(granularity(14_400).is_err(), "Coinbase has no 4h candle; asking for one must not silently return 1h");
+        assert!(
+            granularity(14_400).is_err(),
+            "Coinbase has no 4h candle; asking for one must not silently return 1h"
+        );
     }
 
     #[test]
     fn a_malformed_candle_is_an_integrity_failure_not_a_silent_gap() {
-        assert!(matches!(parse_candles(b"[[1,2,3]]", 60), Err(FetchError::Integrity(_))));
+        assert!(matches!(
+            parse_candles(b"[[1,2,3]]", 60),
+            Err(FetchError::Integrity(_))
+        ));
         assert!(matches!(
             parse_candles(br#"[[1700000000,"a","b","c","d","e"]]"#, 60),
             Err(FetchError::Integrity(_))
@@ -233,13 +260,20 @@ mod tests {
     #[test]
     fn the_page_span_follows_the_venue_s_candle_cap() {
         assert_eq!(CoinbaseBackfill::page_span_secs(60), 18_000, "300 minutes");
-        assert_eq!(CoinbaseBackfill::page_span_secs(86_400), 25_920_000, "300 days");
+        assert_eq!(
+            CoinbaseBackfill::page_span_secs(86_400),
+            25_920_000,
+            "300 days"
+        );
     }
 
     #[test]
     fn the_declared_limit_sits_under_the_published_one() {
         let l = declared_rate_limit();
-        assert!(l.per_window <= 10, "Coinbase publishes 10 rps for public endpoints");
+        assert!(
+            l.per_window <= 10,
+            "Coinbase publishes 10 rps for public endpoints"
+        );
         assert_eq!(l.window_ms, 1_000);
     }
 

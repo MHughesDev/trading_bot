@@ -89,7 +89,11 @@ impl Graded {
         if self.checks.is_empty() {
             return 0.0;
         }
-        let evidenced = self.checks.iter().filter(|c| c.outcome.is_evidence()).count();
+        let evidenced = self
+            .checks
+            .iter()
+            .filter(|c| c.outcome.is_evidence())
+            .count();
         evidenced as f64 / self.checks.len() as f64
     }
 
@@ -136,7 +140,9 @@ pub fn grade(checks: Vec<CheckResult>, cfg: &QcConfig, repaired_bad_ticks: bool)
         }
     }
 
-    let missing = find(CheckKind::Coverage).and_then(|c| c.metric).unwrap_or(0.0);
+    let missing = find(CheckKind::Coverage)
+        .and_then(|c| c.metric)
+        .unwrap_or(0.0);
     if find(CheckKind::Coverage).is_some_and(|c| c.outcome == Outcome::Fail)
         || missing >= cfg.coverage.d_min_missing
     {
@@ -176,7 +182,11 @@ pub fn grade(checks: Vec<CheckResult>, cfg: &QcConfig, repaired_bad_ticks: bool)
     }
 
     // ── the remaining failures are material but not fatal ──
-    for kind in [CheckKind::StaleRuns, CheckKind::Volume, CheckKind::CrossSource] {
+    for kind in [
+        CheckKind::StaleRuns,
+        CheckKind::Volume,
+        CheckKind::CrossSource,
+    ] {
         if let Some(c) = find(kind) {
             if c.outcome == Outcome::Fail {
                 letter = letter.min(Grade::C);
@@ -289,22 +299,45 @@ mod tests {
     /// Both sides of the 0.5% B boundary.
     #[test]
     fn the_b_boundary_is_half_a_percent_of_gaps() {
-        let just_under = grade(with(CheckKind::Coverage, Outcome::Pass, 0.0049), &cfg(), false);
+        let just_under = grade(
+            with(CheckKind::Coverage, Outcome::Pass, 0.0049),
+            &cfg(),
+            false,
+        );
         assert_eq!(just_under.grade, Grade::A, "{:?}", just_under.reasons);
 
-        let at_limit = grade(with(CheckKind::Coverage, Outcome::Pass, 0.005), &cfg(), false);
-        assert_eq!(at_limit.grade, Grade::C, "0.5% is the limit, not the allowance");
+        let at_limit = grade(
+            with(CheckKind::Coverage, Outcome::Pass, 0.005),
+            &cfg(),
+            false,
+        );
+        assert_eq!(
+            at_limit.grade,
+            Grade::C,
+            "0.5% is the limit, not the allowance"
+        );
     }
 
     /// Both sides of the 5% D boundary.
     #[test]
     fn the_d_boundary_is_five_percent_of_gaps() {
-        let just_under = grade(with(CheckKind::Coverage, Outcome::Pass, 0.049), &cfg(), false);
+        let just_under = grade(
+            with(CheckKind::Coverage, Outcome::Pass, 0.049),
+            &cfg(),
+            false,
+        );
         assert_eq!(just_under.grade, Grade::C);
 
-        let at_limit = grade(with(CheckKind::Coverage, Outcome::Fail, 0.05), &cfg(), false);
+        let at_limit = grade(
+            with(CheckKind::Coverage, Outcome::Fail, 0.05),
+            &cfg(),
+            false,
+        );
         assert_eq!(at_limit.grade, Grade::D);
-        assert!(at_limit.reasons.iter().any(|r| r.contains("5.00% of expected bars missing")));
+        assert!(at_limit
+            .reasons
+            .iter()
+            .any(|r| r.contains("5.00% of expected bars missing")));
     }
 
     /// A venue that published a bad print and corrected it is a C; one that
@@ -323,7 +356,9 @@ mod tests {
         let g = grade(checks, &cfg(), true);
         assert_eq!(g.grade, Grade::D);
         assert!(
-            g.reasons.iter().any(|r| r.starts_with("D: timestamp violation")),
+            g.reasons
+                .iter()
+                .any(|r| r.starts_with("D: timestamp violation")),
             "{:?}",
             g.reasons
         );
@@ -331,7 +366,11 @@ mod tests {
 
     #[test]
     fn stale_runs_and_volume_are_material_but_not_fatal() {
-        for kind in [CheckKind::StaleRuns, CheckKind::Volume, CheckKind::CrossSource] {
+        for kind in [
+            CheckKind::StaleRuns,
+            CheckKind::Volume,
+            CheckKind::CrossSource,
+        ] {
             let g = grade(with(kind, Outcome::Fail, 1.0), &cfg(), false);
             assert_eq!(g.grade, Grade::C, "{kind:?} should be C, got {:?}", g.grade);
         }
@@ -340,9 +379,19 @@ mod tests {
     /// Survivorship is a property of the study, not of the bars.
     #[test]
     fn survivorship_flags_without_lowering_the_grade() {
-        let g = grade(with(CheckKind::Survivorship, Outcome::Fail, 1.0), &cfg(), false);
+        let g = grade(
+            with(CheckKind::Survivorship, Outcome::Fail, 1.0),
+            &cfg(),
+            false,
+        );
         assert_eq!(g.grade, Grade::A);
-        assert!(g.reasons.iter().any(|r| r.starts_with("flag: survivorship")), "{:?}", g.reasons);
+        assert!(
+            g.reasons
+                .iter()
+                .any(|r| r.starts_with("flag: survivorship")),
+            "{:?}",
+            g.reasons
+        );
     }
 
     // ── reasons ──────────────────────────────────────────────────────────────
@@ -431,7 +480,10 @@ mod tests {
 
         assert!(Grade::C.waivable());
         assert!(!Grade::D.waivable());
-        assert!(!Grade::A.waivable(), "an A needs no waiver, so asking for one is a mistake");
+        assert!(
+            !Grade::A.waivable(),
+            "an A needs no waiver, so asking for one is a mistake"
+        );
     }
 
     /// Ordering is worst-first so `min` is the conservative combinator; a bug

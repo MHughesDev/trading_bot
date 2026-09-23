@@ -84,7 +84,8 @@ fn crossover_definition(exits: &str) -> StrategyDefinition {
 /// `MaxHoldingBars` is the exit that makes entries countable: it closes on a bar
 /// count rather than on a price level, so every entry produces exactly one
 /// closed trade and nothing depends on the fixture's price path.
-const TIMED_EXIT: &str = r#"{ "mode": "rules", "rules": [{ "rule": "max_holding_bars", "bars": 4 }] }"#;
+const TIMED_EXIT: &str =
+    r#"{ "mode": "rules", "rules": [{ "rule": "max_holding_bars", "bars": 4 }] }"#;
 
 /// Up and down repeatedly, long enough that the crossings land past `ema_10`'s
 /// 50-bar warm-up.
@@ -139,8 +140,7 @@ fn simulate(def: StrategyDefinition, bars: Vec<LoadedBar>) -> backtest::sim::Det
 fn the_preview_counts_the_entries_the_simulator_takes() {
     let bars = zigzag();
     let def = crossover_definition(TIMED_EXIT);
-    let preview =
-        preview_signals(&def, &bars, Timeframe::Minutes1).expect("the preview runs");
+    let preview = preview_signals(&def, &bars, Timeframe::Minutes1).expect("the preview runs");
     let outcome = simulate(def, bars.clone());
 
     assert!(
@@ -208,8 +208,12 @@ fn the_preview_counts_the_entries_the_simulator_takes() {
 #[test]
 fn the_preview_counts_edges_not_bars_the_condition_was_true_on() {
     let bars = zigzag();
-    let preview = preview_signals(&crossover_definition(TIMED_EXIT), &bars, Timeframe::Minutes1)
-        .expect("the preview runs");
+    let preview = preview_signals(
+        &crossover_definition(TIMED_EXIT),
+        &bars,
+        Timeframe::Minutes1,
+    )
+    .expect("the preview runs");
     let long = preview
         .signals
         .iter()

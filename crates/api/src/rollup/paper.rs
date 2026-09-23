@@ -152,12 +152,14 @@ pub fn paper_rollup(engine: &PaperTradingEngine) -> RollupResponse {
                     .find(|a| a.symbol == numeraire.symbol())
                 {
                     Some(existing) => existing.gross += snap.equity,
-                    None => totals.peg_assumptions.push(domain::numeraire::PegAssumption {
-                        symbol: numeraire.symbol().to_owned(),
-                        rate: Decimal::ONE,
-                        policy: domain::numeraire::PegPolicy::AssumeParity,
-                        gross: snap.equity,
-                    }),
+                    None => totals
+                        .peg_assumptions
+                        .push(domain::numeraire::PegAssumption {
+                            symbol: numeraire.symbol().to_owned(),
+                            rate: Decimal::ONE,
+                            policy: domain::numeraire::PegPolicy::AssumeParity,
+                            gross: snap.equity,
+                        }),
                 }
             }
             if usd_convertible(snap.currency) {

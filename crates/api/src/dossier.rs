@@ -85,17 +85,25 @@ struct FromMemory {
 
 async fn from_memory(pg: &PgPool, user_id: Uuid, run_id: Uuid) -> Result<FromMemory, sqlx::Error> {
     let run = run_id.to_string();
-    let rows: Vec<(String, String, String, String, String, Option<i64>, Option<f64>, Value)> =
-        sqlx::query_as(
-            "SELECT entry_id, kind, claim, confidence, evidence_class, n, se, extra
+    let rows: Vec<(
+        String,
+        String,
+        String,
+        String,
+        String,
+        Option<i64>,
+        Option<f64>,
+        Value,
+    )> = sqlx::query_as(
+        "SELECT entry_id, kind, claim, confidence, evidence_class, n, se, extra
                FROM agent_memory.entry
               WHERE user_id = $1 AND prov_run_id = $2 AND NOT archived
               ORDER BY created_at",
-        )
-        .bind(user_id)
-        .bind(&run)
-        .fetch_all(pg)
-        .await?;
+    )
+    .bind(user_id)
+    .bind(&run)
+    .fetch_all(pg)
+    .await?;
 
     let mut out = FromMemory {
         unresolved: Vec::new(),
@@ -464,8 +472,14 @@ mod tests {
     #[test]
     fn rendering_puts_every_number_where_alignment_can_find_it() {
         let text = render(&json!({ "sharpe": 1.43, "max_drawdown": 0.12 }));
-        assert!(harness::report::claims::contains_number(&text, "1.43"), "{text}");
-        assert!(harness::report::claims::contains_number(&text, "0.12"), "{text}");
+        assert!(
+            harness::report::claims::contains_number(&text, "1.43"),
+            "{text}"
+        );
+        assert!(
+            harness::report::claims::contains_number(&text, "0.12"),
+            "{text}"
+        );
     }
 
     /// Nested and array values reach the text too. A metric buried two levels
@@ -477,8 +491,14 @@ mod tests {
             "metrics": { "sharpe": 1.43 },
             "windows": [{ "return": 0.07 }]
         }));
-        assert!(harness::report::claims::contains_number(&text, "1.43"), "{text}");
-        assert!(harness::report::claims::contains_number(&text, "0.07"), "{text}");
+        assert!(
+            harness::report::claims::contains_number(&text, "1.43"),
+            "{text}"
+        );
+        assert!(
+            harness::report::claims::contains_number(&text, "0.07"),
+            "{text}"
+        );
     }
 
     /// Nulls are dropped rather than rendered as the word. `null` is not a

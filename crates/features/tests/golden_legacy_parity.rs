@@ -74,7 +74,9 @@ fn sample_std(v: &[f64]) -> f64 {
 
 /// `closes(f)` as it was: the window newest first.
 fn window_closes(rows: &[FeatureRow], decision: usize, lookback: usize) -> Option<Vec<f64>> {
-    (0..lookback).map(|b| decision.checked_sub(b).map(|i| rows[i].close)).collect()
+    (0..lookback)
+        .map(|b| decision.checked_sub(b).map(|i| rows[i].close))
+        .collect()
 }
 
 fn legacy_ema(rows: &[FeatureRow], decision: usize, period: usize) -> Option<f64> {
@@ -126,17 +128,29 @@ fn legacy_rolling_std(rows: &[FeatureRow], decision: usize, w: usize) -> Option<
 fn legacy_zscore(rows: &[FeatureRow], decision: usize, w: usize) -> Option<f64> {
     let c = window_closes(rows, decision, w)?;
     let s = sample_std(&c);
-    Some(if s == 0.0 { f64::NAN } else { (c[0] - mean(&c)) / s })
+    Some(if s == 0.0 {
+        f64::NAN
+    } else {
+        (c[0] - mean(&c)) / s
+    })
 }
 
 fn legacy_simple_return(rows: &[FeatureRow], decision: usize, k: usize) -> Option<f64> {
     let c = window_closes(rows, decision, k + 1)?;
-    Some(if c[k] == 0.0 { f64::NAN } else { c[0] / c[k] - 1.0 })
+    Some(if c[k] == 0.0 {
+        f64::NAN
+    } else {
+        c[0] / c[k] - 1.0
+    })
 }
 
 fn legacy_log_return_1(rows: &[FeatureRow], decision: usize) -> Option<f64> {
     let c = window_closes(rows, decision, 2)?;
-    Some(if c[0] <= 0.0 || c[1] <= 0.0 { f64::NAN } else { (c[0] / c[1]).ln() })
+    Some(if c[0] <= 0.0 || c[1] <= 0.0 {
+        f64::NAN
+    } else {
+        (c[0] / c[1]).ln()
+    })
 }
 
 fn legacy_parkinson(rows: &[FeatureRow], decision: usize, w: usize) -> Option<f64> {
@@ -160,13 +174,16 @@ fn legacy_garman_klass(rows: &[FeatureRow], decision: usize, w: usize) -> Option
         if r.low <= 0.0 || r.high <= 0.0 || r.open <= 0.0 || r.close <= 0.0 {
             return Some(f64::NAN);
         }
-        sum += (0.5 * (r.high / r.low).ln().powi(2) - c1 * (r.close / r.open).ln().powi(2)).max(0.0);
+        sum +=
+            (0.5 * (r.high / r.low).ln().powi(2) - c1 * (r.close / r.open).ln().powi(2)).max(0.0);
     }
     Some((sum / w as f64).sqrt())
 }
 
 fn legacy_rel_volume(rows: &[FeatureRow], decision: usize, w: usize) -> Option<f64> {
-    let v: Vec<f64> = (0..w).map(|b| decision.checked_sub(b).map(|i| rows[i].volume)).collect::<Option<_>>()?;
+    let v: Vec<f64> = (0..w)
+        .map(|b| decision.checked_sub(b).map(|i| rows[i].volume))
+        .collect::<Option<_>>()?;
     let m = mean(&v);
     Some(if m <= 0.0 { f64::NAN } else { v[0] / m })
 }
@@ -320,7 +337,10 @@ fn every_legacy_name_computes_the_same_bits_it_did_before_the_catalogue() {
             }
         }
     }
-    assert!(compared > 90_000, "only {compared} comparisons — the fixture shrank");
+    assert!(
+        compared > 90_000,
+        "only {compared} comparisons — the fixture shrank"
+    );
 }
 
 /// Absence is part of parity: a legacy name is `None` until its declared window
@@ -333,7 +353,8 @@ fn the_first_bar_with_a_value_has_not_moved_for_any_legacy_name() {
         let f = feature(name).unwrap();
         let col = backfill_column(f.as_ref(), &rows);
         let engine_first = col.iter().position(Option::is_some);
-        let legacy_first = (0..rows.len()).find(|d| legacy(name, &rows, *d).is_some_and(f64::is_finite));
+        let legacy_first =
+            (0..rows.len()).find(|d| legacy(name, &rows, *d).is_some_and(f64::is_finite));
         assert_eq!(engine_first, legacy_first, "{name}");
     }
 }

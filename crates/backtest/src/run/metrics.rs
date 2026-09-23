@@ -4,8 +4,8 @@
 //! hooks** (`trial_count_at_eval`, `is_oos_gap`) are `None` at the Run level and
 //! are populated only by Studies (Phase 1) and gates (Phase 4).
 
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use super::result::Trade;
@@ -232,8 +232,7 @@ impl MetricSet {
         // sums (hit rate, profit factor, expectancy in R) cross into f64.
         let n_trades = input.trades.len() as i64;
         let mut wins = 0i64;
-        let (mut gains, mut losses, mut notional) =
-            (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
+        let (mut gains, mut losses, mut notional) = (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
         let (mut n_losers, mut abs_sum) = (0i64, Decimal::ZERO);
         for t in input.trades {
             if t.pnl > Decimal::ZERO {
@@ -273,7 +272,11 @@ impl MetricSet {
             } else {
                 abs_sum_f / n_trades as f64
             };
-            if unit > 0.0 { mean_net / unit } else { 0.0 }
+            if unit > 0.0 {
+                mean_net / unit
+            } else {
+                0.0
+            }
         } else {
             0.0
         };

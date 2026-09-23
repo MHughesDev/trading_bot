@@ -95,8 +95,10 @@ async fn silence_pass(pg: &sqlx::PgPool, ch_url: &str) {
             pg,
             ch_url,
             chrono::Utc::now(),
-            std::num::NonZeroU32::new(storage::clickhouse::census::REGISTRY_DEFAULT_TOLERANCE_CADENCES)
-                .expect("the registry default is positive"),
+            std::num::NonZeroU32::new(
+                storage::clickhouse::census::REGISTRY_DEFAULT_TOLERANCE_CADENCES,
+            )
+            .expect("the registry default is positive"),
         )
         .await,
     );

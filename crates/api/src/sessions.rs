@@ -537,7 +537,9 @@ impl From<ItemRow> for AgendaItem {
                 })
                 .unwrap_or_default(),
             dedupe_key: r.dedupe_key,
-            score: r.score.and_then(|s| serde_json::from_value::<Score>(s).ok()),
+            score: r
+                .score
+                .and_then(|s| serde_json::from_value::<Score>(s).ok()),
             status: status_from(&r.status, &r.status_detail),
             depends_on: r
                 .depends_on
@@ -576,8 +578,12 @@ fn status_from(word: &str, detail: &Value) -> ItemStatus {
     match word {
         "approved" => ItemStatus::Approved,
         "queued" => ItemStatus::Queued,
-        "claimed" => id("run_id").map_or(ItemStatus::Queued, |run_id| ItemStatus::Claimed { run_id }),
-        "running" => id("run_id").map_or(ItemStatus::Queued, |run_id| ItemStatus::Running { run_id }),
+        "claimed" => {
+            id("run_id").map_or(ItemStatus::Queued, |run_id| ItemStatus::Claimed { run_id })
+        }
+        "running" => {
+            id("run_id").map_or(ItemStatus::Queued, |run_id| ItemStatus::Running { run_id })
+        }
         "done" => ItemStatus::Done {
             verdict: text("verdict"),
         },
@@ -637,11 +643,7 @@ fn detail_of(status: &ItemStatus) -> Value {
 /// # Errors
 ///
 /// Propagates database errors.
-pub async fn claim(
-    pg: &PgPool,
-    item_id: Uuid,
-    run_id: Uuid,
-) -> Result<bool, SessionStoreError> {
+pub async fn claim(pg: &PgPool, item_id: Uuid, run_id: Uuid) -> Result<bool, SessionStoreError> {
     let done = sqlx::query(
         "UPDATE agenda_items
             SET status = 'claimed', status_detail = $2, claimed_at = now()
@@ -668,10 +670,11 @@ pub async fn requeue_or_expire(
     item_id: Uuid,
     why: &str,
 ) -> Result<ItemStatus, SessionStoreError> {
-    let row: Option<(i32,)> = sqlx::query_as("SELECT attempts FROM agenda_items WHERE item_id = $1")
-        .bind(item_id)
-        .fetch_optional(pg)
-        .await?;
+    let row: Option<(i32,)> =
+        sqlx::query_as("SELECT attempts FROM agenda_items WHERE item_id = $1")
+            .bind(item_id)
+            .fetch_optional(pg)
+            .await?;
     let attempts = row.map_or(0, |r| r.0) + 1;
     if attempts >= research_session::agenda::MAX_ATTEMPTS {
         let status = ItemStatus::Expired {
@@ -753,8 +756,14 @@ mod tests {
         let s = Uuid::new_v4();
         let i = Uuid::new_v4();
         assert_eq!(child_conversation_id(s, i), child_conversation_id(s, i));
-        assert_ne!(child_conversation_id(s, i), child_conversation_id(s, Uuid::new_v4()));
-        assert_ne!(child_conversation_id(s, i), child_conversation_id(Uuid::new_v4(), i));
+        assert_ne!(
+            child_conversation_id(s, i),
+            child_conversation_id(s, Uuid::new_v4())
+        );
+        assert_ne!(
+            child_conversation_id(s, i),
+            child_conversation_id(Uuid::new_v4(), i)
+        );
         // Not symmetric: swapping the two must not collide, which a naive XOR or
         // a sorted concatenation would.
         assert_ne!(child_conversation_id(s, i), child_conversation_id(i, s));
@@ -778,7 +787,10 @@ mod tests {
 
     #[test]
     fn an_unknown_status_word_reads_as_the_one_that_can_do_least() {
-        assert_eq!(status_from("something_new", &json!({})), ItemStatus::Proposed);
+        assert_eq!(
+            status_from("something_new", &json!({})),
+            ItemStatus::Proposed
+        );
         assert!(!status_from("something_new", &json!({})).is_claimable());
         // And a claimed row with no run id is not readable as claimed, because a
         // claim with no run is a claim nothing can be resumed from.

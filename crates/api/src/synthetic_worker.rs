@@ -181,7 +181,13 @@ pub fn parse_synthetic_manifest(manifest: &Value) -> Result<SyntheticSpec, JobEr
     let seed = manifest
         .get("seed")
         .and_then(Value::as_u64)
-        .ok_or_else(|| JobError::logic(ledger::TerminalReason::IntegrityRejected, "invalid_manifest", "simulate_paths needs a seed"))?;
+        .ok_or_else(|| {
+            JobError::logic(
+                ledger::TerminalReason::IntegrityRejected,
+                "invalid_manifest",
+                "simulate_paths needs a seed",
+            )
+        })?;
 
     let timeframe = manifest
         .get("tf")
@@ -193,9 +199,20 @@ pub fn parse_synthetic_manifest(manifest: &Value) -> Result<SyntheticSpec, JobEr
     let length_raw = manifest
         .get("length")
         .and_then(Value::as_u64)
-        .ok_or_else(|| JobError::logic(ledger::TerminalReason::IntegrityRejected, "invalid_manifest", "simulate_paths needs a length"))?;
-    let length = usize::try_from(length_raw)
-        .map_err(|_| JobError::logic(ledger::TerminalReason::IntegrityRejected, "invalid_manifest", "length does not fit in memory"))?;
+        .ok_or_else(|| {
+            JobError::logic(
+                ledger::TerminalReason::IntegrityRejected,
+                "invalid_manifest",
+                "simulate_paths needs a length",
+            )
+        })?;
+    let length = usize::try_from(length_raw).map_err(|_| {
+        JobError::logic(
+            ledger::TerminalReason::IntegrityRejected,
+            "invalid_manifest",
+            "length does not fit in memory",
+        )
+    })?;
 
     let start = match manifest.get("start") {
         Some(v) if !v.is_null() => {

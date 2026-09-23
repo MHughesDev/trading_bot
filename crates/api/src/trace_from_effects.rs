@@ -116,7 +116,13 @@ fn event_for(direction: &str, kind: &str, payload: &Value) -> Option<Event> {
             // outlive prompts, and `harness::trace` records a hash for the same
             // reason. What is available here is the length, which is what the
             // log kept.
-            prompt_hash: format!("bytes:{}", payload.get("prompt_bytes").and_then(Value::as_u64).unwrap_or(0)),
+            prompt_hash: format!(
+                "bytes:{}",
+                payload
+                    .get("prompt_bytes")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+            ),
             input_tokens: 0,
             output_tokens: 0,
             cached_tokens: 0,
@@ -174,8 +180,12 @@ mod tests {
                 "t:1",
                 "orchestrator",
                 1,
-                event_for("effect", "CallModel", &json!({"prompt_bytes": 4096, "step": 1}))
-                    .expect("a model call maps"),
+                event_for(
+                    "effect",
+                    "CallModel",
+                    &json!({"prompt_bytes": 4096, "step": 1}),
+                )
+                .expect("a model call maps"),
             ),
             Span::new(
                 "t",

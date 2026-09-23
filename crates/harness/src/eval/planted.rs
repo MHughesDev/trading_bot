@@ -837,7 +837,8 @@ mod tests {
         let b = PlantedCorpus::standard(7);
         let c = PlantedCorpus::standard(8);
 
-        let briefs = |p: &PlantedCorpus| serde_json::to_string(&p.briefs().collect::<Vec<_>>()).unwrap();
+        let briefs =
+            |p: &PlantedCorpus| serde_json::to_string(&p.briefs().collect::<Vec<_>>()).unwrap();
         assert_eq!(briefs(&a), briefs(&b), "same seed, same corpus");
         assert_ne!(
             briefs(&a),
@@ -1024,7 +1025,12 @@ mod tests {
                 .insert(template(case));
         }
         for (kind, templates) in &by_kind {
-            assert_eq!(templates.len(), 1, "{kind} has {} phrasings", templates.len());
+            assert_eq!(
+                templates.len(),
+                1,
+                "{kind} has {} phrasings",
+                templates.len()
+            );
         }
 
         let single = ["Edge", "Null", "Leak"];
@@ -1076,14 +1082,17 @@ mod tests {
             identifiers.push(' ');
         }
 
-        for token in ["null", "leak", "dominan", "winner", "rho", "truth", "answer", "expected"] {
+        for token in [
+            "null", "leak", "dominan", "winner", "rho", "truth", "answer", "expected",
+        ] {
             assert!(
                 !identifiers.contains(token),
                 "an agent-visible identifier contains {token:?}"
             );
         }
         assert!(
-            !identifiers.contains(&format!("{seed}")) && !identifiers.contains(&format!("{seed:x}")),
+            !identifiers.contains(&format!("{seed}"))
+                && !identifiers.contains(&format!("{seed:x}")),
             "a brief carries the seed, which reconstructs the whole key"
         );
 
@@ -1111,7 +1120,11 @@ mod tests {
         }
         let ids: std::collections::BTreeSet<&str> =
             c.cases().iter().map(PlantedCase::case_id).collect();
-        assert_eq!(ids.len(), c.len(), "case ids must be unique or scoring maps collide");
+        assert_eq!(
+            ids.len(),
+            c.len(),
+            "case ids must be unique or scoring maps collide"
+        );
     }
 
     /// The leak is not identifiable by the shape of the brief: every case

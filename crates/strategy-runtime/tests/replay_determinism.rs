@@ -106,7 +106,10 @@ fn run_once(events: Vec<WorldEvent>) -> Vec<domain::order::OrderIntent> {
     let mut all_intents = Vec::new();
     for event in &events {
         let outcome = instance.process_event(event);
-        assert!(outcome.errors.is_empty(), "replay must not hit a sizing error");
+        assert!(
+            outcome.errors.is_empty(),
+            "replay must not hit a sizing error"
+        );
         all_intents.extend(outcome.intents);
     }
     all_intents

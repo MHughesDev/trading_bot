@@ -212,13 +212,23 @@ mod tests {
     fn parent() -> RunStore {
         let mut s = RunStore::new();
         s.insert(
-            Draft::new(1, RecordKind::ToolResult, "run_backtest", Body::text("sharpe 1.4"))
-                .with_subject(Subject::instrument("BTC-USD"))
-                .with_id("experiment_id", "exp_7"),
+            Draft::new(
+                1,
+                RecordKind::ToolResult,
+                "run_backtest",
+                Body::text("sharpe 1.4"),
+            )
+            .with_subject(Subject::instrument("BTC-USD"))
+            .with_id("experiment_id", "exp_7"),
         );
         s.insert(
-            Draft::new(2, RecordKind::Finding, "record_finding", Body::text("momentum holds"))
-                .with_subject(Subject::instrument("BTC-USD")),
+            Draft::new(
+                2,
+                RecordKind::Finding,
+                "record_finding",
+                Body::text("momentum holds"),
+            )
+            .with_subject(Subject::instrument("BTC-USD")),
         );
         s.insert(Draft::new(
             3,
@@ -227,8 +237,13 @@ mod tests {
             Body::text("chose the 1h timeframe because the 1d sample was thin"),
         ));
         s.insert(
-            Draft::new(4, RecordKind::Correction, "validate_strategy", Body::text("bad name"))
-                .with_id("code", "when_names_string"),
+            Draft::new(
+                4,
+                RecordKind::Correction,
+                "validate_strategy",
+                Body::text("bad name"),
+            )
+            .with_id("code", "when_names_string"),
         );
         s.insert(Draft::new(
             5,
@@ -389,7 +404,10 @@ mod tests {
             );
         }
         let kinds: BTreeSet<RecordKind> = projected.store.all().map(|r| r.kind).collect();
-        assert!(kinds.contains(&RecordKind::Finding), "findings are the point");
+        assert!(
+            kinds.contains(&RecordKind::Finding),
+            "findings are the point"
+        );
         assert!(
             kinds.contains(&RecordKind::ToolResult),
             "the diagnostic bundle and the parent candidate arrive as tool results"
@@ -445,10 +463,16 @@ mod tests {
         let b = brief(&projected, &q, 2_000, &policy, 200);
         assert_eq!(b.projection, "worker");
         assert!(!b.shown.is_empty(), "the worker was handed nothing at all");
-        assert!(!b.manifest.is_empty(), "a brief with no index is a wall of text");
+        assert!(
+            !b.manifest.is_empty(),
+            "a brief with no index is a wall of text"
+        );
         assert_eq!(b.report.candidates, projected.store.len());
         for id in &b.shown {
-            let r = projected.store.get(*id).expect("rendered from the projection");
+            let r = projected
+                .store
+                .get(*id)
+                .expect("rendered from the projection");
             assert!(
                 CAMPAIGN_WORKER_KINDS.contains(&r.kind),
                 "{:?} was rendered into the brief",

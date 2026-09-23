@@ -162,9 +162,14 @@ mod tests {
         let mut s = RunStore::new();
         // The record the call rests on: it carries the experiment id.
         let bearing = s.insert(
-            Draft::new(2, RecordKind::ToolResult, "run_backtest", Body::text("x".repeat(200)))
-                .with_subject(Subject::instrument("BTC-USD"))
-                .with_id("experiment_id", "exp_7"),
+            Draft::new(
+                2,
+                RecordKind::ToolResult,
+                "run_backtest",
+                Body::text("x".repeat(200)),
+            )
+            .with_subject(Subject::instrument("BTC-USD"))
+            .with_id("experiment_id", "exp_7"),
         );
         // Plenty of plausible neighbours the call never used.
         let mut incidental = bearing;
@@ -244,9 +249,7 @@ mod tests {
         let by_ablation = ranking(&rows);
 
         let mut by_citation: Vec<RecordId> = rows.iter().map(|r| r.id).collect();
-        by_citation.sort_by_key(|id| {
-            std::cmp::Reverse(s.get(*id).map_or(0, |r| r.citations))
-        });
+        by_citation.sort_by_key(|id| std::cmp::Reverse(s.get(*id).map_or(0, |r| r.citations)));
 
         assert_eq!(by_ablation.first(), Some(&bearing), "{by_ablation:?}");
         assert_eq!(by_citation.first(), Some(&chatty), "{by_citation:?}");

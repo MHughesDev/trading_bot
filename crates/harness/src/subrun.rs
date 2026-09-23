@@ -245,7 +245,10 @@ mod tests {
     fn a_sub_run_may_not_delegate_past_the_profiles_depth() {
         let mut d = worker(Some("worker"));
         d.depth = 2;
-        assert_eq!(d.check(1), Err(DelegationError::TooDeep { depth: 2, max: 1 }));
+        assert_eq!(
+            d.check(1),
+            Err(DelegationError::TooDeep { depth: 2, max: 1 })
+        );
     }
 
     /// Every role names a projection or explains why it has none, and the names

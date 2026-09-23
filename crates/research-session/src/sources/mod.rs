@@ -192,7 +192,11 @@ pub struct World {
 #[must_use]
 pub fn ingest(charter: &Charter, world: &World, agenda: &mut Vec<AgendaItem>) -> Ingest {
     let mut out = Ingest::default();
-    out.absorb(memory::open_questions(charter, &world.open_questions, agenda));
+    out.absorb(memory::open_questions(
+        charter,
+        &world.open_questions,
+        agenda,
+    ));
     out.absorb(ledger::retry_conditions(
         charter,
         &world.negatives,
@@ -320,10 +324,7 @@ mod tests {
         let out = ingest(&charter, &world, &mut agenda);
         assert!(agenda.is_empty());
         assert_eq!(out.skipped.len(), 2, "{:?}", out.skipped);
-        assert!(out
-            .skipped
-            .iter()
-            .all(|s| s.why == SkipReason::OutOfScope));
+        assert!(out.skipped.iter().all(|s| s.why == SkipReason::OutOfScope));
     }
 
     #[test]
@@ -388,7 +389,10 @@ mod tests {
         };
         let mut agenda = Vec::new();
         let out = ingest(&charter, &world, &mut agenda);
-        assert!(agenda.is_empty(), "an unanswerable condition inserts nothing");
+        assert!(
+            agenda.is_empty(),
+            "an unanswerable condition inserts nothing"
+        );
         assert_eq!(out.skipped.len(), 1);
         assert_eq!(out.skipped[0].why, SkipReason::NotEvaluable);
     }

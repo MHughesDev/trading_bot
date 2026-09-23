@@ -268,13 +268,19 @@ impl AuditSink {
     ) -> Result<AuditEnvelope, AuditUnavailable> {
         let body = json!({ "action": action, "arguments": arguments });
         match self.api.post("/api/agent/audit", body).await {
-            Ok(v) => match v.get("audit_id").and_then(Value::as_str).and_then(|s| s.parse().ok()) {
+            Ok(v) => match v
+                .get("audit_id")
+                .and_then(Value::as_str)
+                .and_then(|s| s.parse().ok())
+            {
                 Some(id) => Ok(AuditEnvelope(id)),
                 None => Err(AuditUnavailable {
                     detail: json!({ "reason": "the platform opened no audit record", "response": v }),
                 }),
             },
-            Err(e) => Err(AuditUnavailable { detail: e.to_tool_error() }),
+            Err(e) => Err(AuditUnavailable {
+                detail: e.to_tool_error(),
+            }),
         }
     }
 
@@ -467,7 +473,12 @@ impl McpContext {
     /// Record what a write returned, so a repeat of it returns the same thing.
     pub fn remember(&self, tool: &str, params: &Value, result: &Value) {
         self.idempotency.record(
-            &idempotency::key(self.run_id, u32::try_from(self.trajectory.steps_taken().max(0)).unwrap_or(0), tool, params),
+            &idempotency::key(
+                self.run_id,
+                u32::try_from(self.trajectory.steps_taken().max(0)).unwrap_or(0),
+                tool,
+                params,
+            ),
             result,
         );
     }
@@ -718,8 +729,7 @@ pub(crate) async fn dispatch_step(
             });
         }
     };
-    let result =
-        dispatch_in_family(ctx, tool_name, params, None, &envelope, Some(family_id)).await;
+    let result = dispatch_in_family(ctx, tool_name, params, None, &envelope, Some(family_id)).await;
     ctx.audit.close(envelope, &result).await;
     result
 }
@@ -1003,7 +1013,9 @@ async fn dispatch_untraced(
 
         // ── The precheck reads (S-8.2) ─────────────────────────────────────────
         "find_prior_hypothesis" => tools::lifecycle::find_prior_hypothesis(&ctx.api, params).await,
-        "prior_negative_results" => tools::lifecycle::prior_negative_results(&ctx.api, params).await,
+        "prior_negative_results" => {
+            tools::lifecycle::prior_negative_results(&ctx.api, params).await
+        }
         "get_session" => tools::lifecycle::get_session(&ctx.api, params).await,
         "list_agenda" => tools::lifecycle::list_agenda(&ctx.api, params).await,
         "get_digest" => tools::lifecycle::get_digest(&ctx.api, params).await,
@@ -1166,7 +1178,10 @@ mod catalogue_tests {
         // The guard and `workflows::specs` share their predicate — a battery
         // still owed a step is in neither, so the two sides of this assertion
         // stay equal as batteries become runnable.
-        for w in tools::workflows::all().iter().filter(|w| w.is_declared_complete()) {
+        for w in tools::workflows::all()
+            .iter()
+            .filter(|w| w.is_declared_complete())
+        {
             arms.insert(w.name);
         }
 

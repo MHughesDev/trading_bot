@@ -91,10 +91,7 @@ pub enum PlatformVerdict {
     /// **nothing is halted** — but the row records what would have been, and
     /// which window took the decision (§4.3: a window nobody can see is a hole
     /// nobody can audit).
-    Suppressed {
-        lost: Vec<String>,
-        window_id: Uuid,
-    },
+    Suppressed { lost: Vec<String>, window_id: Uuid },
     /// Components are lost and no window covers it: **global halt** (§4).
     Halt { lost: Vec<String> },
 }
@@ -406,7 +403,10 @@ mod tests {
         ];
         let v = assess(&beats, &[], at(60));
         let reason = v.reason();
-        assert!(reason.contains("api") && reason.contains("jobs"), "{reason}");
+        assert!(
+            reason.contains("api") && reason.contains("jobs"),
+            "{reason}"
+        );
         assert_eq!(v.lost(), ["api".to_owned(), "jobs".to_owned()]);
     }
 

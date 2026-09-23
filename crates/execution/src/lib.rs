@@ -186,7 +186,10 @@ impl ExecutionEngine {
         let broker_order_id = match self.broker.submit(&order).await {
             Ok(id) => id,
             Err(e) => {
-                if let Err(je) = journal.set_state(idempotency_key, OrderState::Rejected).await {
+                if let Err(je) = journal
+                    .set_state(idempotency_key, OrderState::Rejected)
+                    .await
+                {
                     tracing::error!(
                         %idempotency_key, error = %je,
                         "could not record a venue rejection — the order row is left at 'accepted' \

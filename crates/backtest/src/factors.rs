@@ -102,7 +102,9 @@ pub enum FactorGap {
          over three coins is the difference between two of them wearing a factor's name"
     )]
     TooFewInstruments(usize, usize),
-    #[error("the instruments share no common timestamp grid, so there is no cross-section to sort")]
+    #[error(
+        "the instruments share no common timestamp grid, so there is no cross-section to sort"
+    )]
     NoCommonGrid,
     #[error(
         "the common grid is {0} periods and the declared windows need {1}; a factor series shorter \
@@ -227,10 +229,20 @@ impl MarketPanel {
         let mut funding = Vec::with_capacity(self.instruments.len());
         for p in &self.instruments {
             let index: BTreeMap<DateTime<Utc>, usize> =
-                p.ts.iter().copied().enumerate().map(|(i, t)| (t, i)).collect();
+                p.ts.iter()
+                    .copied()
+                    .enumerate()
+                    .map(|(i, t)| (t, i))
+                    .collect();
             let pick = |src: &[f64]| -> Vec<f64> {
                 ts.iter()
-                    .map(|t| index.get(t).and_then(|i| src.get(*i)).copied().unwrap_or(0.0))
+                    .map(|t| {
+                        index
+                            .get(t)
+                            .and_then(|i| src.get(*i))
+                            .copied()
+                            .unwrap_or(0.0)
+                    })
                     .collect()
             };
             names.push(p.instrument.clone());
@@ -278,7 +290,13 @@ pub fn build_declared(
     for name in declared {
         let returns = match name.as_str() {
             CRYPTO_MARKET => equal_weight_market(&aligned, start),
-            CRYPTO_SIZE => sorted_spread(&aligned, start, cfg.size_window, SortOn::Volume, Leg::LowMinusHigh)?,
+            CRYPTO_SIZE => sorted_spread(
+                &aligned,
+                start,
+                cfg.size_window,
+                SortOn::Volume,
+                Leg::LowMinusHigh,
+            )?,
             CRYPTO_MOMENTUM => sorted_spread(
                 &aligned,
                 start,
@@ -286,7 +304,13 @@ pub fn build_declared(
                 SortOn::TrailingReturn(cfg.momentum_skip),
                 Leg::HighMinusLow,
             )?,
-            CRYPTO_CARRY => sorted_spread(&aligned, start, cfg.carry_window, SortOn::Funding, Leg::HighMinusLow)?,
+            CRYPTO_CARRY => sorted_spread(
+                &aligned,
+                start,
+                cfg.carry_window,
+                SortOn::Funding,
+                Leg::HighMinusLow,
+            )?,
             other => return Err(FactorGap::Undefined(other.to_string())),
         };
         out.push(FactorSeries {
@@ -377,8 +401,16 @@ fn sorted_spread(
             })
             .collect();
         ranked.sort_by(|x, y| x.0.total_cmp(&y.0));
-        let low: f64 = ranked[..third].iter().map(|(_, i)| a.returns[*i][t]).sum::<f64>() / third as f64;
-        let high: f64 = ranked[n - third..].iter().map(|(_, i)| a.returns[*i][t]).sum::<f64>() / third as f64;
+        let low: f64 = ranked[..third]
+            .iter()
+            .map(|(_, i)| a.returns[*i][t])
+            .sum::<f64>()
+            / third as f64;
+        let high: f64 = ranked[n - third..]
+            .iter()
+            .map(|(_, i)| a.returns[*i][t])
+            .sum::<f64>()
+            / third as f64;
         out.push(match leg {
             Leg::HighMinusLow => high - low,
             Leg::LowMinusHigh => low - high,
@@ -414,7 +446,11 @@ pub fn align_to_strategy(
     }
     let grid: Vec<DateTime<Utc>> = common.into_iter().collect();
     let index = |ts: &[DateTime<Utc>]| -> BTreeMap<DateTime<Utc>, usize> {
-        ts.iter().copied().enumerate().map(|(i, t)| (t, i)).collect()
+        ts.iter()
+            .copied()
+            .enumerate()
+            .map(|(i, t)| (t, i))
+            .collect()
     };
     let s_idx = index(strategy_ts);
     let y: Vec<f64> = grid
@@ -467,7 +503,9 @@ mod tests {
                 };
                 if funding {
                     #[allow(clippy::cast_precision_loss)]
-                    let f: Vec<f64> = (0..n_periods).map(|k| 0.0001 * ((k + i) % 3) as f64).collect();
+                    let f: Vec<f64> = (0..n_periods)
+                        .map(|k| 0.0001 * ((k + i) % 3) as f64)
+                        .collect();
                     p.with_funding(f)
                 } else {
                     p
@@ -495,7 +533,10 @@ mod tests {
         .expect("a nine-instrument panel with funding");
         assert_eq!(built.len(), 4);
         let names: Vec<&str> = built.iter().map(|f| f.factor.as_str()).collect();
-        assert_eq!(names, vec![CRYPTO_MARKET, CRYPTO_SIZE, CRYPTO_MOMENTUM, CRYPTO_CARRY]);
+        assert_eq!(
+            names,
+            vec![CRYPTO_MARKET, CRYPTO_SIZE, CRYPTO_MOMENTUM, CRYPTO_CARRY]
+        );
         for f in &built {
             assert_eq!(f.ts.len(), f.returns.len());
             assert!(!f.returns.is_empty());
@@ -505,7 +546,10 @@ mod tests {
         // one member's series — the check that it is a *market*, not a coin.
         let market = &built[0].returns;
         for inst in &p.instruments {
-            assert_ne!(&inst.returns[inst.returns.len() - market.len()..], &market[..]);
+            assert_ne!(
+                &inst.returns[inst.returns.len() - market.len()..],
+                &market[..]
+            );
         }
     }
 
@@ -565,7 +609,10 @@ mod tests {
         let peeking = build_declared(
             &declared(&[CRYPTO_MOMENTUM]),
             &p,
-            BatteryConfig { momentum_skip: 0, ..BatteryConfig::default() },
+            BatteryConfig {
+                momentum_skip: 0,
+                ..BatteryConfig::default()
+            },
         )
         .expect("builds");
         let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;

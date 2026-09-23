@@ -180,7 +180,10 @@ mod tests {
         if !root.is_dir() {
             // Before the first template exists there is nothing to reconcile,
             // and an empty catalogue is the honest answer rather than a failure.
-            assert!(specs().is_empty(), "no templates directory, but specs exist");
+            assert!(
+                specs().is_empty(),
+                "no templates directory, but specs exist"
+            );
             return;
         }
         let mut on_disk: Vec<String> = Vec::new();

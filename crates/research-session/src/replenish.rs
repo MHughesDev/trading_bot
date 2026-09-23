@@ -73,10 +73,12 @@ pub fn on_drain(session: Uuid, charter: &Charter, agenda: &[AgendaItem], repleni
     if agenda.iter().any(|i| i.status.is_claimable()) {
         return Drain::NotDrained;
     }
-    if agenda
-        .iter()
-        .any(|i| matches!(i.status, ItemStatus::Claimed { .. } | ItemStatus::Running { .. }))
-    {
+    if agenda.iter().any(|i| {
+        matches!(
+            i.status,
+            ItemStatus::Claimed { .. } | ItemStatus::Running { .. }
+        )
+    }) {
         return Drain::Waiting {
             reason: "a child is still running; its harvest may refill the agenda",
         };
@@ -115,8 +117,13 @@ pub fn survey_item(session: Uuid, charter: &Charter) -> AgendaItem {
         .or_else(|| charter.scope.asset_classes.first())
         .cloned()
         .unwrap_or_default();
-    AgendaItem::new(session, &survey_question(charter), &subject, Source::Replenish)
-        .with_workflow(SURVEY_WORKFLOW)
+    AgendaItem::new(
+        session,
+        &survey_question(charter),
+        &subject,
+        Source::Replenish,
+    )
+    .with_workflow(SURVEY_WORKFLOW)
 }
 
 /// The question the survey is asked.
@@ -501,7 +508,9 @@ mod tests {
         }];
         let r = absorb(
             &charter(),
-            &report(vec![ProposedQuestion::new("already asked", "btc").worth(0.9)]),
+            &report(vec![
+                ProposedQuestion::new("already asked", "btc").worth(0.9)
+            ]),
             &mut agenda,
         );
         assert!(r.value_estimates.is_empty());
@@ -555,8 +564,13 @@ mod tests {
         let mut agenda = vec![done("settled")];
         let rep = report(vec![ProposedQuestion::new("a new question", "btc")]);
         let r = absorb(&charter(), &rep, &mut agenda);
-        assert_eq!(r.as_finished_run(&rep, 1.0).sources, vec![Source::Replenish]);
-        assert!(r.added().all(|i| !i.sources.contains(&Source::RefinementFollowup)));
+        assert_eq!(
+            r.as_finished_run(&rep, 1.0).sources,
+            vec![Source::Replenish]
+        );
+        assert!(r
+            .added()
+            .all(|i| !i.sources.contains(&Source::RefinementFollowup)));
     }
 
     #[test]

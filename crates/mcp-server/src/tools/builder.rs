@@ -396,10 +396,8 @@ pub async fn finalize_strategy(ctx: &McpContext, params: &Value) -> Value {
     match strategy_validator::validate(&def) {
         Ok(_) => {}
         Err(errs) => {
-            let errors: Vec<ValidationErrorItem> = errs
-                .into_iter()
-                .map(ValidationErrorItem::from)
-                .collect();
+            let errors: Vec<ValidationErrorItem> =
+                errs.into_iter().map(ValidationErrorItem::from).collect();
             return json!({ "valid": false, "errors": errors });
         }
     }

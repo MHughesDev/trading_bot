@@ -41,7 +41,12 @@ fn with_db(url: &str, db: &str) -> String {
 /// them when the developer database has been migrated — and does not when it has
 /// not, which would fail 0119's GRANTs for a reason that has nothing to do with
 /// what is being tested.
-const ROLES: &[&str] = &["app_role", "agent_role", "internal_ml_role", "backtest_role"];
+const ROLES: &[&str] = &[
+    "app_role",
+    "agent_role",
+    "internal_ml_role",
+    "backtest_role",
+];
 
 async fn scratch(name: &str) -> PgPool {
     let mut admin = PgConnection::connect(&with_db(&base_url(), "postgres"))
@@ -94,11 +99,23 @@ fn full_bundle(members: &[uuid::Uuid]) -> TrialEvidence {
     let t0 = chrono::Utc::now();
     TrialEvidence {
         cost_ladder: vec![
-            CostRung { multiple: 1.0, net_metric: 0.20 },
-            CostRung { multiple: 3.0, net_metric: 0.05 },
-            CostRung { multiple: 5.0, net_metric: -0.08 },
+            CostRung {
+                multiple: 1.0,
+                net_metric: 0.20,
+            },
+            CostRung {
+                multiple: 3.0,
+                net_metric: 0.05,
+            },
+            CostRung {
+                multiple: 5.0,
+                net_metric: -0.08,
+            },
         ],
-        capacity_base: Some(CapacityBase { base_aum_usd: 1_000_000.0, single_venue: true }),
+        capacity_base: Some(CapacityBase {
+            base_aum_usd: 1_000_000.0,
+            single_venue: true,
+        }),
         capacity_curve: members
             .iter()
             .enumerate()
@@ -259,7 +276,10 @@ async fn the_schema_refuses_evidence_that_is_not_evidence() {
     .bind(t)
     .execute(&pool)
     .await;
-    assert!(mis_shaped.is_err(), "a mis-aligned factor series must be refused");
+    assert!(
+        mis_shaped.is_err(),
+        "a mis-aligned factor series must be refused"
+    );
 
     // An *empty* one passes an `array_length` CHECK (NULL is not false) and is
     // refused here only because the constraint uses `cardinality`.
@@ -270,7 +290,10 @@ async fn the_schema_refuses_evidence_that_is_not_evidence() {
     .bind(t)
     .execute(&pool)
     .await;
-    assert!(empty.is_err(), "an empty factor series is not a factor series");
+    assert!(
+        empty.is_err(),
+        "an empty factor series is not a factor series"
+    );
 
     // A negative notional is not a notional.
     let negative = sqlx::query(
@@ -318,7 +341,10 @@ async fn the_schema_refuses_evidence_that_is_not_evidence() {
     .bind(uuid::Uuid::new_v4())
     .execute(&pool)
     .await;
-    assert!(uncounted.is_err(), "a rung must name a registered trial (INV-16)");
+    assert!(
+        uncounted.is_err(),
+        "a rung must name a registered trial (INV-16)"
+    );
 
     // And a recorded row cannot be edited afterwards.
     l.record_gate_evidence_async(
@@ -326,8 +352,14 @@ async fn the_schema_refuses_evidence_that_is_not_evidence() {
         t,
         &TrialEvidence {
             cost_ladder: vec![
-                CostRung { multiple: 1.0, net_metric: 0.1 },
-                CostRung { multiple: 4.0, net_metric: -0.1 },
+                CostRung {
+                    multiple: 1.0,
+                    net_metric: 0.1,
+                },
+                CostRung {
+                    multiple: 4.0,
+                    net_metric: -0.1,
+                },
             ],
             produced_by: "funnel".into(),
             ..TrialEvidence::default()

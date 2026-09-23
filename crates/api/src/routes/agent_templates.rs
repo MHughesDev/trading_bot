@@ -307,11 +307,7 @@ fn data_key(
 }
 
 /// Fetch the window point-in-time and write it once.
-async fn materialise(
-    clickhouse_url: &str,
-    key: &DataKey,
-    root: &Path,
-) -> anyhow::Result<PathBuf> {
+async fn materialise(clickhouse_url: &str, key: &DataKey, root: &Path) -> anyhow::Result<PathBuf> {
     let path = key.path(root);
     if path.is_file() {
         return Ok(path);
@@ -321,9 +317,10 @@ async fn materialise(
     let start = DateTime::parse_from_rfc3339(&key.start)?.with_timezone(&Utc);
     let end = DateTime::parse_from_rfc3339(&key.end)?.with_timezone(&Utc);
 
-    let timeframe =
-        <domain::payloads::bar::Timeframe as backtest::types::TimeframeExt>::from_key(&key.timeframe)
-            .ok_or_else(|| anyhow::anyhow!("unknown timeframe {:?}", key.timeframe))?;
+    let timeframe = <domain::payloads::bar::Timeframe as backtest::types::TimeframeExt>::from_key(
+        &key.timeframe,
+    )
+    .ok_or_else(|| anyhow::anyhow!("unknown timeframe {:?}", key.timeframe))?;
 
     let store = backtest::store::BarStore::connect(clickhouse_url).as_of(as_of);
     let bars = store
@@ -373,9 +370,7 @@ fn materialise_returns(
     experiment_id: Uuid,
     root: &Path,
 ) -> anyhow::Result<PathBuf> {
-    use arrow::array::{
-        ArrayRef, Float64Array, Int64Array, StringArray, TimestampNanosecondArray,
-    };
+    use arrow::array::{ArrayRef, Float64Array, Int64Array, StringArray, TimestampNanosecondArray};
     use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
     use arrow::record_batch::RecordBatch;
     use parquet::arrow::ArrowWriter;
@@ -404,9 +399,11 @@ fn materialise_returns(
             // Nanoseconds, matching the bar materialiser's `ts` column, so a
             // template joins a family to a factor series without converting
             // between two clocks.
-            stamps.push(times.get(i).map_or(0, |t| {
-                t.timestamp_nanos_opt().unwrap_or(0)
-            }));
+            stamps.push(
+                times
+                    .get(i)
+                    .map_or(0, |t| t.timestamp_nanos_opt().unwrap_or(0)),
+            );
             rets.push(*r);
         }
     }
@@ -661,8 +658,12 @@ mod tests {
         .map_err(|_| "refused")
         .expect("a window starting before the cutoff is answerable");
 
-        let end = DateTime::parse_from_rfc3339(&key.end).unwrap().with_timezone(&Utc);
-        let as_of = DateTime::parse_from_rfc3339(&key.as_of).unwrap().with_timezone(&Utc);
+        let end = DateTime::parse_from_rfc3339(&key.end)
+            .unwrap()
+            .with_timezone(&Utc);
+        let as_of = DateTime::parse_from_rfc3339(&key.as_of)
+            .unwrap()
+            .with_timezone(&Utc);
         assert!(end <= cutoff, "end {end} is past the cutoff {cutoff}");
         assert!(as_of <= cutoff, "as_of {as_of} is past the cutoff {cutoff}");
     }
@@ -689,8 +690,12 @@ mod tests {
         let older = project_with(Some(Utc::now() - Duration::days(400)));
         let newer = project_with(Some(Utc::now() - Duration::days(45)));
         let a = args("2020-01-01T00:00:00Z", "2099-01-01T00:00:00Z");
-        let ka = data_key(&a, &series(), &older).map_err(|_| "refused").unwrap();
-        let kb = data_key(&a, &series(), &newer).map_err(|_| "refused").unwrap();
+        let ka = data_key(&a, &series(), &older)
+            .map_err(|_| "refused")
+            .unwrap();
+        let kb = data_key(&a, &series(), &newer)
+            .map_err(|_| "refused")
+            .unwrap();
         assert_ne!(ka.digest(), kb.digest());
     }
 

@@ -154,7 +154,11 @@ fn match_len(pattern: &str, path: &str) -> Option<usize> {
         .map_or((pattern, false), |b| (b, true));
 
     if !body.contains('*') {
-        let hit = if anchored { path == body } else { path.starts_with(body) };
+        let hit = if anchored {
+            path == body
+        } else {
+            path.starts_with(body)
+        };
         return hit.then_some(body.len());
     }
 
@@ -166,7 +170,11 @@ fn match_len(pattern: &str, path: &str) -> Option<usize> {
             continue;
         }
         let hay = &path[pos..];
-        let found = if first { hay.starts_with(part).then_some(0) } else { hay.find(part) }?;
+        let found = if first {
+            hay.starts_with(part).then_some(0)
+        } else {
+            hay.find(part)
+        }?;
         pos += found + part.len();
         first = false;
     }
@@ -181,7 +189,8 @@ fn match_len(pattern: &str, path: &str) -> Option<usize> {
 /// Identifies the software and points at nothing. A crawler that lies about who
 /// it is has no standing to complain when it is blocked, and one that presents a
 /// browser string is pretending to be a person.
-pub const USER_AGENT: &str = "TradingBotResearchAgent/1.0 (+self-hosted; research; respects robots.txt)";
+pub const USER_AGENT: &str =
+    "TradingBotResearchAgent/1.0 (+self-hosted; research; respects robots.txt)";
 
 #[cfg(test)]
 mod tests {
@@ -206,9 +215,13 @@ mod tests {
     /// a site author expects when they write one.
     #[test]
     fn a_specific_group_overrides_the_star_group() {
-        let body = "User-agent: *\nDisallow: /\n\nUser-agent: TradingBotResearchAgent\nDisallow: /admin\n";
+        let body =
+            "User-agent: *\nDisallow: /\n\nUser-agent: TradingBotResearchAgent\nDisallow: /admin\n";
         let r = parse(body, USER_AGENT);
-        assert!(r.allows("/papers"), "the star group's blanket deny must not apply");
+        assert!(
+            r.allows("/papers"),
+            "the star group's blanket deny must not apply"
+        );
         assert!(!r.allows("/admin/x"));
     }
 
@@ -230,7 +243,10 @@ mod tests {
 
     #[test]
     fn longest_match_wins_between_allow_and_disallow() {
-        let r = parse("User-agent: *\nDisallow: /docs\nAllow: /docs/public\n", USER_AGENT);
+        let r = parse(
+            "User-agent: *\nDisallow: /docs\nAllow: /docs/public\n",
+            USER_AGENT,
+        );
         assert!(!r.allows("/docs/secret"));
         assert!(r.allows("/docs/public/a"), "the longer Allow wins");
     }
@@ -245,7 +261,10 @@ mod tests {
 
     #[test]
     fn wildcards_and_end_anchors_work() {
-        let r = parse("User-agent: *\nDisallow: /*.pdf$\nDisallow: /a/*/secret\n", USER_AGENT);
+        let r = parse(
+            "User-agent: *\nDisallow: /*.pdf$\nDisallow: /a/*/secret\n",
+            USER_AGENT,
+        );
         assert!(!r.allows("/papers/x.pdf"));
         assert!(r.allows("/papers/x.pdf.html"), "$ anchors the end");
         assert!(!r.allows("/a/b/secret"));
@@ -254,7 +273,10 @@ mod tests {
 
     #[test]
     fn comments_and_blank_lines_are_ignored() {
-        let r = parse("# comment\n\nUser-agent: *   # trailing\nDisallow: /p  # why\n", USER_AGENT);
+        let r = parse(
+            "# comment\n\nUser-agent: *   # trailing\nDisallow: /p  # why\n",
+            USER_AGENT,
+        );
         assert!(!r.allows("/p/x"));
     }
 
@@ -269,7 +291,10 @@ mod tests {
             Some(Duration::from_secs(60)),
             "a hostile delay is capped rather than obeyed"
         );
-        assert_eq!(parse("User-agent: *\nCrawl-delay: soon\n", USER_AGENT).crawl_delay(), None);
+        assert_eq!(
+            parse("User-agent: *\nCrawl-delay: soon\n", USER_AGENT).crawl_delay(),
+            None
+        );
     }
 
     #[test]
@@ -284,7 +309,10 @@ mod tests {
         assert!(USER_AGENT.contains("TradingBot"));
         assert!(USER_AGENT.contains("robots.txt"));
         for browser in ["Mozilla", "Chrome", "Safari", "Gecko"] {
-            assert!(!USER_AGENT.contains(browser), "must not impersonate a browser");
+            assert!(
+                !USER_AGENT.contains(browser),
+                "must not impersonate a browser"
+            );
         }
     }
 }

@@ -235,7 +235,9 @@ fn relevance(entry: &Entry, terms: &[String]) -> usize {
     let claim = entry.claim.to_lowercase();
     terms
         .iter()
-        .map(|t| usize::from(subject.contains(t.as_str())) * 2 + usize::from(claim.contains(t.as_str())))
+        .map(|t| {
+            usize::from(subject.contains(t.as_str())) * 2 + usize::from(claim.contains(t.as_str()))
+        })
         .sum()
 }
 
@@ -257,7 +259,9 @@ fn rank_score(entry: &Entry, terms: &[String], today: &str) -> f64 {
     if rel == 0.0 && entry.kind != Kind::UserPreference {
         return 0.0;
     }
-    let age_days = super::days_between(&entry.data_window.end, today).unwrap_or(0).max(0) as f64;
+    let age_days = super::days_between(&entry.data_window.end, today)
+        .unwrap_or(0)
+        .max(0) as f64;
     // Half-life of a year. Gentle: a finding does not stop being true on a
     // schedule, and `valid_until` already carries the hard edge.
     let recency = 0.5f64.powf(age_days / 365.0);
@@ -315,10 +319,10 @@ pub fn assemble_brief(
             continue;
         }
         let self_matches = relevance(e, &terms) > 0;
-        let peer_matches = e.conflicts_with.iter().any(|id| {
-            live.iter()
-                .any(|o| &o.id == id && relevance(o, &terms) > 0)
-        });
+        let peer_matches = e
+            .conflicts_with
+            .iter()
+            .any(|id| live.iter().any(|o| &o.id == id && relevance(o, &terms) > 0));
         if self_matches || peer_matches {
             conflicted.push(e);
         }
@@ -366,12 +370,13 @@ pub fn assemble_brief(
                     s == "global" || scopes.iter().any(|sc| sc == s)
                 }
                 // §4: "plus any whose retry_condition is now satisfied".
-                Slot::NegativeResult => {
-                    relevance(e, &terms) > 0 || retry_met(e, met_conditions)
-                }
+                Slot::NegativeResult => relevance(e, &terms) > 0 || retry_met(e, met_conditions),
                 Slot::OpenQuestion => {
                     relevance(e, &terms) > 0
-                        && e.extra.get("status").and_then(|s| s.get("closed")).is_none()
+                        && e.extra
+                            .get("status")
+                            .and_then(|s| s.get("closed"))
+                            .is_none()
                 }
                 _ => true,
             })
@@ -507,9 +512,7 @@ fn push(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::memory::{
-        Confidence, DataWindow, Direction, Entry, Kind, Measurement, Provenance,
-    };
+    use crate::memory::{Confidence, DataWindow, Direction, Entry, Kind, Measurement, Provenance};
 
     fn prov() -> Provenance {
         Provenance::new("run_1", "run_backtest", "v3", "tpl")
@@ -656,7 +659,11 @@ mod tests {
             &[],
         );
         assert_eq!(
-            brief.items.iter().filter(|i| i.slot == Slot::Conflict).count(),
+            brief
+                .items
+                .iter()
+                .filter(|i| i.slot == Slot::Conflict)
+                .count(),
             2
         );
     }
@@ -774,12 +781,27 @@ mod tests {
     fn a_deleted_preference_leaves_the_next_brief() {
         let mut p = preference("p_1", "global", "never use 1m bars");
         let with = assemble_brief(
-            "r", "anything", std::slice::from_ref(&p), 400, Detail::Lines, "2026-07-01", &[], &[],
+            "r",
+            "anything",
+            std::slice::from_ref(&p),
+            400,
+            Detail::Lines,
+            "2026-07-01",
+            &[],
+            &[],
         );
         assert_eq!(with.items.len(), 1);
         p.archived = true; // what DELETE /api/memory/preferences does
-        let without =
-            assemble_brief("r", "anything", &[p], 400, Detail::Lines, "2026-07-01", &[], &[]);
+        let without = assemble_brief(
+            "r",
+            "anything",
+            &[p],
+            400,
+            Detail::Lines,
+            "2026-07-01",
+            &[],
+            &[],
+        );
         assert!(without.items.is_empty());
     }
 
@@ -837,8 +859,7 @@ mod tests {
             &[],
             &[],
         );
-        let slots: std::collections::BTreeSet<Slot> =
-            brief.items.iter().map(|i| i.slot).collect();
+        let slots: std::collections::BTreeSet<Slot> = brief.items.iter().map(|i| i.slot).collect();
         assert!(slots.contains(&Slot::NegativeResult), "{slots:?}");
         assert!(slots.contains(&Slot::UserPreference), "{slots:?}");
         assert!(brief.elided > 0, "elision is reported, not silent");
@@ -929,11 +950,39 @@ mod tests {
     #[test]
     fn the_brief_is_byte_stable_across_two_identical_assemblies() {
         let store = vec![
-            finding("f_1", "BTC-USD 1h", "momentum survives", Confidence::Established),
-            finding("f_2", "BTC-USD 1h", "momentum survives", Confidence::Established),
+            finding(
+                "f_1",
+                "BTC-USD 1h",
+                "momentum survives",
+                Confidence::Established,
+            ),
+            finding(
+                "f_2",
+                "BTC-USD 1h",
+                "momentum survives",
+                Confidence::Established,
+            ),
         ];
-        let a = assemble_brief("r", "BTC-USD momentum", &store, 400, Detail::Lines, "2026-07-01", &[], &[]);
-        let b = assemble_brief("r", "BTC-USD momentum", &store, 400, Detail::Lines, "2026-07-01", &[], &[]);
+        let a = assemble_brief(
+            "r",
+            "BTC-USD momentum",
+            &store,
+            400,
+            Detail::Lines,
+            "2026-07-01",
+            &[],
+            &[],
+        );
+        let b = assemble_brief(
+            "r",
+            "BTC-USD momentum",
+            &store,
+            400,
+            Detail::Lines,
+            "2026-07-01",
+            &[],
+            &[],
+        );
         assert_eq!(a, b, "a reordering brief is a prompt-cache miss every step");
     }
 }

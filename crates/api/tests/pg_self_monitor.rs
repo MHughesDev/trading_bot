@@ -48,7 +48,9 @@ async fn scratch(name: &str) -> PgPool {
     pool.execute("CREATE TABLE IF NOT EXISTS public._sqlx_migrations (version BIGINT PRIMARY KEY)")
         .await
         .unwrap();
-    for m in [M0002, M0037, M0043, M0044, M0046, M0047, M0048, M0049, M0050] {
+    for m in [
+        M0002, M0037, M0043, M0044, M0046, M0047, M0048, M0049, M0050,
+    ] {
         pool.execute(m).await.expect("migration applies");
     }
     pool
@@ -78,9 +80,16 @@ async fn every_spec_signal_is_reported_and_unfitted_ones_carry_no_number() {
         "m5_calibration_ece",
         "mnar_b1",
     ] {
-        assert!(ids.contains(&expected), "§16.2 signal {expected} is missing from the report");
+        assert!(
+            ids.contains(&expected),
+            "§16.2 signal {expected} is missing from the report"
+        );
     }
-    assert_eq!(ids.len(), 11, "no signal may be added without a spec reference");
+    assert_eq!(
+        ids.len(),
+        11,
+        "no signal may be added without a spec reference"
+    );
 
     // On an empty platform nothing is in alarm and nothing is broken — but
     // nothing pretends to a value either.
@@ -98,17 +107,32 @@ async fn every_spec_signal_is_reported_and_unfitted_ones_carry_no_number() {
                 s.id,
                 s.state
             );
-            assert!(!s.detail.is_empty(), "{} must say why it has no value", s.id);
+            assert!(
+                !s.detail.is_empty(),
+                "{} must say why it has no value",
+                s.id
+            );
         }
     }
 
     // M5 and the MNAR coefficient are the two signals whose models do not exist.
-    let m5 = report.signals.iter().find(|s| s.id == "m5_calibration_ece").unwrap();
+    let m5 = report
+        .signals
+        .iter()
+        .find(|s| s.id == "m5_calibration_ece")
+        .unwrap();
     assert_eq!(m5.state, api::self_monitor::SignalState::NotFitted);
     assert!(m5.value.is_none());
-    assert_eq!(m5.threshold, Some(0.08), "the bar is shown even before there is a value");
+    assert_eq!(
+        m5.threshold,
+        Some(0.08),
+        "the bar is shown even before there is a value"
+    );
 
-    assert!(report.healthy(), "an empty platform has nothing wrong with it");
+    assert!(
+        report.healthy(),
+        "an empty platform has nothing wrong with it"
+    );
 }
 
 /// Gate verdicts are durable, carry their profile, and aggregate to a
@@ -124,8 +148,16 @@ async fn gate_verdicts_persist_and_aggregate_by_profile() {
     for (exp, g13, g14) in [("exp-pass", true, true), ("exp-fail", true, false)] {
         led.record_gate(
             tenant,
-            &GateRecord::measured("strict_v1", 13, "stationary_bootstrap", g13, 0.4, 0.0, "p05 > 0")
-                .for_experiment(exp),
+            &GateRecord::measured(
+                "strict_v1",
+                13,
+                "stationary_bootstrap",
+                g13,
+                0.4,
+                0.0,
+                "p05 > 0",
+            )
+            .for_experiment(exp),
         )
         .expect("record gate 13");
         led.record_gate(
@@ -165,8 +197,14 @@ async fn gate_verdicts_persist_and_aggregate_by_profile() {
     assert!(naked.is_err(), "significance is never naked (INV-3)");
 
     // The self-monitor reads it back.
-    let report = api::self_monitor::health(&pg, tenant).await.expect("health");
-    let s = report.signals.iter().find(|s| s.id == "gate_pass_rate").unwrap();
+    let report = api::self_monitor::health(&pg, tenant)
+        .await
+        .expect("health");
+    let s = report
+        .signals
+        .iter()
+        .find(|s| s.id == "gate_pass_rate")
+        .unwrap();
     assert!(s.state.has_value(), "{}", s.detail);
     assert!(s.detail.contains("strict_v1"));
 }
@@ -191,8 +229,14 @@ async fn paper_v1_exists_beside_strict_v1_and_cannot_authorise_capital() {
         .iter()
         .find(|r| r.get::<String, _>("profile_id") == "paper_v1")
         .expect("paper_v1 exists");
-    assert!(!paper.get::<bool, _>("authorises_capital"), "paper_v1 must not authorise capital");
-    assert_eq!(paper.get::<Option<String>, _>("supersedes").as_deref(), Some("strict_v1"));
+    assert!(
+        !paper.get::<bool, _>("authorises_capital"),
+        "paper_v1 must not authorise capital"
+    );
+    assert_eq!(
+        paper.get::<Option<String>, _>("supersedes").as_deref(),
+        Some("strict_v1")
+    );
 
     let strict = rows
         .iter()
@@ -205,7 +249,13 @@ async fn paper_v1_exists_beside_strict_v1_and_cannot_authorise_capital() {
     assert_eq!(pt["min_track_record_years"], serde_json::json!(0.0));
     assert_eq!(st["min_track_record_years"], serde_json::json!(5.0));
     // Every statistical floor P-01 is about is kept.
-    for k in ["dsr_gte", "pbo_lt", "min_independent_events", "romano_wolf_p_lt", "alpha_t_stat_gte"] {
+    for k in [
+        "dsr_gte",
+        "pbo_lt",
+        "min_independent_events",
+        "romano_wolf_p_lt",
+        "alpha_t_stat_gte",
+    ] {
         assert_eq!(pt[k], st[k], "paper_v1 must not relax {k}");
     }
 
@@ -219,7 +269,10 @@ async fn paper_v1_exists_beside_strict_v1_and_cannot_authorise_capital() {
     .unwrap();
     assert_eq!(ac.len(), 4, "two profiles x two asset classes");
     for (_, _, windows) in &ac {
-        assert!(*windows >= 2, "Gate 11 needs at least two crisis windows declared");
+        assert!(
+            *windows >= 2,
+            "Gate 11 needs at least two crisis windows declared"
+        );
     }
 }
 
@@ -243,10 +296,11 @@ async fn the_platform_seed_is_database_generated_and_unreadable_by_agents() {
     .await
     .expect("campaign insert without a seed");
 
-    let seed: i64 = sqlx::query_scalar("SELECT platform_seed FROM mlops.campaign WHERE slug='seeded'")
-        .fetch_one(&pg)
-        .await
-        .unwrap();
+    let seed: i64 =
+        sqlx::query_scalar("SELECT platform_seed FROM mlops.campaign WHERE slug='seeded'")
+            .fetch_one(&pg)
+            .await
+            .unwrap();
     assert!(seed > 0, "the database supplies a seed nobody asked for");
 
     // Two campaigns get two seeds: a seed reused across campaigns is learnable.
@@ -262,10 +316,11 @@ async fn the_platform_seed_is_database_generated_and_unreadable_by_agents() {
     .execute(&pg)
     .await
     .unwrap();
-    let seeds: Vec<i64> = sqlx::query_scalar("SELECT platform_seed FROM mlops.campaign ORDER BY slug")
-        .fetch_all(&pg)
-        .await
-        .unwrap();
+    let seeds: Vec<i64> =
+        sqlx::query_scalar("SELECT platform_seed FROM mlops.campaign ORDER BY slug")
+            .fetch_all(&pg)
+            .await
+            .unwrap();
     assert_ne!(seeds[0], seeds[1], "each campaign draws its own seed");
 
     // The grant is the mechanism: agent_role may read its campaigns and not this
@@ -286,6 +341,9 @@ async fn the_platform_seed_is_database_generated_and_unreadable_by_agents() {
         "agent_role must hold no grant on platform_seed; granted: {granted:?}"
     );
     for expected in ["slug", "hypothesis", "delta_practical", "exploration_floor"] {
-        assert!(granted.iter().any(|c| c == expected), "agent_role lost {expected}");
+        assert!(
+            granted.iter().any(|c| c == expected),
+            "agent_role lost {expected}"
+        );
     }
 }

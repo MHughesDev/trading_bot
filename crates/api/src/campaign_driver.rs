@@ -215,11 +215,10 @@ impl CampaignWorker {
         phase: CampaignPhase,
     ) -> Result<JobState, JobError> {
         loop {
-            let child = self
-                .store
-                .get(child_id)
-                .await
-                .map_err(|e| JobError::infrastructure(format!("reading child {child_id}: {e}")))?;
+            let child =
+                self.store.get(child_id).await.map_err(|e| {
+                    JobError::infrastructure(format!("reading child {child_id}: {e}"))
+                })?;
             if child.state.is_terminal() {
                 return Ok(child.state);
             }
@@ -360,7 +359,8 @@ impl CampaignWorker {
                 )));
             }
             if phase == CampaignPhase::Hypothesize {
-                self.log_proposal(tenant, campaign_id, &child.job_id).await?;
+                self.log_proposal(tenant, campaign_id, &child.job_id)
+                    .await?;
             }
             return Ok(());
         }
@@ -479,7 +479,10 @@ impl CampaignWorker {
                 JobError::logic(
                     ledger::TerminalReason::IntegrityRejected,
                     "campaign_transition_refused",
-                    format!("appending {} to campaign {campaign_id}: {e}", phase.as_str()),
+                    format!(
+                        "appending {} to campaign {campaign_id}: {e}",
+                        phase.as_str()
+                    ),
                 )
             })?;
         Ok(())
@@ -556,8 +559,10 @@ impl Worker for CampaignWorker {
                 });
             }
 
-            if let TerminationCheck::End(phase, why) = self.should_end(&tenant, campaign_id).await? {
-                self.append(&tenant, campaign_id, phase, json!({ "reason": why })).await?;
+            if let TerminationCheck::End(phase, why) = self.should_end(&tenant, campaign_id).await?
+            {
+                self.append(&tenant, campaign_id, phase, json!({ "reason": why }))
+                    .await?;
                 continue;
             }
 
@@ -571,7 +576,8 @@ impl Worker for CampaignWorker {
                     ),
                 ));
             };
-            self.advance(ctx, &tenant, campaign_id, &state, next).await?;
+            self.advance(ctx, &tenant, campaign_id, &state, next)
+                .await?;
             phases_run += 1;
         }
     }
@@ -622,7 +628,10 @@ mod tests {
             let found = CampaignPhase::ALL.iter().any(|p| {
                 p.as_str() == *phase && CampaignWorker::child_kind(*p) == Some(JobKind::ResearchRun)
             });
-            assert!(found, "ResearchRunWorker handles `{phase}`, which nothing dispatches");
+            assert!(
+                found,
+                "ResearchRunWorker handles `{phase}`, which nothing dispatches"
+            );
         }
     }
 
@@ -637,7 +646,10 @@ mod tests {
         let kind = CampaignWorker::child_kind(CampaignPhase::Hypothesize)
             .expect("HYPOTHESIZE dispatches a worker sub-run");
         assert!(!kind.counts_trial(), "{kind} charges a trial for thinking");
-        assert!(kind.logs_exploration(), "{kind} does not reach the exploration ledger");
+        assert!(
+            kind.logs_exploration(),
+            "{kind} does not reach the exploration ledger"
+        );
     }
 
     /// A campaign's compute goes through counted job kinds. If a phase's work
@@ -645,9 +657,16 @@ mod tests {
     /// counter climbing, which is the one thing the ledger exists to prevent.
     #[test]
     fn the_phases_that_look_at_out_of_sample_behaviour_count_trials() {
-        for p in [CampaignPhase::Baseline, CampaignPhase::Experiment, CampaignPhase::Gate] {
+        for p in [
+            CampaignPhase::Baseline,
+            CampaignPhase::Experiment,
+            CampaignPhase::Gate,
+        ] {
             let kind = CampaignWorker::child_kind(p).expect("has a child kind");
-            assert!(kind.counts_trial(), "{p:?} dispatches {kind}, which is not counted");
+            assert!(
+                kind.counts_trial(),
+                "{p:?} dispatches {kind}, which is not counted"
+            );
         }
     }
 }

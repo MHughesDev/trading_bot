@@ -199,7 +199,11 @@ impl GateProfile {
     /// Attach the per-asset-class gate facts loaded from
     /// `mlops.gate_profile_asset_class`.
     #[must_use]
-    pub fn with_asset_class(mut self, asset_class: impl Into<String>, gates: AssetClassGates) -> Self {
+    pub fn with_asset_class(
+        mut self,
+        asset_class: impl Into<String>,
+        gates: AssetClassGates,
+    ) -> Self {
         self.asset_classes.insert(asset_class.into(), gates);
         self
     }
@@ -332,7 +336,10 @@ mod tests {
         let paper = GateProfile::paper_v1();
 
         assert!(strict.authorises_capital());
-        assert!(!paper.authorises_capital(), "paper_v1 must never authorise capital");
+        assert!(
+            !paper.authorises_capital(),
+            "paper_v1 must never authorise capital"
+        );
         assert_eq!(paper.supersedes(), Some(STRICT_V1));
 
         // Exactly one threshold differs, and it is the calendar floor.
@@ -341,7 +348,10 @@ mod tests {
         assert!((a.min_track_record_years - 5.0).abs() < f64::EPSILON);
         let mut a_rest = a;
         a_rest.min_track_record_years = 0.0;
-        assert_eq!(a_rest, b, "paper_v1 relaxes the calendar floor and nothing else");
+        assert_eq!(
+            a_rest, b,
+            "paper_v1 relaxes the calendar floor and nothing else"
+        );
 
         // The statistical floors it keeps are the ones P-01 is about.
         assert_eq!(b.min_independent_events, 300);

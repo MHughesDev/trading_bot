@@ -63,7 +63,10 @@ impl RecordId {
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         let t = s.trim();
-        let digits = t.strip_prefix('r').or_else(|| t.strip_prefix('R')).unwrap_or(t);
+        let digits = t
+            .strip_prefix('r')
+            .or_else(|| t.strip_prefix('R'))
+            .unwrap_or(t);
         digits.parse::<u32>().ok().map(RecordId)
     }
 }
@@ -335,11 +338,7 @@ impl Record {
             .get("window")
             .or_else(|| self.ids.get("range"))
             .map_or("", String::as_str);
-        Some(format!(
-            "{}|{}|{window}",
-            self.source,
-            self.subject.label()
-        ))
+        Some(format!("{}|{}|{window}", self.source, self.subject.label()))
     }
 
     /// Whether this record is the head of its chain.
@@ -589,9 +588,11 @@ impl RunStore {
     /// **Metadata never leaves.** Subject, ids, kind and `tokens_full` stay
     /// resident, so scoring and the manifest still see the whole store and a
     /// spill is invisible except in latency and in `expand`.
-    pub fn spill(&mut self, max_resident: usize, handle: impl Fn(RecordId) -> String)
-        -> Vec<(RecordId, String, Body)>
-    {
+    pub fn spill(
+        &mut self,
+        max_resident: usize,
+        handle: impl Fn(RecordId) -> String,
+    ) -> Vec<(RecordId, String, Body)> {
         let resident: Vec<RecordId> = self
             .records
             .iter()

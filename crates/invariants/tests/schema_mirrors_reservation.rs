@@ -69,7 +69,10 @@ fn the_reservable_kinds_are_the_catalogue_kinds_minus_none() {
         !listed.iter().any(|k| k == "none"),
         "`none` is reservable, but a reservation exists because a tool declared a trial"
     );
-    assert_eq!(mcp_server_lib::gate::trial_kind_str(TrialKind::None), "none");
+    assert_eq!(
+        mcp_server_lib::gate::trial_kind_str(TrialKind::None),
+        "none"
+    );
 }
 
 /// The Rust-side list the route validates against is the same list.
@@ -140,7 +143,9 @@ fn the_workflow_check_is_the_harness_enum() {
     .expect("0133 is readable");
     let sql = statements(&sql);
 
-    let at = sql.find("workflow IN (").expect("no `workflow IN (` CHECK in 0133");
+    let at = sql
+        .find("workflow IN (")
+        .expect("no `workflow IN (` CHECK in 0133");
     let rest = &sql[at + "workflow IN (".len()..];
     let close = rest.find(')').expect("the list closes");
     let mut listed: Vec<String> = rest[..close]
@@ -171,4 +176,3 @@ fn the_workflow_check_is_the_harness_enum() {
         "0133's workflow CHECK and `ledger::reservation::WORKFLOWS` have drifted"
     );
 }
-

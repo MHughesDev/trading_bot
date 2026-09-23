@@ -101,10 +101,7 @@ pub fn validate_strategy(definition_json: &str) -> ValidationResult {
         },
         Err(errs) => ValidationResult {
             valid: false,
-            errors: errs
-                .into_iter()
-                .map(ValidationErrorItem::from)
-                .collect(),
+            errors: errs.into_iter().map(ValidationErrorItem::from).collect(),
         },
     }
 }

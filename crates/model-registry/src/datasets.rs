@@ -328,11 +328,10 @@ impl DatasetManager {
         );
         let store = self.artifacts.clone();
         let key_for_put = key.clone();
-        let artifact = tokio::task::spawn_blocking(move || {
-            store.put_blocking(&key_for_put, &parquet_bytes)
-        })
-        .await
-        .context("artifact put task panicked")??;
+        let artifact =
+            tokio::task::spawn_blocking(move || store.put_blocking(&key_for_put, &parquet_bytes))
+                .await
+                .context("artifact put task panicked")??;
         let parquet_uri = artifact.uri;
 
         self.register_specs(plan, uses_backfilled).await?;
@@ -439,7 +438,10 @@ impl DatasetManager {
                     }
                 }
                 let frame = features::build_aligned_training_frame(
-                    &kept.iter().map(backtest::warmup::bar_obs).collect::<Vec<_>>(),
+                    &kept
+                        .iter()
+                        .map(backtest::warmup::bar_obs)
+                        .collect::<Vec<_>>(),
                     &plan.features,
                     plan.horizon_bars,
                     step_ns,
@@ -870,7 +872,8 @@ impl FrameAccumulator {
             self.label.push(frame.label[r]);
             // A frame built without alignment carries no weights; an unweighted
             // row is weight 1, which is what "no weighting" means.
-            self.sample_weight.push(frame.sample_weight.get(r).copied().unwrap_or(1.0));
+            self.sample_weight
+                .push(frame.sample_weight.get(r).copied().unwrap_or(1.0));
             for (i, src) in mapping.iter().enumerate() {
                 let (v, age, q) = match src {
                     Some(idx) => (
@@ -905,7 +908,11 @@ impl FrameAccumulator {
             quality: self
                 .quality
                 .into_iter()
-                .map(|c| c.into_iter().map(|q| u32::try_from(q).unwrap_or(0)).collect())
+                .map(|c| {
+                    c.into_iter()
+                        .map(|q| u32::try_from(q).unwrap_or(0))
+                        .collect()
+                })
                 .collect(),
             label: self.label,
         }
@@ -1126,7 +1133,10 @@ mod tests {
         assert!(d.starts_with("sha256:"));
         assert_eq!(d.len(), "sha256:".len() + 64);
         let p = m_digest().await;
-        assert_eq!(p, d, "the plan carries the running image, not a placeholder");
+        assert_eq!(
+            p, d,
+            "the plan carries the running image, not a placeholder"
+        );
     }
 
     async fn m_digest() -> String {
@@ -1160,7 +1170,6 @@ mod tests {
         assert!(p.spec.feature_set_id.starts_with("sha256:"));
         assert_ne!(p.spec.feature_set_id, "fs_core_ohlcv_v3");
     }
-
 
     /// 400 bars, not 30. Features are windowed (ADR-P0-19) and produce no value
     /// until their full declared window exists — `ema_7` needs 5·7 bars, `rsi_N`

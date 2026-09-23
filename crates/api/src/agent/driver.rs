@@ -561,8 +561,11 @@ pub async fn drive(
                 ctx.append("status", json!({ "phase": "resumed" })).await;
             }
             Hold::Stop(reason) => {
-                ctx.append("status", json!({ "phase": "stopping", "reason": reason.as_str() }))
-                    .await;
+                ctx.append(
+                    "status",
+                    json!({ "phase": "stopping", "reason": reason.as_str() }),
+                )
+                .await;
                 ctx.finish(
                     reason.terminal_status(),
                     reason.error_text(),
@@ -681,7 +684,9 @@ pub async fn drive(
                     Ok(_) => json!({ "finished": true }),
                     Err(correction) => json!({ "error": correction }),
                 };
-                mcp_ctx.record_step(FINISH_TASK, &call.arguments, &recorded, 0, None).await;
+                mcp_ctx
+                    .record_step(FINISH_TASK, &call.arguments, &recorded, 0, None)
+                    .await;
                 match parsed {
                     Ok(f) => {
                         ctx.append("final", json!({ "content": f.summary })).await;
@@ -784,7 +789,15 @@ pub async fn drive(
 
             if inline {
                 // Answered by the driver itself, so dispatch never saw it.
-                mcp_ctx.record_step(&call.name, &call.arguments, &result, started.elapsed().as_millis(), None).await;
+                mcp_ctx
+                    .record_step(
+                        &call.name,
+                        &call.arguments,
+                        &result,
+                        started.elapsed().as_millis(),
+                        None,
+                    )
+                    .await;
             }
             let is_error = result.get("error").is_some();
             let text = truncate_result(&result);

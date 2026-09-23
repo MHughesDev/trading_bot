@@ -15,12 +15,12 @@ pub mod store;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use ledger::{DispatchContext, TrialLedger};
 use crate::run::RunDispatch;
 use crate::run::{
     Backtest, DataSlice, RunConfig, RunExecutor, RunId, RunResult, RunStatus, RunStore,
 };
 use crate::study::{StudyConfig, StudyConfigError, StudyEngine, StudyKind, StudyResult, VarySpec};
+use ledger::{DispatchContext, TrialLedger};
 
 pub use store::{ExperimentStore, InMemoryExperimentStore};
 
@@ -333,7 +333,9 @@ impl Experiment {
             _ => None,
         };
         if let Some(slot) = slot {
-            *slot = Some(slot.map_or(result.distribution.median, |m: f64| m.max(result.distribution.median)));
+            *slot = Some(slot.map_or(result.distribution.median, |m: f64| {
+                m.max(result.distribution.median)
+            }));
         }
         self.updated = Utc::now();
     }
@@ -404,17 +406,32 @@ impl Experiment {
             .ledger()
             .claim_sealed_holdout(&ctx.tenant_id, &lineage, &by)
             .map_err(|e| ExperimentError::LedgerRefused(e.to_string()))?;
-        if let ledger::holdout::HoldoutClaim::Repeat { first_trial, called_at, result } = claim {
-            let first: RunResult = serde_json::from_value(result)
-                .map_err(|e| ExperimentError::LedgerRefused(format!("the recorded holdout result is unreadable: {e}")))?;
-            self.holdout.access_log.push(VaultAccess { when: Utc::now(), run_id: first.run_id.clone(), by });
+        if let ledger::holdout::HoldoutClaim::Repeat {
+            first_trial,
+            called_at,
+            result,
+        } = claim
+        {
+            let first: RunResult = serde_json::from_value(result).map_err(|e| {
+                ExperimentError::LedgerRefused(format!(
+                    "the recorded holdout result is unreadable: {e}"
+                ))
+            })?;
+            self.holdout.access_log.push(VaultAccess {
+                when: Utc::now(),
+                run_id: first.run_id.clone(),
+                by,
+            });
             self.holdout.spent = true;
             self.updated = Utc::now();
             let notice = format!(
                 "the sealed holdout for lineage '{lineage}' was already evaluated at {called_at} (trial {first_trial}); \
                  this is that result, not a new evaluation"
             );
-            return Ok(VaultOutcome { result: first, notice: Some(notice) });
+            return Ok(VaultOutcome {
+                result: first,
+                notice: Some(notice),
+            });
         }
 
         // The single legitimate holdout access: the candidate config evaluated
@@ -459,12 +476,20 @@ impl Experiment {
         let trial = bt
             .ledger()
             .prior_trial(&ctx.tenant_id, result.run_id.as_str())
-            .ok_or_else(|| ExperimentError::LedgerRefused("the vault run has no settled trial to record".into()))?;
-        let stored = serde_json::to_value(&result).map_err(|e| ExperimentError::LedgerRefused(e.to_string()))?;
+            .ok_or_else(|| {
+                ExperimentError::LedgerRefused(
+                    "the vault run has no settled trial to record".into(),
+                )
+            })?;
+        let stored = serde_json::to_value(&result)
+            .map_err(|e| ExperimentError::LedgerRefused(e.to_string()))?;
         bt.ledger()
             .record_sealed_holdout(&ctx.tenant_id, &lineage, trial, &stored)
             .map_err(|e| ExperimentError::LedgerRefused(e.to_string()))?;
-        Ok(VaultOutcome { result, notice: None })
+        Ok(VaultOutcome {
+            result,
+            notice: None,
+        })
     }
 
     /// True if any slice the Study would evaluate intersects the holdout tail.
@@ -515,7 +540,9 @@ mod tests {
         Backtest, ClosureExecutor, ComputeCost, EvalResolution, InMemoryRunStore, MetricKind,
         ParamMap, RunConfig, RunConfigBuilder, UnsafeFlags, ENGINE_VERSION,
     };
-    use crate::study::{SelectionRule, StudyBudget, StudyConfig, StudyKind, StudyVerdict, VarySpec};
+    use crate::study::{
+        SelectionRule, StudyBudget, StudyConfig, StudyKind, StudyVerdict, VarySpec,
+    };
     use chrono::TimeZone;
 
     fn research_slice() -> DataSlice {
@@ -587,7 +614,11 @@ mod tests {
     #[test]
     fn running_studies_auto_increments_monotonically() {
         let mut e = experiment();
-        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
+        let bt = Backtest::new(
+            InMemoryRunStore::new(),
+            ok_executor(),
+            InMemoryLedger::new(),
+        );
         // Each sweep has 10 members → +10 per study.
         let mut s1 = sweep_over(research_slice());
         s1.study_id = "s1".into();
@@ -606,7 +637,11 @@ mod tests {
     #[test]
     fn research_study_touching_holdout_is_refused() {
         let mut e = experiment();
-        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
+        let bt = Backtest::new(
+            InMemoryRunStore::new(),
+            ok_executor(),
+            InMemoryLedger::new(),
+        );
         // A sweep whose base slice IS the holdout tail.
         let bad = sweep_over(holdout_slice());
         assert_eq!(
@@ -619,7 +654,11 @@ mod tests {
     #[test]
     fn vault_requires_gate3_then_runs_once_and_validates() {
         let mut e = experiment();
-        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
+        let bt = Backtest::new(
+            InMemoryRunStore::new(),
+            ok_executor(),
+            InMemoryLedger::new(),
+        );
         let candidate = base_config(research_slice());
 
         // Before Gate 3: refused.
@@ -629,7 +668,10 @@ mod tests {
         );
 
         e.mark_gate3_passed();
-        let r = e.run_vault(&candidate, &bt, &ctx(), "alice").unwrap().result;
+        let r = e
+            .run_vault(&candidate, &bt, &ctx(), "alice")
+            .unwrap()
+            .result;
         assert_eq!(r.status, RunStatus::Ok);
         assert!(e.holdout.spent);
         assert_eq!(e.holdout.access_log.len(), 1);
@@ -648,7 +690,11 @@ mod tests {
     /// nothing, and the request is logged.
     #[test]
     fn a_lineage_evaluates_its_sealed_holdout_once() {
-        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
+        let bt = Backtest::new(
+            InMemoryRunStore::new(),
+            ok_executor(),
+            InMemoryLedger::new(),
+        );
         let candidate = base_config(research_slice());
         let mut first = experiment();
         first.mark_gate3_passed();
@@ -661,19 +707,37 @@ mod tests {
         second.mark_gate3_passed();
         let b = second.run_vault(&candidate, &bt, &ctx(), "bob").unwrap();
         assert_eq!(b.result, a.result, "the first result, not a new evaluation");
-        assert!(b.notice.as_deref().is_some_and(|n| n.contains("already evaluated")));
-        assert_eq!(bt.ledger().trial_count("tenant-test"), trials_after_first, "nothing ran");
+        assert!(b
+            .notice
+            .as_deref()
+            .is_some_and(|n| n.contains("already evaluated")));
+        assert_eq!(
+            bt.ledger().trial_count("tenant-test"),
+            trials_after_first,
+            "nothing ran"
+        );
         assert!(second.holdout.spent);
-        assert_eq!(bt.ledger().holdout_attempts("tenant-test", &first.strategy_family), 2);
+        assert_eq!(
+            bt.ledger()
+                .holdout_attempts("tenant-test", &first.strategy_family),
+            2
+        );
     }
 
     #[test]
     fn vault_runs_over_the_holdout_slice() {
         let mut e = experiment();
-        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
+        let bt = Backtest::new(
+            InMemoryRunStore::new(),
+            ok_executor(),
+            InMemoryLedger::new(),
+        );
         let candidate = base_config(research_slice());
         e.mark_gate3_passed();
-        let r = e.run_vault(&candidate, &bt, &ctx(), "alice").unwrap().result;
+        let r = e
+            .run_vault(&candidate, &bt, &ctx(), "alice")
+            .unwrap()
+            .result;
         // The stored run's config slice must be the holdout, not the research slice.
         let stored = bt.store().get(&r.run_id).unwrap();
         assert_eq!(stored.run_id, r.run_id);
@@ -716,7 +780,11 @@ mod tests {
     fn lifecycle_is_one_directional_through_validation() {
         let mut e = experiment();
         e.mark_gate3_passed();
-        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
+        let bt = Backtest::new(
+            InMemoryRunStore::new(),
+            ok_executor(),
+            InMemoryLedger::new(),
+        );
         e.run_vault(&base_config(research_slice()), &bt, &ctx(), "a")
             .unwrap();
         assert_eq!(e.state, ExperimentState::Validated);
@@ -734,7 +802,11 @@ mod tests {
     fn validated_state_forbids_research_studies() {
         let mut e = experiment();
         e.mark_gate3_passed();
-        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
+        let bt = Backtest::new(
+            InMemoryRunStore::new(),
+            ok_executor(),
+            InMemoryLedger::new(),
+        );
         e.run_vault(&base_config(research_slice()), &bt, &ctx(), "a")
             .unwrap();
         let s = sweep_over(research_slice());
@@ -753,8 +825,13 @@ mod tests {
         // it only adds. "Starting over" is a NEW Experiment with its own zeroed
         // counter — a fresh struct — never a reset of this one.
         let mut e = experiment();
-        let bt = Backtest::new(InMemoryRunStore::new(), ok_executor(), InMemoryLedger::new());
-        e.run_study(&sweep_over(research_slice()), &bt, &ctx()).unwrap();
+        let bt = Backtest::new(
+            InMemoryRunStore::new(),
+            ok_executor(),
+            InMemoryLedger::new(),
+        );
+        e.run_study(&sweep_over(research_slice()), &bt, &ctx())
+            .unwrap();
         let after = e.trial_counter();
         assert_eq!(after, 10);
         let fresh = Experiment::new("exp-2", "ema-family", holdout_slice(), "null:block_perm");
@@ -797,18 +874,29 @@ mod tests {
     fn the_cv_wf_gap_is_none_until_both_kinds_have_run() {
         let mut e = experiment();
         assert_eq!(e.cv_wf_gap(), None);
-        e.record_study_result("wf".into(), StudyKind::WalkForward, &result_with_median(1.0));
+        e.record_study_result(
+            "wf".into(),
+            StudyKind::WalkForward,
+            &result_with_median(1.0),
+        );
         assert_eq!(e.cv_wf_gap(), None, "one kind is not a comparison");
         assert!(!e.suspect_overlapping_label_leakage());
         e.record_study_result("cv".into(), StudyKind::Cpcv, &result_with_median(1.4));
         assert_eq!(e.cv_wf_gap(), Some(1.4 - 1.0));
-        assert!(!e.suspect_overlapping_label_leakage(), "0.4 is under the limit");
+        assert!(
+            !e.suspect_overlapping_label_leakage(),
+            "0.4 is under the limit"
+        );
     }
 
     #[test]
     fn a_cross_validated_result_far_above_walk_forward_is_flagged() {
         let mut e = experiment();
-        e.record_study_result("wf".into(), StudyKind::WalkForward, &result_with_median(0.4));
+        e.record_study_result(
+            "wf".into(),
+            StudyKind::WalkForward,
+            &result_with_median(0.4),
+        );
         e.record_study_result("cv".into(), StudyKind::Cpcv, &result_with_median(2.0));
         assert!(e.suspect_overlapping_label_leakage());
         // A flag, not a block: nothing about the Experiment's state changed.
@@ -820,7 +908,11 @@ mod tests {
     #[test]
     fn the_gap_uses_the_best_result_of_each_family() {
         let mut e = experiment();
-        e.record_study_result("wf".into(), StudyKind::WalkForward, &result_with_median(0.4));
+        e.record_study_result(
+            "wf".into(),
+            StudyKind::WalkForward,
+            &result_with_median(0.4),
+        );
         e.record_study_result("cv1".into(), StudyKind::Cpcv, &result_with_median(0.5));
         e.record_study_result("cv2".into(), StudyKind::NestedCv, &result_with_median(2.0));
         assert_eq!(e.cv_wf_gap(), Some(2.0 - 0.4));

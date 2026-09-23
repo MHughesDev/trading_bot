@@ -187,7 +187,10 @@ struct LabelSource {
 
 impl LabelSource {
     fn none(reason: impl Into<String>) -> Self {
-        Self { labels: None, reason: reason.into() }
+        Self {
+            labels: None,
+            reason: reason.into(),
+        }
     }
 }
 
@@ -401,8 +404,11 @@ impl Worker for GateAdvanceWorker {
         // chose, which is §12.7's gate-hacking in its purest form. Everything
         // this worker evaluates, it computes (ADR-P2-31).
         let length = length_inputs(&timestamps, &returns, n_eff);
-        let strategy_series: Vec<(chrono::DateTime<chrono::Utc>, f64)> =
-            timestamps.iter().copied().zip(returns.iter().copied()).collect();
+        let strategy_series: Vec<(chrono::DateTime<chrono::Utc>, f64)> = timestamps
+            .iter()
+            .copied()
+            .zip(returns.iter().copied())
+            .collect();
 
         let family_rows = led
             .experiment_family_async(&tenant, &req.experiment_id)
@@ -418,14 +424,15 @@ impl Worker for GateAdvanceWorker {
             .latest_leakage_run_async(&tenant, &req.dataset_id)
             .await
             .map_err(infra("the leakage run"))?
-            .map(|(subject, checks_run, blocking_count, flag_count, finished_at)| LeakageRun {
-                subject,
-                checks_run,
-                blocking_count,
-                flag_count,
-                finished_at,
-            });
-
+            .map(
+                |(subject, checks_run, blocking_count, flag_count, finished_at)| LeakageRun {
+                    subject,
+                    checks_run,
+                    blocking_count,
+                    flag_count,
+                    finished_at,
+                },
+            );
 
         // The seed the bootstrap draws from is the platform's, not the
         // candidate's (§12.7). Falling back to the trial's own id when the
@@ -532,31 +539,30 @@ impl Worker for GateAdvanceWorker {
         // Gate 12. The concentration half refuses to cross a numeraire; when it
         // does, the pairs are empty and the numeraire is `None`, and the gate
         // reports that rather than summing two units together.
-        let (numeraire, per_instrument_pnl) =
-            match ledger::evidence::per_instrument_pnl(&shaped.instrument_pnl) {
-                Ok((unit, pairs)) => (Some(unit), pairs),
-                Err(why) => {
-                    if !shaped.instrument_pnl.is_empty() {
-                        tracing::info!(trial = %req.trial_id, reason = %why, "gate 12 concentration");
-                    }
-                    (None, Vec::new())
+        let (numeraire, per_instrument_pnl) = match ledger::evidence::per_instrument_pnl(
+            &shaped.instrument_pnl,
+        ) {
+            Ok((unit, pairs)) => (Some(unit), pairs),
+            Err(why) => {
+                if !shaped.instrument_pnl.is_empty() {
+                    tracing::info!(trial = %req.trial_id, reason = %why, "gate 12 concentration");
                 }
-            };
+                (None, Vec::new())
+            }
+        };
         let neighbourhood: Vec<(f64, f64)> = shaped
             .neighbourhood
             .iter()
             .map(|p| (p.param_value, p.metric))
             .collect();
-        let perturbation = shaped
-            .neighbourhood
-            .iter()
-            .find(|p| p.is_center)
-            .map(|c| backtest::gates::PerturbationInputs {
+        let perturbation = shaped.neighbourhood.iter().find(|p| p.is_center).map(|c| {
+            backtest::gates::PerturbationInputs {
                 center: c.metric,
                 neighbourhood: &neighbourhood,
                 per_instrument_pnl: &per_instrument_pnl,
                 numeraire: numeraire.as_deref(),
-            });
+            }
+        });
 
         // Gate 10. The stored factor series, aligned period-for-period to the
         // strategy's **own stored net return series** — the same series N_eff and
@@ -571,22 +577,25 @@ impl Worker for GateAdvanceWorker {
             &shaped.factors,
             MIN_ATTRIBUTION_PERIODS,
         );
-        let factors = aligned.as_ref().map(|(net, battery)| backtest::gates::evaluators::FactorInputs {
-            strategy_net: net,
-            factors: battery,
-            // Which factor is "the market" is a property of the declared
-            // battery, not of this worker. The profile names it first; falling
-            // back to the crypto market factor only when the profile declared
-            // nothing, in which case Gate 10 is already inconclusive.
-            market_factor: profile
-                .asset_class(&req.asset_class)
-                .and_then(|d| d.factor_battery.first().cloned())
-                .unwrap_or_else(|| backtest::factors::CRYPTO_MARKET.to_string()),
-            // Neutrality is a claim a strategy makes, and nothing in this
-            // platform records one yet. An unmade claim is not checked — which
-            // is the spec's rule, not a leniency (§12.3 Gate 10).
-            neutral_claim: false,
-        });
+        let factors =
+            aligned
+                .as_ref()
+                .map(|(net, battery)| backtest::gates::evaluators::FactorInputs {
+                    strategy_net: net,
+                    factors: battery,
+                    // Which factor is "the market" is a property of the declared
+                    // battery, not of this worker. The profile names it first; falling
+                    // back to the crypto market factor only when the profile declared
+                    // nothing, in which case Gate 10 is already inconclusive.
+                    market_factor: profile
+                        .asset_class(&req.asset_class)
+                        .and_then(|d| d.factor_battery.first().cloned())
+                        .unwrap_or_else(|| backtest::factors::CRYPTO_MARKET.to_string()),
+                    // Neutrality is a claim a strategy makes, and nothing in this
+                    // platform records one yet. An unmade claim is not checked — which
+                    // is the spec's rule, not a leniency (§12.3 Gate 10).
+                    neutral_claim: false,
+                });
 
         ctx.progress(Progress {
             pct: Some(0.5),
@@ -648,8 +657,7 @@ impl Worker for GateAdvanceWorker {
         let ids = record_stack(&led, &tenant, &profile, &evidence, &verdict)
             .map_err(|e| JobError::infrastructure(format!("recording the gate stack: {e}")))?;
 
-        let inconclusive: Vec<i32> =
-            verdict.inconclusive().iter().map(|o| o.gate_no).collect();
+        let inconclusive: Vec<i32> = verdict.inconclusive().iter().map(|o| o.gate_no).collect();
         let passed = verdict.outcomes.iter().filter(|o| o.passed).count();
 
         Ok(JobOutput {
@@ -657,7 +665,9 @@ impl Worker for GateAdvanceWorker {
                 "{passed} of {GATE_COUNT} gates passed under {} ({} could not be evaluated){}",
                 profile.profile_id(),
                 inconclusive.len(),
-                verdict.blocked_at.map_or(String::new(), |g| format!("; blocked at gate {g}")),
+                verdict
+                    .blocked_at
+                    .map_or(String::new(), |g| format!("; blocked at gate {g}")),
             )),
             result: json!({
                 "experiment_id": req.experiment_id,
@@ -731,7 +741,11 @@ fn cost_ladder(
 /// an independent observation of anything — it is the strategy not trading — and
 /// counting flat bars toward the event floor is how a 5-minute backtest claims
 /// 300 events in a week.
-#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 fn length_inputs(
     timestamps: &[chrono::DateTime<chrono::Utc>],
     returns: &[f64],
@@ -845,12 +859,21 @@ mod tests {
     fn stored_cost_rungs_beat_the_reconstructed_pair() {
         let mut shaped = ledger::evidence::TrialEvidence::produced_by("funnel");
         shaped.cost_ladder = vec![
-            ledger::evidence::CostRung { multiple: 1.0, net_metric: 0.20 },
-            ledger::evidence::CostRung { multiple: 4.0, net_metric: -0.05 },
+            ledger::evidence::CostRung {
+                multiple: 1.0,
+                net_metric: 0.20,
+            },
+            ledger::evidence::CostRung {
+                multiple: 4.0,
+                net_metric: -0.05,
+            },
         ];
         let ladder = cost_ladder(&shaped, Some(9.0));
         assert_eq!(ladder.len(), 2);
-        assert!((ladder[1].multiple - 4.0).abs() < f64::EPSILON, "not the scalar's 9x");
+        assert!(
+            (ladder[1].multiple - 4.0).abs() < f64::EPSILON,
+            "not the scalar's 9x"
+        );
     }
 
     /// The adversarial case for the fallback. A breakeven at or below 1x says
@@ -882,13 +905,21 @@ mod tests {
             &GateProfile::strict_v1(),
             &cost_ladder(&shaped, None),
         );
-        assert!(verdict.inconclusive && !verdict.passed, "{}", verdict.detail);
+        assert!(
+            verdict.inconclusive && !verdict.passed,
+            "{}",
+            verdict.detail
+        );
     }
 
     #[test]
     fn the_bootstrap_seed_is_deterministic_and_not_a_parameter() {
         let id = Uuid::new_v4();
-        assert_eq!(trial_seed(id), trial_seed(id), "a re-evaluation must reproduce");
+        assert_eq!(
+            trial_seed(id),
+            trial_seed(id),
+            "a re-evaluation must reproduce"
+        );
         assert_ne!(trial_seed(id), trial_seed(Uuid::new_v4()));
     }
 }
@@ -911,7 +942,10 @@ mod derivation_tests {
     fn no_series_means_no_measurement_rather_than_a_default() {
         assert!(length_inputs(&[], &[], 10.0).is_none());
         let (ts, _) = daily(5, 0.01);
-        assert!(length_inputs(&ts, &[0.01], 10.0).is_none(), "mismatched lengths");
+        assert!(
+            length_inputs(&ts, &[0.01], 10.0).is_none(),
+            "mismatched lengths"
+        );
     }
 
     /// A constant series has no Sharpe. Returning one would be a division by a
@@ -927,8 +961,15 @@ mod derivation_tests {
     fn the_span_is_measured_not_assumed() {
         let (ts, rs) = daily(731, 0.001);
         let l = length_inputs(&ts, &rs, 42.0).expect("measurable");
-        assert!((l.years - 2.0).abs() < 0.02, "two years of daily bars: {}", l.years);
-        assert!((l.n_eff - 42.0).abs() < f64::EPSILON, "N_eff is the platform's, not derived");
+        assert!(
+            (l.years - 2.0).abs() < 0.02,
+            "two years of daily bars: {}",
+            l.years
+        );
+        assert!(
+            (l.n_eff - 42.0).abs() < f64::EPSILON,
+            "N_eff is the platform's, not derived"
+        );
     }
 
     /// Annualizing from the observed sampling interval rather than assuming 252:
@@ -938,10 +979,14 @@ mod derivation_tests {
     fn the_sharpe_is_annualized_from_the_observed_interval() {
         let start = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
         let n = 2_000;
-        let rs: Vec<f64> = (0..n).map(|i| if i % 2 == 0 { 0.001 } else { 0.0005 }).collect();
+        let rs: Vec<f64> = (0..n)
+            .map(|i| if i % 2 == 0 { 0.001 } else { 0.0005 })
+            .collect();
 
         let daily_ts: Vec<_> = (0..n).map(|i| start + Duration::days(i as i64)).collect();
-        let minute_ts: Vec<_> = (0..n).map(|i| start + Duration::minutes(i as i64)).collect();
+        let minute_ts: Vec<_> = (0..n)
+            .map(|i| start + Duration::minutes(i as i64))
+            .collect();
 
         let d = length_inputs(&daily_ts, &rs, 10.0).unwrap();
         let m = length_inputs(&minute_ts, &rs, 10.0).unwrap();
@@ -960,7 +1005,9 @@ mod derivation_tests {
         let start = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
         let ts: Vec<_> = (0..1_000).map(|i| start + Duration::days(i)).collect();
         // Ten real moves, the rest flat.
-        let rs: Vec<f64> = (0..1_000).map(|i| if i % 100 == 0 { 0.02 } else { 0.0 }).collect();
+        let rs: Vec<f64> = (0..1_000)
+            .map(|i| if i % 100 == 0 { 0.02 } else { 0.0 })
+            .collect();
         let l = length_inputs(&ts, &rs, 10.0).expect("measurable");
         assert_eq!(l.independent_events, 10, "only the moves count");
     }

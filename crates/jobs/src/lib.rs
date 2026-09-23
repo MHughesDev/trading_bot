@@ -15,11 +15,11 @@
 //! 3. **Leases, not liveness assumptions** (JB-04). A worker holds a lease it must
 //!    renew; if it dies, the job returns to the queue rather than vanishing.
 
+pub mod artifacts;
 pub mod checkpoint;
 pub mod kinds;
-pub mod models;
-pub mod artifacts;
 pub mod manifest;
+pub mod models;
 pub mod store;
 pub mod types;
 pub mod worker;

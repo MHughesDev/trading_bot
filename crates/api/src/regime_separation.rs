@@ -193,8 +193,12 @@ pub fn separate(series: &[LabelledSeries], periods_per_year: f64, seed: u64) -> 
             continue;
         }
         let mean = s.points.iter().map(|(_, r)| r).sum::<f64>() / n as f64;
-        let var =
-            s.points.iter().map(|(_, r)| (r - mean).powi(2)).sum::<f64>() / (n as f64 - 1.0);
+        let var = s
+            .points
+            .iter()
+            .map(|(_, r)| (r - mean).powi(2))
+            .sum::<f64>()
+            / (n as f64 - 1.0);
         let sd = var.sqrt();
         if !(sd.is_finite() && sd > 0.0) {
             continue;
@@ -203,11 +207,15 @@ pub fn separate(series: &[LabelledSeries], periods_per_year: f64, seed: u64) -> 
     }
 
     let labelled_count: usize = standardized.iter().map(Vec::len).sum();
-    let pooled: Vec<(RegimeLabel, f64)> =
-        standardized.iter().flat_map(|s| s.iter().copied()).collect();
+    let pooled: Vec<(RegimeLabel, f64)> = standardized
+        .iter()
+        .flat_map(|s| s.iter().copied())
+        .collect();
     let per_regime = regime_stats(&pooled, periods_per_year);
-    let usable: Vec<&RegimeStats> =
-        per_regime.iter().filter(|s| s.n >= MIN_OBS_PER_REGIME).collect();
+    let usable: Vec<&RegimeStats> = per_regime
+        .iter()
+        .filter(|s| s.n >= MIN_OBS_PER_REGIME)
+        .collect();
     let regimes_present = per_regime.len();
 
     if usable.len() < MIN_REGIMES {
@@ -225,11 +233,20 @@ pub fn separate(series: &[LabelledSeries], periods_per_year: f64, seed: u64) -> 
         );
     }
 
-    let hi = usable.iter().map(|s| s.mean).fold(f64::NEG_INFINITY, f64::max);
+    let hi = usable
+        .iter()
+        .map(|s| s.mean)
+        .fold(f64::NEG_INFINITY, f64::max);
     let lo = usable.iter().map(|s| s.mean).fold(f64::INFINITY, f64::min);
     let spread = hi - lo;
-    let sharpe_hi = usable.iter().map(|s| s.sharpe).fold(f64::NEG_INFINITY, f64::max);
-    let sharpe_lo = usable.iter().map(|s| s.sharpe).fold(f64::INFINITY, f64::min);
+    let sharpe_hi = usable
+        .iter()
+        .map(|s| s.sharpe)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let sharpe_lo = usable
+        .iter()
+        .map(|s| s.sharpe)
+        .fold(f64::INFINITY, f64::min);
 
     let (h, kruskal_p) = kruskal_wallis(&pooled);
 
@@ -252,7 +269,10 @@ pub fn separate(series: &[LabelledSeries], periods_per_year: f64, seed: u64) -> 
         if usable.len() < MIN_REGIMES {
             continue;
         }
-        let hi = usable.iter().map(|s| s.mean).fold(f64::NEG_INFINITY, f64::max);
+        let hi = usable
+            .iter()
+            .map(|s| s.mean)
+            .fold(f64::NEG_INFINITY, f64::max);
         let lo = usable.iter().map(|s| s.mean).fold(f64::INFINITY, f64::min);
         draws += 1;
         if hi - lo >= spread {
@@ -321,7 +341,9 @@ fn regime_stats(points: &[(RegimeLabel, f64)], periods_per_year: f64) -> Vec<Reg
     }
     let mut out = Vec::new();
     for label in RegimeLabel::ALL {
-        let Some(v) = by_label.get(label.as_str()) else { continue };
+        let Some(v) = by_label.get(label.as_str()) else {
+            continue;
+        };
         let n = v.len();
         let mean = v.iter().sum::<f64>() / n as f64;
         let sd = if n >= 2 {
@@ -329,8 +351,18 @@ fn regime_stats(points: &[(RegimeLabel, f64)], periods_per_year: f64) -> Vec<Reg
         } else {
             0.0
         };
-        let sharpe = if sd > 0.0 { mean / sd * periods_per_year.sqrt() } else { 0.0 };
-        out.push(RegimeStats { label: label.as_str().to_string(), n, mean, sd, sharpe });
+        let sharpe = if sd > 0.0 {
+            mean / sd * periods_per_year.sqrt()
+        } else {
+            0.0
+        };
+        out.push(RegimeStats {
+            label: label.as_str().to_string(),
+            n,
+            mean,
+            sd,
+            sharpe,
+        });
     }
     out
 }
@@ -350,7 +382,10 @@ fn kruskal_wallis(points: &[(RegimeLabel, f64)]) -> (Option<f64>, Option<f64>) {
     }
     let mut order: Vec<usize> = (0..n).collect();
     order.sort_by(|a, b| {
-        points[*a].1.partial_cmp(&points[*b].1).unwrap_or(std::cmp::Ordering::Equal)
+        points[*a]
+            .1
+            .partial_cmp(&points[*b].1)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
     // Mid-ranks for ties, and the tie sum the correction needs.
     let mut rank = vec![0.0_f64; n];
@@ -358,9 +393,7 @@ fn kruskal_wallis(points: &[(RegimeLabel, f64)]) -> (Option<f64>, Option<f64>) {
     let mut i = 0;
     while i < n {
         let mut j = i;
-        while j + 1 < n
-            && (points[order[j + 1]].1 - points[order[i]].1).abs() <= f64::EPSILON
-        {
+        while j + 1 < n && (points[order[j + 1]].1 - points[order[i]].1).abs() <= f64::EPSILON {
             j += 1;
         }
         let t = (j - i + 1) as f64;
@@ -419,7 +452,11 @@ fn erfc(x: f64) -> f64 {
             + t * (-0.284_496_736
                 + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429))))
         * (-x * x).exp();
-    if x >= 0.0 { y } else { 2.0 - y }
+    if x >= 0.0 {
+        y
+    } else {
+        2.0 - y
+    }
 }
 
 /// SplitMix64. A named, reproducible stream: the same inputs must give the same
@@ -533,7 +570,10 @@ impl SeparationJob {
             for w in times.windows(2) {
                 spacings.push((w[1] - w[0]).num_seconds().max(1));
             }
-            labelled.push(LabelledSeries { source: source.clone(), points: aligned });
+            labelled.push(LabelledSeries {
+                source: source.clone(),
+                points: aligned,
+            });
         }
 
         let periods_per_year = periods_per_year(&spacings);
@@ -614,9 +654,7 @@ impl SeparationJob {
         tx.commit().await?;
         Ok(rows
             .into_iter()
-            .map(|(id, ts, returns)| {
-                (id.to_string(), ts.into_iter().zip(returns).collect())
-            })
+            .map(|(id, ts, returns)| (id.to_string(), ts.into_iter().zip(returns).collect()))
             .collect())
     }
 }
@@ -677,20 +715,37 @@ fn input_digest(
         returns: history
             .iter()
             .map(|o| {
-                RegimeLabel::ALL.iter().position(|l| *l == o.label).unwrap_or(usize::MAX) as f64
+                RegimeLabel::ALL
+                    .iter()
+                    .position(|l| *l == o.label)
+                    .unwrap_or(usize::MAX) as f64
             })
             .collect(),
     };
     let knowledge = ReturnSeries {
         timestamps: event_times,
         #[allow(clippy::cast_precision_loss)]
-        returns: history.iter().map(|o| o.knowledge_time.timestamp() as f64).collect(),
+        returns: history
+            .iter()
+            .map(|o| o.knowledge_time.timestamp() as f64)
+            .collect(),
     };
     let flat = ReturnSeries {
-        timestamps: series.iter().flat_map(|(_, p)| p.iter().map(|(t, _)| *t)).collect(),
-        returns: series.iter().flat_map(|(_, p)| p.iter().map(|(_, r)| *r)).collect(),
+        timestamps: series
+            .iter()
+            .flat_map(|(_, p)| p.iter().map(|(t, _)| *t))
+            .collect(),
+        returns: series
+            .iter()
+            .flat_map(|(_, p)| p.iter().map(|(_, r)| *r))
+            .collect(),
     };
-    format!("{}|{}|{}", labels.digest(), knowledge.digest(), flat.digest())
+    format!(
+        "{}|{}|{}",
+        labels.digest(),
+        knowledge.digest(),
+        flat.digest()
+    )
 }
 
 /// A reproducible seed from the digest's own bytes.
@@ -716,7 +771,10 @@ mod tests {
     use super::*;
 
     fn series(name: &str, points: Vec<(RegimeLabel, f64)>) -> LabelledSeries {
-        LabelledSeries { source: name.to_string(), points }
+        LabelledSeries {
+            source: name.to_string(),
+            points,
+        }
     }
 
     /// Runs of low and high vol of irregular length — as real regimes are —
@@ -730,14 +788,21 @@ mod tests {
         let mut label = RegimeLabel::LowVol;
         while points.len() < 800 {
             let run = 8 + (rng.next_u64() % 40) as usize;
-            let drift = if label == RegimeLabel::LowVol { 1.0 } else { -1.0 };
+            let drift = if label == RegimeLabel::LowVol {
+                1.0
+            } else {
+                -1.0
+            };
             for _ in 0..run {
                 // Deterministic pseudo-noise in [-0.5, 0.5].
                 let noise = (rng.next_u64() % 1000) as f64 / 1000.0 - 0.5;
                 points.push((label, drift + noise));
             }
-            label =
-                if label == RegimeLabel::LowVol { RegimeLabel::HighVol } else { RegimeLabel::LowVol };
+            label = if label == RegimeLabel::LowVol {
+                RegimeLabel::HighVol
+            } else {
+                RegimeLabel::LowVol
+            };
         }
         let out = separate(&[series("real", points)], 252.0, 1);
         assert_eq!(out.separates, Some(true), "{}", out.verdict);
@@ -785,7 +850,11 @@ mod tests {
         let mut points = Vec::new();
         let mut rng = SplitMix64::new(11);
         for block in 0..30 {
-            let label = if block % 2 == 0 { RegimeLabel::LowVol } else { RegimeLabel::HighVol };
+            let label = if block % 2 == 0 {
+                RegimeLabel::LowVol
+            } else {
+                RegimeLabel::HighVol
+            };
             for _ in 0..20 {
                 let noise = (rng.next_u64() % 1000) as f64 / 1000.0 - 0.5;
                 points.push((label, noise));
@@ -808,8 +877,11 @@ mod tests {
         let points: Vec<(RegimeLabel, f64)> = (0..n)
             .map(|i| {
                 let x = i as f64;
-                let label =
-                    if (x / 47.0).sin() > 0.0 { RegimeLabel::HighVol } else { RegimeLabel::LowVol };
+                let label = if (x / 47.0).sin() > 0.0 {
+                    RegimeLabel::HighVol
+                } else {
+                    RegimeLabel::LowVol
+                };
                 (label, (x / 53.0).sin())
             })
             .collect();
@@ -848,8 +920,11 @@ mod tests {
     fn the_same_inputs_give_the_same_p_value() {
         let points: Vec<(RegimeLabel, f64)> = (0..300)
             .map(|i| {
-                let label =
-                    if (i / 25) % 2 == 0 { RegimeLabel::LowVol } else { RegimeLabel::HighVol };
+                let label = if (i / 25) % 2 == 0 {
+                    RegimeLabel::LowVol
+                } else {
+                    RegimeLabel::HighVol
+                };
                 (label, ((i * 37) % 13) as f64 / 13.0 - 0.5)
             })
             .collect();
@@ -886,7 +961,11 @@ mod tests {
 
         let mixed: Vec<(RegimeLabel, f64)> = (0..60)
             .map(|i| {
-                let l = if i % 2 == 0 { RegimeLabel::LowVol } else { RegimeLabel::HighVol };
+                let l = if i % 2 == 0 {
+                    RegimeLabel::LowVol
+                } else {
+                    RegimeLabel::HighVol
+                };
                 (l, i as f64)
             })
             .collect();

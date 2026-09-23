@@ -101,7 +101,6 @@ pub fn derive_requirements(
     })
 }
 
-
 /// Floor on warm-up whenever any indicator is in play, so very short-period
 /// strategies still get a stable lead-in before the first tradable bar.
 const MIN_WARMUP_BARS: u64 = 30;

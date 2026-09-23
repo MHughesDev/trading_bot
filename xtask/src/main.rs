@@ -626,8 +626,8 @@ fn scan_v2_writers(root: Option<&std::path::Path>) -> Result<(Vec<String>, Vec<S
         return Err("git ls-files failed".into());
     }
 
-    let file_list =
-        String::from_utf8(output.stdout).map_err(|_| "invalid utf8 from git ls-files".to_string())?;
+    let file_list = String::from_utf8(output.stdout)
+        .map_err(|_| "invalid utf8 from git ls-files".to_string())?;
     let mut violations: Vec<String> = vec![];
     let mut allowed_seen: Vec<(&str, usize)> =
         V2_PRE_FREEZE_WRITERS.iter().map(|(p, _)| (*p, 0)).collect();
@@ -781,8 +781,12 @@ mod tests {
 
     #[test]
     fn plain_inserts_are_writes() {
-        assert!(line_writes_v2(r#"    .query("INSERT INTO market_bars_v2 (a) VALUES (1)")"#));
-        assert!(line_writes_v2(r#"    .query("INSERT INTO market_bars_v2(a) VALUES (1)")"#));
+        assert!(line_writes_v2(
+            r#"    .query("INSERT INTO market_bars_v2 (a) VALUES (1)")"#
+        ));
+        assert!(line_writes_v2(
+            r#"    .query("INSERT INTO market_bars_v2(a) VALUES (1)")"#
+        ));
         assert!(line_writes_v2(r#"    .insert("market_bars_v2")"#));
     }
 
@@ -840,12 +844,16 @@ mod tests {
         assert!(line_writes_v2(
             r#"    .query("ALTER TABLE market_bars_v2 UPDATE revision = 1 WHERE 1")"#
         ));
-        assert!(line_writes_v2(r#"    .query("TRUNCATE TABLE market_bars_v2")"#));
+        assert!(line_writes_v2(
+            r#"    .query("TRUNCATE TABLE market_bars_v2")"#
+        ));
         assert!(line_writes_v2(r#"    .query("DROP TABLE market_bars_v2")"#));
         assert!(line_writes_v2(
             r#"    .query("DROP TABLE IF EXISTS market_bars_v2")"#
         ));
-        assert!(line_writes_v2(r#"    .query("DETACH TABLE market_bars_v2")"#));
+        assert!(line_writes_v2(
+            r#"    .query("DETACH TABLE market_bars_v2")"#
+        ));
     }
 
     /// Lower-case SQL is the same SQL. A guard that only knows one casing documents
@@ -881,19 +889,27 @@ mod tests {
     /// draining, and a check that forbade that would forbid the fix.
     #[test]
     fn reads_and_prose_are_not_writes() {
-        assert!(!line_writes_v2(r#"    .query("SELECT count() FROM market_bars_v2")"#));
+        assert!(!line_writes_v2(
+            r#"    .query("SELECT count() FROM market_bars_v2")"#
+        ));
         assert!(!line_writes_v2(
             r#"    .query("SELECT * FROM trading.market_bars_v2 FINAL")"#
         ));
-        assert!(!line_writes_v2(r#"    .query("INSERT INTO market_bar (a) VALUES (1)")"#));
+        assert!(!line_writes_v2(
+            r#"    .query("INSERT INTO market_bar (a) VALUES (1)")"#
+        ));
         assert!(!line_writes_v2(
             r#"    .query(&format!("CREATE TABLE {staging} AS market_bars_v2"))"#
         ));
         assert!(!line_writes_v2(
             r#"    .query("INSERT INTO {staging} SELECT DISTINCT * FROM market_bars_v2")"#
         ));
-        assert!(!line_writes_v2("// INSERT INTO market_bars_v2 is forbidden"));
-        assert!(!line_writes_v2("//! writes its bars to `market_bars_v2` with"));
+        assert!(!line_writes_v2(
+            "// INSERT INTO market_bars_v2 is forbidden"
+        ));
+        assert!(!line_writes_v2(
+            "//! writes its bars to `market_bars_v2` with"
+        ));
         assert!(!line_writes_v2(" * INSERT INTO market_bars_v2"));
     }
 

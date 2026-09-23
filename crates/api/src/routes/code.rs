@@ -85,7 +85,8 @@ fn workspace_for(run_id: Uuid) -> Result<PathBuf, String> {
     // path fragment that came off the wire is a path fragment that can contain
     // `..`.
     let dir = PathBuf::from(root).join(run_id.to_string());
-    std::fs::create_dir_all(&dir).map_err(|e| format!("the workspace could not be created: {e}"))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("the workspace could not be created: {e}"))?;
     Ok(dir)
 }
 
@@ -204,7 +205,10 @@ mod tests {
             "script": "print(1)",
             "run_id": "../../etc"
         }));
-        assert!(body.is_err(), "a run id that is not a UUID does not deserialise");
+        assert!(
+            body.is_err(),
+            "a run id that is not a UUID does not deserialise"
+        );
     }
 
     /// The launcher is a template with exactly one substitution, and the
@@ -214,7 +218,10 @@ mod tests {
         let launcher = "docker run --rm -i --network none -v {workspace}:/workspace img";
         let rendered = launcher.replace("{workspace}", "/srv/ws/abc");
         assert!(rendered.contains("/srv/ws/abc:/workspace"));
-        assert!(!rendered.contains('{'), "an unsubstituted slot reached the command line");
+        assert!(
+            !rendered.contains('{'),
+            "an unsubstituted slot reached the command line"
+        );
     }
 
     /// A body without a run id does not deserialise, because a script with no
@@ -222,8 +229,7 @@ mod tests {
     /// could invent is a shared one.
     #[test]
     fn a_script_without_a_run_has_no_workspace_and_is_refused() {
-        let body: Result<RunBody, _> =
-            serde_json::from_value(json!({ "script": "print(1)" }));
+        let body: Result<RunBody, _> = serde_json::from_value(json!({ "script": "print(1)" }));
         assert!(body.is_err());
     }
 }

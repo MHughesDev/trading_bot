@@ -32,16 +32,12 @@ use crate::{auth::BearerToken, state::AppState};
 /// we are asking permission from.
 fn fetcher() -> &'static Arc<Fetcher> {
     static FETCHER: OnceLock<Arc<Fetcher>> = OnceLock::new();
-    FETCHER.get_or_init(|| {
-        Arc::new(Fetcher::new(Policy::default(), Arc::new(SystemResolver)))
-    })
+    FETCHER.get_or_init(|| Arc::new(Fetcher::new(Policy::default(), Arc::new(SystemResolver))))
 }
 
 fn runner_config() -> RunnerConfig {
-    let root = std::env::var("WORKSPACE_ROOT").map_or_else(
-        |_| std::path::PathBuf::from("."),
-        std::path::PathBuf::from,
-    );
+    let root = std::env::var("WORKSPACE_ROOT")
+        .map_or_else(|_| std::path::PathBuf::from("."), std::path::PathBuf::from);
     RunnerConfig::from_workspace(&root)
 }
 
@@ -64,10 +60,7 @@ const fn default_limit() -> usize {
 }
 
 /// POST /api/web/search
-pub async fn search(
-    _token: BearerToken,
-    Json(body): Json<SearchBody>,
-) -> impl IntoResponse {
+pub async fn search(_token: BearerToken, Json(body): Json<SearchBody>) -> impl IntoResponse {
     let Some(provider) = Provider::parse(&body.provider) else {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -172,7 +165,11 @@ pub async fn fetch(
         .bind(&doc.final_url)
         .bind(i32::from(doc.status))
         .bind(&doc.content_type)
-        .bind(doc.title.as_ref().map(|t| t.read_as_untrusted_input().clone()))
+        .bind(
+            doc.title
+                .as_ref()
+                .map(|t| t.read_as_untrusted_input().clone()),
+        )
         .bind(doc.text.read_as_untrusted_input())
         .bind(i32::try_from(doc.bytes).unwrap_or(i32::MAX))
         .bind(doc.truncated)
@@ -251,7 +248,10 @@ pub async fn create_skill(
     };
 
     let Ok(mut tx) = ledger::pg::tenant_tx(&state.pg, &tenant).await else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "no_tx" })))
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "no_tx" })),
+        )
             .into_response();
     };
 
@@ -321,13 +321,13 @@ pub async fn create_skill(
 }
 
 /// GET /api/skills
-pub async fn list_skills(
-    State(state): State<AppState>,
-    token: BearerToken,
-) -> impl IntoResponse {
+pub async fn list_skills(State(state): State<AppState>, token: BearerToken) -> impl IntoResponse {
     let tenant = token.user_id().to_string();
     let Ok(mut tx) = ledger::pg::tenant_tx(&state.pg, &tenant).await else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "no_tx" })))
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "no_tx" })),
+        )
             .into_response();
     };
 
@@ -448,7 +448,11 @@ pub async fn run_skill(
         .bind(done.record.outcome.code())
         .bind(outcome_detail(&done.record.outcome))
         .bind(i64::try_from(done.record.duration_ms).unwrap_or(i64::MAX))
-        .bind(done.record.peak_memory_bytes.and_then(|m| i64::try_from(m).ok()))
+        .bind(
+            done.record
+                .peak_memory_bytes
+                .and_then(|m| i64::try_from(m).ok()),
+        )
         .bind(&tenant)
         .execute(&mut *tx)
         .await;
@@ -558,7 +562,9 @@ mod tests {
         assert!(outcome_detail(&Outcome::Ok).is_empty());
         for o in [
             Outcome::BadInput { detail: "a".into() },
-            Outcome::Raised { exception: "b".into() },
+            Outcome::Raised {
+                exception: "b".into(),
+            },
             Outcome::BrokeContract { detail: "c".into() },
             Outcome::TimedOut { limit_secs: 30 },
             Outcome::Killed { reason: "d".into() },
@@ -570,6 +576,9 @@ mod tests {
 
     #[test]
     fn the_default_search_provider_is_the_one_with_citation_counts() {
-        assert_eq!(Provider::parse(&default_provider()), Some(Provider::OpenAlex));
+        assert_eq!(
+            Provider::parse(&default_provider()),
+            Some(Provider::OpenAlex)
+        );
     }
 }

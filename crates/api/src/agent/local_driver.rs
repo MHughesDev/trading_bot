@@ -202,16 +202,17 @@ fn outcome_word(o: &Outcome) -> &'static str {
 /// the pair is what determines where a crash fell.
 fn describe_input(i: &Input) -> (&'static str, Value) {
     match i {
-        Input::Admission(a) => ("Admission", serde_json::json!({ "admission": format!("{a:?}") })),
+        Input::Admission(a) => (
+            "Admission",
+            serde_json::json!({ "admission": format!("{a:?}") }),
+        ),
         Input::ModelReply { raw } => (
             "ModelReply",
             // The reply in full. It is what the loop parsed, and a replay that
             // re-parses something else is not a replay.
             serde_json::json!({ "raw": raw }),
         ),
-        Input::ModelTruncated { raw } => {
-            ("ModelTruncated", serde_json::json!({ "raw": raw }))
-        }
+        Input::ModelTruncated { raw } => ("ModelTruncated", serde_json::json!({ "raw": raw })),
         Input::ModelError { detail, retryable } => (
             "ModelError",
             serde_json::json!({ "detail": detail, "retryable": retryable }),
@@ -289,7 +290,9 @@ fn describe_effect(e: &Effect) -> (&'static str, Value) {
                 "idempotent": idempotent,
             }),
         ),
-        Effect::AskHuman { step, tool, ruling, .. } => (
+        Effect::AskHuman {
+            step, tool, ruling, ..
+        } => (
             "AskHuman",
             serde_json::json!({ "step": step, "tool": tool, "ruling": format!("{ruling:?}") }),
         ),
@@ -312,7 +315,11 @@ fn describe_effect(e: &Effect) -> (&'static str, Value) {
         // A spill is logged by handle and size, not by content: the content is
         // now *in* the workspace and logging it here would be a second copy of
         // the bytes the spill exists to move out of memory.
-        Effect::Spill { record, handle, body } => (
+        Effect::Spill {
+            record,
+            handle,
+            body,
+        } => (
             "Spill",
             serde_json::json!({
                 "record": record.to_string(),
@@ -337,14 +344,8 @@ fn describe_effect(e: &Effect) -> (&'static str, Value) {
             "Note",
             serde_json::json!({ "core_tool": name, "detail": detail }),
         ),
-        Effect::Note(n) => (
-            "Note",
-            serde_json::json!({ "note": format!("{n:?}") }),
-        ),
-        Effect::Done(o) => (
-            "Done",
-            serde_json::json!({ "outcome": format!("{o:?}") }),
-        ),
+        Effect::Note(n) => ("Note", serde_json::json!({ "note": format!("{n:?}") })),
+        Effect::Done(o) => ("Done", serde_json::json!({ "outcome": format!("{o:?}") })),
     }
 }
 
@@ -575,13 +576,7 @@ impl Recorder {
 
     /// Latency is recorded, not hidden. Local inference trades wall clock for cost,
     /// and §15.3 asks for that to be surfaced rather than made to look like a hang.
-    async fn usage(
-        &mut self,
-        step: u32,
-        usage: &llm::Usage,
-        estimated: u32,
-        latency_ms: u128,
-    ) {
+    async fn usage(&mut self, step: u32, usage: &llm::Usage, estimated: u32, latency_ms: u128) {
         let (input, output) = (usage.input_tokens, usage.output_tokens);
         self.tokens_in += input as i64;
         self.tokens_out += output as i64;
@@ -591,8 +586,7 @@ impl Recorder {
         // under-estimate on long steps behind an over-estimate on short ones.
         self.prompt_tokens += i64::try_from(usage.prompt_tokens()).unwrap_or(i64::MAX);
         self.est_prompt_tokens += i64::from(estimated);
-        self.cache_read_tokens +=
-            i64::try_from(usage.cache_read_input_tokens).unwrap_or(i64::MAX);
+        self.cache_read_tokens += i64::try_from(usage.cache_read_input_tokens).unwrap_or(i64::MAX);
         self.append(
             "usage",
             json!({ "step": step, "input_tokens": input, "output_tokens": output,
@@ -691,8 +685,11 @@ impl Recorder {
         match crate::questions::close_cited(&self.pg, user_id, &entry).await {
             Ok(closed) if !closed.is_empty() => {
                 self.yielded.questions_closed += u32::try_from(closed.len()).unwrap_or(0);
-                self.append("questions_closed", json!({ "by": entry.id, "closed": closed }))
-                    .await;
+                self.append(
+                    "questions_closed",
+                    json!({ "by": entry.id, "closed": closed }),
+                )
+                .await;
             }
             Ok(_) => {}
             Err(e) => {
@@ -738,15 +735,14 @@ impl Recorder {
 
         // The turn this run is. Read rather than passed, so no call site has to
         // carry it and none can pass a stale one.
-        let turn: i32 = sqlx::query_scalar(
-            "SELECT COALESCE(turn_index, 0) FROM agent_runs WHERE run_id = $1",
-        )
-        .bind(self.run_id)
-        .fetch_optional(&self.pg)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or(0);
+        let turn: i32 =
+            sqlx::query_scalar("SELECT COALESCE(turn_index, 0) FROM agent_runs WHERE run_id = $1")
+                .bind(self.run_id)
+                .fetch_optional(&self.pg)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(0);
 
         let summary = harness::memory::TurnSummary::from_state(
             turn,
@@ -979,13 +975,14 @@ impl Recorder {
         // headline and a button. Every count is final by now — the
         // `hypotheses_*` three were set by `decide_hypotheses` just above, and
         // the rest accumulate as the run goes.
-        let (key, value) = match crate::dossier::compile_and_store(&self.pg, self.user_id, produced).await {
-            Ok(_) => ("ticket", json!(run)),
-            // Named, not silent. A dossier refuses to compile when a claim is
-            // not supported by its evidence or when no critic ran, and both are
-            // findings about the run rather than a missing button.
-            Err(e) => ("not_compiled", json!(e.to_string())),
-        };
+        let (key, value) =
+            match crate::dossier::compile_and_store(&self.pg, self.user_id, produced).await {
+                Ok(_) => ("ticket", json!(run)),
+                // Named, not silent. A dossier refuses to compile when a claim is
+                // not supported by its evidence or when no critic ran, and both are
+                // findings about the run rather than a missing button.
+                Err(e) => ("not_compiled", json!(e.to_string())),
+            };
         self.append("dossier", self.yield_payload(key, value)).await;
     }
 
@@ -1035,8 +1032,7 @@ impl Recorder {
                     return;
                 }
                 use harness::lifecycle::evaluate::Verdict;
-                self.yielded.hypotheses_tested =
-                    u32::try_from(decided.len()).unwrap_or(u32::MAX);
+                self.yielded.hypotheses_tested = u32::try_from(decided.len()).unwrap_or(u32::MAX);
                 self.yielded.hypotheses_refuted = u32::try_from(
                     decided
                         .iter()
@@ -1055,11 +1051,8 @@ impl Recorder {
                 self.append("verdicts", payload).await;
             }
             Err(e) => {
-                self.append(
-                    "status",
-                    json!({ "verdicts_not_written": e.to_string() }),
-                )
-                .await;
+                self.append("status", json!({ "verdicts_not_written": e.to_string() }))
+                    .await;
             }
         }
     }
@@ -1414,8 +1407,7 @@ pub async fn run(
                 Effect::Note(n) => rec.note(&n).await,
                 Effect::Remember(e) => rec.remember(params.user_id, &e).await,
                 Effect::Done(o) => rec.finish(&o).await,
-                _ => {}
-                // A refusal has no workspace and no records, so it cannot spill.
+                _ => {} // A refusal has no workspace and no records, so it cannot spill.
             }
         }
         return;
@@ -1445,7 +1437,10 @@ pub async fn run(
                 offered.join(", ")
             ),
             fix: params.profile.escalate_to.as_ref().map_or_else(
-                || "choose a workflow this tier offers, or configure a tier that offers this one".to_string(),
+                || {
+                    "choose a workflow this tier offers, or configure a tier that offers this one"
+                        .to_string()
+                },
                 |to| format!("run this on `{to}`, which is where this profile escalates"),
             ),
         })
@@ -1586,8 +1581,11 @@ pub async fn run(
         ))
     });
 
-    rec.input("Admission", serde_json::json!({ "admission": format!("{admission:?}") }))
-        .await;
+    rec.input(
+        "Admission",
+        serde_json::json!({ "admission": format!("{admission:?}") }),
+    )
+    .await;
     let mut effects = governor.next(Input::Admission(admission));
     loop {
         // **Before anything is executed.** The log's whole value is that a row says
@@ -1623,7 +1621,11 @@ pub async fn run(
                 // failed write is logged and the body stays where it is:
                 // losing an observation to save memory would invert the whole
                 // point of a store that never deletes.
-                Effect::Spill { record, handle, body } => {
+                Effect::Spill {
+                    record,
+                    handle,
+                    body,
+                } => {
                     let text = serde_json::to_string(&*body).unwrap_or_default();
                     let args = serde_json::Map::from_iter([
                         ("path".to_string(), json!(handle)),
@@ -1633,8 +1635,7 @@ pub async fn run(
                     // spilled body lands where `read_file` can reach it and
                     // under the same path rules — a second write path would be
                     // a second set of rules about where the agent may write.
-                    let (detail, failed) =
-                        workspace_tools::execute(&ws, "write_file", &args).await;
+                    let (detail, failed) = workspace_tools::execute(&ws, "write_file", &args).await;
                     if failed {
                         // The body goes back. Losing an observation to save
                         // memory would invert the point of a store that never
@@ -1841,9 +1842,9 @@ pub async fn run(
                 // The catalogue says whether this call registers a trial. A tool
                 // with no spec is not a catalogue tool — `fs` and the harness-owned
                 // ones — and spends nothing.
-                if mcp_server_lib::spec::find(&name).is_some_and(|spec| {
-                    spec.spends_trial != mcp_server_lib::spec::TrialKind::None
-                }) {
+                if mcp_server_lib::spec::find(&name)
+                    .is_some_and(|spec| spec.spends_trial != mcp_server_lib::spec::TrialKind::None)
+                {
                     rec.trials_spent += 1;
                 }
                 // What the model asked for, before the platform completes it.
@@ -1918,10 +1919,8 @@ pub async fn run(
                 } else if name == "define_campaign" {
                     let mut with_brief = arguments.clone();
                     with_brief.insert("run_id".into(), json!(params.run_id));
-                    let query = harness::context::select::Query::from_state(
-                        governor.working(),
-                        step,
-                    );
+                    let query =
+                        harness::context::select::Query::from_state(governor.working(), step);
                     let brief = subrun::assemble(
                         governor.context_store(),
                         &query,
@@ -1954,8 +1953,20 @@ pub async fn run(
                 let out = if workspace_tools::is_workspace_tool(&namespace) {
                     let started = Instant::now();
                     let (text, is_error) = workspace_tools::execute(&ws, &name, &arguments).await;
-                    let raw = if is_error { json!({ "error": text }) } else { json!({ "result": text }) };
-                    mcp_ctx.record_step(&name, &Value::Object(arguments.clone()), &raw, started.elapsed().as_millis(), None).await;
+                    let raw = if is_error {
+                        json!({ "error": text })
+                    } else {
+                        json!({ "result": text })
+                    };
+                    mcp_ctx
+                        .record_step(
+                            &name,
+                            &Value::Object(arguments.clone()),
+                            &raw,
+                            started.elapsed().as_millis(),
+                            None,
+                        )
+                        .await;
                     bridge::Executed {
                         raw: json!({ "result": text }),
                         text,
@@ -1979,10 +1990,9 @@ pub async fn run(
                         .iter()
                         .rev()
                         .find_map(|turn| match turn {
-                            harness::transcript::Turn::Assistant { calls, .. } => calls
-                                .iter()
-                                .find(|c| c.name == name)
-                                .map(|c| c.id.clone()),
+                            harness::transcript::Turn::Assistant { calls, .. } => {
+                                calls.iter().find(|c| c.name == name).map(|c| c.id.clone())
+                            }
                             harness::transcript::Turn::ToolResult { .. } => None,
                         })
                         .unwrap_or_else(|| format!("call_{step}"));
@@ -2122,8 +2132,7 @@ fn transcript_messages(t: &harness::transcript::Transcript) -> Vec<Message> {
                     .map(|c| llm::ToolCall {
                         id: c.id.clone(),
                         name: c.name.clone(),
-                        arguments: serde_json::from_str(&c.arguments)
-                            .unwrap_or_else(|_| json!({})),
+                        arguments: serde_json::from_str(&c.arguments).unwrap_or_else(|_| json!({})),
                     })
                     .collect(),
             }),

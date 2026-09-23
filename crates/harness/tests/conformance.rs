@@ -16,7 +16,7 @@ use harness::context::{assemble, cap_tool_result, Block, Section};
 use harness::drive::{Decode, Effect, Input, Loop, Outcome, Task};
 use harness::hardware::{Admission, TaskDemand};
 use harness::policy::{decide, ActionContext};
-use harness::profile::{ExposureScope, CodeExecution, Mode, ProfileSet, Routing, SchemaStyle};
+use harness::profile::{CodeExecution, ExposureScope, Mode, ProfileSet, Routing, SchemaStyle};
 use harness::provenance::{Provenance, Tagged};
 use harness::registry::{Risk, ToolDef, ToolRegistry};
 use harness::{Decision, Tier};
@@ -128,7 +128,10 @@ fn every_profile_field_is_enforced_somewhere() {
     // asserted: the cap is never exceeded, and the reserve is actually held — a
     // reserve that quietly stopped being held would make the escape hatch cost the
     // tool it just found, and nothing else would notice.
-    let reserve = p.tools.search_reserve_slots.min(p.tools.max_exposed_per_step / 3);
+    let reserve = p
+        .tools
+        .search_reserve_slots
+        .min(p.tools.max_exposed_per_step / 3);
     assert!(exposure.schemas.len() <= p.tools.max_exposed_per_step);
     assert_eq!(
         exposure.schemas.len(),
@@ -207,7 +210,10 @@ fn every_profile_field_is_enforced_somewhere() {
         use harness::lifecycle::chain::{may_continue, Refinement, Stop};
         use harness::memory::negative::FailureClass;
         let cap = p.orchestration.max_refinements_per_run as usize;
-        assert!(cap >= 1, "a run that may not refine at all cannot repair anything");
+        assert!(
+            cap >= 1,
+            "a run that may not refine at all cannot repair anything"
+        );
         let chain: Vec<Refinement> = (0..cap)
             .map(|i| Refinement {
                 diagnosis_id: format!("t_{i}"),
@@ -239,12 +245,17 @@ fn every_profile_field_is_enforced_somewhere() {
             "a tier that may run nothing is a tier nobody can start a run on"
         );
         for w in &p.workflows {
-            assert!(p.may_run(*w), "a declared workflow the profile then refuses");
+            assert!(
+                p.may_run(*w),
+                "a declared workflow the profile then refuses"
+            );
         }
         // The frontier profile declares all seven, so the enforcement point is
         // asserted against a tier that withholds one rather than against this
         // one, which withholds nothing.
-        let mid = set.get("qwen3.6-35b-a3b").expect("the local_mid profile ships");
+        let mid = set
+            .get("qwen3.6-35b-a3b")
+            .expect("the local_mid profile ships");
         assert!(
             !mid.may_run(Workflow::Optimise),
             "AGENT-013 §11 withholds `optimise` below local_high"
@@ -609,7 +620,11 @@ fn the_degraded_profiles_promotion_is_bound_to_the_machine_it_was_measured_on() 
         "an attestation is evidence about one machine, not a property of the file"
     );
     assert!(why.is_some_and(|w| w.contains("does not transfer")));
-    match admit(there, TaskDemand::MultiStep, degraded.escalate_to.as_deref()) {
+    match admit(
+        there,
+        TaskDemand::MultiStep,
+        degraded.escalate_to.as_deref(),
+    ) {
         Admission::Escalate { to, .. } => assert_eq!(to, "claude-opus-5"),
         other => panic!("an unlicensed claim must escalate, not run: {other:?}"),
     }
@@ -786,10 +801,7 @@ fn an_idempotent_call_that_failed_is_retried_once_then_answered_from_the_session
         let fx = l.next(Input::ModelReply {
             raw: json!({ "instrument": "BTC-USD" }).to_string(),
         });
-        if fx
-            .iter()
-            .any(|e| matches!(e, Effect::ExecuteTool { .. }))
-        {
+        if fx.iter().any(|e| matches!(e, Effect::ExecuteTool { .. })) {
             dispatches += 1;
             l.next(Input::ToolError {
                 detail: "invalid_request".into(),
@@ -1079,8 +1091,10 @@ fn a_reasoning_step_is_satisfied_by_recording_a_finding_not_by_a_tool_call() {
     );
     assert!(l.outcome().is_none(), "and it must not end the task");
     assert!(
-        fx.iter().any(|e| matches!(e, Effect::Note(harness::drive::Note::CoreTool { name, .. })
-            if name == "record_finding")),
+        fx.iter().any(
+            |e| matches!(e, Effect::Note(harness::drive::Note::CoreTool { name, .. })
+            if name == "record_finding")
+        ),
         "the finding is recorded on the timeline, got {fx:?}"
     );
 }
@@ -1123,8 +1137,10 @@ fn a_finding_may_not_cite_an_identifier_the_session_never_saw() {
         .to_string(),
     });
     assert!(
-        fx.iter().any(|e| matches!(e, Effect::Note(harness::drive::Note::Rejected { code, .. })
-            if *code == "drive.finding_evidence_unattributable")),
+        fx.iter().any(
+            |e| matches!(e, Effect::Note(harness::drive::Note::Rejected { code, .. })
+            if *code == "drive.finding_evidence_unattributable")
+        ),
         "a fabricated handle must not enter the ledger, got {fx:?}"
     );
 }
@@ -1164,8 +1180,14 @@ fn a_task_that_stops_learning_is_stopped_before_its_budget_runs_out() {
             let fx = l.next(Input::ToolError {
                 detail: "upstream unavailable".into(),
             });
-            if fx.iter().any(|e| matches!(e,
-                Effect::Note(harness::drive::Note::Degraded(Degradation::NoProgress { .. })))) {
+            if fx.iter().any(|e| {
+                matches!(
+                    e,
+                    Effect::Note(harness::drive::Note::Degraded(
+                        Degradation::NoProgress { .. }
+                    ))
+                )
+            }) {
                 saw_no_progress = true;
                 break;
             }
@@ -1220,8 +1242,12 @@ fn steps_that_learn_something_keep_the_breaker_open() {
             source: "platform.get_bars".into(),
         });
         assert!(
-            !fx.iter().any(|e| matches!(e,
-                Effect::Note(harness::drive::Note::Degraded(Degradation::NoProgress { .. })))),
+            !fx.iter().any(|e| matches!(
+                e,
+                Effect::Note(harness::drive::Note::Degraded(
+                    Degradation::NoProgress { .. }
+                ))
+            )),
             "a run that keeps learning must never be stopped for not learning"
         );
     }
@@ -1299,10 +1325,15 @@ fn a_session_that_ran_no_tool_at_all_still_needs_evidence() {
     let fx = l.next(Input::ModelReply {
         raw: json!({ "result": "it works", "evidence": "" }).to_string(),
     });
-    assert!(l.outcome().is_none(), "a hollow claim must not end the task");
     assert!(
-        fx.iter().any(|e| matches!(e, Effect::Note(harness::drive::Note::Rejected { code, .. })
-            if *code == "drive.finish_without_evidence")),
+        l.outcome().is_none(),
+        "a hollow claim must not end the task"
+    );
+    assert!(
+        fx.iter().any(
+            |e| matches!(e, Effect::Note(harness::drive::Note::Rejected { code, .. })
+            if *code == "drive.finish_without_evidence")
+        ),
         "got {fx:?}"
     );
 }
@@ -1324,24 +1355,35 @@ fn re_recording_a_known_finding_is_refused() {
         raw: json!({ "steps": [
             { "goal": "read", "tool": "get_bars" }, { "goal": "note", "tool": "record_finding" },
             { "goal": "again", "tool": "record_finding" }
-        ]}).to_string(),
+        ]})
+        .to_string(),
     });
-    l.next(Input::ModelReply { raw: json!({ "name": "get_bars" }).to_string() });
-    l.next(Input::ModelReply { raw: json!({ "instrument": "BTC-USD" }).to_string() });
+    l.next(Input::ModelReply {
+        raw: json!({ "name": "get_bars" }).to_string(),
+    });
+    l.next(Input::ModelReply {
+        raw: json!({ "instrument": "BTC-USD" }).to_string(),
+    });
     l.next(Input::ToolResult {
         output: "{\"bars\": 500}".into(),
         source: "platform.get_bars".into(),
     });
 
     let note = json!({ "finding": "BTC-USD has 500 bars.", "evidence": "get_bars" }).to_string();
-    l.next(Input::ModelReply { raw: json!({ "name": "record_finding" }).to_string() });
+    l.next(Input::ModelReply {
+        raw: json!({ "name": "record_finding" }).to_string(),
+    });
     l.next(Input::ModelReply { raw: note.clone() });
 
-    l.next(Input::ModelReply { raw: json!({ "name": "record_finding" }).to_string() });
+    l.next(Input::ModelReply {
+        raw: json!({ "name": "record_finding" }).to_string(),
+    });
     let fx = l.next(Input::ModelReply { raw: note });
     assert!(
-        fx.iter().any(|e| matches!(e, Effect::Note(harness::drive::Note::Rejected { code, .. })
-            if *code == "drive.finding_already_recorded")),
+        fx.iter().any(
+            |e| matches!(e, Effect::Note(harness::drive::Note::Rejected { code, .. })
+            if *code == "drive.finding_already_recorded")
+        ),
         "a repeat must be refused rather than advancing the plan, got {fx:?}"
     );
 }
@@ -1571,10 +1613,19 @@ fn a_tier_below_local_high_cannot_declare_optimise() {
     use harness::state::Workflow;
 
     let set = load();
-    let mut p = set.get("qwen3.6-35b-a3b").expect("the local_mid profile").clone();
-    assert!(p.validate().is_ok(), "the shipped profile is valid as it stands");
+    let mut p = set
+        .get("qwen3.6-35b-a3b")
+        .expect("the local_mid profile")
+        .clone();
+    assert!(
+        p.validate().is_ok(),
+        "the shipped profile is valid as it stands"
+    );
     p.workflows.push(Workflow::Optimise);
-    let err = p.validate().expect_err("local_mid may not drive a campaign").to_string();
+    let err = p
+        .validate()
+        .expect_err("local_mid may not drive a campaign")
+        .to_string();
     assert!(err.contains("optimise"), "{err}");
 }
 
@@ -1626,7 +1677,10 @@ fn the_authoring_mode_and_the_amendment_cap_are_bounded_by_validation() {
         .get("qwen3.6-35b-a3b")
         .expect("the local_mid profile")
         .clone();
-    assert!(p.validate().is_ok(), "the shipped profile is valid as it stands");
+    assert!(
+        p.validate().is_ok(),
+        "the shipped profile is valid as it stands"
+    );
 
     let mut free = p.clone();
     free.prereg_authoring = PreregAuthoring::Free;

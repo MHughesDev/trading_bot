@@ -182,11 +182,16 @@ fn the_sub_run_position_is_the_child_keys_position() {
         a.child_key(campaign, CampaignPhase::Hypothesize),
         a.child_key(campaign, CampaignPhase::Experiment)
     );
-    let advanced = fold(&[
-        log,
-        vec![CampaignEvent::new(CampaignPhase::Hypothesize, serde_json::json!({}))],
-    ]
-    .concat())
+    let advanced = fold(
+        &[
+            log,
+            vec![CampaignEvent::new(
+                CampaignPhase::Hypothesize,
+                serde_json::json!({}),
+            )],
+        ]
+        .concat(),
+    )
     .expect("folds");
     assert_ne!(
         a.child_key(campaign, CampaignPhase::Hypothesize),

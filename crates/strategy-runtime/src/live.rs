@@ -83,7 +83,9 @@ pub struct LiveKey {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum LiveRegistryError {
-    #[error("strategy '{strategy_id}' is already running for user '{user_id}' on '{instrument_id}'")]
+    #[error(
+        "strategy '{strategy_id}' is already running for user '{user_id}' on '{instrument_id}'"
+    )]
     AlreadyRunning {
         user_id: String,
         instrument_id: String,
@@ -208,8 +210,11 @@ impl LiveStrategyRegistry {
         let mut removed = 0;
         map.retain(|_, entry| {
             let before = entry.len();
-            entry.retain(|s| s.source != LiveSource::Automation {
-                automation_id: automation_id.to_owned(),
+            entry.retain(|s| {
+                s.source
+                    != LiveSource::Automation {
+                        automation_id: automation_id.to_owned(),
+                    }
             });
             removed += before - entry.len();
             !entry.is_empty()

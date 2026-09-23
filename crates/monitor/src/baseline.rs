@@ -208,7 +208,10 @@ mod tests {
     fn a_seeded_baseline_measures_distance_in_sigmas() {
         let e = Ewma::seeded(0.1, 0.90, 0.02);
         let z = e.z(0.84).expect("seeded baselines have a band");
-        assert!((z + 3.0).abs() < 1e-9, "0.84 is three sigma below 0.90, got {z}");
+        assert!(
+            (z + 3.0).abs() < 1e-9,
+            "0.84 is three sigma below 0.90, got {z}"
+        );
     }
 
     #[test]
@@ -220,7 +223,11 @@ mod tests {
         for _ in 0..100 {
             e.update(5.0);
         }
-        assert!((e.mean() - 5.0).abs() < 0.01, "mean {} did not follow", e.mean());
+        assert!(
+            (e.mean() - 5.0).abs() < 0.01,
+            "mean {} did not follow",
+            e.mean()
+        );
     }
 
     #[test]
@@ -245,7 +252,10 @@ mod tests {
             }
         }
         let i = fired.expect("a sustained one-sigma drop must be caught");
-        assert!(i < 20, "took {i} observations, which is too slow to be useful");
+        assert!(
+            i < 20,
+            "took {i} observations, which is too slow to be useful"
+        );
     }
 
     #[test]

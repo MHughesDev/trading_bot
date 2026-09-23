@@ -53,7 +53,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use domain::strategy_def::StrategyDefinition;
 
-use crate::ast::{BinOp, Expr, ExitKind, Side, SizeKind, Strategy};
+use crate::ast::{BinOp, ExitKind, Expr, Side, SizeKind, Strategy};
 use crate::catalogue::Catalogue;
 use crate::decompile::{decompile_with, expr_to_text};
 use crate::diagnostic::{Code, Diagnostic, Span};
@@ -319,9 +319,7 @@ impl Diff {
     /// The slug this version was given, when it differs.
     #[must_use]
     pub fn renamed(&self) -> Option<(&str, &str)> {
-        self.renamed
-            .as_ref()
-            .map(|(a, b)| (a.as_str(), b.as_str()))
+        self.renamed.as_ref().map(|(a, b)| (a.as_str(), b.as_str()))
     }
 
     /// The whole diff as lines a person reads.
@@ -400,10 +398,7 @@ impl Lineage {
     /// than one move is flagged".
     #[must_use]
     pub fn multi_change_steps(&self) -> Vec<&Step> {
-        self.steps
-            .iter()
-            .filter(|s| s.diff.n_moves() > 1)
-            .collect()
+        self.steps.iter().filter(|s| s.diff.n_moves() > 1).collect()
     }
 
     /// The lineage as lines a person reads.
@@ -637,7 +632,9 @@ impl Shape {
                 before: self.size.clone(),
                 after: other.size.clone(),
                 words: match (&self.size, &other.size) {
-                    (Some(a), Some(b)) => format!("sizing became `size {b}` where it was `size {a}`"),
+                    (Some(a), Some(b)) => {
+                        format!("sizing became `size {b}` where it was `size {a}`")
+                    }
                     (None, Some(b)) => format!("the strategy gained `size {b}`"),
                     (Some(a), None) => format!("the `size {a}` clause was removed"),
                     (None, None) => unreachable!("equal sizes do not reach here"),
@@ -777,7 +774,11 @@ impl Shape {
 
     fn diff_headers(&self, other: &Self, out: &mut Vec<Change>) {
         for (what, a, b) in [
-            ("instrument", Some(&self.instrument), Some(&other.instrument)),
+            (
+                "instrument",
+                Some(&self.instrument),
+                Some(&other.instrument),
+            ),
             ("version", self.version.as_ref(), other.version.as_ref()),
             (
                 "asset_class",
@@ -1264,10 +1265,7 @@ exit time 48 bars
             ),
             (
                 "replace the signal outright",
-                BASE.replace(
-                    "ema(close, 7) > ema(close, 21)",
-                    "rsi(close, 14) < 30",
-                ),
+                BASE.replace("ema(close, 7) > ema(close, 21)", "rsi(close, 14) < 30"),
                 MoveKind::SwapSignal,
             ),
             (
@@ -1407,7 +1405,10 @@ exit time 24 bars
         );
         let d = diff(&def(BASE), &def(&with_filter)).expect("diffs");
         let c = &d.changes()[0];
-        assert_eq!(c.words, "the `entry long` condition gained `and rsi(close, 14) < 60`");
+        assert_eq!(
+            c.words,
+            "the `entry long` condition gained `and rsi(close, 14) < 60`"
+        );
         assert_eq!(c.path, "entry.long[0].when");
         assert_eq!(c.after.as_deref(), Some("rsi(close, 14) < 60"));
         for text in [&c.words, &c.path] {
@@ -1489,7 +1490,10 @@ exit time 24 bars
         let rendered = l.render();
         assert!(rendered.contains("v1 → v2"), "{rendered}");
         assert!(rendered.contains("v2 → v3"), "{rendered}");
-        assert!(rendered.contains("gained `and rsi(close, 14) < 60`"), "{rendered}");
+        assert!(
+            rendered.contains("gained `and rsi(close, 14) < 60`"),
+            "{rendered}"
+        );
     }
 
     /// The vocabulary is a join with `research::propose::Move`, and a join that
@@ -1514,7 +1518,10 @@ exit time 24 bars
             "FEAT-003 §8.3 has no threshold row; claiming one would let a campaign record a \
              move it never made"
         );
-        assert_eq!(MoveKind::AddFilter.research_kind(), Some("add_condition_filter"));
+        assert_eq!(
+            MoveKind::AddFilter.research_kind(),
+            Some("add_condition_filter")
+        );
     }
 
     #[test]

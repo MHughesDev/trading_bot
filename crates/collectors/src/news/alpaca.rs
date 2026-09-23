@@ -165,8 +165,7 @@ pub fn to_text_items(
 pub fn parse_news(body: &str) -> Result<AlpacaNewsResponse, NewsError> {
     // Decoding a body fetched from an external REST API — see the note on the
     // `lint-no-json-hotpath` exception in `collectors::macro::fred`.
-    serde_json::from_str::<AlpacaNewsResponse>(body)
-        .map_err(|e| NewsError::Parse(e.to_string()))
+    serde_json::from_str::<AlpacaNewsResponse>(body).map_err(|e| NewsError::Parse(e.to_string()))
 }
 
 /// The budget every caller of this module must spend against.
@@ -213,15 +212,15 @@ mod tests {
     #[test]
     fn a_correction_becomes_a_second_row() {
         let page = parse_news(PAGE).expect("fixture parses");
-        let corrected =
-            to_text_items(&page.news[0], TEST_SOURCE_ID, t("2024-05-01T17:00:05Z"), 0).expect("well-formed item");
+        let corrected = to_text_items(&page.news[0], TEST_SOURCE_ID, t("2024-05-01T17:00:05Z"), 0)
+            .expect("well-formed item");
         assert_eq!(corrected.len(), 2);
         assert_eq!(corrected[0].revision, 0);
         assert_eq!(corrected[1].revision, 1);
         assert_eq!(validate_revision_chain(&corrected), Ok(()));
 
-        let untouched =
-            to_text_items(&page.news[1], TEST_SOURCE_ID, t("2024-05-01T14:00:05Z"), 0).expect("well-formed item");
+        let untouched = to_text_items(&page.news[1], TEST_SOURCE_ID, t("2024-05-01T14:00:05Z"), 0)
+            .expect("well-formed item");
         assert_eq!(untouched.len(), 1);
     }
 
@@ -230,11 +229,11 @@ mod tests {
     #[test]
     fn an_item_is_never_returned_before_its_publication_time() {
         let page = parse_news(PAGE).expect("fixture parses");
-        let rows =
-            to_text_items(&page.news[0], TEST_SOURCE_ID, t("2024-05-01T17:00:05Z"), 0).expect("well-formed item");
+        let rows = to_text_items(&page.news[0], TEST_SOURCE_ID, t("2024-05-01T17:00:05Z"), 0)
+            .expect("well-formed item");
         assert!(item_as_of(&rows, "alpaca:1001", t("2024-05-01T12:59:59Z")).is_none());
-        let at_15 =
-            item_as_of(&rows, "alpaca:1001", t("2024-05-01T15:00:00Z")).expect("published at 13:00");
+        let at_15 = item_as_of(&rows, "alpaca:1001", t("2024-05-01T15:00:00Z"))
+            .expect("published at 13:00");
         assert_eq!(at_15.revision, 0);
     }
 
@@ -244,8 +243,8 @@ mod tests {
     #[test]
     fn ingestion_time_never_becomes_the_knowledge_time() {
         let page = parse_news(PAGE).expect("fixture parses");
-        let rows =
-            to_text_items(&page.news[1], TEST_SOURCE_ID, t("2024-05-01T20:00:00Z"), 0).expect("well-formed item");
+        let rows = to_text_items(&page.news[1], TEST_SOURCE_ID, t("2024-05-01T20:00:00Z"), 0)
+            .expect("well-formed item");
         assert_eq!(rows[0].available_time, t("2024-05-01T14:00:00Z"));
         assert_eq!(rows[0].ingested_time, t("2024-05-01T20:00:00Z"));
     }
@@ -253,8 +252,13 @@ mod tests {
     #[test]
     fn a_declared_lag_delays_availability() {
         let page = parse_news(PAGE).expect("fixture parses");
-        let rows = to_text_items(&page.news[1], TEST_SOURCE_ID, t("2024-05-01T14:00:01Z"), 900_000)
-            .expect("well-formed item");
+        let rows = to_text_items(
+            &page.news[1],
+            TEST_SOURCE_ID,
+            t("2024-05-01T14:00:01Z"),
+            900_000,
+        )
+        .expect("well-formed item");
         assert_eq!(rows[0].available_time, t("2024-05-01T14:15:00Z"));
     }
 

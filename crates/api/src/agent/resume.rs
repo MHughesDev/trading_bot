@@ -125,10 +125,7 @@ pub fn decide(rows: &[LogRow], current_version: &str) -> Resume {
 
     // Version first. Everything below reads the log as if this harness wrote it, and
     // that is only true if it did.
-    if let Some(other) = rows
-        .iter()
-        .find(|r| r.harness_version != current_version)
-    {
+    if let Some(other) = rows.iter().find(|r| r.harness_version != current_version) {
         return Resume::Interrupted {
             reason: format!(
                 "the log was written by harness {} and this is {current_version}; \

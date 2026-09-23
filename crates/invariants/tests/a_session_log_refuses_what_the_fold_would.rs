@@ -237,7 +237,10 @@ async fn a_session_is_a_question_or_a_charter_and_the_column_says_so() {
     .bind(convo2)
     .execute(&pool)
     .await;
-    assert!(both.is_err(), "a session carrying both a question and a charter");
+    assert!(
+        both.is_err(),
+        "a session carrying both a question and a charter"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

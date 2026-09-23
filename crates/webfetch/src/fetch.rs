@@ -122,7 +122,10 @@ impl Fetcher {
             let response = client
                 .get(&current)
                 .header(reqwest::header::USER_AGENT, USER_AGENT)
-                .header(reqwest::header::ACCEPT, "text/html,text/plain;q=0.9,*/*;q=0.1")
+                .header(
+                    reqwest::header::ACCEPT,
+                    "text/html,text/plain;q=0.9,*/*;q=0.1",
+                )
                 // No cookie jar and no auth header, ever. A fetcher that carries
                 // credentials is a fetcher that can be pointed at something.
                 .send()
@@ -203,7 +206,10 @@ impl Fetcher {
         } else {
             self.resolver
                 .resolve(&host, port)
-                .map_err(|reason| FetchError::Resolve { host: host.clone(), reason })?
+                .map_err(|reason| FetchError::Resolve {
+                    host: host.clone(),
+                    reason,
+                })?
         };
 
         match check(url, &self.policy, &addrs) {
@@ -291,20 +297,23 @@ impl Fetcher {
             (raw.to_string(), None)
         };
 
-        Ok((Document {
-            final_url: final_url.to_string(),
-            requested_url: requested.to_string(),
-            status,
-            content_type,
-            text: Untrusted::new(text),
-            title: title.map(Untrusted::new),
-            body_sha256,
-            bytes,
-            // When *we* learned it. Not any date on the page, which the page
-            // chooses.
-            knowledge_time: chrono::Utc::now(),
-            truncated,
-        }, raw.into_owned()))
+        Ok((
+            Document {
+                final_url: final_url.to_string(),
+                requested_url: requested.to_string(),
+                status,
+                content_type,
+                text: Untrusted::new(text),
+                title: title.map(Untrusted::new),
+                body_sha256,
+                bytes,
+                // When *we* learned it. Not any date on the page, which the page
+                // chooses.
+                knowledge_time: chrono::Utc::now(),
+                truncated,
+            },
+            raw.into_owned(),
+        ))
     }
 
     /// Fetch and cache robots.txt, then check the path.
@@ -316,7 +325,11 @@ impl Fetcher {
         let path = "/robots.txt";
         let mut cache = self.robots.lock().await;
         if !cache.contains_key(&approved.host) {
-            let scheme = if self.policy.allow_plaintext { "http" } else { "https" };
+            let scheme = if self.policy.allow_plaintext {
+                "http"
+            } else {
+                "https"
+            };
             let url = format!("{scheme}://{}{path}", approved.host);
             let rules = match self.client_for(approved) {
                 Ok(client) => match client.get(&url).send().await {
@@ -392,7 +405,9 @@ mod tests {
     #[test]
     fn a_host_resolving_into_the_private_network_is_refused_before_any_socket() {
         let f = fetcher("127.0.0.1:443");
-        let err = f.approve("https://arxiv.org/abs/1").expect_err("must refuse");
+        let err = f
+            .approve("https://arxiv.org/abs/1")
+            .expect_err("must refuse");
         assert!(matches!(err, FetchError::Refused(_)), "{err}");
         assert!(err.to_string().contains("loopback"), "{err}");
     }
@@ -416,7 +431,10 @@ mod tests {
     #[test]
     fn a_literal_ip_host_skips_the_resolver() {
         let f = Fetcher::new(
-            Policy { hosts: HostPolicy::AllowAny, ..Policy::default() },
+            Policy {
+                hosts: HostPolicy::AllowAny,
+                ..Policy::default()
+            },
             Arc::new(Failing),
         );
         assert!(f.approve("https://93.184.216.34/").is_ok());
@@ -430,7 +448,12 @@ mod tests {
         for t in ["text/html", "text/plain", "application/json"] {
             assert!(READABLE.contains(&t), "{t} should be readable");
         }
-        for t in ["application/pdf", "image/png", "application/zip", "application/octet-stream"] {
+        for t in [
+            "application/pdf",
+            "image/png",
+            "application/zip",
+            "application/octet-stream",
+        ] {
             assert!(!READABLE.contains(&t), "{t} must not be decoded as text");
         }
     }
@@ -438,7 +461,9 @@ mod tests {
     #[test]
     fn robots_defaults_to_permissive_for_an_unseen_host() {
         let f = fetcher("93.184.216.34:443");
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
         assert!(rt.block_on(f.robots_allows("never-fetched.org", "/anything")));
     }
 

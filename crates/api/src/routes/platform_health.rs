@@ -91,7 +91,21 @@ pub async fn gate_stack(
     // The newest verdict per gate for this subject. `DISTINCT ON` rather than a
     // window function because the table is append-only: a re-evaluation appends,
     // and the board shows the current answer.
-    let rows = sqlx::query_as::<_, (i32, String, bool, Option<f64>, Option<f64>, String, String, Option<f64>, Option<i64>, chrono::DateTime<chrono::Utc>)>(
+    let rows = sqlx::query_as::<
+        _,
+        (
+            i32,
+            String,
+            bool,
+            Option<f64>,
+            Option<f64>,
+            String,
+            String,
+            Option<f64>,
+            Option<i64>,
+            chrono::DateTime<chrono::Utc>,
+        ),
+    >(
         "SELECT DISTINCT ON (gate_no)
                 gate_no, gate_name, passed, statistic, threshold, detail, profile_id,
                 n_eff, trial_count_at_eval, decided_at
@@ -108,8 +122,8 @@ pub async fn gate_stack(
         Ok(rows) => {
             let verdicts: Vec<GateVerdictRow> = rows
                 .into_iter()
-                .map(|(gate_no, gate_name, passed, statistic, threshold, detail, profile_id, n_eff, trial_count_at_eval, decided_at)| {
-                    GateVerdictRow {
+                .map(
+                    |(
                         gate_no,
                         gate_name,
                         passed,
@@ -120,8 +134,21 @@ pub async fn gate_stack(
                         n_eff,
                         trial_count_at_eval,
                         decided_at,
-                    }
-                })
+                    )| {
+                        GateVerdictRow {
+                            gate_no,
+                            gate_name,
+                            passed,
+                            statistic,
+                            threshold,
+                            detail,
+                            profile_id,
+                            n_eff,
+                            trial_count_at_eval,
+                            decided_at,
+                        }
+                    },
+                )
                 .collect();
             let recorded = verdicts.len();
             let passed = verdicts.iter().filter(|v| v.passed).count();
@@ -187,7 +214,11 @@ pub async fn timeline(
     axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let tenant = token.user_id().to_string();
-    let limit: i64 = q.get("limit").and_then(|s| s.parse().ok()).unwrap_or(200).clamp(1, 1000);
+    let limit: i64 = q
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(200)
+        .clamp(1, 1000);
 
     let mut tx = match ledger::pg::tenant_tx(&state.pg, &tenant).await {
         Ok(tx) => tx,
@@ -200,7 +231,20 @@ pub async fn timeline(
         }
     };
 
-    let audits = sqlx::query_as::<_, (chrono::DateTime<chrono::Utc>, String, String, String, String, String, String, Option<String>, serde_json::Value)>(
+    let audits = sqlx::query_as::<
+        _,
+        (
+            chrono::DateTime<chrono::Utc>,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            serde_json::Value,
+        ),
+    >(
         "SELECT occurred_at, action, record_phase, verdict, envelope, actor_kind, actor_id,
                 on_behalf_of, request
          FROM mlops.audit_event
@@ -213,7 +257,19 @@ pub async fn timeline(
     .fetch_all(&mut *tx)
     .await;
 
-    let decisions = sqlx::query_as::<_, (chrono::DateTime<chrono::Utc>, String, String, f64, bool, i64, String, String)>(
+    let decisions = sqlx::query_as::<
+        _,
+        (
+            chrono::DateTime<chrono::Utc>,
+            String,
+            String,
+            f64,
+            bool,
+            i64,
+            String,
+            String,
+        ),
+    >(
         "SELECT decided_at, kind, decision_tier, propensity, exploration_flag,
                 coalesce(jsonb_array_length(candidate_set), 0)::bigint,
                 actor_kind, actor_id
@@ -237,7 +293,9 @@ pub async fn timeline(
     };
 
     let mut rows: Vec<TimelineRow> = Vec::with_capacity(audits.len() + decisions.len());
-    for (at, action, phase, verdict, envelope, actor_kind, actor_id, on_behalf_of, request) in audits {
+    for (at, action, phase, verdict, envelope, actor_kind, actor_id, on_behalf_of, request) in
+        audits
+    {
         rows.push(TimelineRow {
             kind: "audit",
             at,
@@ -278,7 +336,12 @@ pub async fn timeline(
     // here so a reviewer sees it without reading every row.
     let prevented = rows
         .iter()
-        .filter(|r| r.kind == "audit" && r.verdict.as_deref().is_some_and(|v| v == "denied" || v == "pending_approval"))
+        .filter(|r| {
+            r.kind == "audit"
+                && r.verdict
+                    .as_deref()
+                    .is_some_and(|v| v == "denied" || v == "pending_approval")
+        })
         .count();
 
     (

@@ -296,7 +296,11 @@ pub fn derive_negative_result(
 /// condition — is untouched, and an annotation that tries to change the class is
 /// refused rather than silently ignored. Silent ignoring is how a model learns
 /// the field is advisory.
-pub fn annotate(entry: &mut Entry, note: &str, claimed_class: Option<&str>) -> Result<(), RefusedWrite> {
+pub fn annotate(
+    entry: &mut Entry,
+    note: &str,
+    claimed_class: Option<&str>,
+) -> Result<(), RefusedWrite> {
     if entry.kind != Kind::NegativeResult {
         return Err(RefusedWrite::NoSuchEntry {
             ticket_id: entry.id.clone(),
@@ -400,8 +404,12 @@ mod tests {
             &refused(FailureClass::WeakEffect, "t = 0.4"),
             prov(),
         );
-        let err = annotate(&mut e, "I think it is a capacity issue", Some("capacity_insufficient"))
-            .unwrap_err();
+        let err = annotate(
+            &mut e,
+            "I think it is a capacity issue",
+            Some("capacity_insufficient"),
+        )
+        .unwrap_err();
         assert_eq!(
             err,
             RefusedWrite::AnnotationChangedClass {

@@ -165,14 +165,28 @@ impl WorkerPool {
 
         let trial = if job.kind.counts_trial() {
             let Some(trial_id) = job.trial_id else {
-                let error = JobError::logic(ledger::TerminalReason::IntegrityRejected, "unregistered_trial", format!("{} jobs dispatch compute and need a registered trial (INV-16)", job.kind));
+                let error = JobError::logic(
+                    ledger::TerminalReason::IntegrityRejected,
+                    "unregistered_trial",
+                    format!(
+                        "{} jobs dispatch compute and need a registered trial (INV-16)",
+                        job.kind
+                    ),
+                );
                 let _ = self.store.fail(&job.job_id, error).await;
                 return;
             };
-            match ledger::pg::PgTrialLedger::new(self.store.pool().clone()).resume_ticket_async(&job.user_id.to_string(), trial_id).await {
+            match ledger::pg::PgTrialLedger::new(self.store.pool().clone())
+                .resume_ticket_async(&job.user_id.to_string(), trial_id)
+                .await
+            {
                 Ok(t) => Some(t),
                 Err(e) => {
-                    let error = JobError::logic(ledger::TerminalReason::IntegrityRejected, "unregistered_trial", format!("trial {trial_id} cannot authorize this job: {e}"));
+                    let error = JobError::logic(
+                        ledger::TerminalReason::IntegrityRejected,
+                        "unregistered_trial",
+                        format!("trial {trial_id} cannot authorize this job: {e}"),
+                    );
                     let _ = self.store.fail(&job.job_id, error).await;
                     return;
                 }

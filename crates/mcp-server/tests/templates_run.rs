@@ -446,7 +446,10 @@ async fn a_planted_bar_boundary_leak_is_caught_and_a_clean_pair_is_not() {
     let (outcome, leaky) = run_once(t, &call("slow_leaky.parquet")).await;
     assert_eq!(outcome, Outcome::Ok, "{outcome:?}");
     let leaky = detail_of(leaky);
-    let violations = leaky.get("n_violations").and_then(Value::as_u64).unwrap_or(0);
+    let violations = leaky
+        .get("n_violations")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     assert!(
         violations > 0,
         "the planted lookahead was not caught at all"

@@ -11,7 +11,10 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use dataplane::feature::{register_check, Feature, FeatureDef, FeatureError, FeatureRow, InfoClass, WindowedFrame, EVALUATE_FN};
+use dataplane::feature::{
+    register_check, Feature, FeatureDef, FeatureError, FeatureRow, InfoClass, WindowedFrame,
+    EVALUATE_FN,
+};
 
 use crate::{Ema, Rsi};
 
@@ -21,7 +24,13 @@ pub const OBV_WINDOW: u32 = 256;
 /// Build a feature definition whose `code_hash` is the hash of the source that
 /// implements it, so a served value records exactly which code produced it.
 #[must_use]
-pub fn definition(feature_id: &str, family: &str, version: u32, lookback_bars: u32, source: &str) -> FeatureDef {
+pub fn definition(
+    feature_id: &str,
+    family: &str,
+    version: u32,
+    lookback_bars: u32,
+    source: &str,
+) -> FeatureDef {
     FeatureDef {
         feature_id: feature_id.to_string(),
         version,
@@ -29,7 +38,12 @@ pub fn definition(feature_id: &str, family: &str, version: u32, lookback_bars: u
         lookback_bars,
         knowledge_lag_ms: 0,
         output_dtype: "f64".into(),
-        asset_classes: vec!["equity".into(), "crypto".into(), "futures".into(), "fx".into()],
+        asset_classes: vec![
+            "equity".into(),
+            "crypto".into(),
+            "futures".into(),
+            "fx".into(),
+        ],
         deflators: vec![],
         info_class: InfoClass::MarketPublic,
     }
@@ -84,7 +98,6 @@ fn sample_std(v: &[f64]) -> f64 {
     (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (v.len() as f64 - 1.0)).sqrt()
 }
 
-
 /// The computation behind a catalogued family.
 ///
 /// One variant per *algorithm*, not per name: `sma_20` and `rolling_mean_20` are
@@ -124,17 +137,35 @@ enum Kind {
     /// Wilder average true range, in price units.
     Atr(usize),
     /// `ema(fast) − ema(slow)`.
-    Macd { fast: usize, slow: usize },
+    Macd {
+        fast: usize,
+        slow: usize,
+    },
     /// `ema(signal)` of the macd series.
-    MacdSignal { fast: usize, slow: usize, signal: usize },
+    MacdSignal {
+        fast: usize,
+        slow: usize,
+        signal: usize,
+    },
     /// macd minus its signal line.
-    MacdHist { fast: usize, slow: usize, signal: usize },
+    MacdHist {
+        fast: usize,
+        slow: usize,
+        signal: usize,
+    },
     /// Bollinger band, `k` sample standard deviations from the rolling mean.
-    Bollinger { k: usize, part: BandPart },
+    Bollinger {
+        k: usize,
+        part: BandPart,
+    },
     /// Donchian channel over the window's highs and lows.
     Donchian(BandPart),
     /// Keltner band: `ema(n)` ± `k · atr(n)`.
-    Keltner { n: usize, k: usize, upper: bool },
+    Keltner {
+        n: usize,
+        k: usize,
+        upper: bool,
+    },
     Obv,
     RelVolume,
 
@@ -144,7 +175,10 @@ enum Kind {
     DowSin,
     DowCos,
     /// 1 inside `[from, to)` UTC hours, else 0.
-    UtcSession { from: i64, to: i64 },
+    UtcSession {
+        from: i64,
+        to: i64,
+    },
 
     // ── range volatility and realised measures (F2) ──────────────────────────
     Parkinson,
@@ -223,7 +257,13 @@ impl Series {
 fn log_returns(closes_newest_first: &[f64]) -> Vec<f64> {
     closes_newest_first
         .windows(2)
-        .map(|w| if w[0] <= 0.0 || w[1] <= 0.0 { f64::NAN } else { (w[0] / w[1]).ln() })
+        .map(|w| {
+            if w[0] <= 0.0 || w[1] <= 0.0 {
+                f64::NAN
+            } else {
+                (w[0] / w[1]).ln()
+            }
+        })
         .collect()
 }
 
@@ -235,7 +275,11 @@ fn central_moment(v: &[f64], m: i32) -> f64 {
 }
 
 /// Linear-interpolated percentile of `v`, `q` in whole percent.
-#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 fn percentile(v: &[f64], q: usize) -> f64 {
     if v.is_empty() {
         return f64::NAN;
@@ -272,10 +316,13 @@ impl Windowed {
     fn macd_at(closes_oldest_first: &[f64], fast: usize, slow: usize, back: usize) -> f64 {
         let span = slow * crate::ema::EMA_LOOKBACK_PERIODS;
         let end = closes_oldest_first.len().checked_sub(back);
-        let Some(end) = end.filter(|e| *e >= span) else { return f64::NAN };
+        let Some(end) = end.filter(|e| *e >= span) else {
+            return f64::NAN;
+        };
         let w = &closes_oldest_first[end - span..end];
         let fast_span = fast * crate::ema::EMA_LOOKBACK_PERIODS;
-        crate::ema::ema_from_oldest(&w[span - fast_span.min(span)..], fast) - crate::ema::ema_from_oldest(w, slow)
+        crate::ema::ema_from_oldest(&w[span - fast_span.min(span)..], fast)
+            - crate::ema::ema_from_oldest(w, slow)
     }
 
     /// `ema(signal)` of the macd series ending at the decision bar.
@@ -288,7 +335,9 @@ impl Windowed {
         }
         // Oldest first: j = 0 is `count - 1` bars back, j = count - 1 is the
         // decision bar.
-        let macds: Vec<f64> = (0..count).map(|j| Self::macd_at(closes_oldest_first, fast, slow, count - 1 - j)).collect();
+        let macds: Vec<f64> = (0..count)
+            .map(|j| Self::macd_at(closes_oldest_first, fast, slow, count - 1 - j))
+            .collect();
         crate::ema::ema_from_oldest(&macds, signal)
     }
 
@@ -298,7 +347,9 @@ impl Windowed {
         let mut w = crate::rsi::WilderAverage::new(period);
         for i in (0..s.close.len().saturating_sub(1)).rev() {
             let prev = s.close[i + 1];
-            let tr = (s.high[i] - s.low[i]).max((s.high[i] - prev).abs()).max((s.low[i] - prev).abs());
+            let tr = (s.high[i] - s.low[i])
+                .max((s.high[i] - prev).abs())
+                .max((s.low[i] - prev).abs());
             w.push(tr);
         }
         w.value()
@@ -318,13 +369,22 @@ impl Feature for Windowed {
             Kind::HourSin | Kind::HourCos => {
                 let hour = (f.back(0)?.ts_ns.div_euclid(3_600_000_000_000)).rem_euclid(24) as f64;
                 let a = hour * std::f64::consts::TAU / 24.0;
-                return Ok(if matches!(self.1, Kind::HourSin) { a.sin() } else { a.cos() });
+                return Ok(if matches!(self.1, Kind::HourSin) {
+                    a.sin()
+                } else {
+                    a.cos()
+                });
             }
             Kind::DowSin | Kind::DowCos => {
                 // Unix day 0 was a Thursday; 0 = Monday.
-                let dow = (f.back(0)?.ts_ns.div_euclid(86_400_000_000_000) + 3).rem_euclid(7) as f64;
+                let dow =
+                    (f.back(0)?.ts_ns.div_euclid(86_400_000_000_000) + 3).rem_euclid(7) as f64;
                 let a = dow * std::f64::consts::TAU / 7.0;
-                return Ok(if matches!(self.1, Kind::DowSin) { a.sin() } else { a.cos() });
+                return Ok(if matches!(self.1, Kind::DowSin) {
+                    a.sin()
+                } else {
+                    a.cos()
+                });
             }
             Kind::UtcSession { from, to } => {
                 let hour = (f.back(0)?.ts_ns.div_euclid(3_600_000_000_000)).rem_euclid(24);
@@ -337,7 +397,11 @@ impl Feature for Windowed {
         let s = Series::read(f)?;
         let c = &s.close;
         Ok(match self.1 {
-            Kind::HourSin | Kind::HourCos | Kind::DowSin | Kind::DowCos | Kind::UtcSession { .. } => unreachable!("handled above"),
+            Kind::HourSin
+            | Kind::HourCos
+            | Kind::DowSin
+            | Kind::DowCos
+            | Kind::UtcSession { .. } => unreachable!("handled above"),
 
             Kind::RollingMean => mean(c),
             Kind::RollingStd => sample_std(c),
@@ -415,7 +479,9 @@ impl Feature for Windowed {
 
             Kind::Atr(p) => Self::atr_value(&s, p),
             Kind::Macd { fast, slow } => Self::macd_at(&s.closes_oldest_first(), fast, slow, 0),
-            Kind::MacdSignal { fast, slow, signal } => Self::macd_signal_at(&s.closes_oldest_first(), fast, slow, signal),
+            Kind::MacdSignal { fast, slow, signal } => {
+                Self::macd_signal_at(&s.closes_oldest_first(), fast, slow, signal)
+            }
             Kind::MacdHist { fast, slow, signal } => {
                 let o = s.closes_oldest_first();
                 Self::macd_at(&o, fast, slow, 0) - Self::macd_signal_at(&o, fast, slow, signal)
@@ -497,17 +563,21 @@ impl Feature for Windowed {
                 let c1 = 2.0 * 2.0_f64.ln() - 1.0;
                 let mut acc = 0.0;
                 for b in 0..w {
-                    if s.low[b] <= 0.0 || s.high[b] <= 0.0 || s.open[b] <= 0.0 || s.close[b] <= 0.0 {
+                    if s.low[b] <= 0.0 || s.high[b] <= 0.0 || s.open[b] <= 0.0 || s.close[b] <= 0.0
+                    {
                         return Ok(f64::NAN);
                     }
-                    acc += (0.5 * (s.high[b] / s.low[b]).ln().powi(2) - c1 * (s.close[b] / s.open[b]).ln().powi(2)).max(0.0);
+                    acc += (0.5 * (s.high[b] / s.low[b]).ln().powi(2)
+                        - c1 * (s.close[b] / s.open[b]).ln().powi(2))
+                    .max(0.0);
                 }
                 (acc / w as f64).sqrt()
             }
             Kind::RogersSatchell => {
                 let mut acc = 0.0;
                 for b in 0..w {
-                    if s.low[b] <= 0.0 || s.high[b] <= 0.0 || s.open[b] <= 0.0 || s.close[b] <= 0.0 {
+                    if s.low[b] <= 0.0 || s.high[b] <= 0.0 || s.open[b] <= 0.0 || s.close[b] <= 0.0
+                    {
                         return Ok(f64::NAN);
                     }
                     let (h, l, o, cl) = (s.high[b], s.low[b], s.open[b], s.close[b]);
@@ -612,7 +682,8 @@ fn construct(name: &str) -> Option<Arc<dyn Feature>> {
     let p = r.params();
     let lookback = r.lookback_bars()?;
     let family = r.family;
-    let passthrough = |field| Some(Arc::new(Passthrough(def(name, "passthrough", 1), field)) as Arc<dyn Feature>);
+    let passthrough =
+        |field| Some(Arc::new(Passthrough(def(name, "passthrough", 1), field)) as Arc<dyn Feature>);
     let windowed = |kind| {
         let mut d = def(name, family.name, lookback);
         d.knowledge_lag_ms = family.pit_lag_ms;
@@ -650,19 +721,50 @@ fn construct(name: &str) -> Option<Arc<dyn Feature>> {
         "ewma" => windowed(Kind::Ewma(p[0])),
 
         "atr" => windowed(Kind::Atr(p[0])),
-        "macd" => windowed(Kind::Macd { fast: p[0], slow: p[1] }),
-        "macd_signal" => windowed(Kind::MacdSignal { fast: p[0], slow: p[1], signal: p[2] }),
-        "macd_hist" => windowed(Kind::MacdHist { fast: p[0], slow: p[1], signal: p[2] }),
-        "bb_upper" => windowed(Kind::Bollinger { k: p[1], part: BandPart::Upper }),
-        "bb_lower" => windowed(Kind::Bollinger { k: p[1], part: BandPart::Lower }),
-        "bb_width" => windowed(Kind::Bollinger { k: p[1], part: BandPart::Width }),
-        "bb_pctb" => windowed(Kind::Bollinger { k: p[1], part: BandPart::PctB }),
+        "macd" => windowed(Kind::Macd {
+            fast: p[0],
+            slow: p[1],
+        }),
+        "macd_signal" => windowed(Kind::MacdSignal {
+            fast: p[0],
+            slow: p[1],
+            signal: p[2],
+        }),
+        "macd_hist" => windowed(Kind::MacdHist {
+            fast: p[0],
+            slow: p[1],
+            signal: p[2],
+        }),
+        "bb_upper" => windowed(Kind::Bollinger {
+            k: p[1],
+            part: BandPart::Upper,
+        }),
+        "bb_lower" => windowed(Kind::Bollinger {
+            k: p[1],
+            part: BandPart::Lower,
+        }),
+        "bb_width" => windowed(Kind::Bollinger {
+            k: p[1],
+            part: BandPart::Width,
+        }),
+        "bb_pctb" => windowed(Kind::Bollinger {
+            k: p[1],
+            part: BandPart::PctB,
+        }),
         "donchian_upper" => windowed(Kind::Donchian(BandPart::Upper)),
         "donchian_lower" => windowed(Kind::Donchian(BandPart::Lower)),
         "donchian_mid" => windowed(Kind::Donchian(BandPart::Mid)),
         "donchian_width" => windowed(Kind::Donchian(BandPart::Width)),
-        "keltner_upper" => windowed(Kind::Keltner { n: p[0], k: p[1], upper: true }),
-        "keltner_lower" => windowed(Kind::Keltner { n: p[0], k: p[1], upper: false }),
+        "keltner_upper" => windowed(Kind::Keltner {
+            n: p[0],
+            k: p[1],
+            upper: true,
+        }),
+        "keltner_lower" => windowed(Kind::Keltner {
+            n: p[0],
+            k: p[1],
+            upper: false,
+        }),
         "obv" => windowed(Kind::Obv),
         "rel_volume" => windowed(Kind::RelVolume),
 
@@ -700,12 +802,19 @@ fn construct(name: &str) -> Option<Arc<dyn Feature>> {
 pub fn feature(name: &str) -> Result<Arc<dyn Feature>, FeatureError> {
     static REGISTERED: OnceLock<Mutex<HashMap<String, Arc<dyn Feature>>>> = OnceLock::new();
     let cache = REGISTERED.get_or_init(Default::default);
-    if let Some(f) = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(name) {
+    if let Some(f) = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(name)
+    {
         return Ok(Arc::clone(f));
     }
     let f = construct(name).ok_or_else(|| FeatureError::Unknown(name.to_string()))?;
     register_check(f.as_ref())?;
-    cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(name.to_string(), Arc::clone(&f));
+    cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(name.to_string(), Arc::clone(&f));
     Ok(f)
 }
 
@@ -748,20 +857,27 @@ pub fn lookback_bars(name: &str) -> Option<u32> {
 /// non-finite result).
 #[must_use]
 pub fn value_at(feature: &dyn Feature, rows: &[FeatureRow], decision: usize) -> Option<f64> {
-    EVALUATE_FN(feature, rows, decision).ok().filter(|v| v.is_finite())
+    EVALUATE_FN(feature, rows, decision)
+        .ok()
+        .filter(|v| v.is_finite())
 }
 
 /// Batch path: one column per feature, `None` where absent.
 #[must_use]
 pub fn backfill_column(feature: &dyn Feature, rows: &[FeatureRow]) -> Vec<Option<f64>> {
-    (0..rows.len()).map(|i| value_at(feature, rows, i)).collect()
+    (0..rows.len())
+        .map(|i| value_at(feature, rows, i))
+        .collect()
 }
 
 /// The latest value of each named feature over `rows`.
 ///
 /// # Errors
 /// Unknown or unregistrable names.
-pub fn latest(names: &[String], rows: &[FeatureRow]) -> Result<BTreeMap<String, Option<f64>>, FeatureError> {
+pub fn latest(
+    names: &[String],
+    rows: &[FeatureRow],
+) -> Result<BTreeMap<String, Option<f64>>, FeatureError> {
     let last = rows.len().checked_sub(1);
     names
         .iter()
@@ -780,7 +896,14 @@ mod tests {
         closes
             .iter()
             .enumerate()
-            .map(|(i, &c)| FeatureRow { ts_ns: i as i64 * 3_600_000_000_000, open: c, high: c * 1.01, low: c * 0.99, close: c, volume: 1.0 + (i % 3) as f64 })
+            .map(|(i, &c)| FeatureRow {
+                ts_ns: i as i64 * 3_600_000_000_000,
+                open: c,
+                high: c * 1.01,
+                low: c * 0.99,
+                close: c,
+                volume: 1.0 + (i % 3) as f64,
+            })
             .collect()
     }
 
@@ -845,8 +968,6 @@ mod tests {
         );
     }
 
-
-
     #[test]
     fn every_catalogued_feature_registers() {
         for name in crate::feature_sets::known_features() {
@@ -856,7 +977,14 @@ mod tests {
 
     #[test]
     fn unknown_and_degenerate_names_do_not_resolve() {
-        for bad in ["ema_0", "rsi_1", "rolling_std_1", "returns_", "nope", "ema_x"] {
+        for bad in [
+            "ema_0",
+            "rsi_1",
+            "rolling_std_1",
+            "returns_",
+            "nope",
+            "ema_x",
+        ] {
             assert!(feature(bad).is_err(), "{bad}");
         }
     }
@@ -875,7 +1003,9 @@ mod tests {
 
     #[test]
     fn windowed_ema_matches_the_recursive_definition_on_its_window() {
-        let closes: Vec<f64> = (0..60).map(|i| (f64::from(i) * 0.3).sin() * 5.0 + 100.0).collect();
+        let closes: Vec<f64> = (0..60)
+            .map(|i| (f64::from(i) * 0.3).sin() * 5.0 + 100.0)
+            .collect();
         let r = rows(&closes);
         let got = value_at(feature("ema_4").unwrap().as_ref(), &r, 59).unwrap();
         let k = 2.0 / 5.0;
@@ -889,7 +1019,10 @@ mod tests {
     #[test]
     fn rsi_of_a_monotone_rise_is_100() {
         let r = rows(&(0..30).map(|i| 10.0 + f64::from(i)).collect::<Vec<_>>());
-        assert_eq!(value_at(feature("rsi_3").unwrap().as_ref(), &r, 29), Some(100.0));
+        assert_eq!(
+            value_at(feature("rsi_3").unwrap().as_ref(), &r, 29),
+            Some(100.0)
+        );
     }
 
     #[test]
@@ -907,7 +1040,10 @@ mod tests {
         let r = feature("rsi_14").unwrap();
         assert!(e.def().code_hash.starts_with("sha256:"));
         assert_ne!(e.def().code_hash, r.def().code_hash);
-        assert_eq!(feature("ema_7").unwrap().def().code_hash, feature("ema_9").unwrap().def().code_hash);
+        assert_eq!(
+            feature("ema_7").unwrap().def().code_hash,
+            feature("ema_9").unwrap().def().code_hash
+        );
     }
 
     /// The feature-set id is a version hash, not a name: a set with a different
@@ -917,7 +1053,8 @@ mod tests {
         let a = feature_set_version_hash(&["ema_7".into(), "rsi_14".into()]).unwrap();
         let same = feature_set_version_hash(&["ema_7".into(), "rsi_14".into()]).unwrap();
         let reordered = feature_set_version_hash(&["rsi_14".into(), "ema_7".into()]).unwrap();
-        let extra = feature_set_version_hash(&["ema_7".into(), "rsi_14".into(), "close".into()]).unwrap();
+        let extra =
+            feature_set_version_hash(&["ema_7".into(), "rsi_14".into(), "close".into()]).unwrap();
         assert_eq!(a, same);
         assert_ne!(a, reordered, "column order is part of the set");
         assert_ne!(a, extra);
@@ -933,9 +1070,17 @@ mod tests {
 
     /// The match arms of `construct`, read out of its own source.
     fn constructor_arms() -> std::collections::BTreeSet<&'static str> {
-        let body = SOURCE.split("fn construct(name: &str)").nth(1).expect("construct is in this file");
+        let body = SOURCE
+            .split("fn construct(name: &str)")
+            .nth(1)
+            .expect("construct is in this file");
         let mut arms = std::collections::BTreeSet::new();
-        for piece in body.split('"').skip(1).step_by(2).zip(body.split('"').skip(2).step_by(2)) {
+        for piece in body
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .zip(body.split('"').skip(2).step_by(2))
+        {
             let (name, after) = piece;
             if after.trim_start().starts_with("=>") {
                 arms.insert(name);
@@ -960,15 +1105,32 @@ mod tests {
                 unbuildable.push(name);
             }
         }
-        assert!(unbuildable.is_empty(), "catalogued but not constructible: {unbuildable:?}");
+        assert!(
+            unbuildable.is_empty(),
+            "catalogued but not constructible: {unbuildable:?}"
+        );
 
         let arms = constructor_arms();
-        assert!(arms.len() > 40, "the arm scan found only {}; it has drifted", arms.len());
-        let known: std::collections::BTreeSet<&str> = crate::registry::families().iter().filter(|f| f.alias_of.is_none()).map(|f| f.name).collect();
+        assert!(
+            arms.len() > 40,
+            "the arm scan found only {}; it has drifted",
+            arms.len()
+        );
+        let known: std::collections::BTreeSet<&str> = crate::registry::families()
+            .iter()
+            .filter(|f| f.alias_of.is_none())
+            .map(|f| f.name)
+            .collect();
         let orphan: Vec<&&str> = arms.difference(&known).collect();
-        assert!(orphan.is_empty(), "constructor arms with no catalogue row: {orphan:?}");
+        assert!(
+            orphan.is_empty(),
+            "constructor arms with no catalogue row: {orphan:?}"
+        );
         let unhandled: Vec<&&str> = known.difference(&arms).collect();
-        assert!(unhandled.is_empty(), "catalogue rows with no constructor arm: {unhandled:?}");
+        assert!(
+            unhandled.is_empty(),
+            "catalogue rows with no constructor arm: {unhandled:?}"
+        );
     }
 
     /// Every family, at its example parameters, passes the declared-lookback
@@ -1003,9 +1165,13 @@ mod tests {
             }
         }
         let under = UnderDeclared(def("liar_4", "liar", 4));
-        let err = register_check(&under).expect_err("a feature reading past its window must not register");
+        let err = register_check(&under)
+            .expect_err("a feature reading past its window must not register");
         assert!(
-            matches!(err, FeatureError::Registration { .. } | FeatureError::LookbackExceeded { .. }),
+            matches!(
+                err,
+                FeatureError::Registration { .. } | FeatureError::LookbackExceeded { .. }
+            ),
             "unexpected error: {err}"
         );
     }
@@ -1033,7 +1199,11 @@ mod tests {
     /// families a strategy can now name, and each produces a finite value.
     #[test]
     fn the_whole_catalogue_computes_a_finite_value_on_ordinary_bars() {
-        let r = rows(&(0..4_000).map(|i| 100.0 + (f64::from(i) * 0.013).sin() * 8.0 + f64::from(i) * 0.002).collect::<Vec<_>>());
+        let r = rows(
+            &(0..4_000)
+                .map(|i| 100.0 + (f64::from(i) * 0.013).sin() * 8.0 + f64::from(i) * 0.002)
+                .collect::<Vec<_>>(),
+        );
         let mut absent = Vec::new();
         for f in crate::registry::families() {
             let name = f.example();
@@ -1043,7 +1213,10 @@ mod tests {
                 None => absent.push(name),
             }
         }
-        assert!(absent.is_empty(), "no value on 4,000 clean bars: {absent:?}");
+        assert!(
+            absent.is_empty(),
+            "no value on 4,000 clean bars: {absent:?}"
+        );
     }
 
     #[test]
@@ -1051,7 +1224,14 @@ mod tests {
         // Constant 2.0-wide bars with no gaps: every true range is 2.0, so any
         // weighting of them averages to 2.0.
         let r: Vec<FeatureRow> = (0..200)
-            .map(|i| FeatureRow { ts_ns: i as i64 * 3_600_000_000_000, open: 100.0, high: 101.0, low: 99.0, close: 100.0, volume: 1.0 })
+            .map(|i| FeatureRow {
+                ts_ns: i as i64 * 3_600_000_000_000,
+                open: 100.0,
+                high: 101.0,
+                low: 99.0,
+                close: 100.0,
+                volume: 1.0,
+            })
             .collect();
         let v = value_at(feature("atr_14").unwrap().as_ref(), &r, 199).unwrap();
         assert!((v - 2.0).abs() < 1e-12, "atr_14 = {v}");
@@ -1059,29 +1239,45 @@ mod tests {
 
     #[test]
     fn macd_is_the_difference_of_the_two_emas_it_names() {
-        let closes: Vec<f64> = (0..1_000).map(|i| 100.0 + (f64::from(i) * 0.07).sin() * 6.0).collect();
+        let closes: Vec<f64> = (0..1_000)
+            .map(|i| 100.0 + (f64::from(i) * 0.07).sin() * 6.0)
+            .collect();
         let r = rows(&closes);
         let d = r.len() - 1;
         let macd = value_at(feature("macd_12_26").unwrap().as_ref(), &r, d).unwrap();
         let fast = value_at(feature("ema_12").unwrap().as_ref(), &r, d).unwrap();
         let slow = value_at(feature("ema_26").unwrap().as_ref(), &r, d).unwrap();
-        assert_eq!(macd.to_bits(), (fast - slow).to_bits(), "macd must be exactly its two legs");
+        assert_eq!(
+            macd.to_bits(),
+            (fast - slow).to_bits(),
+            "macd must be exactly its two legs"
+        );
     }
 
     #[test]
     fn macd_hist_is_macd_minus_its_signal() {
-        let closes: Vec<f64> = (0..1_500).map(|i| 100.0 + (f64::from(i) * 0.05).cos() * 4.0).collect();
+        let closes: Vec<f64> = (0..1_500)
+            .map(|i| 100.0 + (f64::from(i) * 0.05).cos() * 4.0)
+            .collect();
         let r = rows(&closes);
         let d = r.len() - 1;
         let hist = value_at(feature("macd_hist_12_26_9").unwrap().as_ref(), &r, d).unwrap();
         let macd = value_at(feature("macd_12_26").unwrap().as_ref(), &r, d).unwrap();
         let sig = value_at(feature("macd_signal_12_26_9").unwrap().as_ref(), &r, d).unwrap();
-        assert!((hist - (macd - sig)).abs() < 1e-9, "{hist} vs {}", macd - sig);
+        assert!(
+            (hist - (macd - sig)).abs() < 1e-9,
+            "{hist} vs {}",
+            macd - sig
+        );
     }
 
     #[test]
     fn a_bollinger_band_brackets_its_own_middle() {
-        let r = rows(&(0..200).map(|i| 100.0 + (f64::from(i) * 0.3).sin() * 5.0).collect::<Vec<_>>());
+        let r = rows(
+            &(0..200)
+                .map(|i| 100.0 + (f64::from(i) * 0.3).sin() * 5.0)
+                .collect::<Vec<_>>(),
+        );
         let d = 199;
         let up = value_at(feature("bb_upper_20_2").unwrap().as_ref(), &r, d).unwrap();
         let lo = value_at(feature("bb_lower_20_2").unwrap().as_ref(), &r, d).unwrap();
@@ -1094,7 +1290,11 @@ mod tests {
 
     #[test]
     fn a_donchian_channel_contains_every_bar_of_its_window() {
-        let r = rows(&(0..120).map(|i| 100.0 + f64::from(i % 17)).collect::<Vec<_>>());
+        let r = rows(
+            &(0..120)
+                .map(|i| 100.0 + f64::from(i % 17))
+                .collect::<Vec<_>>(),
+        );
         let d = 119;
         let up = value_at(feature("donchian_upper_20").unwrap().as_ref(), &r, d).unwrap();
         let lo = value_at(feature("donchian_lower_20").unwrap().as_ref(), &r, d).unwrap();
@@ -1106,17 +1306,32 @@ mod tests {
     #[test]
     fn pct_rank_is_one_at_a_window_high_and_zero_at_a_window_low() {
         let rising = rows(&(0..60).map(|i| 100.0 + f64::from(i)).collect::<Vec<_>>());
-        assert_eq!(value_at(feature("pct_rank_20").unwrap().as_ref(), &rising, 59), Some(1.0));
+        assert_eq!(
+            value_at(feature("pct_rank_20").unwrap().as_ref(), &rising, 59),
+            Some(1.0)
+        );
         let falling = rows(&(0..60).map(|i| 100.0 - f64::from(i)).collect::<Vec<_>>());
-        assert_eq!(value_at(feature("pct_rank_20").unwrap().as_ref(), &falling, 59), Some(0.0));
+        assert_eq!(
+            value_at(feature("pct_rank_20").unwrap().as_ref(), &falling, 59),
+            Some(0.0)
+        );
     }
 
     #[test]
     fn efficiency_ratio_is_one_on_a_straight_line_and_near_zero_on_a_saw() {
         let straight = rows(&(0..80).map(|i| 100.0 + f64::from(i)).collect::<Vec<_>>());
-        let v = value_at(feature("efficiency_ratio_20").unwrap().as_ref(), &straight, 79).unwrap();
+        let v = value_at(
+            feature("efficiency_ratio_20").unwrap().as_ref(),
+            &straight,
+            79,
+        )
+        .unwrap();
         assert!((v - 1.0).abs() < 1e-12, "{v}");
-        let saw = rows(&(0..80).map(|i| 100.0 + f64::from(i % 2)).collect::<Vec<_>>());
+        let saw = rows(
+            &(0..80)
+                .map(|i| 100.0 + f64::from(i % 2))
+                .collect::<Vec<_>>(),
+        );
         let v = value_at(feature("efficiency_ratio_20").unwrap().as_ref(), &saw, 79).unwrap();
         assert!(v < 0.1, "{v}");
     }
@@ -1124,7 +1339,14 @@ mod tests {
     #[test]
     fn a_utc_session_is_one_inside_its_window_and_zero_outside() {
         let r: Vec<FeatureRow> = (0..24)
-            .map(|h| FeatureRow { ts_ns: i64::from(h) * 3_600_000_000_000, open: 1.0, high: 1.0, low: 1.0, close: 1.0, volume: 1.0 })
+            .map(|h| FeatureRow {
+                ts_ns: i64::from(h) * 3_600_000_000_000,
+                open: 1.0,
+                high: 1.0,
+                low: 1.0,
+                close: 1.0,
+                volume: 1.0,
+            })
             .collect();
         let f = feature("utc_session_london").unwrap();
         assert_eq!(value_at(f.as_ref(), &r, 7), Some(1.0));
@@ -1138,17 +1360,34 @@ mod tests {
     /// number and record different provenance for it (INV-14).
     #[test]
     fn an_alias_and_its_canonical_family_are_the_same_implementation() {
-        for (alias, canonical) in [("sma_20", "rolling_mean_20"), ("momentum_5", "returns_5"), ("ret_5", "returns_5"), ("logret_1", "log_returns_1")] {
+        for (alias, canonical) in [
+            ("sma_20", "rolling_mean_20"),
+            ("momentum_5", "returns_5"),
+            ("ret_5", "returns_5"),
+            ("logret_1", "log_returns_1"),
+        ] {
             let a = feature(alias).unwrap();
             let c = feature(canonical).unwrap();
-            assert_eq!(a.def().code_hash, c.def().code_hash, "{alias} vs {canonical}");
+            assert_eq!(
+                a.def().code_hash,
+                c.def().code_hash,
+                "{alias} vs {canonical}"
+            );
             assert_eq!(a.def().lookback_bars, c.def().lookback_bars);
         }
-        let r = rows(&(0..200).map(|i| 100.0 + (f64::from(i) * 0.21).sin() * 3.0).collect::<Vec<_>>());
+        let r = rows(
+            &(0..200)
+                .map(|i| 100.0 + (f64::from(i) * 0.21).sin() * 3.0)
+                .collect::<Vec<_>>(),
+        );
         for (alias, canonical) in [("sma_20", "rolling_mean_20"), ("momentum_5", "returns_5")] {
             let a = value_at(feature(alias).unwrap().as_ref(), &r, 199);
             let c = value_at(feature(canonical).unwrap().as_ref(), &r, 199);
-            assert_eq!(a.map(f64::to_bits), c.map(f64::to_bits), "{alias} vs {canonical}");
+            assert_eq!(
+                a.map(f64::to_bits),
+                c.map(f64::to_bits),
+                "{alias} vs {canonical}"
+            );
         }
     }
 

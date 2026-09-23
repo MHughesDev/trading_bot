@@ -63,7 +63,9 @@ fn ch_url() -> String {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires live Postgres and ClickHouse"]
 async fn the_regime_model_is_validated_or_it_is_decorative() {
-    let pg = PgPool::connect(&pg_url()).await.expect("postgres reachable");
+    let pg = PgPool::connect(&pg_url())
+        .await
+        .expect("postgres reachable");
 
     let scopes = RegimeScopeStore::new(pg.clone())
         .enabled()
@@ -76,7 +78,10 @@ async fn the_regime_model_is_validated_or_it_is_decorative() {
     );
 
     for scope in &scopes {
-        println!("\n=== scope {} ({}) ===", scope.market_scope, scope.series_symbol);
+        println!(
+            "\n=== scope {} ({}) ===",
+            scope.market_scope, scope.series_symbol
+        );
         println!("rationale: {}", scope.rationale);
 
         let bars = daily_bars(&ch_url(), scope).await;
@@ -145,7 +150,10 @@ async fn the_regime_model_is_validated_or_it_is_decorative() {
         }
         println!("spread_mean    : {:?}", run.result.spread_mean);
         println!("spread_sharpe  : {:?}", run.result.spread_sharpe);
-        println!("kruskal H / p  : {:?} / {:?}", run.result.kruskal_h, run.result.kruskal_p);
+        println!(
+            "kruskal H / p  : {:?} / {:?}",
+            run.result.kruskal_h, run.result.kruskal_p
+        );
         println!("rotation p     : {:?}", run.result.permutation_p);
         println!("alpha          : {}", run.result.alpha);
         println!("separates      : {:?}", run.result.separates);
@@ -178,7 +186,9 @@ async fn daily_bars(ch: &str, scope: &RegimeScope) -> Vec<FeatureRow> {
     storage::clickhouse::migrate::run_migrations(ch)
         .await
         .expect("clickhouse migrations apply");
-    let pg = PgPool::connect(&pg_url()).await.expect("postgres reachable");
+    let pg = PgPool::connect(&pg_url())
+        .await
+        .expect("postgres reachable");
     let identity = storage::identity::PgIdentityService::new(pg.clone(), ch.to_string());
     identity.sync_dims().await.expect("identity dims sync");
     storage::identity::install(identity);
@@ -207,9 +217,13 @@ async fn daily_bars(ch: &str, scope: &RegimeScope) -> Vec<FeatureRow> {
     let store = BarStore::connect(ch);
     let bucket = u32::try_from(scope.series_period_secs).unwrap_or(86_400);
     let bars = if scope.series_base_period_secs == scope.series_period_secs {
-        store.load_bars(&scope.series_symbol, base, start, end).await
+        store
+            .load_bars(&scope.series_symbol, base, start, end)
+            .await
     } else {
-        store.load_bars_bucketed(&scope.series_symbol, base, bucket, start, end).await
+        store
+            .load_bars_bucketed(&scope.series_symbol, base, bucket, start, end)
+            .await
     }
     .expect("bars read");
 
@@ -248,10 +262,7 @@ fn log_returns(bars: &[FeatureRow]) -> Vec<(DateTime<Utc>, f64)> {
 ///
 /// The indicators come from `features::runtime` — the one implementation
 /// (INV-14). What lives here is the position rule.
-fn candidate_series(
-    bars: &[FeatureRow],
-    split: usize,
-) -> Vec<(String, Vec<(DateTime<Utc>, f64)>)> {
+fn candidate_series(bars: &[FeatureRow], split: usize) -> Vec<(String, Vec<(DateTime<Utc>, f64)>)> {
     let mut out = Vec::new();
 
     let ema_params = [(5_u32, 20_u32), (10, 50), (20, 100)];
@@ -263,8 +274,9 @@ fn candidate_series(
     }
 
     let rsi_params = [7_u32, 14, 21];
-    if let Some(p) = best(&rsi_params, |p| mean(&rsi_reversion(bars, **p)[..split.min(bars.len())]))
-    {
+    if let Some(p) = best(&rsi_params, |p| {
+        mean(&rsi_reversion(bars, **p)[..split.min(bars.len())])
+    }) {
         let full = rsi_reversion(bars, *p);
         out.push((format!("rsi_reversion_{p}"), oos(bars, &full, split)));
     }
@@ -323,9 +335,11 @@ fn oos(bars: &[FeatureRow], full: &[f64], split: usize) -> Vec<(DateTime<Utc>, f
 }
 
 fn best<'a, T>(items: &'a [T], score: impl Fn(&&'a T) -> f64) -> Option<&'a T> {
-    items
-        .iter()
-        .max_by(|a, b| score(a).partial_cmp(&score(b)).unwrap_or(std::cmp::Ordering::Equal))
+    items.iter().max_by(|a, b| {
+        score(a)
+            .partial_cmp(&score(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })
 }
 
 fn mean(v: &[f64]) -> f64 {
@@ -342,5 +356,12 @@ fn summary(points: &[(DateTime<Utc>, f64)]) -> (f64, f64) {
         return (m, 0.0);
     }
     let sd = (v.iter().map(|r| (r - m).powi(2)).sum::<f64>() / (v.len() as f64 - 1.0)).sqrt();
-    (m, if sd > 0.0 { m / sd * 365.25_f64.sqrt() } else { 0.0 })
+    (
+        m,
+        if sd > 0.0 {
+            m / sd * 365.25_f64.sqrt()
+        } else {
+            0.0
+        },
+    )
 }

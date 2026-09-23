@@ -187,7 +187,8 @@ pub fn numbers_in(s: &str) -> Vec<String> {
             let d = bytes[i];
             if d.is_ascii_digit() {
                 i += 1;
-            } else if d == '.' && !seen_dot && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() {
+            } else if d == '.' && !seen_dot && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit()
+            {
                 seen_dot = true;
                 i += 1;
             } else {
@@ -213,8 +214,8 @@ pub fn sentences(prose: &str) -> Vec<String> {
     let mut chars = prose.chars().peekable();
     while let Some(c) = chars.next() {
         current.push(c);
-        let ends = matches!(c, '.' | '!' | '?' | '\n')
-            && chars.peek().is_none_or(|n| n.is_whitespace());
+        let ends =
+            matches!(c, '.' | '!' | '?' | '\n') && chars.peek().is_none_or(|n| n.is_whitespace());
         if ends {
             let t = current.trim();
             if !t.is_empty() {
@@ -276,9 +277,9 @@ pub fn is_rounding_of(claim: &str, evidence: f64) -> bool {
     let Ok(stated) = claim.parse::<f64>() else {
         return false;
     };
-    let decimals = claim
-        .split_once('.')
-        .map_or(0, |(_, frac)| frac.chars().filter(char::is_ascii_digit).count());
+    let decimals = claim.split_once('.').map_or(0, |(_, frac)| {
+        frac.chars().filter(char::is_ascii_digit).count()
+    });
     let Ok(decimals) = i32::try_from(decimals) else {
         return false;
     };
@@ -322,9 +323,9 @@ pub fn extract(prose: &str, evidence: &[Evidence]) -> Extraction {
         let mut supported_by: Vec<String> = Vec::new();
         for e in evidence {
             let vals = values_in(&e.text);
-            let supports = numbers.iter().any(|n| {
-                contains_number(&e.text, n) || vals.iter().any(|v| is_rounding_of(n, *v))
-            });
+            let supports = numbers
+                .iter()
+                .any(|n| contains_number(&e.text, n) || vals.iter().any(|v| is_rounding_of(n, *v)));
             if supports {
                 supported_by.push(e.id.clone());
             }
@@ -369,7 +370,10 @@ mod tests {
 
     #[test]
     fn a_number_that_appears_verbatim_is_direct() {
-        let e = [ev("exp_7", "sharpe_after_costs 1.43 over 2020-01-01 to 2024-12-31")];
+        let e = [ev(
+            "exp_7",
+            "sharpe_after_costs 1.43 over 2020-01-01 to 2024-12-31",
+        )];
         let x = extract("The strategy reached a sharpe of 1.43.", &e);
         assert_eq!(x.claims.len(), 1);
         assert_eq!(x.claims[0].method, Method::DirectStat);

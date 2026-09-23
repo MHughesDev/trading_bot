@@ -98,7 +98,11 @@ pub enum Move {
     /// cheaper name. The ablations are Runs and count as trials (§8.3).
     Simplify,
     /// Crossover.
-    Combine { a: String, b: String, how: CombineHow },
+    Combine {
+        a: String,
+        b: String,
+        how: CombineHow,
+    },
 }
 
 /// A check §8.3 demands that this crate cannot perform alone.
@@ -211,7 +215,9 @@ pub enum ProposalError {
          a parameter that is about to stop existing"
     )]
     RangesOnRemoval(&'static str),
-    #[error("two ranges are named `{0}`; a parameter has one range or the sweep has two answers for it")]
+    #[error(
+        "two ranges are named `{0}`; a parameter has one range or the sweep has two answers for it"
+    )]
     DuplicateRange(String),
     #[error("range `{name}` runs backwards ({detail})")]
     BackwardsRange { name: String, detail: String },
@@ -723,8 +729,9 @@ mod tests {
             json!({ "name": "risk", "kind": { "kind": "float", "min": 0.001, "max": 0.05, "log": true } }),
             json!({ "name": "mode", "kind": { "kind": "enum", "choices": ["a", "b"] } }),
         ] {
-            let dim: Dim = serde_json::from_value(built.clone())
-                .unwrap_or_else(|e| panic!("the grammar's shape is not Dim's shape: {e} for {built}"));
+            let dim: Dim = serde_json::from_value(built.clone()).unwrap_or_else(|e| {
+                panic!("the grammar's shape is not Dim's shape: {e} for {built}")
+            });
             // And the reverse: what `Dim` emits uses only keys the schema names.
             let wire = serde_json::to_value(&dim).expect("serialise");
             let offered = items["properties"].as_object().expect("properties");

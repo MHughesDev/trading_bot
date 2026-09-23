@@ -227,7 +227,8 @@ mod tests {
             purge_bars: 5,
             embargo_bars: 5,
         };
-        let folds = walk_forward_folds(10_000, &spec, &crate::walk_forward::horizon_only(5)).unwrap();
+        let folds =
+            walk_forward_folds(10_000, &spec, &crate::walk_forward::horizon_only(5)).unwrap();
         for fold in &folds {
             assert!(
                 fold.test.start >= fold.cal.end,

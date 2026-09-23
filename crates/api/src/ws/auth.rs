@@ -86,7 +86,11 @@ pub struct WsUnauthorized;
 
 impl IntoResponse for WsUnauthorized {
     fn into_response(self) -> Response {
-        (StatusCode::UNAUTHORIZED, "missing or invalid token query param").into_response()
+        (
+            StatusCode::UNAUTHORIZED,
+            "missing or invalid token query param",
+        )
+            .into_response()
     }
 }
 

@@ -109,11 +109,7 @@ pub enum WindowVerdict {
 /// are clipped to now and never refused, because there is no sealed partition to
 /// overlap.
 #[must_use]
-pub fn judge_window(
-    project: &Project,
-    start: DateTime<Utc>,
-    end: DateTime<Utc>,
-) -> WindowVerdict {
+pub fn judge_window(project: &Project, start: DateTime<Utc>, end: DateTime<Utc>) -> WindowVerdict {
     if let Some(cutoff) = project.research_cutoff {
         if end > cutoff {
             return WindowVerdict::HoldoutOverlap {
@@ -210,7 +206,7 @@ pub async fn preview(
                     "fix": format!("request end <= {sealed_from}"),
                 })),
             )
-                .into_response()
+                .into_response();
         }
         WindowVerdict::Empty { effective_end } => {
             return (
@@ -305,7 +301,11 @@ fn project_error(e: &ProjectError) -> axum::response::Response {
         ProjectError::DeskExploratoryOnly(_) => (StatusCode::FORBIDDEN, "desk_exploratory_only"),
         ProjectError::Sqlx(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
     };
-    (status, Json(json!({ "error": code, "message": e.to_string() }))).into_response()
+    (
+        status,
+        Json(json!({ "error": code, "message": e.to_string() })),
+    )
+        .into_response()
 }
 
 #[cfg(test)]
@@ -375,7 +375,11 @@ mod tests {
         ));
         // One second later is not.
         assert!(matches!(
-            judge_window(&p, cutoff - Duration::days(30), cutoff + Duration::seconds(1)),
+            judge_window(
+                &p,
+                cutoff - Duration::days(30),
+                cutoff + Duration::seconds(1)
+            ),
             WindowVerdict::HoldoutOverlap { .. }
         ));
     }
@@ -384,11 +388,7 @@ mod tests {
     #[test]
     fn the_refusal_names_the_partition_boundary() {
         let cutoff = Utc::now() - Duration::days(90);
-        match judge_window(
-            &research(cutoff),
-            cutoff - Duration::days(1),
-            Utc::now(),
-        ) {
+        match judge_window(&research(cutoff), cutoff - Duration::days(1), Utc::now()) {
             WindowVerdict::HoldoutOverlap { sealed_from } => assert_eq!(sealed_from, cutoff),
             other => panic!("expected a refusal naming the boundary, got {other:?}"),
         }
@@ -399,7 +399,11 @@ mod tests {
     #[test]
     fn the_desk_is_clipped_and_never_refused() {
         let p = desk();
-        let verdict = judge_window(&p, Utc::now() - Duration::days(30), Utc::now() + Duration::days(7));
+        let verdict = judge_window(
+            &p,
+            Utc::now() - Duration::days(30),
+            Utc::now() + Duration::days(7),
+        );
         match verdict {
             WindowVerdict::Allowed {
                 effective_end,

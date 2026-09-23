@@ -55,7 +55,11 @@ pub fn grid(start_ns: i64, end_ns: i64, step_ns: i64) -> Vec<i64> {
         return Vec::new();
     }
     let first = start_ns.div_euclid(step_ns) * step_ns;
-    let first = if first < start_ns { first + step_ns } else { first };
+    let first = if first < start_ns {
+        first + step_ns
+    } else {
+        first
+    };
     if end_ns <= first {
         return Vec::new();
     }
@@ -74,7 +78,11 @@ pub fn densify(obs: &[Obs], grid: &[i64], max_age_minutes: Option<i64>) -> Vec<A
         .into_iter()
         .zip(grid)
         .map(|(idx, &g)| match idx {
-            None => Aligned { value: None, age_minutes: None, quality: QualityFlags::NONE },
+            None => Aligned {
+                value: None,
+                age_minutes: None,
+                quality: QualityFlags::NONE,
+            },
             Some(i) => {
                 let o = sorted[i];
                 let age = (g - o.knowledge_ns).div_euclid(MINUTE_NS);
@@ -108,12 +116,27 @@ mod tests {
     #[test]
     fn age_and_quality_are_emitted_across_a_gap() {
         let obs = vec![
-            Obs { knowledge_ns: m(0), value: 1.0, quality: QualityFlags::NONE },
-            Obs { knowledge_ns: m(3), value: 2.0, quality: QualityFlags::NONE },
+            Obs {
+                knowledge_ns: m(0),
+                value: 1.0,
+                quality: QualityFlags::NONE,
+            },
+            Obs {
+                knowledge_ns: m(3),
+                value: 2.0,
+                quality: QualityFlags::NONE,
+            },
         ];
         let grid = minute_grid(m(0), m(10));
         let out = densify(&obs, &grid, Some(4));
-        assert_eq!(out[0], Aligned { value: Some(1.0), age_minutes: Some(0), quality: QualityFlags::NONE });
+        assert_eq!(
+            out[0],
+            Aligned {
+                value: Some(1.0),
+                age_minutes: Some(0),
+                quality: QualityFlags::NONE
+            }
+        );
         assert_eq!(out[2].age_minutes, Some(2));
         assert!(out[2].quality.contains(QualityFlags::INTERPOLATED));
         assert_eq!(out[7].value, Some(2.0));
@@ -124,14 +147,27 @@ mod tests {
 
     #[test]
     fn nothing_before_first_observation() {
-        let obs = vec![Obs { knowledge_ns: m(5), value: 1.0, quality: QualityFlags::NONE }];
+        let obs = vec![Obs {
+            knowledge_ns: m(5),
+            value: 1.0,
+            quality: QualityFlags::NONE,
+        }];
         let out = densify(&obs, &minute_grid(m(0), m(6)), None);
-        assert!(out[..5].iter().all(|a| a.value.is_none() && a.age_minutes.is_none()));
+        assert!(out[..5]
+            .iter()
+            .all(|a| a.value.is_none() && a.age_minutes.is_none()));
     }
 
     #[test]
     fn companions_named() {
-        assert_eq!(companion_columns("rv_5m"), ["rv_5m".to_string(), "rv_5m_age_minutes".into(), "rv_5m_quality".into()]);
+        assert_eq!(
+            companion_columns("rv_5m"),
+            [
+                "rv_5m".to_string(),
+                "rv_5m_age_minutes".into(),
+                "rv_5m_quality".into()
+            ]
+        );
     }
 
     #[test]

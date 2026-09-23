@@ -128,10 +128,7 @@ fn leakage(b: &Battery) -> Verdict {
     }
     // An isolated spike is not a leak, but it is a result that has not been shown
     // to be about the market — worth saying before anyone cites it.
-    if b.step("perturbation")
-        .and_then(|s| s.study_flag("plateau"))
-        == Some(false)
-    {
+    if b.step("perturbation").and_then(|s| s.study_flag("plateau")) == Some(false) {
         suspicions.push(
             "the result is an isolated spike rather than a plateau: it holds at the parameters \
              it was found at and not around them"
@@ -179,9 +176,7 @@ fn selection_bias(b: &Battery) -> Verdict {
     let pbo = b
         .step("probability of overfit")
         .and_then(|s| s.number("probability_of_overfit"));
-    let trials = b
-        .step("deflated Sharpe")
-        .and_then(|s| s.number("trials"));
+    let trials = b.step("deflated Sharpe").and_then(|s| s.number("trials"));
     let agree = b
         .step("deflated Sharpe")
         .and_then(|s| s.flag("corroborators_agree"));
@@ -386,7 +381,9 @@ fn precapital(b: &Battery) -> Verdict {
         None => false,
         Some(g) => {
             PASSING_GENERATORS.contains(&g)
-                && b.step("synthetic stress").and_then(super::Ran::study_survived) == Some(true)
+                && b.step("synthetic stress")
+                    .and_then(super::Ran::study_survived)
+                    == Some(true)
         }
     };
 
@@ -528,13 +525,24 @@ pub static ALL: &[Workflow] = &[
                       perturbation. Answers clean, suspect or leaking — `clean` is not `has \
                       an edge`. Refused for text features or SLv2 expressions.",
         arguments: &[
-            ("experiment_id", "the experiment the result belongs to", true),
-            ("instrument_id", "the instrument whose bars are probed", true),
+            (
+                "experiment_id",
+                "the experiment the result belongs to",
+                true,
+            ),
+            (
+                "instrument_id",
+                "the instrument whose bars are probed",
+                true,
+            ),
             ("metric", "the metric the studies are scored on", true),
             ("base_params", "the configuration under test", true),
-
             ("timeframe", "the fast bar timeframe, e.g. 1m", false),
-            ("higher_timeframe", "the aggregate the strategy also reads, e.g. 1h", true),
+            (
+                "higher_timeframe",
+                "the aggregate the strategy also reads, e.g. 1h",
+                true,
+            ),
             (
                 "rich_expressions",
                 "true when the strategy uses SLv2 expressions",
@@ -543,8 +551,16 @@ pub static ALL: &[Workflow] = &[
             ("start", "window start", false),
             ("end", "window end", false),
             ("null_seeds", "`vary` for the label shuffle (seeds)", true),
-            ("perturbation", "`vary` for the perturbation (neighborhood)", true),
-            ("text_features", "true when the feature set contains text", false),
+            (
+                "perturbation",
+                "`vary` for the perturbation (neighborhood)",
+                true,
+            ),
+            (
+                "text_features",
+                "true when the feature set contains text",
+                false,
+            ),
         ],
         subject: "experiment_id",
         stages: &[
@@ -590,7 +606,13 @@ pub static ALL: &[Workflow] = &[
             Stage::Call(Step {
                 tool: "bar_boundary_check",
                 label: "bar boundary",
-                forward: &["instrument_id", "timeframe", "higher_timeframe", "start", "end"],
+                forward: &[
+                    "instrument_id",
+                    "timeframe",
+                    "higher_timeframe",
+                    "start",
+                    "end",
+                ],
                 rename: &[],
                 pinned: &[],
                 when: When::Always,
@@ -672,9 +694,17 @@ pub static ALL: &[Workflow] = &[
                  count nobody registered is not discounted at all",
                 true,
             ),
-            ("n_periods", "CSCV splits for the overfit probability (2-16)", false),
+            (
+                "n_periods",
+                "CSCV splits for the overfit probability (2-16)",
+                false,
+            ),
             ("alpha", "family-wise error rate (default 0.05)", false),
-            ("seed", "bootstrap seed, so the same family gives the same verdict twice", false),
+            (
+                "seed",
+                "bootstrap seed, so the same family gives the same verdict twice",
+                false,
+            ),
         ],
         // Four calls for five of §6's steps, and this is the one place in this
         // file where that is not a gap. N_eff is not a separate look: it is
@@ -792,12 +822,24 @@ pub static ALL: &[Workflow] = &[
                       Answers reject, reduced_size_paper or full_paper.",
         arguments: &[
             ("experiment_id", "the experiment under test", true),
-            ("instrument_id", "the instrument, for the red-team oracle pass", true),
+            (
+                "instrument_id",
+                "the instrument, for the red-team oracle pass",
+                true,
+            ),
             ("metric", "the metric every study is scored on", true),
             ("base_params", "the configuration under test", true),
-            ("ablation_grid", "`vary` for the ablation: {\"vary\":\"params\",\"grid\":[...]}", true),
+            (
+                "ablation_grid",
+                "`vary` for the ablation: {\"vary\":\"params\",\"grid\":[...]}",
+                true,
+            ),
             ("neighborhood", "`vary` for the fragility map", true),
-            ("cost_ladder", "`vary` for the cost shock: optimistic to pessimistic", true),
+            (
+                "cost_ladder",
+                "`vary` for the cost shock: optimistic to pessimistic",
+                true,
+            ),
             ("trade_resamples", "`vary` for the trade reshuffle", true),
             ("regime_windows", "`vary` for the regime conditioning", true),
             ("synthetic_seeds", "`vary` for the synthetic stress", true),
@@ -868,7 +910,11 @@ pub static ALL: &[Workflow] = &[
                       against known factors, style, cross-sectional versus time-series, \
                       health and crowding.",
         arguments: &[
-            ("experiment_id", "the experiment whose signal is being identified", true),
+            (
+                "experiment_id",
+                "the experiment whose signal is being identified",
+                true,
+            ),
             ("run_id", "the run that produced it", true),
         ],
         subject: "experiment_id",
@@ -950,11 +996,19 @@ pub static ALL: &[Workflow] = &[
         arguments: &[
             ("experiment_id", "the experiment being readied", true),
             ("venue", "the venue it would trade on", true),
-            ("instrument_id", "the instrument, for the capacity estimate", true),
+            (
+                "instrument_id",
+                "the instrument, for the capacity estimate",
+                true,
+            ),
             ("timeframe", "bar timeframe for the capacity estimate", true),
             ("start", "window start", true),
             ("end", "window end", true),
-            ("notional_usd", "the size to price the impact curve at", false),
+            (
+                "notional_usd",
+                "the size to price the impact curve at",
+                false,
+            ),
         ],
         subject: "experiment_id",
         stages: &[
@@ -1081,7 +1135,12 @@ mod tests {
                 study("perturbation", true, true, Some(true)),
             ],
         );
-        assert_eq!(leakage(&no_edge).value, "clean", "{}", leakage(&no_edge).because);
+        assert_eq!(
+            leakage(&no_edge).value,
+            "clean",
+            "{}",
+            leakage(&no_edge).because
+        );
 
         // A strategy whose edge survives the shuffle is reading something other
         // than the labels. Same battery, opposite conclusion.
@@ -1106,7 +1165,11 @@ mod tests {
                 study("label shuffle", false, true, None),
             ],
         );
-        assert!(leakage(&b).because.contains("no edge"), "{}", leakage(&b).because);
+        assert!(
+            leakage(&b).because.contains("no edge"),
+            "{}",
+            leakage(&b).because
+        );
     }
 
     /// `clean` here is not a lookahead clearance, and has to keep saying so.
@@ -1250,8 +1313,14 @@ mod tests {
         battery(
             "hypothesis_precheck",
             vec![
-                step("duplicate search", json!({ "trials": vec![json!({}); trials] })),
-                step("registry lookup", json!({ "matches": vec![json!({}); matches] })),
+                step(
+                    "duplicate search",
+                    json!({ "trials": vec![json!({}); trials] }),
+                ),
+                step(
+                    "registry lookup",
+                    json!({ "matches": vec![json!({}); matches] }),
+                ),
                 step("negative results", json!({ "rows": negatives })),
             ],
         )
@@ -1275,7 +1344,11 @@ mod tests {
         // agent-declared.
         let blocked = precheck(&precheck_battery(0, 0, vec![negative("weak_effect", None)]));
         assert_eq!(blocked.value, "blocked");
-        assert!(blocked.because.contains("weak_effect"), "{}", blocked.because);
+        assert!(
+            blocked.because.contains("weak_effect"),
+            "{}",
+            blocked.because
+        );
 
         let dup = precheck(&precheck_battery(1, 0, vec![]));
         assert_eq!(dup.value, "duplicate");
@@ -1378,7 +1451,10 @@ mod tests {
             ),
         ] {
             let mut steps = clean_selection();
-            let at = steps.iter().position(|s| s.label == label).expect("present");
+            let at = steps
+                .iter()
+                .position(|s| s.label == label)
+                .expect("present");
             steps[at] = step(steps[at].label, detail);
             let v = selection_bias(&battery("selection_bias_verdict", steps));
             assert_eq!(v.value, "fails", "{label}: {}", v.because);
@@ -1447,7 +1523,11 @@ mod tests {
         match generator {
             Some(g) => steps[at].detail["generator"] = json!(g),
             None => {
-                steps[at].detail.as_object_mut().expect("object").remove("generator");
+                steps[at]
+                    .detail
+                    .as_object_mut()
+                    .expect("object")
+                    .remove("generator");
             }
         }
     }

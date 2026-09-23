@@ -165,14 +165,19 @@ impl TrialEvidence {
                 ));
             }
             if !r.net_metric.is_finite() {
-                return bad(format!("cost rung net metric {} is not an observation", r.net_metric));
+                return bad(format!(
+                    "cost rung net metric {} is not an observation",
+                    r.net_metric
+                ));
             }
         }
         // One rung is a cost assumption, not a sensitivity. Refusing it here
         // rather than letting Gate 3 call it inconclusive keeps the stored
         // ladder meaning what its name says.
         if self.cost_ladder.len() == 1 {
-            return bad("a cost ladder of one rung is a single cost assumption, not a sensitivity".into());
+            return bad(
+                "a cost ladder of one rung is a single cost assumption, not a sensitivity".into(),
+            );
         }
 
         if let Some(b) = self.capacity_base {
@@ -185,7 +190,10 @@ impl TrialEvidence {
                 return bad(format!("capacity rung AUM {} is not an amount", p.aum_usd));
             }
             if !p.net_sharpe.is_finite() {
-                return bad(format!("capacity rung Sharpe {} is not an observation", p.net_sharpe));
+                return bad(format!(
+                    "capacity rung Sharpe {} is not an observation",
+                    p.net_sharpe
+                ));
             }
         }
         // A curve without the base it is a curve *of* cannot be read: "20% of
@@ -225,7 +233,10 @@ impl TrialEvidence {
             }
             if let Some(v) = i.daily_vol {
                 if !(v.is_finite() && v >= 0.0) {
-                    return bad(format!("{}'s daily vol {v} is not a volatility", i.instrument));
+                    return bad(format!(
+                        "{}'s daily vol {v} is not a volatility",
+                        i.instrument
+                    ));
                 }
             }
         }
@@ -365,9 +376,15 @@ mod tests {
     #[test]
     fn a_single_rung_is_not_a_sensitivity() {
         let mut e = TrialEvidence::produced_by("test");
-        e.cost_ladder = vec![CostRung { multiple: 1.0, net_metric: 0.1 }];
+        e.cost_ladder = vec![CostRung {
+            multiple: 1.0,
+            net_metric: 0.1,
+        }];
         assert!(e.validate().is_err());
-        e.cost_ladder.push(CostRung { multiple: 3.0, net_metric: -0.1 });
+        e.cost_ladder.push(CostRung {
+            multiple: 3.0,
+            net_metric: -0.1,
+        });
         assert!(e.validate().is_ok());
     }
 
@@ -380,7 +397,10 @@ mod tests {
             member_trial_id: Uuid::nil(),
         }];
         assert!(e.validate().is_err());
-        e.capacity_base = Some(CapacityBase { base_aum_usd: 1_000_000.0, single_venue: true });
+        e.capacity_base = Some(CapacityBase {
+            base_aum_usd: 1_000_000.0,
+            single_venue: true,
+        });
         assert!(e.validate().is_ok());
     }
 

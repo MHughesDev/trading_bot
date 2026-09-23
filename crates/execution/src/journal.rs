@@ -322,16 +322,15 @@ impl OrderJournal for PgOrderJournal {
             Decimal,
             Option<Decimal>,
             DateTime<Utc>,
-        )> =
-            sqlx::query_as(
-                "SELECT broker_order_id, instrument_id, side, filled_size, cumulative_filled, \
+        )> = sqlx::query_as(
+            "SELECT broker_order_id, instrument_id, side, filled_size, cumulative_filled, \
                         fill_price, commission, filled_at \
                  FROM fills WHERE idempotency_key = $1 ORDER BY filled_at ASC",
-            )
-            .bind(key)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(db)?;
+        )
+        .bind(key)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)?;
         rows.into_iter()
             .map(
                 |(

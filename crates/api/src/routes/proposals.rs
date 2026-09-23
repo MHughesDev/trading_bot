@@ -170,7 +170,14 @@ pub async fn decide(
     }
 
     let effect = if decision.permits_write() {
-        perform(&state, &kind, subject_id, &payload, token.user_id().to_string()).await
+        perform(
+            &state,
+            &kind,
+            subject_id,
+            &payload,
+            token.user_id().to_string(),
+        )
+        .await
     } else {
         // A rejection performs nothing, and that is not a failure to perform.
         Effect::NotPerformed("rejected".into())
@@ -300,7 +307,9 @@ async fn write_limit(
     let proposed: crate::routes::lifecycle::ProposedLimit =
         match serde_json::from_value(payload.clone()) {
             Ok(v) => v,
-            Err(e) => return Effect::NotPerformed(format!("the proposed limit is not a limit: {e}")),
+            Err(e) => {
+                return Effect::NotPerformed(format!("the proposed limit is not a limit: {e}"))
+            }
         };
     let (family, severity, method) = match (
         proposed.family.parse::<monitor::family::Family>(),
@@ -405,15 +414,26 @@ async fn log_decision(
 
 /// `GET /api/lifecycle/proposals` — the queue a human decides from.
 pub async fn list(State(state): State<AppState>, _token: BearerToken) -> impl IntoResponse {
-    let rows: Result<Vec<(Uuid, String, i16, String, String, String, String, Option<Uuid>)>, _> =
-        sqlx::query_as(
-            "SELECT proposal_id, kind, ring, envelope, dossier_ref, subject, rationale, subject_id
+    let rows: Result<
+        Vec<(
+            Uuid,
+            String,
+            i16,
+            String,
+            String,
+            String,
+            String,
+            Option<Uuid>,
+        )>,
+        _,
+    > = sqlx::query_as(
+        "SELECT proposal_id, kind, ring, envelope, dossier_ref, subject, rationale, subject_id
                FROM agent_lifecycle.proposal
               WHERE decision = 'pending'
               ORDER BY created_at",
-        )
-        .fetch_all(&state.pg)
-        .await;
+    )
+    .fetch_all(&state.pg)
+    .await;
     match rows {
         Ok(rows) => Json(json!({
             "pending": rows
@@ -597,7 +617,10 @@ mod tests {
                 "method": name,
                 "declared_from": "bt_1"
             });
-            assert!(check_proposed_limit(&limit).is_ok(), "{name} refused at creation");
+            assert!(
+                check_proposed_limit(&limit).is_ok(),
+                "{name} refused at creation"
+            );
             assert!(method_from(name).is_ok(), "{name} refused at approval");
         }
     }
@@ -622,12 +645,10 @@ mod tests {
             // `ChangeLimits` joined the set when the proposal gained a payload
             // (migration `0137`). `PromoteStrategy` is still out, and stays out
             // until the promoted set has a writer.
-            let expected = matches!(
-                kind,
-                ProposalKind::DeployPaper | ProposalKind::ChangeLimits
-            );
+            let expected = matches!(kind, ProposalKind::DeployPaper | ProposalKind::ChangeLimits);
             assert_eq!(
-                performable, expected,
+                performable,
+                expected,
                 "`{}` disagrees with `perform`'s arms",
                 kind.as_str()
             );

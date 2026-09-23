@@ -99,7 +99,8 @@ fn str_field(params: &Value, key: &str) -> Option<String> {
 /// both. Reading it one way here would make this tool disagree with
 /// `get_trade_list` about the same array.
 fn as_number(v: &Value) -> Option<f64> {
-    v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+    v.as_f64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
 }
 
 /// One closed trade, as much of it as these two tools need.
@@ -412,7 +413,12 @@ fn parse_resample(params: &Value) -> Result<ResampleRequest, Value> {
     let capital_levels: Option<Vec<f64>> = params
         .get("capital_levels")
         .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(as_number).filter(|c| *c > 0.0).collect::<Vec<f64>>())
+        .map(|a| {
+            a.iter()
+                .filter_map(as_number)
+                .filter(|c| *c > 0.0)
+                .collect::<Vec<f64>>()
+        })
         .filter(|v| !v.is_empty());
 
     Ok(ResampleRequest {
@@ -634,8 +640,11 @@ fn parse_shock(params: &Value) -> Result<ShockRequest, Value> {
     };
     let multipliers: Vec<f64> = match params.get("multipliers").and_then(Value::as_array) {
         Some(a) => {
-            let parsed: Vec<f64> =
-                a.iter().filter_map(as_number).filter(|m| *m >= 0.0 && m.is_finite()).collect();
+            let parsed: Vec<f64> = a
+                .iter()
+                .filter_map(as_number)
+                .filter(|m| *m >= 0.0 && m.is_finite())
+                .collect();
             if parsed.len() != a.len() {
                 return Err(json!({
                     "error": "bad_multipliers",
@@ -656,7 +665,10 @@ fn parse_shock(params: &Value) -> Result<ShockRequest, Value> {
     Ok(ShockRequest {
         run_id,
         multipliers,
-        live_cost_bps: params.get("live_cost_bps").and_then(as_number).filter(|b| b.is_finite()),
+        live_cost_bps: params
+            .get("live_cost_bps")
+            .and_then(as_number)
+            .filter(|b| b.is_finite()),
     })
 }
 
@@ -951,7 +963,8 @@ mod tests {
         for k in path {
             cur = cur.get(k).unwrap_or_else(|| panic!("missing {k} in {v}"));
         }
-        cur.as_f64().unwrap_or_else(|| panic!("{path:?} is not a number in {v}"))
+        cur.as_f64()
+            .unwrap_or_else(|| panic!("{path:?} is not a number in {v}"))
     }
 
     // ── walk ─────────────────────────────────────────────────────────────────
@@ -1044,14 +1057,20 @@ mod tests {
         let p50 = f(&s.max_drawdown, &["p50"]);
         let p99 = f(&s.max_drawdown, &["p99"]);
         assert!(p50 > 0.0, "p50 drawdown was {p50}");
-        assert!(p99 > p50, "reordering must spread the drawdown: p50 {p50}, p99 {p99}");
+        assert!(
+            p99 > p50,
+            "reordering must spread the drawdown: p50 {p50}, p99 {p99}"
+        );
     }
 
     #[test]
     fn a_bootstrap_endpoint_actually_moves() {
         let s = simulate(&series(), &req(Mode::Bootstrap, None));
         let d = s.endpoint_dispersion.expect("bootstrap reports dispersion");
-        assert!(f(&d, &["sd"]) > 0.0, "a resampled endpoint over a varying series must vary: {d}");
+        assert!(
+            f(&d, &["sd"]) > 0.0,
+            "a resampled endpoint over a varying series must vary: {d}"
+        );
         assert!(f(&d, &["p95"]) > f(&d, &["p5"]), "{d}");
     }
 
@@ -1067,7 +1086,10 @@ mod tests {
             .and_then(Value::as_str)
             .expect("a reshuffle result says what it is not");
         assert!(refusal.contains("NOT a capital requirement"), "{refusal}");
-        assert!(out.get("endpoint_dispersion_absent_because").is_some(), "{out}");
+        assert!(
+            out.get("endpoint_dispersion_absent_because").is_some(),
+            "{out}"
+        );
     }
 
     #[test]
@@ -1084,7 +1106,9 @@ mod tests {
             let out = resample_report(&rows(&series(), 1.0), &req(mode, None));
             assert_eq!(out.get("mode").and_then(Value::as_str), Some(mode.as_str()));
             assert!(
-                out.get("measures").and_then(Value::as_str).is_some_and(|m| m.len() > 40),
+                out.get("measures")
+                    .and_then(Value::as_str)
+                    .is_some_and(|m| m.len() > 40),
                 "{out}"
             );
         }
@@ -1098,8 +1122,14 @@ mod tests {
         let r = s.ruin.expect("levels were supplied");
         let arr = r.as_array().expect("array");
         assert_eq!(arr.len(), 2, "{r}");
-        assert!((f(&arr[0], &["prob"]) - 1.0).abs() < 1e-9, "capital 0.5 is always ruined: {r}");
-        assert!(f(&arr[1], &["prob"]).abs() < 1e-9, "capital 100 is never ruined: {r}");
+        assert!(
+            (f(&arr[0], &["prob"]) - 1.0).abs() < 1e-9,
+            "capital 0.5 is always ruined: {r}"
+        );
+        assert!(
+            f(&arr[1], &["prob"]).abs() < 1e-9,
+            "capital 100 is never ruined: {r}"
+        );
     }
 
     #[test]
@@ -1107,14 +1137,23 @@ mod tests {
         // `series()` loses 210 in total, so 300 of capital cannot be ruined at
         // any ordering — while a capital of 1 is ruined by any ordering that
         // opens with a loss, which is a third of them before counting the rest.
-        let s = simulate(&series(), &req(Mode::Reshuffle, Some(vec![1.0, 50.0, 300.0])));
+        let s = simulate(
+            &series(),
+            &req(Mode::Reshuffle, Some(vec![1.0, 50.0, 300.0])),
+        );
         let r = s.ruin.expect("levels were supplied");
         let arr = r.as_array().expect("array");
         let p: Vec<f64> = arr.iter().map(|row| f(row, &["prob"])).collect();
-        assert!(p[0] > 0.0 && p[0] < 1.0, "a mixed series is neither certain nor safe: {r}");
+        assert!(
+            p[0] > 0.0 && p[0] < 1.0,
+            "a mixed series is neither certain nor safe: {r}"
+        );
         assert!(p[0] >= p[1], "ruin cannot rise with capital: {r}");
         assert!(p[1] >= p[2], "ruin cannot rise with capital: {r}");
-        assert!(p[2].abs() < 1e-9, "capital above the total of the losses is never ruined: {r}");
+        assert!(
+            p[2].abs() < 1e-9,
+            "capital above the total of the losses is never ruined: {r}"
+        );
     }
 
     #[test]
@@ -1127,8 +1166,14 @@ mod tests {
     #[test]
     fn too_few_trades_is_refused_rather_than_answered() {
         let out = resample_report(&rows(&[1.0, 2.0, -1.0], 0.1), &req(Mode::Bootstrap, None));
-        assert_eq!(out.get("error").and_then(Value::as_str), Some("too_few_trades"));
-        assert_eq!(out.get("need").and_then(Value::as_u64), Some(MIN_TRADES as u64));
+        assert_eq!(
+            out.get("error").and_then(Value::as_str),
+            Some("too_few_trades")
+        );
+        assert_eq!(
+            out.get("need").and_then(Value::as_u64),
+            Some(MIN_TRADES as u64)
+        );
         assert!(out.get("max_drawdown_pctiles").is_none(), "{out}");
     }
 
@@ -1137,7 +1182,10 @@ mod tests {
     #[test]
     fn a_missing_mode_is_refused_and_the_refusal_explains_both_modes() {
         let e = parse_resample(&json!({ "run_id": "r1" })).expect_err("mode is required");
-        assert_eq!(e.get("error").and_then(Value::as_str), Some("mode_required"));
+        assert_eq!(
+            e.get("error").and_then(Value::as_str),
+            Some("mode_required")
+        );
         let why = e.get("why").and_then(Value::as_str).expect("why");
         assert!(why.contains("path risk"), "{why}");
         assert!(why.contains("estimation uncertainty"), "{why}");
@@ -1148,7 +1196,10 @@ mod tests {
         let e = parse_resample(&json!({ "run_id": "r1", "mode": "block" }))
             .expect_err("block is not offered");
         assert_eq!(e.get("error").and_then(Value::as_str), Some("unknown_mode"));
-        let note = e.get("block_not_offered").and_then(Value::as_str).expect("note");
+        let note = e
+            .get("block_not_offered")
+            .and_then(Value::as_str)
+            .expect("note");
         assert!(note.contains("politis_white_block"), "{note}");
     }
 
@@ -1156,7 +1207,10 @@ mod tests {
     fn a_path_count_below_the_floor_is_refused() {
         let e = parse_resample(&json!({ "run_id": "r1", "mode": "bootstrap", "n_paths": 10 }))
             .expect_err("below the floor");
-        assert_eq!(e.get("error").and_then(Value::as_str), Some("n_paths_out_of_range"));
+        assert_eq!(
+            e.get("error").and_then(Value::as_str),
+            Some("n_paths_out_of_range")
+        );
     }
 
     #[test]
@@ -1185,7 +1239,10 @@ mod tests {
             { "pnl": 1.5, "costs_paid": 0.25, "entry_price": 10, "exit_price": 11, "qty": 2 }
         ]}));
         assert_eq!(read.len(), 2);
-        assert_eq!(read[0], read[1], "the string and number forms must read the same");
+        assert_eq!(
+            read[0], read[1],
+            "the string and number forms must read the same"
+        );
         assert_eq!(read[0].costs_paid, Some(0.25));
         assert_eq!(read[0].notional, Some(42.0));
     }
@@ -1214,14 +1271,23 @@ mod tests {
         // net 400. Break-even is 600 / 200 = 3.
         let trades = rows(&vec![10.0; 40], 5.0);
         let out = shock_report(&trades, &shock("r1"));
-        assert!((f(&out, &["breakeven_multiplier"]) - 3.0).abs() < 1e-9, "{out}");
+        assert!(
+            (f(&out, &["breakeven_multiplier"]) - 3.0).abs() < 1e-9,
+            "{out}"
+        );
         let curve = out.get("curve").and_then(Value::as_array).expect("curve");
         assert_eq!(curve.len(), DEFAULT_MULTIPLIERS.len());
         // The 3x point is exactly zero, so it is not profitable.
-        let at_3 = curve.iter().find(|p| f(p, &["multiplier"]) == 3.0).expect("3x is on the grid");
+        let at_3 = curve
+            .iter()
+            .find(|p| f(p, &["multiplier"]) == 3.0)
+            .expect("3x is on the grid");
         assert!(f(at_3, &["net_pnl"]).abs() < 1e-9, "{at_3}");
         assert_eq!(at_3.get("profitable").and_then(Value::as_bool), Some(false));
-        let at_1 = curve.iter().find(|p| f(p, &["multiplier"]) == 1.0).expect("1x is on the grid");
+        let at_1 = curve
+            .iter()
+            .find(|p| f(p, &["multiplier"]) == 1.0)
+            .expect("1x is on the grid");
         assert!((f(at_1, &["net_pnl"]) - 400.0).abs() < 1e-9, "{at_1}");
     }
 
@@ -1229,7 +1295,10 @@ mod tests {
     fn a_run_already_losing_money_says_so_and_reports_a_multiple_below_one() {
         let trades = rows(&vec![-1.0; 40], 5.0);
         let out = shock_report(&trades, &shock("r1"));
-        assert_eq!(out.get("already_unprofitable").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            out.get("already_unprofitable").and_then(Value::as_bool),
+            Some(true)
+        );
         assert!(f(&out, &["breakeven_multiplier"]) < 1.0, "{out}");
     }
 
@@ -1237,7 +1306,10 @@ mod tests {
     fn a_run_with_no_recorded_costs_is_refused_rather_than_given_an_infinite_margin() {
         let trades = rows(&vec![10.0; 40], 0.0);
         let out = shock_report(&trades, &shock("r1"));
-        assert_eq!(out.get("error").and_then(Value::as_str), Some("no_costs_charged"));
+        assert_eq!(
+            out.get("error").and_then(Value::as_str),
+            Some("no_costs_charged")
+        );
         assert!(out.get("breakeven_multiplier").is_none(), "{out}");
     }
 
@@ -1246,20 +1318,35 @@ mod tests {
         let mut trades = rows(&vec![10.0; 40], 5.0);
         trades[7].costs_paid = None;
         let out = shock_report(&trades, &shock("r1"));
-        assert_eq!(out.get("error").and_then(Value::as_str), Some("costs_not_recorded"));
-        assert_eq!(out.get("trades_missing_costs_paid").and_then(Value::as_u64), Some(1));
+        assert_eq!(
+            out.get("error").and_then(Value::as_str),
+            Some("costs_not_recorded")
+        );
+        assert_eq!(
+            out.get("trades_missing_costs_paid").and_then(Value::as_u64),
+            Some(1)
+        );
         assert!(out.get("curve").is_none(), "{out}");
     }
 
     #[test]
     fn the_grid_says_where_its_one_times_point_came_from() {
         let out = shock_report(&rows(&vec![10.0; 40], 5.0), &shock("r1"));
-        let origin = out.get("grid_origin").and_then(Value::as_str).expect("grid_origin");
+        let origin = out
+            .get("grid_origin")
+            .and_then(Value::as_str)
+            .expect("grid_origin");
         assert!(origin.contains("costs_paid"), "{origin}");
-        assert!((f(&out, &["baseline", "total_costs"]) - 200.0).abs() < 1e-9, "{out}");
+        assert!(
+            (f(&out, &["baseline", "total_costs"]) - 200.0).abs() < 1e-9,
+            "{out}"
+        );
         // 200 of costs against 40 trades of 1,000 notional each — 40,000 in all —
         // is 50 basis points.
-        assert!((f(&out, &["baseline_cost_bps_of_notional"]) - 50.0).abs() < 1e-9, "{out}");
+        assert!(
+            (f(&out, &["baseline_cost_bps_of_notional"]) - 50.0).abs() < 1e-9,
+            "{out}"
+        );
     }
 
     #[test]
@@ -1268,7 +1355,10 @@ mod tests {
         trades[0].notional = None;
         let out = shock_report(&trades, &shock("r1"));
         assert_eq!(out.get("baseline_cost_bps_of_notional"), Some(&Value::Null));
-        assert!(out.get("baseline_cost_bps_absent_because").is_some(), "{out}");
+        assert!(
+            out.get("baseline_cost_bps_absent_because").is_some(),
+            "{out}"
+        );
     }
 
     #[test]
@@ -1279,23 +1369,37 @@ mod tests {
         // 2x with a margin of 1.
         with_live.live_cost_bps = Some(100.0);
         let out = shock_report(&trades, &with_live);
-        assert!((f(&out, &["live_cost", "implied_multiplier"]) - 2.0).abs() < 1e-9, "{out}");
-        assert!((f(&out, &["live_cost", "safety_margin"]) - 1.0).abs() < 1e-9, "{out}");
+        assert!(
+            (f(&out, &["live_cost", "implied_multiplier"]) - 2.0).abs() < 1e-9,
+            "{out}"
+        );
+        assert!(
+            (f(&out, &["live_cost", "safety_margin"]) - 1.0).abs() < 1e-9,
+            "{out}"
+        );
         assert_eq!(
-            out.get("live_cost").and_then(|l| l.get("survives_live_costs")).and_then(Value::as_bool),
+            out.get("live_cost")
+                .and_then(|l| l.get("survives_live_costs"))
+                .and_then(Value::as_bool),
             Some(true)
         );
 
         let without = shock_report(&trades, &shock("r1"));
         assert_eq!(without.get("live_cost"), Some(&Value::Null));
-        assert!(without.get("live_cost_absent_because").is_some(), "{without}");
+        assert!(
+            without.get("live_cost_absent_because").is_some(),
+            "{without}"
+        );
     }
 
     #[test]
     fn a_negative_multiplier_is_refused() {
         let e = parse_shock(&json!({ "run_id": "r1", "multipliers": [1.0, -2.0] }))
             .expect_err("negative costs are not a shock");
-        assert_eq!(e.get("error").and_then(Value::as_str), Some("bad_multipliers"));
+        assert_eq!(
+            e.get("error").and_then(Value::as_str),
+            Some("bad_multipliers")
+        );
     }
 
     #[test]

@@ -330,7 +330,11 @@ pub async fn create(
 
     // ── the bounded case ────────────────────────────────────────────────────
     if !body.continuous {
-        let Some(question) = body.question.as_deref().map(str::trim).filter(|q| !q.is_empty())
+        let Some(question) = body
+            .question
+            .as_deref()
+            .map(str::trim)
+            .filter(|q| !q.is_empty())
         else {
             return bad(
                 "a bounded session needs a question",
@@ -344,7 +348,10 @@ pub async fn create(
             state.pg.clone(),
             state.cred_crypto.clone(),
         );
-        let workflow = body.workflow.as_deref().and_then(harness::state::Workflow::parse);
+        let workflow = body
+            .workflow
+            .as_deref()
+            .and_then(harness::state::Workflow::parse);
         return match state
             .agent
             .send_message(token.user_id(), conversation_id, question, &creds, workflow)
@@ -501,7 +508,10 @@ async fn transition(
         return r;
     }
     match sessions::append(&state.pg, id, kind, payload).await {
-        Ok(()) => (StatusCode::OK, Json(json!({ "ok": true, "event": kind.as_str() })))
+        Ok(()) => (
+            StatusCode::OK,
+            Json(json!({ "ok": true, "event": kind.as_str() })),
+        )
             .into_response(),
         // The trigger refuses an illegal transition and its message names both
         // states. Passed through rather than reworded: it is the most specific
@@ -584,8 +594,10 @@ pub async fn resume(
     match jobs.submit(sub).await {
         Ok(j) => (
             StatusCode::OK,
-            Json(json!({ "ok": true, "event": kind.as_str(), "job_id": j.job_id,
-                         "continuous": session.continuous })),
+            Json(
+                json!({ "ok": true, "event": kind.as_str(), "job_id": j.job_id,
+                         "continuous": session.continuous }),
+            ),
         )
             .into_response(),
         Err(e) => db(e),
@@ -956,9 +968,8 @@ fn already_in_order(ranks: &[Option<usize>]) -> std::collections::BTreeSet<usize
     let mut prev: Vec<Option<usize>> = vec![None; ranks.len()];
     for (i, rank) in ranks.iter().enumerate() {
         let Some(rank) = *rank else { continue };
-        let at = tails.partition_point(|&t| {
-            ranks[t].expect("only ranked positions are ever pushed") < rank
-        });
+        let at = tails
+            .partition_point(|&t| ranks[t].expect("only ranked positions are ever pushed") < rank);
         prev[i] = at.checked_sub(1).map(|p| tails[p]);
         if at == tails.len() {
             tails.push(i);
@@ -1368,8 +1379,13 @@ pub async fn events(
         }
     });
 
-    Ok(Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
-        .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)).text("keep-alive")))
+    Ok(
+        Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx)).keep_alive(
+            KeepAlive::new()
+                .interval(Duration::from_secs(15))
+                .text("keep-alive"),
+        ),
+    )
 }
 
 #[cfg(test)]
@@ -1405,14 +1421,18 @@ mod tests {
         }
         // `pause`, `stop` and the three item actions go through helpers that
         // check; asserted here so the helpers cannot lose it.
-        assert!(src.contains("async fn transition(") && {
-            let t = src.split_once("async fn transition(").unwrap().1;
-            t[..t.find("\n}").unwrap_or(t.len())].contains("permits(HUMAN_SCOPE)")
-        });
-        assert!(src.contains("async fn item_action(") && {
-            let t = src.split_once("async fn item_action(").unwrap().1;
-            t[..t.find("\n}\n").unwrap_or(t.len())].contains("permits(HUMAN_SCOPE)")
-        });
+        assert!(
+            src.contains("async fn transition(") && {
+                let t = src.split_once("async fn transition(").unwrap().1;
+                t[..t.find("\n}").unwrap_or(t.len())].contains("permits(HUMAN_SCOPE)")
+            }
+        );
+        assert!(
+            src.contains("async fn item_action(") && {
+                let t = src.split_once("async fn item_action(").unwrap().1;
+                t[..t.find("\n}\n").unwrap_or(t.len())].contains("permits(HUMAN_SCOPE)")
+            }
+        );
     }
 
     /// Four distinct ids, stable within a test.
@@ -1480,7 +1500,9 @@ mod tests {
         let ranks = [Some(1), Some(2), Some(3), Some(0)];
         assert_eq!(
             already_in_order(&ranks),
-            [0, 1, 2].into_iter().collect::<std::collections::BTreeSet<_>>()
+            [0, 1, 2]
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>()
         );
         // An id the board does not hold was never in place, so it is never in
         // the run — and a run computed over nothing would be silently empty.
@@ -1578,7 +1600,10 @@ mod tests {
             "trials".into(),
             Utc::now(),
         );
-        assert_eq!(row.get("spend_unit").and_then(Value::as_str), Some("trials"));
+        assert_eq!(
+            row.get("spend_unit").and_then(Value::as_str),
+            Some("trials")
+        );
         // And the column is actually asked for: a JSON key built from a SELECT
         // that does not name it would not compile, but a SELECT that names it
         // and a key that does not is exactly the shape of the original bug.
@@ -1621,9 +1646,16 @@ mod tests {
         // Two fields moved and no others: the exclusion the human added, and the
         // version the route bumps. A diff that reported every field would be a
         // second copy of the charter wearing a diff's name.
-        assert!(obj.contains_key("exclusions"), "the change itself is missing");
+        assert!(
+            obj.contains_key("exclusions"),
+            "the change itself is missing"
+        );
         assert!(obj.contains_key("version"));
-        assert_eq!(obj.len(), 2, "unchanged fields were reported as changes: {obj:?}");
+        assert_eq!(
+            obj.len(),
+            2,
+            "unchanged fields were reported as changes: {obj:?}"
+        );
         assert_eq!(
             obj["exclusions"]["from"],
             json!([]),
@@ -1641,7 +1673,11 @@ mod tests {
         assert_eq!(same, json!({}));
 
         let old = amendment_json(4, &json!({ "version": 3 }), Utc::now());
-        assert_eq!(old["changed"], Value::Null, "an unrecorded diff read as an empty one");
+        assert_eq!(
+            old["changed"],
+            Value::Null,
+            "an unrecorded diff read as an empty one"
+        );
         assert_eq!(old["by"], Value::Null);
         assert_eq!(old["version"], json!(3));
 
@@ -1661,7 +1697,10 @@ mod tests {
         // arrived from nowhere.
         let changed = charter_changes(None, &a_charter(vec!["optimise".into()]));
         let obj = changed.as_object().expect("a diff is an object");
-        assert!(!obj.is_empty(), "the first charter registered as no change at all");
+        assert!(
+            !obj.is_empty(),
+            "the first charter registered as no change at all"
+        );
         assert_eq!(obj["exclusions"]["from"], Value::Null);
         assert_eq!(obj["exclusions"]["to"], json!(["optimise"]));
     }

@@ -74,16 +74,26 @@ pub const DEFAULT_ALPHA: f64 = 0.05;
 pub enum CompareError {
     #[error("need at least {MIN_REPLICATES} paired replicates, have {have}")]
     TooFewReplicates { have: usize },
-    #[error("A and B were measured on {a} and {b} replicates; a paired comparison needs the same ones")]
+    #[error(
+        "A and B were measured on {a} and {b} replicates; a paired comparison needs the same ones"
+    )]
     NotPaired { a: usize, b: usize },
     #[error("replicate {index} differs between A and B ({a:?} vs {b:?}); pairing is what makes the difference meaningful")]
-    MismatchedReplicate { index: usize, a: Replicate, b: Replicate },
+    MismatchedReplicate {
+        index: usize,
+        a: Replicate,
+        b: Replicate,
+    },
     #[error("delta_practical must be positive and finite; got {0}")]
     BadDelta(f64),
     #[error("the declared scale must be positive and finite; got {0}")]
     BadScale(f64),
     #[error("paired difference {difference} at replicate {index} lies outside the declared scale of ±{scale}; widen the scale rather than clipping the observation")]
-    OutOfScale { index: usize, difference: f64, scale: f64 },
+    OutOfScale {
+        index: usize,
+        difference: f64,
+        scale: f64,
+    },
     #[error("a metric was not finite at replicate {index}")]
     NotFinite { index: usize },
 }
@@ -500,7 +510,10 @@ impl ComparisonPlan {
             return Err(CompareError::BadDelta(self.delta_practical));
         }
         if a.len() != b.len() {
-            return Err(CompareError::NotPaired { a: a.len(), b: b.len() });
+            return Err(CompareError::NotPaired {
+                a: a.len(),
+                b: b.len(),
+            });
         }
         if a.len() < MIN_REPLICATES {
             return Err(CompareError::TooFewReplicates { have: a.len() });
@@ -617,7 +630,11 @@ pub fn holm_adjusted(p_values: &[f64]) -> Vec<f64> {
         return Vec::new();
     }
     let mut order: Vec<usize> = (0..m).collect();
-    order.sort_by(|&i, &j| p_values[i].partial_cmp(&p_values[j]).unwrap_or(std::cmp::Ordering::Equal));
+    order.sort_by(|&i, &j| {
+        p_values[i]
+            .partial_cmp(&p_values[j])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let mut adjusted = vec![0.0; m];
     let mut running: f64 = 0.0;
@@ -758,7 +775,10 @@ pub fn wilcoxon_signed_rank_p(differences: &[f64]) -> f64 {
     }
     let mut idx: Vec<usize> = (0..n).collect();
     idx.sort_by(|&i, &j| {
-        nonzero[i].abs().partial_cmp(&nonzero[j].abs()).unwrap_or(std::cmp::Ordering::Equal)
+        nonzero[i]
+            .abs()
+            .partial_cmp(&nonzero[j].abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     // Average ranks within ties.
@@ -827,12 +847,19 @@ mod tests {
     fn the_replicate_grid_is_paired_and_reproducible() {
         let g1 = replicate_grid(TARGET_REPLICATES, 7);
         let g2 = replicate_grid(TARGET_REPLICATES, 7);
-        assert_eq!(g1, g2, "the same comparison must draw the same nuisance grid");
+        assert_eq!(
+            g1, g2,
+            "the same comparison must draw the same nuisance grid"
+        );
         assert_eq!(g1.len(), TARGET_REPLICATES);
         // All three cost perturbations are exercised, not just the modelled one.
         let costs: std::collections::BTreeSet<i32> = g1.iter().map(|r| r.cost_bp).collect();
         assert_eq!(costs.len(), 3);
-        assert_ne!(replicate_grid(TARGET_REPLICATES, 8), g1, "the seed moves the grid");
+        assert_ne!(
+            replicate_grid(TARGET_REPLICATES, 8),
+            g1,
+            "the seed moves the grid"
+        );
     }
 
     #[test]
@@ -860,7 +887,10 @@ mod tests {
         let p = plan(0.1, 29);
         let a = measurements(&[1.0; 4]);
         let b = measurements(&[0.0; 4]);
-        assert!(matches!(p.judge(&a, &b), Err(CompareError::TooFewReplicates { have: 4 })));
+        assert!(matches!(
+            p.judge(&a, &b),
+            Err(CompareError::TooFewReplicates { have: 4 })
+        ));
     }
 
     /// A difference larger than the declared scale is an error, not a clipped
@@ -872,7 +902,10 @@ mod tests {
         values[4] = 5.0;
         let a = measurements(&values);
         let b = measurements(&[0.0; 10]);
-        assert!(matches!(p.judge(&a, &b), Err(CompareError::OutOfScale { index: 4, .. })));
+        assert!(matches!(
+            p.judge(&a, &b),
+            Err(CompareError::OutOfScale { index: 4, .. })
+        ));
     }
 
     /// A large, consistent improvement separates above δ and promotes.
@@ -917,7 +950,9 @@ mod tests {
     #[test]
     fn noise_never_promotes() {
         let p = scaled_plan(0.05, 12, 0.3);
-        let a = measurements(&[0.10, -0.08, 0.05, -0.11, 0.09, -0.04, 0.02, -0.07, 0.06, -0.05, 0.03, -0.09]);
+        let a = measurements(&[
+            0.10, -0.08, 0.05, -0.11, 0.09, -0.04, 0.02, -0.07, 0.06, -0.05, 0.03, -0.09,
+        ]);
         let b = measurements(&[0.0_f64; 12]);
         let c = p.judge(&a, &b).unwrap();
         assert_ne!(c.verdict(), Verdict::Promote, "{}", c.headline());
@@ -927,7 +962,9 @@ mod tests {
     /// is the property that makes "sample until it separates" legitimate.
     #[test]
     fn the_confidence_sequence_covers_the_mean_at_every_look() {
-        let unit: Vec<f64> = (0..200).map(|i| if i % 3 == 0 { 0.8 } else { 0.4 }).collect();
+        let unit: Vec<f64> = (0..200)
+            .map(|i| if i % 3 == 0 { 0.8 } else { 0.4 })
+            .collect();
         let truth = unit.iter().sum::<f64>() / unit.len() as f64;
         for t in 5..=unit.len() {
             let cs = confidence_sequence(&unit[..t], DEFAULT_ALPHA).unwrap();
@@ -981,8 +1018,14 @@ mod tests {
         // Holm is at least as strict as BH on the same family — promotion pays
         // for the family-wise guarantee, screening does not.
         let bh = screening_adjusted(&p);
-        assert!(adj.iter().zip(bh.iter()).all(|(h, b)| h >= b), "{adj:?} vs {bh:?}");
-        assert!(adj[1] > bh[1], "the two must actually differ: {adj:?} vs {bh:?}");
+        assert!(
+            adj.iter().zip(bh.iter()).all(|(h, b)| h >= b),
+            "{adj:?} vs {bh:?}"
+        );
+        assert!(
+            adj[1] > bh[1],
+            "the two must actually differ: {adj:?} vs {bh:?}"
+        );
     }
 
     /// The declared scale is not a free parameter. Shrinking it to make the
@@ -1042,7 +1085,9 @@ mod tests {
         let shifted: Vec<f64> = (0..20).map(|i| 0.5 + f64::from(i) * 0.01).collect();
         assert!(wilcoxon_signed_rank_p(&shifted) < 0.01);
         // Symmetric noise is not.
-        let noise: Vec<f64> = (0..20).map(|i| if i % 2 == 0 { 0.3 } else { -0.3 }).collect();
+        let noise: Vec<f64> = (0..20)
+            .map(|i| if i % 2 == 0 { 0.3 } else { -0.3 })
+            .collect();
         assert!(wilcoxon_signed_rank_p(&noise) > 0.5);
         // Degenerate input does not produce a small p-value out of nowhere.
         assert!((wilcoxon_signed_rank_p(&[0.0; 10]) - 1.0).abs() < 1e-12);

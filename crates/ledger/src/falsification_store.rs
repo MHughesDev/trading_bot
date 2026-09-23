@@ -37,7 +37,10 @@ const KILL_CLASSES: [(KillClass, &str); 7] = [
     (KillClass::Lookahead, "lookahead"),
     (KillClass::DataArtifact, "data_artifact"),
     (KillClass::BelowCostFloor, "below_cost_floor"),
-    (KillClass::BelowTradeableFrontier, "below_tradeable_frontier"),
+    (
+        KillClass::BelowTradeableFrontier,
+        "below_tradeable_frontier",
+    ),
     (KillClass::FillModelExploit, "fill_model_exploit"),
     (KillClass::DuplicateOfExisting, "duplicate_of_existing"),
     (KillClass::InvalidMetric, "invalid_metric"),
@@ -82,7 +85,9 @@ pub async fn insert_kill(
     kill: &Kill,
 ) -> Result<Uuid, StoreError> {
     let r: &Reproduction = kill.reproduction();
-    let mut tx = crate::pg::tenant_tx(pool, tenant_id).await.map_err(|e| be(&e))?;
+    let mut tx = crate::pg::tenant_tx(pool, tenant_id)
+        .await
+        .map_err(|e| be(&e))?;
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO mlops.falsification (
              tenant_id, report_kind, target_trial_id, defect_class,
@@ -120,7 +125,9 @@ pub async fn insert_defect(
     defect: &EvaluatorDefect,
 ) -> Result<Uuid, StoreError> {
     let r: &Reproduction = defect.reproduction();
-    let mut tx = crate::pg::tenant_tx(pool, tenant_id).await.map_err(|e| be(&e))?;
+    let mut tx = crate::pg::tenant_tx(pool, tenant_id)
+        .await
+        .map_err(|e| be(&e))?;
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO mlops.falsification (
              tenant_id, report_kind, component, claimed_guarantee,
@@ -163,7 +170,9 @@ pub async fn verify(
     outcome: Verification,
     verified_by: &str,
 ) -> Result<bool, StoreError> {
-    let mut tx = crate::pg::tenant_tx(pool, tenant_id).await.map_err(|e| be(&e))?;
+    let mut tx = crate::pg::tenant_tx(pool, tenant_id)
+        .await
+        .map_err(|e| be(&e))?;
     let n = sqlx::query(
         "UPDATE mlops.falsification
             SET verification = $1, verified_by = $2, verified_at = now()
@@ -191,7 +200,9 @@ pub async fn covered_by(
     id: Uuid,
     test: &str,
 ) -> Result<bool, StoreError> {
-    let mut tx = crate::pg::tenant_tx(pool, tenant_id).await.map_err(|e| be(&e))?;
+    let mut tx = crate::pg::tenant_tx(pool, tenant_id)
+        .await
+        .map_err(|e| be(&e))?;
     let n = sqlx::query(
         "UPDATE mlops.falsification SET regression_test = $1
           WHERE falsification_id = $2 AND tenant_id = $3",
@@ -220,7 +231,9 @@ pub async fn score_of(
     tenant_id: &str,
     id: Uuid,
 ) -> Result<Option<Score>, StoreError> {
-    let mut tx = crate::pg::tenant_tx(pool, tenant_id).await.map_err(|e| be(&e))?;
+    let mut tx = crate::pg::tenant_tx(pool, tenant_id)
+        .await
+        .map_err(|e| be(&e))?;
     let row = sqlx::query(
         "SELECT score FROM mlops.falsification_scored
           WHERE falsification_id = $1 AND tenant_id = $2",
@@ -245,7 +258,9 @@ pub async fn score_of(
 /// # Errors
 /// Backend failures.
 pub async fn undischarged(pool: &PgPool, tenant_id: &str) -> Result<Vec<Uuid>, StoreError> {
-    let mut tx = crate::pg::tenant_tx(pool, tenant_id).await.map_err(|e| be(&e))?;
+    let mut tx = crate::pg::tenant_tx(pool, tenant_id)
+        .await
+        .map_err(|e| be(&e))?;
     let ids: Vec<Uuid> = sqlx::query_scalar(
         "SELECT falsification_id FROM mlops.falsification
           WHERE tenant_id = $1 AND report_kind = 'evaluator_defect'

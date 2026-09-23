@@ -25,7 +25,10 @@ impl InfoClass {
     /// Only these three classes may cross a tenant boundary (INV-24).
     #[must_use]
     pub fn crosses_tenant(self) -> bool {
-        matches!(self, Self::PlatformPhysics | Self::Methodology | Self::MarketPublic)
+        matches!(
+            self,
+            Self::PlatformPhysics | Self::Methodology | Self::MarketPublic
+        )
     }
 }
 
@@ -46,7 +49,11 @@ pub struct FeatureDef {
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum FeatureError {
     #[error("feature {feature} read {requested} bars back but declared lookback_bars={declared}")]
-    LookbackExceeded { feature: String, declared: u32, requested: usize },
+    LookbackExceeded {
+        feature: String,
+        declared: u32,
+        requested: usize,
+    },
     #[error("causal access violation: read row {row} after decision row {decision}")]
     FutureRead { row: usize, decision: usize },
     #[error("insufficient history: need {need} bars, have {have}")]
@@ -81,7 +88,12 @@ pub struct WindowedFrame<'a> {
 impl<'a> WindowedFrame<'a> {
     #[must_use]
     pub fn new(feature: &'a str, data: &'a [FeatureRow], decision: usize, lookback: u32) -> Self {
-        Self { feature, data, decision, lookback }
+        Self {
+            feature,
+            data,
+            decision,
+            lookback,
+        }
     }
 
     /// Close `back` bars before the decision bar.
@@ -104,10 +116,13 @@ impl<'a> WindowedFrame<'a> {
                 requested: back + 1,
             });
         }
-        let idx = self.decision.checked_sub(back).ok_or(FeatureError::Insufficient {
-            need: back + 1,
-            have: self.decision + 1,
-        })?;
+        let idx = self
+            .decision
+            .checked_sub(back)
+            .ok_or(FeatureError::Insufficient {
+                need: back + 1,
+                have: self.decision + 1,
+            })?;
         Ok(&self.data[idx])
     }
 
@@ -136,14 +151,24 @@ pub trait Feature: Send + Sync {
 /// A feature is only defined once its whole declared window exists: a value computed
 /// over a shorter window would differ between a backfill that starts at the dataset
 /// edge and a live serve with full history.
-pub fn evaluate(feature: &dyn Feature, rows: &[FeatureRow], decision: usize) -> Result<f64, FeatureError> {
+pub fn evaluate(
+    feature: &dyn Feature,
+    rows: &[FeatureRow],
+    decision: usize,
+) -> Result<f64, FeatureError> {
     let def = feature.def();
     let need = def.lookback_bars as usize;
     if decision >= rows.len() {
-        return Err(FeatureError::Insufficient { need: decision + 1, have: rows.len() });
+        return Err(FeatureError::Insufficient {
+            need: decision + 1,
+            have: rows.len(),
+        });
     }
     if decision + 1 < need {
-        return Err(FeatureError::Insufficient { need, have: decision + 1 });
+        return Err(FeatureError::Insufficient {
+            need,
+            have: decision + 1,
+        });
     }
     let frame = WindowedFrame::new(&def.feature_id, rows, decision, def.lookback_bars);
     feature.compute(&frame)
@@ -151,7 +176,8 @@ pub fn evaluate(feature: &dyn Feature, rows: &[FeatureRow], decision: usize) -> 
 
 /// Pointer to [`evaluate`], exposed so a test can assert both runtime paths resolve
 /// to the same function object.
-pub const EVALUATE_FN: fn(&dyn Feature, &[FeatureRow], usize) -> Result<f64, FeatureError> = evaluate;
+pub const EVALUATE_FN: fn(&dyn Feature, &[FeatureRow], usize) -> Result<f64, FeatureError> =
+    evaluate;
 
 /// Registration check (AT-13): a feature that reads beyond its declaration, or whose
 /// output depends on data outside its window, fails loudly here.
@@ -162,7 +188,10 @@ pub fn register_check(feature: &dyn Feature) -> Result<(), FeatureError> {
     let def = feature.def();
     let lb = def.lookback_bars as usize;
     if lb == 0 {
-        return Err(FeatureError::Registration { feature: def.feature_id.clone(), reason: "lookback_bars must be ≥ 1".into() });
+        return Err(FeatureError::Registration {
+            feature: def.feature_id.clone(),
+            reason: "lookback_bars must be ≥ 1".into(),
+        });
     }
     let n = lb * 4 + 16;
     let series_a: Vec<FeatureRow> = (0..n)
@@ -188,7 +217,10 @@ pub fn register_check(feature: &dyn Feature) -> Result<(), FeatureError> {
         r.volume = r.volume * 7.0 + 1.0;
     }
     // Evaluated twice on identical input, a pure feature cannot differ.
-    if let (Ok(x), Ok(y)) = (evaluate(feature, &series_a, n - 1), evaluate(feature, &series_a, n - 1)) {
+    if let (Ok(x), Ok(y)) = (
+        evaluate(feature, &series_a, n - 1),
+        evaluate(feature, &series_a, n - 1),
+    ) {
         if x.to_bits() != y.to_bits() && !(x.is_nan() && y.is_nan()) {
             return Err(FeatureError::Registration {
                 feature: def.feature_id.clone(),
@@ -202,10 +234,11 @@ pub fn register_check(feature: &dyn Feature) -> Result<(), FeatureError> {
             reason: e.to_string(),
         })?;
         if decision == n - 1 {
-            let b = evaluate(feature, &series_b, decision).map_err(|e| FeatureError::Registration {
-                feature: def.feature_id.clone(),
-                reason: e.to_string(),
-            })?;
+            let b =
+                evaluate(feature, &series_b, decision).map_err(|e| FeatureError::Registration {
+                    feature: def.feature_id.clone(),
+                    reason: e.to_string(),
+                })?;
             if (a - b).abs() > 1e-12 && !(a.is_nan() && b.is_nan()) {
                 return Err(FeatureError::Registration {
                     feature: def.feature_id.clone(),
@@ -235,9 +268,18 @@ impl<'a> CausalGuard<'a> {
     /// A read past the decision row.
     pub fn at(&self, row: usize) -> Result<f64, FeatureError> {
         if row > self.decision {
-            return Err(FeatureError::FutureRead { row, decision: self.decision });
+            return Err(FeatureError::FutureRead {
+                row,
+                decision: self.decision,
+            });
         }
-        self.rows.get(row).copied().ok_or(FeatureError::Insufficient { need: row + 1, have: self.rows.len() })
+        self.rows
+            .get(row)
+            .copied()
+            .ok_or(FeatureError::Insufficient {
+                need: row + 1,
+                have: self.rows.len(),
+            })
     }
 
     #[must_use]
@@ -286,13 +328,21 @@ impl FeatureRuntime {
     ///
     /// # Errors
     /// The first registration failure.
-    pub fn new(feature_set_id: impl Into<String>, features: Vec<Arc<dyn Feature>>, log: Arc<dyn ServeLog>) -> Result<Self, FeatureError> {
+    pub fn new(
+        feature_set_id: impl Into<String>,
+        features: Vec<Arc<dyn Feature>>,
+        log: Arc<dyn ServeLog>,
+    ) -> Result<Self, FeatureError> {
         let mut map = BTreeMap::new();
         for f in features {
             register_check(f.as_ref())?;
             map.insert(f.def().feature_id.clone(), f);
         }
-        Ok(Self { features: map, feature_set_id: feature_set_id.into(), log })
+        Ok(Self {
+            features: map,
+            feature_set_id: feature_set_id.into(),
+            log,
+        })
     }
 
     #[must_use]
@@ -312,17 +362,28 @@ impl FeatureRuntime {
 
     #[must_use]
     pub fn code_hashes(&self) -> BTreeMap<String, String> {
-        self.features.iter().map(|(id, f)| (id.clone(), f.def().code_hash.clone())).collect()
+        self.features
+            .iter()
+            .map(|(id, f)| (id.clone(), f.def().code_hash.clone()))
+            .collect()
     }
 
     #[must_use]
     pub fn max_lookback(&self) -> u32 {
-        self.features.values().map(|f| f.def().lookback_bars).max().unwrap_or(0)
+        self.features
+            .values()
+            .map(|f| f.def().lookback_bars)
+            .max()
+            .unwrap_or(0)
     }
 
     #[must_use]
     pub fn max_knowledge_lag_ms(&self) -> u64 {
-        self.features.values().map(|f| f.def().knowledge_lag_ms).max().unwrap_or(0)
+        self.features
+            .values()
+            .map(|f| f.def().knowledge_lag_ms)
+            .max()
+            .unwrap_or(0)
     }
 
     /// Batch path. Rows lacking their full window are NaN.
@@ -351,7 +412,10 @@ impl FeatureRuntime {
         event_time: DateTime<Utc>,
         knowledge_time: DateTime<Utc>,
     ) -> Result<BTreeMap<String, f64>, FeatureError> {
-        let decision = window.len().checked_sub(1).ok_or(FeatureError::Insufficient { need: 1, have: 0 })?;
+        let decision = window
+            .len()
+            .checked_sub(1)
+            .ok_or(FeatureError::Insufficient { need: 1, have: 0 })?;
         let mut values = BTreeMap::new();
         for (id, f) in &self.features {
             values.insert(id.clone(), EVALUATE_FN(f.as_ref(), window, decision)?);
@@ -430,7 +494,13 @@ pub fn diagnose(
 pub fn p99_relative_diff(diffs: &[ConsistencyDiff]) -> f64 {
     let mut rel: Vec<f64> = diffs
         .iter()
-        .map(|d| d.abs_diff / d.served_value.abs().max(d.recomputed_value.abs()).max(1e-300))
+        .map(|d| {
+            d.abs_diff
+                / d.served_value
+                    .abs()
+                    .max(d.recomputed_value.abs())
+                    .max(1e-300)
+        })
         .filter(|r| r.is_finite())
         .collect();
     if rel.is_empty() {
@@ -482,9 +552,18 @@ pub(crate) mod tests {
     /// AT-13: declares 20, reads 50 → registration fails.
     #[test]
     fn a_lying_feature_fails_registration() {
-        let liar = Sma { def: def("sma_liar", 20), reads: 50 };
-        assert!(matches!(register_check(&liar), Err(FeatureError::Registration { .. })));
-        let honest = Sma { def: def("sma_20", 20), reads: 20 };
+        let liar = Sma {
+            def: def("sma_liar", 20),
+            reads: 50,
+        };
+        assert!(matches!(
+            register_check(&liar),
+            Err(FeatureError::Registration { .. })
+        ));
+        let honest = Sma {
+            def: def("sma_20", 20),
+            reads: 20,
+        };
         assert_eq!(register_check(&honest), Ok(()));
     }
 
@@ -515,34 +594,75 @@ pub(crate) mod tests {
         let rows: Vec<f64> = (0..10).map(f64::from).collect();
         let g = CausalGuard::new(&rows, 4);
         assert_eq!(g.at(4), Ok(4.0));
-        assert_eq!(g.at(5), Err(FeatureError::FutureRead { row: 5, decision: 4 }));
+        assert_eq!(
+            g.at(5),
+            Err(FeatureError::FutureRead {
+                row: 5,
+                decision: 4
+            })
+        );
     }
 
     /// AT-15: backfill and live resolve to the same function object and agree.
     #[test]
     fn backfill_and_live_share_one_implementation() {
-        assert!(std::ptr::fn_addr_eq(EVALUATE_FN, evaluate as fn(&dyn Feature, &[FeatureRow], usize) -> Result<f64, FeatureError>));
+        assert!(std::ptr::fn_addr_eq(
+            EVALUATE_FN,
+            evaluate as fn(&dyn Feature, &[FeatureRow], usize) -> Result<f64, FeatureError>
+        ));
         let log = Arc::new(MemoryServeLog::default());
-        let rt = FeatureRuntime::new("fs1", vec![Arc::new(Sma { def: def("sma_5", 5), reads: 5 })], log.clone()).unwrap();
-        let series: Vec<FeatureRow> =
-            (0..50).map(|i| FeatureRow { close: f64::from(i).sin() * 10.0 + 100.0, ..FeatureRow::default() }).collect();
+        let rt = FeatureRuntime::new(
+            "fs1",
+            vec![Arc::new(Sma {
+                def: def("sma_5", 5),
+                reads: 5,
+            })],
+            log.clone(),
+        )
+        .unwrap();
+        let series: Vec<FeatureRow> = (0..50)
+            .map(|i| FeatureRow {
+                close: f64::from(i).sin() * 10.0 + 100.0,
+                ..FeatureRow::default()
+            })
+            .collect();
         let batch = rt.backfill(&series);
         let now = Utc::now();
         for i in 10..50 {
             let live = rt.serve_live("t", 1, &series[..=i], now, now).unwrap();
-            assert_eq!(live["sma_5"].to_bits(), batch["sma_5"][i].to_bits(), "bit-identical at {i}");
+            assert_eq!(
+                live["sma_5"].to_bits(),
+                batch["sma_5"][i].to_bits(),
+                "bit-identical at {i}"
+            );
         }
-        assert_eq!(log.0.lock().unwrap().len(), 40, "every live serve is logged");
+        assert_eq!(
+            log.0.lock().unwrap().len(),
+            40,
+            "every live serve is logged"
+        );
     }
 
     #[test]
     fn diagnosis_uses_both_knowledge_times() {
         let t = Utc::now();
         assert_eq!(diagnose(1.0, 1.0, t, t, "a", "a", true), Diagnosis::Match);
-        assert_eq!(diagnose(1.0, 2.0, t, t + Duration::minutes(40), "a", "a", true), Diagnosis::LateArrival);
-        assert_eq!(diagnose(1.0, 2.0, t, t, "a", "b", true), Diagnosis::CodeDrift);
-        assert_eq!(diagnose(1.0, 2.0, t, t, "a", "a", false), Diagnosis::Nondeterminism);
-        assert_eq!(diagnose(1.0, 1.0 + 1e-12, t, t, "a", "a", true), Diagnosis::Precision);
+        assert_eq!(
+            diagnose(1.0, 2.0, t, t + Duration::minutes(40), "a", "a", true),
+            Diagnosis::LateArrival
+        );
+        assert_eq!(
+            diagnose(1.0, 2.0, t, t, "a", "b", true),
+            Diagnosis::CodeDrift
+        );
+        assert_eq!(
+            diagnose(1.0, 2.0, t, t, "a", "a", false),
+            Diagnosis::Nondeterminism
+        );
+        assert_eq!(
+            diagnose(1.0, 1.0 + 1e-12, t, t, "a", "a", true),
+            Diagnosis::Precision
+        );
     }
 
     #[test]

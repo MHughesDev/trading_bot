@@ -119,13 +119,14 @@ pub async fn min_track_record(
     token: BearerToken,
     Json(body): Json<RunBody>,
 ) -> impl IntoResponse {
-    let view = match state
-        .suite
-        .audit_track_record(token.user_id(), &body.run_id, TRACK_RECORD_CONFIDENCE)
-    {
-        Ok(v) => v,
-        Err(e) => return refuse("not_found", e.to_string()),
-    };
+    let view =
+        match state
+            .suite
+            .audit_track_record(token.user_id(), &body.run_id, TRACK_RECORD_CONFIDENCE)
+        {
+            Ok(v) => v,
+            Err(e) => return refuse("not_found", e.to_string()),
+        };
 
     // The floor is `strict_v1`'s, always, and is NOT a caller argument.
     //
@@ -288,7 +289,12 @@ pub async fn holdout_look(
         Ok(v) => v,
         Err(r) => return r,
     };
-    let Some(reason) = body.reason.as_deref().map(str::trim).filter(|s| s.len() >= 20) else {
+    let Some(reason) = body
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| s.len() >= 20)
+    else {
         // Not a formality. The reason is written into an append-only access log
         // that outlives the run, and "testing" is not a reason anyone can audit
         // a year later.

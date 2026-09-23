@@ -205,9 +205,7 @@ impl ArmError {
     pub fn reason(&self) -> String {
         match self {
             Self::NotFound => "no such automation".into(),
-            Self::NotExecutable => {
-                "pipeline automations are not executable yet (Set E 4.3)".into()
-            }
+            Self::NotExecutable => "pipeline automations are not executable yet (Set E 4.3)".into(),
             Self::Unusable(d) => format!("the automation cannot be armed: {d}"),
             Self::AlreadyRunning(d) => format!("already running: {d}"),
             Self::Storage(d) => format!("storage: {d}"),
@@ -287,14 +285,13 @@ pub async fn arm_by_id(state: &AppState, id: Uuid) -> Result<serde_json::Value, 
 
     // Load the execution strategy's definition.  An automation that names a
     // strategy the platform does not have must not arm.
-    let def_row: Option<(serde_json::Value,)> = sqlx::query_as(
-        "SELECT definition_json FROM strategy_definitions WHERE strategy_id = $1",
-    )
-    .bind(execution_strategy_id)
-    .fetch_optional(&state.pg)
-    .await
-    .ok()
-    .flatten();
+    let def_row: Option<(serde_json::Value,)> =
+        sqlx::query_as("SELECT definition_json FROM strategy_definitions WHERE strategy_id = $1")
+            .bind(execution_strategy_id)
+            .fetch_optional(&state.pg)
+            .await
+            .ok()
+            .flatten();
 
     let Some((def_json,)) = def_row else {
         return Err(ArmError::Unusable(format!(
@@ -302,9 +299,8 @@ pub async fn arm_by_id(state: &AppState, id: Uuid) -> Result<serde_json::Value, 
         )));
     };
 
-    let definition: domain::strategy_def::StrategyDefinition =
-        serde_json::from_value(def_json)
-            .map_err(|e| ArmError::Unusable(format!("invalid strategy definition: {e}")))?;
+    let definition: domain::strategy_def::StrategyDefinition = serde_json::from_value(def_json)
+        .map_err(|e| ArmError::Unusable(format!("invalid strategy definition: {e}")))?;
     let definition = domain::strategy_def::params::materialize(
         &definition,
         &domain::strategy_def::ParamValues::new(),

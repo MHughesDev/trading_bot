@@ -453,7 +453,11 @@ fn the_state_card_does_not_grow_across_fifty_steps() {
     assert!(prompt(&fx).contains("GOAL:"), "and it reaches the prompt");
 
     for i in 0..50u32 {
-        step(&mut l, i, &format!("{{\"bars\": {}, \"run\": \"run_{i}\"}}", 500 + i));
+        step(
+            &mut l,
+            i,
+            &format!("{{\"bars\": {}, \"run\": \"run_{i}\"}}", 500 + i),
+        );
     }
 
     let after = l.working().card(Detail::Rich).len();
@@ -533,7 +537,10 @@ fn re_asking_a_settled_question_is_corrected_with_the_step_it_was_decided_at() {
         "an idempotent read the session already made is not made again"
     );
     assert!(
-        l.working().decided.iter().any(|d| d.question.contains("get_bars")),
+        l.working()
+            .decided
+            .iter()
+            .any(|d| d.question.contains("get_bars")),
         "and the decision is on the card, not only in a comment"
     );
 
@@ -582,9 +589,15 @@ fn a_goal_is_classified_before_planning_and_the_default_withholds_trials() {
     use harness::state::GoalKind;
 
     // The four kinds, from the words a goal actually uses.
-    assert_eq!(GoalKind::classify("how many 1m bars do we hold for BTC-USD", &[]), GoalKind::Lookup);
     assert_eq!(
-        GoalKind::classify("backtest an ema cross on BTC-USD and report the sharpe", &[]),
+        GoalKind::classify("how many 1m bars do we hold for BTC-USD", &[]),
+        GoalKind::Lookup
+    );
+    assert_eq!(
+        GoalKind::classify(
+            "backtest an ema cross on BTC-USD and report the sharpe",
+            &[]
+        ),
         GoalKind::Research
     );
     assert_eq!(
@@ -615,12 +628,25 @@ fn a_goal_is_classified_before_planning_and_the_default_withholds_trials() {
     );
     // And a market property on its own is not enough: this reads a number the
     // platform already holds.
-    assert_eq!(GoalKind::classify("what is the sharpe of run_42", &[]), GoalKind::Lookup);
+    assert_eq!(
+        GoalKind::classify("what is the sharpe of run_42", &[]),
+        GoalKind::Lookup
+    );
 
     // The default, and what it costs.
-    assert_eq!(GoalKind::classify("something entirely unfamiliar", &[]), GoalKind::Lookup);
-    assert!(!GoalKind::Lookup.may_spend_trials(), "a lookup never spends a trial");
-    assert_eq!(GoalKind::Lookup.max_tools(), 3, "and sees at most three tools");
+    assert_eq!(
+        GoalKind::classify("something entirely unfamiliar", &[]),
+        GoalKind::Lookup
+    );
+    assert!(
+        !GoalKind::Lookup.may_spend_trials(),
+        "a lookup never spends a trial"
+    );
+    assert_eq!(
+        GoalKind::Lookup.max_tools(),
+        3,
+        "and sees at most three tools"
+    );
     assert!(GoalKind::Research.may_spend_trials());
 }
 
@@ -666,7 +692,11 @@ fn the_system_the_schemas_and_the_body_fit_the_window_together() {
 
     // A long run, so compaction has actually had to make choices.
     for i in 0..40u32 {
-        step(&mut l, i, &format!("{{\"bars\": {}, \"run\": \"run_{i}\"}}", 500 + i));
+        step(
+            &mut l,
+            i,
+            &format!("{{\"bars\": {}, \"run\": \"run_{i}\"}}", 500 + i),
+        );
     }
     let fx = l.next(Input::ModelReply {
         raw: r#"{"name":"get_bars"}"#.into(),
@@ -948,7 +978,10 @@ fn a_reflection_costs_a_call_but_not_a_step_and_runs_out() {
 #[test]
 fn a_profile_that_does_not_reflect_is_not_offered_the_tool() {
     let (l, _) = started();
-    assert!(!profile().orchestration.reflection, "the 7B does not reflect");
+    assert!(
+        !profile().orchestration.reflection,
+        "the 7B does not reflect"
+    );
     assert!(
         !l.exposed().contains("reflect"),
         "and is not offered it: {:?}",
@@ -1037,10 +1070,8 @@ fn a_non_retryable_tool_error_spends_no_retry_budget() {
         "the retry budget is intact, so the model is corrected rather than fenced: {fx:?}"
     );
     assert!(
-        fx.iter().any(|e| matches!(
-            e,
-            Effect::Note(harness::drive::Note::Rejected { .. })
-        )),
+        fx.iter()
+            .any(|e| matches!(e, Effect::Note(harness::drive::Note::Rejected { .. }))),
         "and the correction is the thing it gets: {fx:?}"
     );
 }
@@ -1093,8 +1124,16 @@ fn registry_with_skills() -> ToolRegistry {
             "skills",
             "Run a saved Python skill against a payload. Use it to run python.",
         ),
-        ("list_skills", "skills", "Every saved skill with its record."),
-        ("get_funnel", "research", "The gate funnel for an experiment."),
+        (
+            "list_skills",
+            "skills",
+            "Every saved skill with its record.",
+        ),
+        (
+            "get_funnel",
+            "research",
+            "The gate funnel for an experiment.",
+        ),
         ("advance_gate", "research", "Advance an experiment's gate."),
         ("list_lanes", "discovery", "Which lanes exist."),
     ] {
@@ -1203,11 +1242,7 @@ fn a_full_session_slice_reports_rather_than_evicting() {
         });
     }
 
-    assert!(
-        l.exposed().len() <= 5,
-        "the cap held: {:?}",
-        l.exposed()
-    );
+    assert!(l.exposed().len() <= 5, "the cap held: {:?}", l.exposed());
     for name in &before {
         assert!(
             l.exposed().contains(name),
@@ -1378,7 +1413,10 @@ fn a_constraint_narrows_without_dropping_the_plan() {
     use harness::state::Steer;
     assert_eq!(Steer::classify("only use 1h bars"), Steer::Constraint);
     assert_eq!(Steer::classify("focus on BTC-USD"), Steer::Constraint);
-    assert_eq!(Steer::classify("just use the coinbase data"), Steer::Constraint);
+    assert_eq!(
+        Steer::classify("just use the coinbase data"),
+        Steer::Constraint
+    );
 
     let (mut l, _) = started();
     let goal = l.working().goal.clone();
@@ -1414,8 +1452,17 @@ fn an_ambiguous_steer_is_read_as_a_redirection_and_says_so() {
 #[test]
 fn encouragement_is_not_a_new_goal() {
     use harness::state::Steer;
-    for text in ["looking good", "nice, keep going", "thanks", "how's it going"] {
+    for text in [
+        "looking good",
+        "nice, keep going",
+        "thanks",
+        "how's it going",
+    ] {
         assert_eq!(Steer::classify(text), Steer::Comment, "{text}");
     }
-    assert_eq!(Steer::classify("   "), Steer::Comment, "silence is not a steer");
+    assert_eq!(
+        Steer::classify("   "),
+        Steer::Comment,
+        "silence is not a steer"
+    );
 }

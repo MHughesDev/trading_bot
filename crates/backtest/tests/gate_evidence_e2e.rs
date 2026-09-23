@@ -197,7 +197,10 @@ struct WitnessedLedger {
 
 impl WitnessedLedger {
     fn new() -> Self {
-        Self { inner: InMemoryLedger::new(), seen: std::sync::Mutex::new(BTreeMap::new()) }
+        Self {
+            inner: InMemoryLedger::new(),
+            seen: std::sync::Mutex::new(BTreeMap::new()),
+        }
     }
 
     /// The statistics the funnel recorded against one trial.
@@ -261,7 +264,8 @@ impl ledger::TrialLedger for WitnessedLedger {
         produced_by: &str,
     ) -> Result<(), ledger::LedgerError> {
         // The real ledger first: a name it refuses is never witnessed.
-        self.inner.record_statistic(tenant_id, trial_id, name, value, produced_by)?;
+        self.inner
+            .record_statistic(tenant_id, trial_id, name, value, produced_by)?;
         self.seen
             .lock()
             .expect("witness poisoned")
@@ -274,7 +278,8 @@ impl ledger::TrialLedger for WitnessedLedger {
         trial_id: Uuid,
         evidence: &TrialEvidence,
     ) -> Result<(), ledger::LedgerError> {
-        self.inner.record_gate_evidence(tenant_id, trial_id, evidence)
+        self.inner
+            .record_gate_evidence(tenant_id, trial_id, evidence)
     }
     fn claim_sealed_holdout(
         &self,
@@ -282,7 +287,8 @@ impl ledger::TrialLedger for WitnessedLedger {
         lineage: &str,
         requested_by: &str,
     ) -> Result<ledger::holdout::HoldoutClaim, ledger::LedgerError> {
-        self.inner.claim_sealed_holdout(tenant_id, lineage, requested_by)
+        self.inner
+            .claim_sealed_holdout(tenant_id, lineage, requested_by)
     }
     fn record_sealed_holdout(
         &self,
@@ -291,7 +297,8 @@ impl ledger::TrialLedger for WitnessedLedger {
         trial_id: Uuid,
         result: &serde_json::Value,
     ) -> Result<(), ledger::LedgerError> {
-        self.inner.record_sealed_holdout(tenant_id, lineage, trial_id, result)
+        self.inner
+            .record_sealed_holdout(tenant_id, lineage, trial_id, result)
     }
     fn define_campaign(
         &self,
@@ -301,7 +308,8 @@ impl ledger::TrialLedger for WitnessedLedger {
         self.inner.define_campaign(tenant_id, def)
     }
     fn campaign_exploration_fraction(&self, tenant_id: &str, campaign_id: Uuid) -> f64 {
-        self.inner.campaign_exploration_fraction(tenant_id, campaign_id)
+        self.inner
+            .campaign_exploration_fraction(tenant_id, campaign_id)
     }
 }
 
@@ -403,11 +411,17 @@ fn a_strategy_with_evidence_gets_real_verdicts_at_gates_3_4_and_12() {
     let profile = GateProfile::strict_v1();
 
     // ── Gate 3 ───────────────────────────────────────────────────────────────
-    assert!(e.cost_ladder.len() >= 2, "a ladder, not a single assumption");
+    assert!(
+        e.cost_ladder.len() >= 2,
+        "a ladder, not a single assumption"
+    );
     let ladder: Vec<CostRung> = e
         .cost_ladder
         .iter()
-        .map(|r| CostRung { multiple: r.multiple, net_metric: r.net_metric })
+        .map(|r| CostRung {
+            multiple: r.multiple,
+            net_metric: r.net_metric,
+        })
         .collect();
     let g3 = gate_3_cost_sensitivity(&profile, &ladder);
     assert!(!g3.inconclusive, "gate 3 judged on nothing: {}", g3.detail);
@@ -451,9 +465,14 @@ fn a_strategy_with_evidence_gets_real_verdicts_at_gates_3_4_and_12() {
     // what tells the two apart, so it is asserted rather than assumed.
     let sharpes: Vec<f64> = e.capacity_curve.iter().map(|p| p.net_sharpe).collect();
     assert!(
-        e.capacity_curve.windows(2).all(|w| w[0].aum_usd < w[1].aum_usd),
+        e.capacity_curve
+            .windows(2)
+            .all(|w| w[0].aum_usd < w[1].aum_usd),
         "rungs must be stored in AUM order: {:?}",
-        e.capacity_curve.iter().map(|p| p.aum_usd).collect::<Vec<_>>()
+        e.capacity_curve
+            .iter()
+            .map(|p| p.aum_usd)
+            .collect::<Vec<_>>()
     );
     assert!(
         sharpes.windows(2).all(|w| w[1] < w[0]),
@@ -513,7 +532,11 @@ fn a_strategy_with_evidence_gets_real_verdicts_at_gates_3_4_and_12() {
             numeraire: Some(&unit),
         },
     );
-    assert!(!g12.inconclusive, "gate 12 judged on nothing: {}", g12.detail);
+    assert!(
+        !g12.inconclusive,
+        "gate 12 judged on nothing: {}",
+        g12.detail
+    );
     assert!(g12.statistic.is_some(), "{}", g12.detail);
 }
 
@@ -530,8 +553,7 @@ fn every_capacity_rung_is_a_counted_trial() {
     assert_eq!(rungs.len(), backtest::capacity::AUM_MULTIPLES.len());
 
     // No two rungs share a trial id — each is its own look.
-    let ids: std::collections::BTreeSet<Uuid> =
-        rungs.iter().map(|p| p.member_trial_id).collect();
+    let ids: std::collections::BTreeSet<Uuid> = rungs.iter().map(|p| p.member_trial_id).collect();
     assert_eq!(ids.len(), rungs.len(), "one counted trial per rung");
 
     // And the same funnel without the sweep counts exactly that many fewer.
@@ -658,7 +680,11 @@ fn gate_10_needs_both_the_declared_battery_and_the_series() {
             neutral_claim: false,
         },
     );
-    assert!(undeclared.inconclusive && !undeclared.passed, "{}", undeclared.detail);
+    assert!(
+        undeclared.inconclusive && !undeclared.passed,
+        "{}",
+        undeclared.detail
+    );
     assert!(undeclared.detail.contains("declares no factor battery"));
 
     let profile = GateProfile::strict_v1().with_asset_class(
@@ -681,7 +707,11 @@ fn gate_10_needs_both_the_declared_battery_and_the_series() {
             neutral_claim: false,
         },
     );
-    assert!(no_series.inconclusive && !no_series.passed, "{}", no_series.detail);
+    assert!(
+        no_series.inconclusive && !no_series.passed,
+        "{}",
+        no_series.detail
+    );
     assert!(no_series.detail.contains("ccarry"), "{}", no_series.detail);
 
     // (c) Both: a decided verdict with a t-statistic.
@@ -695,7 +725,11 @@ fn gate_10_needs_both_the_declared_battery_and_the_series() {
             neutral_claim: false,
         },
     );
-    assert!(!decided.inconclusive, "gate 10 judged on nothing: {}", decided.detail);
+    assert!(
+        !decided.inconclusive,
+        "gate 10 judged on nothing: {}",
+        decided.detail
+    );
     assert!(decided.statistic.is_some(), "{}", decided.detail);
 }
 

@@ -466,7 +466,10 @@ mod tests {
     fn a_fact_names_the_family_that_owns_it() {
         assert_eq!(Fact::LeaseLost.family(), Family::Lease);
         assert_eq!(
-            Fact::ReconciliationMismatch { venue: venue("kraken") }.family(),
+            Fact::ReconciliationMismatch {
+                venue: venue("kraken")
+            }
+            .family(),
             Family::Venue
         );
         assert_eq!(stale("BTC-USD", "kraken").family(), Family::Data);
@@ -478,7 +481,9 @@ mod tests {
         // variant does not compile until `kind` has an arm, and an arm needs a
         // `FactKind`, and a `FactKind` needs a `wiring` answer.
         let samples = [
-            Fact::ReconciliationMismatch { venue: venue("kraken") },
+            Fact::ReconciliationMismatch {
+                venue: venue("kraken"),
+            },
             Fact::LeaseLost,
             stale("BTC-USD", "kraken"),
         ];

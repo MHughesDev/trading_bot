@@ -209,7 +209,9 @@ impl EdgarClient {
     /// module takes, so there is no request that can omit it. The budget is
     /// spent before the request exists, so a refusal cannot be raced past.
     async fn get(&self, url: &str) -> Result<String, EdgarError> {
-        self.limiter.try_acquire().map_err(EdgarError::RateLimited)?;
+        self.limiter
+            .try_acquire()
+            .map_err(EdgarError::RateLimited)?;
         let response = self
             .http
             .get(url)
@@ -487,7 +489,10 @@ mod tests {
             .iter()
             .find(|f| f.accession == "0000320193-23-000064")
             .expect("the fact");
-        assert!(fact.knowledge.is_derived(), "the impossible stamp was refused");
+        assert!(
+            fact.knowledge.is_derived(),
+            "the impossible stamp was refused"
+        );
         assert_eq!(fact.accepted_at(), t("2023-06-30T23:59:59Z"));
     }
 
@@ -538,9 +543,15 @@ mod tests {
         let limit = c.limiter().limit();
         assert_eq!(limit.venue, "sec_edgar");
         assert!((limit.sustained_rps() - MAX_REQUESTS_PER_SEC as f64).abs() < 1e-9);
-        assert_eq!(limit.source_quote, "Current max request rate: 10 requests/second.");
+        assert_eq!(
+            limit.source_quote,
+            "Current max request rate: 10 requests/second."
+        );
         for i in 0..MAX_REQUESTS_PER_SEC {
-            assert!(c.limiter().try_acquire().is_ok(), "request {i} is inside the rate");
+            assert!(
+                c.limiter().try_acquire().is_ok(),
+                "request {i} is inside the rate"
+            );
         }
         assert!(
             c.limiter().try_acquire().is_err(),

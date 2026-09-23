@@ -347,12 +347,21 @@ impl Drop for Drill {
                     .await;
                 }
                 for component in &components {
-                    purge(&pg, "DELETE FROM monitor.heartbeat WHERE component = $1", component)
-                        .await;
+                    purge(
+                        &pg,
+                        "DELETE FROM monitor.heartbeat WHERE component = $1",
+                        component,
+                    )
+                    .await;
                 }
                 for scope in &scopes {
                     purge(&pg, "DELETE FROM monitor.events WHERE scope = $1", scope).await;
-                    purge(&pg, "DELETE FROM monitor.kill_switch WHERE scope = $1", scope).await;
+                    purge(
+                        &pg,
+                        "DELETE FROM monitor.kill_switch WHERE scope = $1",
+                        scope,
+                    )
+                    .await;
                 }
                 for event_id in &events {
                     purge(
@@ -379,8 +388,12 @@ impl Drop for Drill {
                     .await;
                 }
                 for strategy_id in &limits {
-                    purge(&pg, "DELETE FROM monitor.limits WHERE strategy_id = $1", strategy_id)
-                        .await;
+                    purge(
+                        &pg,
+                        "DELETE FROM monitor.limits WHERE strategy_id = $1",
+                        strategy_id,
+                    )
+                    .await;
                 }
 
                 // The `global`/`lease` rows the *watcher* wrote while the drill
@@ -626,12 +639,20 @@ async fn a_trip_survives_a_restart_and_the_boot_path_agrees() {
     drill.owns_scope("global");
 
     let terms = drill.terms(60_000);
-    MonitorService::new(store.clone(), terms).tick().await.expect("renew");
+    MonitorService::new(store.clone(), terms)
+        .tick()
+        .await
+        .expect("renew");
 
     // Trip, as `POST /api/trading/kill` now does.
-    let event = MonitorEvent::new(Scope::Global, Family::Platform, EventKind::Tripped, "human:test")
-        .expect("human")
-        .with_reason("restart drill");
+    let event = MonitorEvent::new(
+        Scope::Global,
+        Family::Platform,
+        EventKind::Tripped,
+        "human:test",
+    )
+    .expect("human")
+    .with_reason("restart drill");
     store.trip(&event, "restart drill").await.expect("trip");
 
     // "Restart": everything in-process is thrown away and rebuilt from scratch.
@@ -681,12 +702,23 @@ async fn an_injected_mismatch_halts_one_venue_and_blocks_resume_until_clean() {
     drill.owns_scope(bad_scope.to_string());
 
     let terms = drill.terms(60_000);
-    MonitorService::new(store.clone(), terms).tick().await.expect("renew");
+    MonitorService::new(store.clone(), terms)
+        .tick()
+        .await
+        .expect("renew");
 
-    let event = MonitorEvent::new(bad_scope.clone(), Family::Venue, EventKind::Halted, "monitor")
-        .expect("monitor")
-        .with_reason("reconciliation mismatch");
-    store.trip(&event, "reconciliation mismatch").await.expect("trip");
+    let event = MonitorEvent::new(
+        bad_scope.clone(),
+        Family::Venue,
+        EventKind::Halted,
+        "monitor",
+    )
+    .expect("monitor")
+    .with_reason("reconciliation mismatch");
+    store
+        .trip(&event, "reconciliation mismatch")
+        .await
+        .expect("trip");
 
     let (_ks, gate, watcher) = runtime(&store);
     watcher.refresh().await;
@@ -712,7 +744,10 @@ async fn an_injected_mismatch_halts_one_venue_and_blocks_resume_until_clean() {
             all_venues_reconciled: false,
         })
         .await;
-    assert!(refused.is_err(), "a global resume must wait for reconciliation");
+    assert!(
+        refused.is_err(),
+        "a global resume must wait for reconciliation"
+    );
 }
 
 // ── §8.5 — the trip record exists before the first refused order ────────────
@@ -726,7 +761,10 @@ async fn the_trip_record_is_present_before_the_first_refused_order() {
     drill.owns_scope(scope.to_string());
 
     let terms = drill.terms(60_000);
-    MonitorService::new(store.clone(), terms).tick().await.expect("renew");
+    MonitorService::new(store.clone(), terms)
+        .tick()
+        .await
+        .expect("renew");
 
     let event = MonitorEvent::new(scope.clone(), Family::Pnl, EventKind::Halted, "monitor")
         .expect("monitor")
@@ -810,7 +848,10 @@ async fn the_database_refuses_an_agent_tripped_or_agent_reset_row() {
     .bind(&scope)
     .execute(&pg)
     .await;
-    assert!(authored.is_err(), "an agent must not author a monitor event");
+    assert!(
+        authored.is_err(),
+        "an agent must not author a monitor event"
+    );
 }
 
 #[tokio::test]
@@ -855,7 +896,10 @@ async fn a_second_reset_within_five_minutes_is_refused_by_the_store() {
         actor: "human:test".to_owned(),
         all_venues_reconciled: true,
     };
-    store.reset(&request).await.expect("the first reset is allowed");
+    store
+        .reset(&request)
+        .await
+        .expect("the first reset is allowed");
 
     // Trip again — a flapping fault — and try to reset straight back into it.
     //
@@ -891,8 +935,16 @@ async fn a_strategy_with_no_declared_limits_cannot_be_promoted_to_live() {
     );
 
     for (metric, family, method) in [
-        ("fill_rate", "execution", monitor::LimitMethod::PaperEwma3Sigma),
-        ("orders_per_minute", "behaviour", monitor::LimitMethod::VenueRateCeiling),
+        (
+            "fill_rate",
+            "execution",
+            monitor::LimitMethod::PaperEwma3Sigma,
+        ),
+        (
+            "orders_per_minute",
+            "behaviour",
+            monitor::LimitMethod::VenueRateCeiling,
+        ),
         ("max_drawdown", "pnl", monitor::LimitMethod::McP95Drawdown),
     ] {
         store
@@ -933,7 +985,10 @@ async fn a_strategy_with_no_declared_limits_cannot_be_promoted_to_live() {
             declared_by: "agent:run-9".to_owned(),
         })
         .await;
-    assert!(refused.is_err(), "an agent must not declare a control limit");
+    assert!(
+        refused.is_err(),
+        "an agent must not declare a control limit"
+    );
 }
 
 // ── §4.3 — a window suppresses a platform trip and nothing else ─────────────
@@ -942,13 +997,8 @@ async fn a_strategy_with_no_declared_limits_cannot_be_promoted_to_live() {
 async fn an_open_window_is_visible_attributed_and_bounded() {
     let (pg, mut drill) = db!();
     let store = MonitorStore::new(pg.clone());
-    let window = monitor::MaintenanceWindow::open(
-        "human:test",
-        "rolling deploy",
-        15,
-        Utc::now(),
-    )
-    .expect("window");
+    let window = monitor::MaintenanceWindow::open("human:test", "rolling deploy", 15, Utc::now())
+        .expect("window");
     drill.owns_window(window.window_id);
     store.open_window(&window).await.expect("open");
 
@@ -1035,7 +1085,10 @@ async fn a_mismatch_halt_survives_the_refresh_that_erases_an_in_memory_one() {
     drill.owns_scope(Scope::venue(&recorded).to_string());
 
     let terms = drill.terms(60_000);
-    MonitorService::new(store.clone(), terms).tick().await.expect("renew");
+    MonitorService::new(store.clone(), terms)
+        .tick()
+        .await
+        .expect("renew");
 
     let (ks, gate, watcher) = runtime(&store);
     watcher.refresh().await;
@@ -1071,7 +1124,8 @@ async fn a_mismatch_halt_survives_the_refresh_that_erases_an_in_memory_one() {
         "a recorded mismatch must still be halted after the refresh that reads the table"
     );
     assert!(
-        gate.check(intent(), &ctx().on_venue(&in_memory_only)).is_ok(),
+        gate.check(intent(), &ctx().on_venue(&in_memory_only))
+            .is_ok(),
         "this is the defect: an in-memory trip with no durable row is erased by \
          replace_halted, and the venue silently resumes"
     );
@@ -1111,8 +1165,8 @@ async fn a_drill_measures_its_own_propagation_and_leaves_nothing_behind() {
     let (pg, mut drill) = db!();
     let store = MonitorStore::new(pg.clone());
 
-    let rehearsal = monitor::Rehearsal::new(store.clone(), 60_000, "human:test")
-        .expect("a human may rehearse");
+    let rehearsal =
+        monitor::Rehearsal::new(store.clone(), 60_000, "human:test").expect("a human may rehearse");
     let outcome = rehearsal
         .run(monitor::DrillTrigger::Manual, "track-d4")
         .await
@@ -1203,10 +1257,15 @@ async fn a_platform_fault_inside_a_window_is_recorded_and_halts_nothing() {
     }
 
     // The row §4.3 asks for: a window nobody can see is a hole nobody can audit.
-    let event = MonitorEvent::new(Scope::Global, Family::Platform, EventKind::Warning, "monitor")
-        .expect("monitor")
-        .with_reason(verdict.reason())
-        .suppressed_by(window.window_id);
+    let event = MonitorEvent::new(
+        Scope::Global,
+        Family::Platform,
+        EventKind::Warning,
+        "monitor",
+    )
+    .expect("monitor")
+    .with_reason(verdict.reason())
+    .suppressed_by(window.window_id);
     drill.owns_event(event.event_id);
     store.record_event(&event).await.expect("record");
     let recorded: Option<Uuid> =

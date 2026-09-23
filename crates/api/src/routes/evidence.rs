@@ -64,7 +64,10 @@ pub async fn trades(
 
     let tenant = token.user_id().to_string();
     let Ok(mut tx) = ledger::pg::tenant_tx(&state.pg, &tenant).await else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "no_tx" })))
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "no_tx" })),
+        )
             .into_response();
     };
 
@@ -176,7 +179,7 @@ pub async fn trades(
                             or read the per-trade series directly if the run wrote one.",
                 })),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -465,7 +468,10 @@ pub async fn similar_trials(
 
     let tenant = token.user_id().to_string();
     let Ok(mut tx) = ledger::pg::tenant_tx(&state.pg, &tenant).await else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "no_tx" })))
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "no_tx" })),
+        )
             .into_response();
     };
 

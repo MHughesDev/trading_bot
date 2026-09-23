@@ -106,7 +106,11 @@ pub fn list_features(params: &Value) -> Value {
 
     let all = features::feature_families().len();
     let matched = features::list_features(text("family"), cost, text("query"));
-    let shown: Vec<Value> = matched.iter().take(MAX_FAMILIES).map(|f| render(f)).collect();
+    let shown: Vec<Value> = matched
+        .iter()
+        .take(MAX_FAMILIES)
+        .map(|f| render(f))
+        .collect();
     let truncated = matched.len().saturating_sub(shown.len());
 
     json!({
@@ -142,7 +146,10 @@ pub async fn preview_signals(api: &ApiClient, params: &Value) -> Value {
             return json!({ "error": "missing_field", "field": field });
         }
     }
-    match api.post("/api/agent/strategy/preview", params.clone()).await {
+    match api
+        .post("/api/agent/strategy/preview", params.clone())
+        .await
+    {
         Ok(v) => v,
         Err(e) => e.to_tool_error(),
     }
@@ -388,9 +395,9 @@ pub fn diff_strategies(params: &Value) -> Value {
         let Some(v) = params.get(field).filter(|v| !v.is_null()) else {
             return Err(json!({ "error": "missing_field", "field": field }));
         };
-        serde_json::from_value(v.clone()).map_err(|e| {
-            json!({ "error": "invalid_definition", "field": field, "message": e.to_string() })
-        })
+        serde_json::from_value(v.clone()).map_err(
+            |e| json!({ "error": "invalid_definition", "field": field, "message": e.to_string() }),
+        )
     };
     let before = match read("before") {
         Ok(d) => d,
@@ -665,13 +672,18 @@ impl NotExercised {
 pub enum PairOutcome {
     /// The prefix held **over the firings compared**, which is the number
     /// carried here and never dropped from the answer.
-    PrefixHeld { firings_compared: u64 },
+    PrefixHeld {
+        firings_compared: u64,
+    },
     PrefixBroken {
         kind: BreakKind,
         at_bar: Option<u64>,
         says: String,
     },
-    NotExercised { reason: NotExercised, says: String },
+    NotExercised {
+        reason: NotExercised,
+        says: String,
+    },
 }
 
 impl PairOutcome {
@@ -729,7 +741,10 @@ impl Verdict {
 /// `PrefixHeld` is only reachable with at least one firing compared.
 #[must_use]
 pub fn verdict_over(pairs: &[PairOutcome]) -> Verdict {
-    if pairs.iter().any(|p| matches!(p, PairOutcome::PrefixBroken { .. })) {
+    if pairs
+        .iter()
+        .any(|p| matches!(p, PairOutcome::PrefixBroken { .. }))
+    {
         return Verdict::PrefixBroken;
     }
     if pairs
@@ -879,10 +894,16 @@ pub fn compare(full: &RunSignals, short: &RunSignals) -> PairOutcome {
                     };
                 }
                 if e.signals != g.signals {
-                    let missing: Vec<&str> =
-                        e.signals.difference(&g.signals).map(String::as_str).collect();
-                    let extra: Vec<&str> =
-                        g.signals.difference(&e.signals).map(String::as_str).collect();
+                    let missing: Vec<&str> = e
+                        .signals
+                        .difference(&g.signals)
+                        .map(String::as_str)
+                        .collect();
+                    let extra: Vec<&str> = g
+                        .signals
+                        .difference(&e.signals)
+                        .map(String::as_str)
+                        .collect();
                     let kind = match (missing.is_empty(), extra.is_empty()) {
                         (false, true) => BreakKind::MissingFiring,
                         (true, false) => BreakKind::ExtraFiring,
@@ -1020,7 +1041,12 @@ fn read_run(v: &Value) -> Result<RunSignals, Value> {
     };
 
     let mut total_fires = 0u64;
-    for s in v.get("signals").and_then(Value::as_array).into_iter().flatten() {
+    for s in v
+        .get("signals")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         match s.get("fires").and_then(Value::as_u64) {
             Some(n) => total_fires += n,
             None => return Err(unreadable()),
@@ -1588,7 +1614,10 @@ exit time 48 bars
         );
         let def: domain::strategy_def::StrategyDefinition =
             serde_json::from_value(out["detail"]["definition"].clone()).expect("a definition");
-        assert_eq!(def.definition_version, "1.3", "the exits block is a 1.3 document");
+        assert_eq!(
+            def.definition_version, "1.3",
+            "the exits block is a 1.3 document"
+        );
     }
 
     /// A refusal names the clause and carries a fix, because the whole argument
@@ -1630,13 +1659,18 @@ exit time 48 bars
 
         assert_eq!(d["exits"].as_array().expect("exits").len(), 2);
         assert_eq!(d["size"].as_array().expect("size").len(), 1);
-        assert!(d["size"][0].as_str().is_some_and(|s| s.starts_with("size ")));
+        assert!(d["size"][0]
+            .as_str()
+            .is_some_and(|s| s.starts_with("size ")));
 
         // `ema_21` declares a 105-bar warm-up (5N), and the longest wins. The
         // number matters less than that it is the engine's own, not a second
         // arithmetic here.
         let longest = d["warmup_bars"].as_u64().expect("a warm-up");
-        assert_eq!(longest, features::runtime::lookback_bars("ema_21").expect("ema_21 resolves") as u64);
+        assert_eq!(
+            longest,
+            features::runtime::lookback_bars("ema_21").expect("ema_21 resolves") as u64
+        );
         assert!(d["warmup_is_unknown_because"].is_null());
     }
 
@@ -1733,7 +1767,6 @@ exit time 48 bars
         assert_eq!(out["summary_fields"]["n_moves"], 2);
     }
 
-
     /// S-5.10's acceptance across the tool boundary: a move applied by
     /// `apply_move` comes back from `diff_strategies` as that move, with the
     /// two speaking JSON to each other the way a model would.
@@ -1789,7 +1822,9 @@ exit time 48 bars
         }));
         assert_eq!(out["error"], "unreadable_edit");
         assert!(
-            out["fix"].as_str().is_some_and(|f| f.contains("entry.long[0].clause[1]")),
+            out["fix"]
+                .as_str()
+                .is_some_and(|f| f.contains("entry.long[0].clause[1]")),
             "the refusal must show the shape that works: {out:#}"
         );
     }
@@ -1797,7 +1832,12 @@ exit time 48 bars
     /// The new tools are declared, and the namespace still routes.
     #[test]
     fn the_language_is_in_the_catalogue() {
-        for name in ["compile_strategy", "explain_strategy", "diff_strategies", "apply_move"] {
+        for name in [
+            "compile_strategy",
+            "explain_strategy",
+            "diff_strategies",
+            "apply_move",
+        ] {
             let spec = crate::spec::find(name)
                 .unwrap_or_else(|| panic!("`{name}` is not declared, so nothing can call it"));
             assert_eq!(spec.namespace, "strategy");

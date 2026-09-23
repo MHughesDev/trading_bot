@@ -240,14 +240,8 @@ impl DefectBreaker {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PauseReason {
     KillSwitch,
-    Tier {
-        profile: String,
-        health: String,
-    },
-    PlatformDefect {
-        tool: String,
-        runs: Vec<Uuid>,
-    },
+    Tier { profile: String, health: String },
+    PlatformDefect { tool: String, runs: Vec<Uuid> },
 }
 
 impl PauseReason {

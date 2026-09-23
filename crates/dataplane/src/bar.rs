@@ -49,12 +49,20 @@ impl CanonicalBar {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum BarError {
-    #[error("event_time {0} is not aligned to a bar open for period {1}s (bar timestamps are the OPEN)")]
+    #[error(
+        "event_time {0} is not aligned to a bar open for period {1}s (bar timestamps are the OPEN)"
+    )]
     NotOpenAligned(DateTime<Utc>, u32),
     #[error("knowledge_time {knowledge} precedes the bar close {close}: a bar cannot be known before it ends")]
-    KnownBeforeClose { knowledge: DateTime<Utc>, close: DateTime<Utc> },
+    KnownBeforeClose {
+        knowledge: DateTime<Utc>,
+        close: DateTime<Utc>,
+    },
     #[error("knowledge_time {knowledge} precedes ingest_time {ingest} without BACKFILLED_KNOWLEDGE_TIME")]
-    KnownBeforeIngest { knowledge: DateTime<Utc>, ingest: DateTime<Utc> },
+    KnownBeforeIngest {
+        knowledge: DateTime<Utc>,
+        ingest: DateTime<Utc>,
+    },
     #[error(
         "knowledge_time {knowledge} is only {actual_ms} ms after the bar close {close}, but source \
          {source_id} declares a vendor lag of {declared_ms} ms: the vendor had not published this \
@@ -99,7 +107,9 @@ pub fn validate(bar: &CanonicalBar) -> Result<(), BarError> {
     // Observed knowledge_time is when the platform could query the fact, which can
     // never precede receipt. The only exception is a declared backfill sentinel.
     if bar.knowledge_time < bar.ingest_time
-        && !bar.quality_flags.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME)
+        && !bar
+            .quality_flags
+            .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME)
     {
         return Err(BarError::KnownBeforeIngest {
             knowledge: bar.knowledge_time,
@@ -149,7 +159,11 @@ pub enum KnowledgeProvenance {
 /// instant its vendor published the bar. If the two disagree the later wins, which
 /// is the direction that cannot invent knowledge: claiming to have held a candle
 /// before its vendor released it is lookahead however the stamp got there.
-pub fn stamp_knowledge_time(bar: &mut CanonicalBar, provenance: KnowledgeProvenance, lag: &VendorLag) {
+pub fn stamp_knowledge_time(
+    bar: &mut CanonicalBar,
+    provenance: KnowledgeProvenance,
+    lag: &VendorLag,
+) {
     match provenance {
         KnowledgeProvenance::Observed => {
             bar.knowledge_time = bar.ingest_time.max(earliest_knowable(bar, lag));
@@ -214,7 +228,10 @@ pub enum ReceiptVerdict {
     /// `market_bars_v2` — a column that was never really written. It is never
     /// promoted to an observation: sentinel plus flag, and it is counted so the
     /// population is visible rather than laundered into the honest one.
-    Impossible { ingest: DateTime<Utc>, close: DateTime<Utc> },
+    Impossible {
+        ingest: DateTime<Utc>,
+        close: DateTime<Utc>,
+    },
 }
 
 impl ReceiptVerdict {
@@ -233,7 +250,9 @@ impl ReceiptVerdict {
     pub const fn collection(self) -> crate::source::Collection {
         match self {
             Self::Receipt { at } => crate::source::Collection::Forward { received_at: at },
-            Self::HistoryPull { .. } | Self::Impossible { .. } => crate::source::Collection::Historical,
+            Self::HistoryPull { .. } | Self::Impossible { .. } => {
+                crate::source::Collection::Historical
+            }
         }
     }
 
@@ -266,7 +285,9 @@ pub fn classify_receipt(
     if ingest <= deadline {
         ReceiptVerdict::Receipt { at: ingest }
     } else {
-        ReceiptVerdict::HistoryPull { late_by: ingest - deadline }
+        ReceiptVerdict::HistoryPull {
+            late_by: ingest - deadline,
+        }
     }
 }
 
@@ -321,7 +342,11 @@ pub fn validate_against_source(bar: &CanonicalBar, lag: &VendorLag) -> Result<()
 ///
 /// Returns the verdict so a caller can count the three populations, which is the
 /// number this whole exercise exists to produce.
-pub fn stamp_from_receipt(bar: &mut CanonicalBar, lag: &VendorLag, grace: Duration) -> ReceiptVerdict {
+pub fn stamp_from_receipt(
+    bar: &mut CanonicalBar,
+    lag: &VendorLag,
+    grace: Duration,
+) -> ReceiptVerdict {
     let verdict = receipt_of(bar, lag, grace);
     stamp_knowledge_time(bar, verdict.provenance(), lag);
     verdict
@@ -338,7 +363,9 @@ pub fn stamp_from_receipt(bar: &mut CanonicalBar, lag: &VendorLag, grace: Durati
 #[must_use]
 pub fn is_unflagged_sentinel_violation(bar: &CanonicalBar, lag: &VendorLag) -> bool {
     bar.knowledge_time < earliest_knowable(bar, lag)
-        && !bar.quality_flags.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME)
+        && !bar
+            .quality_flags
+            .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME)
 }
 
 #[cfg(test)]
@@ -389,7 +416,10 @@ mod tests {
         let mut b = bar(5);
         b.knowledge_time = b.event_time + Duration::seconds(30);
         b.ingest_time = b.knowledge_time;
-        assert!(matches!(validate(&b), Err(BarError::KnownBeforeClose { .. })));
+        assert!(matches!(
+            validate(&b),
+            Err(BarError::KnownBeforeClose { .. })
+        ));
     }
 
     #[test]
@@ -397,7 +427,10 @@ mod tests {
         let mut b = bar(5);
         b.ingest_time = b.event_time + Duration::days(3);
         b.knowledge_time = b.close_time();
-        assert!(matches!(validate(&b), Err(BarError::KnownBeforeIngest { .. })));
+        assert!(matches!(
+            validate(&b),
+            Err(BarError::KnownBeforeIngest { .. })
+        ));
         b.quality_flags |= QualityFlags::BACKFILLED_KNOWLEDGE_TIME;
         assert_eq!(validate(&b), Ok(()));
     }
@@ -408,9 +441,18 @@ mod tests {
         b.ingest_time = b.event_time + Duration::days(10);
         let prov = provenance_for(&b, Duration::minutes(5));
         assert_eq!(prov, KnowledgeProvenance::Backfilled);
-        stamp_knowledge_time(&mut b, prov, &VendorLag { source_id: 1, lag: std::time::Duration::from_secs(90) });
+        stamp_knowledge_time(
+            &mut b,
+            prov,
+            &VendorLag {
+                source_id: 1,
+                lag: std::time::Duration::from_secs(90),
+            },
+        );
         assert_eq!(b.knowledge_time, b.close_time() + Duration::seconds(90));
-        assert!(b.quality_flags.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
+        assert!(b
+            .quality_flags
+            .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
         assert_eq!(validate(&b), Ok(()));
     }
 
@@ -420,20 +462,35 @@ mod tests {
         b.ingest_time = b.close_time() + Duration::seconds(2);
         let prov = provenance_for(&b, Duration::minutes(5));
         assert_eq!(prov, KnowledgeProvenance::Observed);
-        stamp_knowledge_time(&mut b, prov, &VendorLag { source_id: 1, lag: std::time::Duration::ZERO });
+        stamp_knowledge_time(
+            &mut b,
+            prov,
+            &VendorLag {
+                source_id: 1,
+                lag: std::time::Duration::ZERO,
+            },
+        );
         assert_eq!(b.knowledge_time, b.ingest_time);
-        assert!(!b.quality_flags.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
+        assert!(!b
+            .quality_flags
+            .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
     }
 
     // ── the receipt axis ──────────────────────────────────────────────────────
 
     /// 60 s, as every REST candle endpoint declares in `dataplane.source`.
     fn rest_lag() -> VendorLag {
-        VendorLag { source_id: 2, lag: std::time::Duration::from_secs(60) }
+        VendorLag {
+            source_id: 2,
+            lag: std::time::Duration::from_secs(60),
+        }
     }
 
     fn live_lag() -> VendorLag {
-        VendorLag { source_id: 9, lag: std::time::Duration::ZERO }
+        VendorLag {
+            source_id: 9,
+            lag: std::time::Duration::ZERO,
+        }
     }
 
     /// **The definition-of-done test.** An observed row and a backfilled row for the
@@ -448,7 +505,11 @@ mod tests {
         watched.ingest_time = watched.close_time() + Duration::seconds(70);
         let mut pulled = bar(5);
         pulled.ingest_time = pulled.close_time() + Duration::days(21);
-        assert_eq!(watched.close_time(), pulled.close_time(), "same bar, same close");
+        assert_eq!(
+            watched.close_time(),
+            pulled.close_time(),
+            "same bar, same close"
+        );
 
         let vw = stamp_from_receipt(&mut watched, &rest_lag(), RECEIPT_GRACE);
         let vp = stamp_from_receipt(&mut pulled, &rest_lag(), RECEIPT_GRACE);
@@ -456,13 +517,27 @@ mod tests {
         assert!(matches!(vw, ReceiptVerdict::Receipt { .. }));
         assert!(matches!(vp, ReceiptVerdict::HistoryPull { .. }));
         assert!(vw.is_forward_evidence());
-        assert!(!vp.is_forward_evidence(), "the sentinel must never reach Gate 15 (D-P3)");
+        assert!(
+            !vp.is_forward_evidence(),
+            "the sentinel must never reach Gate 15 (D-P3)"
+        );
 
         assert_ne!(watched.knowledge_time, pulled.knowledge_time);
-        assert_eq!(watched.knowledge_time, watched.ingest_time, "the real receipt is kept");
-        assert_eq!(pulled.knowledge_time, pulled.close_time() + Duration::seconds(60), "sentinel = close + declared lag");
-        assert!(!watched.quality_flags.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
-        assert!(pulled.quality_flags.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
+        assert_eq!(
+            watched.knowledge_time, watched.ingest_time,
+            "the real receipt is kept"
+        );
+        assert_eq!(
+            pulled.knowledge_time,
+            pulled.close_time() + Duration::seconds(60),
+            "sentinel = close + declared lag"
+        );
+        assert!(!watched
+            .quality_flags
+            .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
+        assert!(pulled
+            .quality_flags
+            .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
 
         assert_eq!(validate_against_source(&watched, &rest_lag()), Ok(()));
         assert_eq!(validate_against_source(&pulled, &rest_lag()), Ok(()));
@@ -478,7 +553,9 @@ mod tests {
         b.ingest_time = b.close_time() + Duration::seconds(65);
         let v = stamp_from_receipt(&mut b, &rest_lag(), RECEIPT_GRACE);
         assert!(v.is_forward_evidence(), "transport is not provenance");
-        assert!(!b.quality_flags.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
+        assert!(!b
+            .quality_flags
+            .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
     }
 
     /// And the converse: a live-stream source whose row only reached the store weeks
@@ -490,8 +567,14 @@ mod tests {
         b.ingest_time = b.close_time() + Duration::days(9);
         let v = stamp_from_receipt(&mut b, &live_lag(), RECEIPT_GRACE);
         assert!(!v.is_forward_evidence());
-        assert!(b.quality_flags.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
-        assert_eq!(b.knowledge_time, b.close_time(), "live streams declare no lag, so the sentinel is the close");
+        assert!(b
+            .quality_flags
+            .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
+        assert_eq!(
+            b.knowledge_time,
+            b.close_time(),
+            "live streams declare no lag, so the sentinel is the close"
+        );
     }
 
     /// The window is measured from the vendor's publication, not the bar close, so a
@@ -499,11 +582,17 @@ mod tests {
     /// 15 minutes late. Observed and observed-late are different facts.
     #[test]
     fn the_receipt_window_moves_with_the_declared_lag() {
-        let delayed = VendorLag { source_id: 5, lag: std::time::Duration::from_secs(900) };
+        let delayed = VendorLag {
+            source_id: 5,
+            lag: std::time::Duration::from_secs(900),
+        };
         let mut b = bar(5);
         b.ingest_time = b.close_time() + Duration::seconds(950);
         let v = stamp_from_receipt(&mut b, &delayed, RECEIPT_GRACE);
-        assert!(v.is_forward_evidence(), "a 950 s receipt from a 900 s-delayed vendor is a forward poll");
+        assert!(
+            v.is_forward_evidence(),
+            "a 950 s receipt from a 900 s-delayed vendor is a forward poll"
+        );
         // The same receipt against a 60 s vendor is far too late to be one.
         let mut c = bar(5);
         c.ingest_time = c.close_time() + Duration::seconds(950);
@@ -520,7 +609,9 @@ mod tests {
         let v = stamp_from_receipt(&mut b, &rest_lag(), RECEIPT_GRACE);
         assert!(matches!(v, ReceiptVerdict::Impossible { .. }));
         assert!(!v.is_forward_evidence());
-        assert!(b.quality_flags.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
+        assert!(b
+            .quality_flags
+            .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
         assert_eq!(b.knowledge_time, b.close_time() + Duration::seconds(60));
     }
 
@@ -534,9 +625,20 @@ mod tests {
         b.source_id = 2;
         b.ingest_time = b.close_time();
         b.knowledge_time = b.close_time(); // exactly what v2 stored, for every row
-        assert_eq!(validate(&b), Ok(()), "the old validator accepted this — that is the bug");
+        assert_eq!(
+            validate(&b),
+            Ok(()),
+            "the old validator accepted this — that is the bug"
+        );
         let err = validate_against_source(&b, &rest_lag()).unwrap_err();
-        assert!(matches!(err, BarError::KnownBeforeVendorPublished { declared_ms: 60_000, actual_ms: 0, .. }));
+        assert!(matches!(
+            err,
+            BarError::KnownBeforeVendorPublished {
+                declared_ms: 60_000,
+                actual_ms: 0,
+                ..
+            }
+        ));
         assert!(err.to_string().contains("had not published"));
     }
 
@@ -576,7 +678,10 @@ mod tests {
         b.knowledge_time = b.close_time();
         assert!(is_unflagged_sentinel_violation(&b, &rest_lag()));
         b.quality_flags |= QualityFlags::BACKFILLED_KNOWLEDGE_TIME;
-        assert!(!is_unflagged_sentinel_violation(&b, &rest_lag()), "a flagged hole is not the alarm's business");
+        assert!(
+            !is_unflagged_sentinel_violation(&b, &rest_lag()),
+            "a flagged hole is not the alarm's business"
+        );
         assert!(!is_unflagged_sentinel_violation(&bar(5), &live_lag()));
     }
 
@@ -600,16 +705,25 @@ mod tests {
         let mut watched = bar(5);
         watched.ingest_time = watched.close_time() + Duration::seconds(70);
         let recv = watched.ingest_time;
-        assert_eq!(receipt_of(&watched, &rest_lag(), RECEIPT_GRACE).collection(), Collection::Forward { received_at: recv });
+        assert_eq!(
+            receipt_of(&watched, &rest_lag(), RECEIPT_GRACE).collection(),
+            Collection::Forward { received_at: recv }
+        );
         let mut pulled = bar(5);
         pulled.ingest_time = pulled.close_time() + Duration::days(3);
-        assert_eq!(receipt_of(&pulled, &rest_lag(), RECEIPT_GRACE).collection(), Collection::Historical);
+        assert_eq!(
+            receipt_of(&pulled, &rest_lag(), RECEIPT_GRACE).collection(),
+            Collection::Historical
+        );
     }
 
     #[test]
     fn inconsistent_ohlc_rejected() {
         let mut b = bar(5);
         b.high = dec!(99.5);
-        assert!(matches!(validate(&b), Err(BarError::OhlcInconsistent { .. })));
+        assert!(matches!(
+            validate(&b),
+            Err(BarError::OhlcInconsistent { .. })
+        ));
     }
 }

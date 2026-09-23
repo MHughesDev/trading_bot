@@ -313,11 +313,7 @@ pub async fn list_orders(
         .into_iter()
         .filter(|o| matches!(o.status.as_str(), "new" | "partially_filled"))
         .filter(|o| q.instrument.as_ref().is_none_or(|i| &o.instrument_id == i))
-        .filter(|o| {
-            q.asset_class
-                .as_ref()
-                .is_none_or(|c| &o.asset_class == c)
-        })
+        .filter(|o| q.asset_class.as_ref().is_none_or(|c| &o.asset_class == c))
         .take(limit)
         .collect();
     Json(json!({ "orders": orders })).into_response()
@@ -357,9 +353,7 @@ pub async fn list_fills(
             side: o.side.clone(),
             qty: dec_str(o.filled_qty),
             price: o.avg_fill_price.map(dec_str),
-            value: o
-                .avg_fill_price
-                .map(|p| dec_str(p * o.filled_qty)),
+            value: o.avg_fill_price.map(|p| dec_str(p * o.filled_qty)),
             status: o.status.clone(),
         })
         .collect();
@@ -439,12 +433,7 @@ pub async fn transactions(
                 .next()
                 .unwrap_or("")
                 .to_lowercase();
-            let quantity = e
-                .note
-                .split_whitespace()
-                .nth(1)
-                .unwrap_or("")
-                .to_owned();
+            let quantity = e.note.split_whitespace().nth(1).unwrap_or("").to_owned();
 
             rows.push(TransactionRow {
                 ts: e.at,
@@ -492,10 +481,7 @@ pub struct RiskBreach {
 /// Derived from the same snapshots the rollup uses, so the two can never
 /// disagree. The margin limit is the platform default until the risk service
 /// reads a per-user value.
-pub async fn risk_summary(
-    _token: BearerToken,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+pub async fn risk_summary(_token: BearerToken, State(state): State<AppState>) -> impl IntoResponse {
     const MARGIN_LIMIT_PCT: f64 = 60.0;
 
     let snaps = state.paper_engine.snapshots();
@@ -597,7 +583,21 @@ pub struct CreateAlertRequest {
 
 /// `GET /api/alerts` — every alert this user has set.
 pub async fn list_alerts(token: BearerToken, State(state): State<AppState>) -> impl IntoResponse {
-    let rows = sqlx::query_as::<_, (Uuid, String, String, Decimal, Option<String>, bool, String, DateTime<Utc>, Option<DateTime<Utc>>, Option<Decimal>)>(
+    let rows = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            String,
+            String,
+            Decimal,
+            Option<String>,
+            bool,
+            String,
+            DateTime<Utc>,
+            Option<DateTime<Utc>>,
+            Option<Decimal>,
+        ),
+    >(
         r#"
         SELECT alert_id, instrument_id, kind, value, note, active, channels,
                created_at, triggered_at, triggered_price
@@ -803,7 +803,12 @@ pub async fn record_equity_snapshot(
         .bind(snap.realized_pnl)
         .bind(unrealized)
         .bind(snap.fees_paid)
-        .bind(snap.positions.iter().filter(|p| !p.quantity.is_zero()).count() as i32)
+        .bind(
+            snap.positions
+                .iter()
+                .filter(|p| !p.quantity.is_zero())
+                .count() as i32,
+        )
         .execute(pg)
         .await?;
     }

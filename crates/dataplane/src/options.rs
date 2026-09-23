@@ -53,7 +53,9 @@ pub struct OptionBar {
 }
 
 /// Column names that must never exist on an option table (AT-08).
-pub const FORBIDDEN_GREEK_COLUMNS: &[&str] = &["delta", "gamma", "vega", "theta", "rho", "vanna", "volga", "charm"];
+pub const FORBIDDEN_GREEK_COLUMNS: &[&str] = &[
+    "delta", "gamma", "vega", "theta", "rho", "vanna", "volga", "charm",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Greeks {
@@ -77,21 +79,36 @@ fn norm_pdf(x: f64) -> f64 {
 fn erfc(x: f64) -> f64 {
     let z = x.abs();
     let t = 1.0 / (1.0 + 0.5 * z);
-    let r = t * (-z * z - 1.265_512_23
-        + t * (1.000_023_68
-            + t * (0.374_091_96
-                + t * (0.096_784_18
-                    + t * (-0.186_288_06
-                        + t * (0.278_868_07
-                            + t * (-1.135_203_98 + t * (1.488_515_87 + t * (-0.822_152_23 + t * 0.170_872_77)))))))))
-        .exp();
-    if x >= 0.0 { r } else { 2.0 - r }
+    let r = t
+        * (-z * z - 1.265_512_23
+            + t * (1.000_023_68
+                + t * (0.374_091_96
+                    + t * (0.096_784_18
+                        + t * (-0.186_288_06
+                            + t * (0.278_868_07
+                                + t * (-1.135_203_98
+                                    + t * (1.488_515_87
+                                        + t * (-0.822_152_23 + t * 0.170_872_77)))))))))
+            .exp();
+    if x >= 0.0 {
+        r
+    } else {
+        2.0 - r
+    }
 }
 
 /// Black–Scholes–Merton greeks from stored inputs. Deterministic given
 /// `(iv, S, K, T, r, q)` — which is exactly why storing greeks is redundant.
 #[must_use]
-pub fn bsm_greeks(right: Right, s: f64, k: f64, t_years: f64, r: f64, q: f64, iv: f64) -> Option<Greeks> {
+pub fn bsm_greeks(
+    right: Right,
+    s: f64,
+    k: f64,
+    t_years: f64,
+    r: f64,
+    q: f64,
+    iv: f64,
+) -> Option<Greeks> {
     if !(s > 0.0 && k > 0.0 && t_years > 0.0 && iv > 0.0) {
         return None;
     }
@@ -104,13 +121,15 @@ pub fn bsm_greeks(right: Right, s: f64, k: f64, t_years: f64, r: f64, q: f64, iv
         Right::Call => (
             s * dq * norm_cdf(d1) - k * dr * norm_cdf(d2),
             dq * norm_cdf(d1),
-            -s * dq * norm_pdf(d1) * iv / (2.0 * sqrt_t) - r * k * dr * norm_cdf(d2) + q * s * dq * norm_cdf(d1),
+            -s * dq * norm_pdf(d1) * iv / (2.0 * sqrt_t) - r * k * dr * norm_cdf(d2)
+                + q * s * dq * norm_cdf(d1),
             k * t_years * dr * norm_cdf(d2),
         ),
         Right::Put => (
             k * dr * norm_cdf(-d2) - s * dq * norm_cdf(-d1),
             dq * (norm_cdf(d1) - 1.0),
-            -s * dq * norm_pdf(d1) * iv / (2.0 * sqrt_t) + r * k * dr * norm_cdf(-d2) - q * s * dq * norm_cdf(-d1),
+            -s * dq * norm_pdf(d1) * iv / (2.0 * sqrt_t) + r * k * dr * norm_cdf(-d2)
+                - q * s * dq * norm_cdf(-d1),
             -k * t_years * dr * norm_cdf(-d2),
         ),
     };
@@ -131,7 +150,15 @@ pub fn greeks_for(contract: &OptionContract, bar: &OptionBar) -> Option<Greeks> 
     let k = contract.strike.to_f64()?;
     let expiry = contract.expiry.and_hms_opt(20, 0, 0)?.and_utc();
     let t = (expiry - bar.event_time).num_seconds() as f64 / (365.25 * 86_400.0);
-    bsm_greeks(contract.right, s, k, t, bar.iv_rate?, bar.iv_div?, bar.iv_close?)
+    bsm_greeks(
+        contract.right,
+        s,
+        k,
+        t,
+        bar.iv_rate?,
+        bar.iv_div?,
+        bar.iv_close?,
+    )
 }
 
 /// Default liquid-universe gate (OQ-03 answered: spec default).
@@ -160,7 +187,8 @@ impl UniverseGate {
     pub fn admits(&self, bar: &OptionBar) -> bool {
         let Some(m) = bar.moneyness else { return false };
         let Some(dte) = bar.dte else { return false };
-        let quoted = bar.bid_close.is_some_and(|b| b > Decimal::ZERO) && bar.ask_close.is_some_and(|a| a > Decimal::ZERO);
+        let quoted = bar.bid_close.is_some_and(|b| b > Decimal::ZERO)
+            && bar.ask_close.is_some_and(|a| a > Decimal::ZERO);
         (m - 1.0).abs() <= self.max_abs_log_moneyness_dev
             && (self.min_dte..=self.max_dte).contains(&dte)
             && (!self.require_two_sided_quote || quoted)

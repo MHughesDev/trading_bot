@@ -110,12 +110,7 @@ pub fn fit(corpus: &[Observation]) -> Fitted {
         .collect();
     let indeterminate = corpus
         .iter()
-        .filter(|o| {
-            matches!(
-                o.utility,
-                Utility::Indeterminate | Utility::NotAttributed
-            )
-        })
+        .filter(|o| matches!(o.utility, Utility::Indeterminate | Utility::NotAttributed))
         .count();
 
     let mut out = Fitted {
@@ -141,10 +136,7 @@ pub fn fit(corpus: &[Observation]) -> Fitted {
         separations.push((i, mean(&used) - mean(&unused)));
     }
 
-    let best = separations
-        .iter()
-        .map(|(_, s)| *s)
-        .fold(0.0_f32, f32::max);
+    let best = separations.iter().map(|(_, s)| *s).fold(0.0_f32, f32::max);
     if best <= f32::EPSILON {
         // Nothing separated anything. Returning the defaults is right and
         // saying so is the point: a corpus where no signal predicts use is

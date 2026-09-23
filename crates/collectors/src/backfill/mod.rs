@@ -68,7 +68,10 @@ impl HttpResponse {
                 "{venue} answered {} — access is refused for this client or region",
                 self.status
             ))),
-            500..=599 => Err(FetchError::Transport(format!("{venue} answered {}", self.status))),
+            500..=599 => Err(FetchError::Transport(format!(
+                "{venue} answered {}",
+                self.status
+            ))),
             other => Err(FetchError::Transport(format!("{venue} answered {other}"))),
         }
     }
@@ -86,7 +89,10 @@ pub struct ReqwestGet {
 impl ReqwestGet {
     #[must_use]
     pub fn new(user_agent: impl Into<String>) -> Self {
-        Self { client: reqwest::Client::new(), user_agent: user_agent.into() }
+        Self {
+            client: reqwest::Client::new(),
+            user_agent: user_agent.into(),
+        }
     }
 }
 
@@ -108,8 +114,16 @@ impl HttpGet for ReqwestGet {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.trim().parse::<u64>().ok())
             .map(|secs| secs.saturating_mul(1_000));
-        let body = resp.bytes().await.map_err(|e| FetchError::Transport(e.to_string()))?.to_vec();
-        Ok(HttpResponse { status, retry_after_ms, body })
+        let body = resp
+            .bytes()
+            .await
+            .map_err(|e| FetchError::Transport(e.to_string()))?
+            .to_vec();
+        Ok(HttpResponse {
+            status,
+            retry_after_ms,
+            body,
+        })
     }
 }
 
@@ -130,14 +144,20 @@ pub struct Limited {
 
 impl std::fmt::Debug for Limited {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Limited").field("limit", &self.limiter.limit()).finish_non_exhaustive()
+        f.debug_struct("Limited")
+            .field("limit", &self.limiter.limit())
+            .finish_non_exhaustive()
     }
 }
 
 impl Limited {
     #[must_use]
     pub fn new(limit: RateLimit) -> Self {
-        Self { limiter: RateLimiter::new(limit), origin: Instant::now(), last_ms: AtomicI64::new(0) }
+        Self {
+            limiter: RateLimiter::new(limit),
+            origin: Instant::now(),
+            last_ms: AtomicI64::new(0),
+        }
     }
 
     #[must_use]
@@ -164,7 +184,10 @@ impl Limited {
                     return;
                 }
                 Err(refused) => {
-                    tokio::time::sleep(std::time::Duration::from_millis(refused.retry_after_ms.max(1))).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        refused.retry_after_ms.max(1),
+                    ))
+                    .await;
                 }
             }
         }
@@ -176,10 +199,12 @@ impl Limited {
     /// # Errors
     /// [`FetchError::RateLimited`] carrying our own limiter's wait.
     pub fn try_permit(&self, venue: &str) -> Result<(), FetchError> {
-        self.limiter.try_acquire_at(self.now_ms()).map_err(|r| FetchError::RateLimited {
-            venue: venue.to_string(),
-            retry_after_ms: r.retry_after_ms,
-        })
+        self.limiter
+            .try_acquire_at(self.now_ms())
+            .map_err(|r| FetchError::RateLimited {
+                venue: venue.to_string(),
+                retry_after_ms: r.retry_after_ms,
+            })
     }
 }
 
@@ -196,13 +221,24 @@ impl Limited {
 /// A value that is not a number or a numeric string.
 pub fn raw_number(v: &serde_json::value::RawValue) -> Result<String, FetchError> {
     let s = v.get().trim();
-    let s = s.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(s);
+    let s = s
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(s);
     if s.is_empty() || s == "null" {
-        return Err(FetchError::Integrity("a price or volume field was null".into()));
+        return Err(FetchError::Integrity(
+            "a price or volume field was null".into(),
+        ));
     }
     let mut chars = s.chars();
-    let first_ok = chars.next().is_some_and(|c| c.is_ascii_digit() || c == '-' || c == '+' || c == '.');
-    if !first_ok || !s.chars().all(|c| c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | 'e' | 'E')) {
+    let first_ok = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_digit() || c == '-' || c == '+' || c == '.');
+    if !first_ok
+        || !s
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | 'e' | 'E'))
+    {
         return Err(FetchError::Integrity(format!("not a number: {s:?}")));
     }
     if s.contains(['e', 'E']) {
@@ -212,9 +248,11 @@ pub fn raw_number(v: &serde_json::value::RawValue) -> Result<String, FetchError>
         // arrive as `1.5e-9`, so the exponent is expanded here, through
         // `Decimal` rather than `f64`, and a value `Decimal` cannot hold is an
         // explicit integrity failure instead of a dropped row.
-        let d: rust_decimal::Decimal = s
-            .parse()
-            .map_err(|_| FetchError::Integrity(format!("exponent-notation value {s:?} does not fit a decimal price")))?;
+        let d: rust_decimal::Decimal = s.parse().map_err(|_| {
+            FetchError::Integrity(format!(
+                "exponent-notation value {s:?} does not fit a decimal price"
+            ))
+        })?;
         return Ok(d.normalize().to_string());
     }
     Ok(s.to_string())
@@ -228,7 +266,8 @@ pub fn raw_u64(v: &serde_json::value::RawValue) -> Result<u64, FetchError> {
     let s = raw_number(v)?;
     // Some venues report counts as `12.0`.
     let s = s.split_once('.').map_or(s.as_str(), |(i, _)| i);
-    s.parse::<u64>().map_err(|_| FetchError::Integrity(format!("not a count: {s:?}")))
+    s.parse::<u64>()
+        .map_err(|_| FetchError::Integrity(format!("not a count: {s:?}")))
 }
 
 #[cfg(test)]
@@ -258,17 +297,32 @@ mod tests {
 
     #[test]
     fn a_non_numeric_field_is_an_integrity_failure_not_a_zero() {
-        assert!(matches!(raw_number(&raw("null")), Err(FetchError::Integrity(_))));
-        assert!(matches!(raw_number(&raw("\"n/a\"")), Err(FetchError::Integrity(_))));
-        assert!(matches!(raw_number(&raw("\"\"")), Err(FetchError::Integrity(_))));
+        assert!(matches!(
+            raw_number(&raw("null")),
+            Err(FetchError::Integrity(_))
+        ));
+        assert!(matches!(
+            raw_number(&raw("\"n/a\"")),
+            Err(FetchError::Integrity(_))
+        ));
+        assert!(matches!(
+            raw_number(&raw("\"\"")),
+            Err(FetchError::Integrity(_))
+        ));
         assert_eq!(raw_u64(&raw("12.0")).unwrap(), 12);
     }
 
     #[test]
     fn a_429_becomes_a_pause_carrying_the_venue_s_own_retry_after() {
-        let r = HttpResponse { status: 429, retry_after_ms: Some(30_000), body: Vec::new() };
+        let r = HttpResponse {
+            status: 429,
+            retry_after_ms: Some(30_000),
+            body: Vec::new(),
+        };
         match r.ok_body("coinbase") {
-            Err(FetchError::RateLimited { retry_after_ms, .. }) => assert_eq!(retry_after_ms, 30_000),
+            Err(FetchError::RateLimited { retry_after_ms, .. }) => {
+                assert_eq!(retry_after_ms, 30_000)
+            }
             other => panic!("{other:?}"),
         }
     }
@@ -278,8 +332,15 @@ mod tests {
     #[test]
     fn a_451_or_403_is_terminal_rather_than_retried() {
         for status in [403_u16, 451] {
-            let r = HttpResponse { status, retry_after_ms: None, body: Vec::new() };
-            assert!(matches!(r.ok_body("binance"), Err(FetchError::Terms(_))), "status {status}");
+            let r = HttpResponse {
+                status,
+                retry_after_ms: None,
+                body: Vec::new(),
+            };
+            assert!(
+                matches!(r.ok_body("binance"), Err(FetchError::Terms(_))),
+                "status {status}"
+            );
         }
     }
 
@@ -292,7 +353,13 @@ mod tests {
         for _ in 0..3 {
             assert!(l.limit().try_acquire_at(now).is_ok());
         }
-        assert!(l.limit().try_acquire_at(now).is_err(), "the 4th request in one instant under a 3/s limit must be refused");
-        assert!(matches!(l.try_permit("coinbase"), Err(FetchError::RateLimited { .. })));
+        assert!(
+            l.limit().try_acquire_at(now).is_err(),
+            "the 4th request in one instant under a 3/s limit must be refused"
+        );
+        assert!(matches!(
+            l.try_permit("coinbase"),
+            Err(FetchError::RateLimited { .. })
+        ));
     }
 }

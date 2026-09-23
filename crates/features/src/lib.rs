@@ -31,21 +31,24 @@ use chrono::{DateTime, Utc};
 /// source that copied this constant would be claiming the source arrives
 /// instantly, which is the leak DATA-005 exists to prevent.
 pub const PIT_LAG_BAR_DERIVED_MS: u64 = 0;
-pub use dataplane::feature::{
-    p99_relative_diff, ConsistencyDiff, Diagnosis, Feature, FeatureDef, FeatureError, FeatureRow, FeatureRuntime, MemoryServeLog, ServeLog,
-    ServeRecord,
-};
 pub use align::{densify_bars, densify_to_master_clock, BarObs, MasterClockFrame};
+pub use dataplane::feature::{
+    p99_relative_diff, ConsistencyDiff, Diagnosis, Feature, FeatureDef, FeatureError, FeatureRow,
+    FeatureRuntime, MemoryServeLog, ServeLog, ServeRecord,
+};
 pub use ema::{Ema, EMA_FEATURE_VERSION};
 pub use feature_sets::{
     is_known as is_known_feature, list_feature_sets, resolve as resolve_feature_set,
     validate_features, validate_user_spec, FeatureSetSpec, REGISTRY_VERSION,
 };
-pub use registry::{families as feature_families, list as list_features, resolve as resolve_feature, CostClass, Family, Phase};
+pub use registry::{
+    families as feature_families, list as list_features, resolve as resolve_feature, CostClass,
+    Family, Phase,
+};
 pub use rsi::{Rsi, RSI_FEATURE_VERSION};
 pub use training_frame::{
-    align_higher_tf, build_aligned_training_frame, build_training_frame, devol, fit_sigma, label_horizon_bars, HigherTfBar,
-    OhlcvRow, TrainingFrame,
+    align_higher_tf, build_aligned_training_frame, build_training_frame, devol, fit_sigma,
+    label_horizon_bars, HigherTfBar, OhlcvRow, TrainingFrame,
 };
 pub use walk_forward::{walk_forward_folds, Fold, FoldError};
 

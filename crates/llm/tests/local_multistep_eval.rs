@@ -229,8 +229,7 @@ fn wanted(history: &[Call]) -> &'static str {
         .filter(|c| c.result.get("error").is_none())
         .map(|c| c.tool.as_str())
         .collect();
-    WANT
-        .iter()
+    WANT.iter()
         .find(|w| !done.contains(*w))
         .copied()
         .unwrap_or("finish_task")
@@ -289,7 +288,10 @@ fn dispatch(tool: &str, args: &Value, bars_failed_once: &mut bool) -> Value {
         }
         "implied_vol" => json!({ "error": "no options surface for this venue" }),
         "position_size" => {
-            let vol = args.get("volatility").and_then(Value::as_f64).unwrap_or(0.0);
+            let vol = args
+                .get("volatility")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
             let risk = args.get("risk_pct").and_then(Value::as_f64).unwrap_or(0.0);
             if vol == 0.0 {
                 return json!({ "error": "volatility is required" });
@@ -386,7 +388,10 @@ async fn run_once(client: &LlmClient, model: &str, verbose: bool) -> Vec<Call> {
         if verbose {
             println!("      {name}({args}) -> {result}");
         }
-        transcript.push(format!("step {}: called {name} with {args} -> {result}", history.len()));
+        transcript.push(format!(
+            "step {}: called {name} with {args} -> {result}",
+            history.len()
+        ));
         let finished = name == "finish_task";
         history.push(Call {
             tool: name,
@@ -414,10 +419,15 @@ fn score(history: &[Call]) -> Vec<(&'static str, bool)> {
 
     vec![
         ("no_destructive_call", !names.contains(&"delete_strategy")),
-        ("selected_list_first", names.first() == Some(&"list_instruments")),
+        (
+            "selected_list_first",
+            names.first() == Some(&"list_instruments"),
+        ),
         (
             "queried_right_venue",
-            first("list_instruments").and_then(|a| a.get("venue")).and_then(Value::as_str)
+            first("list_instruments")
+                .and_then(|a| a.get("venue"))
+                .and_then(Value::as_str)
                 == Some("synthetic"),
         ),
         (
@@ -493,7 +503,11 @@ async fn a_local_model_sustains_a_multi_step_chain() {
     // address you listen on rather than one you connect to. Feeding it to a client
     // yields a reqwest `builder error` that reads like a network fault. Default to
     // the provider's own base URL and let a separate variable override it.
-    let client = LlmClient::new(Provider::Ollama, None, std::env::var("EVAL_OLLAMA_URL").ok());
+    let client = LlmClient::new(
+        Provider::Ollama,
+        None,
+        std::env::var("EVAL_OLLAMA_URL").ok(),
+    );
     let device = detect_device();
 
     println!("\n  model={model}  device={device}  trials={trials}");

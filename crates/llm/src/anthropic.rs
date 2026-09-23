@@ -376,8 +376,12 @@ mod tests {
             model: "claude-test".into(),
             system: Some("the charter".into()),
             messages: vec![
-                Message::User { content: "first".into() },
-                Message::User { content: "second".into() },
+                Message::User {
+                    content: "first".into(),
+                },
+                Message::User {
+                    content: "second".into(),
+                },
             ],
             tools: vec![
                 ToolDef {
@@ -397,8 +401,14 @@ mod tests {
 
         // 1. Tools: the last one only.
         let tools = body["tools"].as_array().expect("tools");
-        assert!(tools[0].get("cache_control").is_none(), "not the first tool");
-        assert_eq!(tools[1]["cache_control"]["type"], "ephemeral", "the last tool closes the layer");
+        assert!(
+            tools[0].get("cache_control").is_none(),
+            "not the first tool"
+        );
+        assert_eq!(
+            tools[1]["cache_control"]["type"], "ephemeral",
+            "the last tool closes the layer"
+        );
 
         // 2. System: a text block, because a bare string has nowhere to put it.
         let system = body["system"].as_array().expect("system is a block array");
@@ -413,7 +423,9 @@ mod tests {
             messages[0]["content"]
         );
         let last = messages.last().expect("a last message");
-        let blocks = last["content"].as_array().expect("the last message carries blocks");
+        let blocks = last["content"]
+            .as_array()
+            .expect("the last message carries blocks");
         assert_eq!(blocks.last().unwrap()["cache_control"]["type"], "ephemeral");
     }
 
@@ -428,7 +440,9 @@ mod tests {
         let req = ChatRequest {
             model: "claude-test".into(),
             system: Some("the charter".into()),
-            messages: vec![Message::User { content: "go".into() }],
+            messages: vec![Message::User {
+                content: "go".into(),
+            }],
             tools: vec![ToolDef {
                 name: "t".into(),
                 description: "d".into(),
@@ -456,7 +470,9 @@ mod tests {
     fn a_request_with_no_tools_and_no_system_is_still_well_formed() {
         let req = ChatRequest {
             model: "claude-test".into(),
-            messages: vec![Message::User { content: "hi".into() }],
+            messages: vec![Message::User {
+                content: "hi".into(),
+            }],
             ..ChatRequest::default()
         };
         let body = build_body(&req);
@@ -483,7 +499,11 @@ mod tests {
         });
         let resp = parse_response(body).expect("parses");
         assert_eq!(resp.usage.input_tokens, 10, "fresh tokens, as billed");
-        assert_eq!(resp.usage.prompt_tokens(), 1_000, "the prompt was a thousand tokens");
+        assert_eq!(
+            resp.usage.prompt_tokens(),
+            1_000,
+            "the prompt was a thousand tokens"
+        );
         let hit = resp.usage.cache_hit_fraction().expect("there was a prompt");
         assert!((hit - 0.9).abs() < 1e-9, "90% served from cache, got {hit}");
     }

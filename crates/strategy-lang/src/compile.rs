@@ -230,22 +230,24 @@ impl<'a> Compiler<'a> {
         let constraints: Vec<String> = ast
             .constraints
             .iter()
-            .filter(|c| match domain::strategy_def::params::check_constraint(&c.text) {
-                Ok(()) => true,
-                Err(e) => {
-                    self.err(
-                        Diagnostic::semantic(
-                            Code::UnknownName,
-                            c.span,
-                            format!("`{}` is not a constraint: {e}", c.text),
-                        )
-                        .with_fix(
-                            "a constraint compares two parameters, for example `fast < slow`",
-                        ),
-                    );
-                    false
-                }
-            })
+            .filter(
+                |c| match domain::strategy_def::params::check_constraint(&c.text) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        self.err(
+                            Diagnostic::semantic(
+                                Code::UnknownName,
+                                c.span,
+                                format!("`{}` is not a constraint: {e}", c.text),
+                            )
+                            .with_fix(
+                                "a constraint compares two parameters, for example `fast < slow`",
+                            ),
+                        );
+                        false
+                    }
+                },
+            )
             .map(|c| c.text.clone())
             .collect();
 
@@ -1390,9 +1392,11 @@ exit none
 ",
         )
         .expect("a real constraint compiles");
-        assert_eq!(good.constraints, vec!["param('fast') < param('slow')".to_string()]);
+        assert_eq!(
+            good.constraints,
+            vec!["param('fast') < param('slow')".to_string()]
+        );
     }
-
 
     use super::*;
     use crate::parse::parse;

@@ -141,7 +141,10 @@ mod tests {
             DEFINITION_VERSION_V1_4,
         ] {
             let parsed = DefinitionVersion::parse(v).unwrap_or_else(|| panic!("{v} must parse"));
-            assert!(parsed.is_supported(), "{v} is declared by domain and refused here");
+            assert!(
+                parsed.is_supported(),
+                "{v} is declared by domain and refused here"
+            );
         }
     }
 
@@ -156,13 +159,18 @@ mod tests {
 
     #[test]
     fn a_version_below_the_floor_is_refused() {
-        assert!(!DefinitionVersion::parse("0.9").expect("parses").is_supported());
+        assert!(!DefinitionVersion::parse("0.9")
+            .expect("parses")
+            .is_supported());
     }
 
     #[test]
     fn ten_sorts_above_two() {
         // The string comparison this module exists to remove: "1.10" < "1.2".
-        assert!("1.10" < "1.2", "the lexical order is the bug, not a strawman");
+        assert!(
+            "1.10" < "1.2",
+            "the lexical order is the bug, not a strawman"
+        );
         assert!(
             DefinitionVersion::parse("1.10").expect("parses")
                 > DefinitionVersion::parse("1.2").expect("parses")
@@ -175,7 +183,9 @@ mod tests {
 
     #[test]
     fn a_malformed_version_is_none_rather_than_a_guess() {
-        for bad in ["", "1", "1.", ".1", "1.3.0", "v1.3", "1.3 ", " 1.3", "1.x", "01.3", "-1.2"] {
+        for bad in [
+            "", "1", "1.", ".1", "1.3.0", "v1.3", "1.3 ", " 1.3", "1.x", "01.3", "-1.2",
+        ] {
             assert!(
                 DefinitionVersion::parse(bad).is_none(),
                 "{bad:?} must not parse: an absent version is never a default one"

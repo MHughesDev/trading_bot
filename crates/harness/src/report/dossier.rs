@@ -58,9 +58,7 @@ impl Section {
     #[must_use]
     pub fn when_empty(self) -> &'static str {
         match self {
-            Self::UnresolvedQuestions => {
-                "None found — this run closed everything it opened."
-            }
+            Self::UnresolvedQuestions => "None found — this run closed everything it opened.",
             Self::ReviewerCritique => "None found — the reviewer raised nothing blocking.",
         }
     }

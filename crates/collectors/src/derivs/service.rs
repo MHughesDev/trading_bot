@@ -24,7 +24,9 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use tracing::{error, info, warn};
 
-use super::funding::{FundingError, FundingObservation, KrakenFuturesClient, TickerSnapshot, VENUE};
+use super::funding::{
+    FundingError, FundingObservation, KrakenFuturesClient, TickerSnapshot, VENUE,
+};
 use super::sink::{Beat, ForwardSink, SinkError};
 
 /// The series names the heartbeat table records, matching
@@ -81,7 +83,10 @@ pub trait TickerSource: Send + Sync {
     ///
     /// # Errors
     /// As [`Self::tickers`].
-    async fn funding_history(&self, instrument: &str) -> Result<Vec<FundingObservation>, FundingError>;
+    async fn funding_history(
+        &self,
+        instrument: &str,
+    ) -> Result<Vec<FundingObservation>, FundingError>;
 }
 
 #[async_trait::async_trait]
@@ -90,7 +95,10 @@ impl TickerSource for KrakenFuturesClient {
         Self::tickers(self).await
     }
 
-    async fn funding_history(&self, instrument: &str) -> Result<Vec<FundingObservation>, FundingError> {
+    async fn funding_history(
+        &self,
+        instrument: &str,
+    ) -> Result<Vec<FundingObservation>, FundingError> {
         Self::funding_history(self, instrument).await
     }
 }
@@ -108,7 +116,11 @@ pub struct ForwardCollector<S, K> {
 impl<S: TickerSource, K: ForwardSink> ForwardCollector<S, K> {
     #[must_use]
     pub const fn new(source: S, sink: K) -> Self {
-        Self { source, sink, only: None }
+        Self {
+            source,
+            sink,
+            only: None,
+        }
     }
 
     /// Restrict collection to named instruments.
@@ -136,24 +148,49 @@ impl<S: TickerSource, K: ForwardSink> ForwardCollector<S, K> {
     pub async fn poll_once(&self) -> Result<PollReport, ServiceError> {
         let snap = self.source.tickers().await?;
 
-        let funding: Vec<FundingObservation> = snap.funding.into_iter().filter(|f| self.wanted(&f.instrument)).collect();
-        let open_interest: Vec<_> = snap.open_interest.into_iter().filter(|o| self.wanted(&o.instrument)).collect();
+        let funding: Vec<FundingObservation> = snap
+            .funding
+            .into_iter()
+            .filter(|f| self.wanted(&f.instrument))
+            .collect();
+        let open_interest: Vec<_> = snap
+            .open_interest
+            .into_iter()
+            .filter(|o| self.wanted(&o.instrument))
+            .collect();
 
-        let received_at = funding.first().map(|f| f.ingest_time).or_else(|| open_interest.first().map(|o| o.ingest_time));
+        let received_at = funding
+            .first()
+            .map(|f| f.ingest_time)
+            .or_else(|| open_interest.first().map(|o| o.ingest_time));
 
         let funding_written = self.sink.funding(&funding).await?;
         let open_interest_written = self.sink.open_interest(&open_interest).await?;
 
         let mut beats: Vec<Beat> = Vec::new();
-        beats.extend(latest_per_instrument(FUNDING_SERIES, funding.iter().map(|f| (f.instrument.as_str(), f.event_time))));
-        beats.extend(latest_per_instrument(OPEN_INTEREST_SERIES, open_interest.iter().map(|o| (o.instrument.as_str(), o.event_time))));
+        beats.extend(latest_per_instrument(
+            FUNDING_SERIES,
+            funding
+                .iter()
+                .map(|f| (f.instrument.as_str(), f.event_time)),
+        ));
+        beats.extend(latest_per_instrument(
+            OPEN_INTEREST_SERIES,
+            open_interest
+                .iter()
+                .map(|o| (o.instrument.as_str(), o.event_time)),
+        ));
         self.sink.heartbeat(&beats).await?;
 
         Ok(PollReport {
             received_at,
             funding_written,
             open_interest_written,
-            skipped: snap.skipped.into_iter().filter(|s| self.wanted(s)).collect(),
+            skipped: snap
+                .skipped
+                .into_iter()
+                .filter(|s| self.wanted(s))
+                .collect(),
         })
     }
 
@@ -171,7 +208,13 @@ impl<S: TickerSource, K: ForwardSink> ForwardCollector<S, K> {
         let written = self.sink.funding(&rows).await?;
         if let Some(last) = rows.iter().map(|r| r.event_time).max() {
             self.sink
-                .heartbeat(&[Beat { series: FUNDING_SERIES.to_string(), venue: VENUE.to_string(), instrument: instrument.to_string(), last_event: last, rows: written as u64 }])
+                .heartbeat(&[Beat {
+                    series: FUNDING_SERIES.to_string(),
+                    venue: VENUE.to_string(),
+                    instrument: instrument.to_string(),
+                    last_event: last,
+                    rows: written as u64,
+                }])
                 .await?;
         }
         Ok(written)
@@ -183,7 +226,11 @@ impl<S: TickerSource, K: ForwardSink> ForwardCollector<S, K> {
     /// settlement is still worth having. A tick the limiter refused is counted
     /// separately and is *not* retried — retrying into a refusal is how a free
     /// public endpoint becomes a banned one.
-    pub async fn run(&self, every: Duration, shutdown: impl std::future::Future<Output = ()> + Send) -> RunReport {
+    pub async fn run(
+        &self,
+        every: Duration,
+        shutdown: impl std::future::Future<Output = ()> + Send,
+    ) -> RunReport {
         let mut report = RunReport::default();
         let mut ticks = tokio::time::interval(every);
         ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -220,8 +267,12 @@ impl<S: TickerSource, K: ForwardSink> ForwardCollector<S, K> {
 
 /// One beat per instrument, carrying that instrument's newest event time and how
 /// many rows it contributed.
-fn latest_per_instrument<'a>(series: &str, rows: impl Iterator<Item = (&'a str, DateTime<Utc>)>) -> Vec<Beat> {
-    let mut by: std::collections::BTreeMap<&str, (DateTime<Utc>, u64)> = std::collections::BTreeMap::new();
+fn latest_per_instrument<'a>(
+    series: &str,
+    rows: impl Iterator<Item = (&'a str, DateTime<Utc>)>,
+) -> Vec<Beat> {
+    let mut by: std::collections::BTreeMap<&str, (DateTime<Utc>, u64)> =
+        std::collections::BTreeMap::new();
     for (instrument, event) in rows {
         let e = by.entry(instrument).or_insert((event, 0));
         if event > e.0 {
@@ -230,7 +281,13 @@ fn latest_per_instrument<'a>(series: &str, rows: impl Iterator<Item = (&'a str, 
         e.1 += 1;
     }
     by.into_iter()
-        .map(|(instrument, (last_event, rows))| Beat { series: series.to_string(), venue: VENUE.to_string(), instrument: instrument.to_string(), last_event, rows })
+        .map(|(instrument, (last_event, rows))| Beat {
+            series: series.to_string(),
+            venue: VENUE.to_string(),
+            instrument: instrument.to_string(),
+            last_event,
+            rows,
+        })
         .collect()
 }
 
@@ -269,7 +326,12 @@ mod tests {
 
     impl FixtureSource {
         fn new() -> Self {
-            Self { body: TICKERS, received_at: at(5, 40), fail_with: Mutex::new(None), calls: Mutex::new(0) }
+            Self {
+                body: TICKERS,
+                received_at: at(5, 40),
+                fail_with: Mutex::new(None),
+                calls: Mutex::new(0),
+            }
         }
     }
 
@@ -283,7 +345,10 @@ mod tests {
             parse_tickers(self.body, self.received_at)
         }
 
-        async fn funding_history(&self, instrument: &str) -> Result<Vec<FundingObservation>, FundingError> {
+        async fn funding_history(
+            &self,
+            instrument: &str,
+        ) -> Result<Vec<FundingObservation>, FundingError> {
             let body = r#"{"result":"success","rates":[
                 {"timestamp":"2025-09-10T08:00:00Z","fundingRate":0.655791706953},
                 {"timestamp":"2025-09-10T09:00:00Z","fundingRate":0.66}
@@ -310,7 +375,10 @@ mod tests {
             Ok(rows.len())
         }
 
-        async fn open_interest(&self, rows: &[OpenInterestObservation]) -> Result<usize, SinkError> {
+        async fn open_interest(
+            &self,
+            rows: &[OpenInterestObservation],
+        ) -> Result<usize, SinkError> {
             if self.fail {
                 return Err(SinkError::Store("refused".into()));
             }
@@ -344,7 +412,13 @@ mod tests {
         assert_eq!(written.len(), 3);
         assert!(written.iter().all(|f| f.source == "kraken_futures_rest"));
         assert!(written.iter().any(|f| f.kind == FundingKind::Predicted));
-        assert!(!c.sink.open_interest.lock().unwrap().iter().any(|o| o.instrument.starts_with("FI_")));
+        assert!(!c
+            .sink
+            .open_interest
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|o| o.instrument.starts_with("FI_")));
     }
 
     /// The heartbeat is per instrument and carries that instrument's newest event
@@ -356,16 +430,28 @@ mod tests {
         c.poll_once().await.unwrap();
 
         let beats = c.sink.beats.lock().unwrap();
-        let funding: Vec<_> = beats.iter().filter(|b| b.series == FUNDING_SERIES).collect();
+        let funding: Vec<_> = beats
+            .iter()
+            .filter(|b| b.series == FUNDING_SERIES)
+            .collect();
         assert_eq!(funding.len(), 2, "one beat per instrument, not one per row");
         assert!(funding.iter().all(|b| b.venue == VENUE));
         // PF_XBTUSD contributed a realized rate at 05:00 and a prediction for
         // 06:00; the newest of the two is what the alarm measures against.
-        let btc = funding.iter().find(|b| b.instrument == "PF_XBTUSD").unwrap();
+        let btc = funding
+            .iter()
+            .find(|b| b.instrument == "PF_XBTUSD")
+            .unwrap();
         assert_eq!(btc.last_event, at(6, 0));
         assert_eq!(btc.rows, 2);
 
-        assert_eq!(beats.iter().filter(|b| b.series == OPEN_INTEREST_SERIES).count(), 2);
+        assert_eq!(
+            beats
+                .iter()
+                .filter(|b| b.series == OPEN_INTEREST_SERIES)
+                .count(),
+            2
+        );
     }
 
     /// A store that refused must not leave a heartbeat behind. A silence alarm
@@ -373,10 +459,19 @@ mod tests {
     /// which is worse than having no alarm.
     #[tokio::test]
     async fn a_refused_write_leaves_no_heartbeat() {
-        let c = ForwardCollector::new(FixtureSource::new(), CountingSink { fail: true, ..CountingSink::default() });
+        let c = ForwardCollector::new(
+            FixtureSource::new(),
+            CountingSink {
+                fail: true,
+                ..CountingSink::default()
+            },
+        );
         let e = c.poll_once().await.unwrap_err();
         assert!(matches!(e, ServiceError::Write(_)), "{e}");
-        assert!(c.sink.beats.lock().unwrap().is_empty(), "nothing was written, so nothing may beat");
+        assert!(
+            c.sink.beats.lock().unwrap().is_empty(),
+            "nothing was written, so nothing may beat"
+        );
     }
 
     /// A venue error is an error, not a poll that collected nothing. The
@@ -393,11 +488,18 @@ mod tests {
 
     #[tokio::test]
     async fn an_instrument_filter_narrows_what_is_written() {
-        let c = ForwardCollector::new(FixtureSource::new(), CountingSink::default()).only(["PF_ETHUSD"]);
+        let c = ForwardCollector::new(FixtureSource::new(), CountingSink::default())
+            .only(["PF_ETHUSD"]);
         let r = c.poll_once().await.unwrap();
         assert_eq!(r.funding_written, 1);
         assert_eq!(r.open_interest_written, 1);
-        assert!(c.sink.funding.lock().unwrap().iter().all(|f| f.instrument == "PF_ETHUSD"));
+        assert!(c
+            .sink
+            .funding
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|f| f.instrument == "PF_ETHUSD"));
     }
 
     /// The backfill leg writes derived rows, and they stay derived: a year of
@@ -408,16 +510,27 @@ mod tests {
         let n = c.backfill_funding("PF_XBTUSD").await.unwrap();
         assert_eq!(n, 2);
         let rows = c.sink.funding.lock().unwrap();
-        assert!(rows.iter().all(|r| r.knowledge.is_derived()), "history rows are derived by construction");
+        assert!(
+            rows.iter().all(|r| r.knowledge.is_derived()),
+            "history rows are derived by construction"
+        );
         assert!(rows.iter().all(|r| !r.knowledge.is_forward_evidence()));
-        assert!(rows.iter().all(|r| r.source == "kraken_futures_history"), "and they name the history source, not the ticker");
+        assert!(
+            rows.iter().all(|r| r.source == "kraken_futures_history"),
+            "and they name the history source, not the ticker"
+        );
     }
 
     /// The loop polls, and a refusal is skipped rather than retried into a ban.
     #[tokio::test(start_paused = true)]
     async fn the_loop_polls_on_its_interval_and_stops_when_told() {
         let c = ForwardCollector::new(FixtureSource::new(), CountingSink::default());
-        let report = c.run(Duration::from_secs(3600), tokio::time::sleep(Duration::from_secs(3600 * 3 + 1))).await;
+        let report = c
+            .run(
+                Duration::from_secs(3600),
+                tokio::time::sleep(Duration::from_secs(3600 * 3 + 1)),
+            )
+            .await;
         // The first tick fires immediately, then one per hour.
         assert_eq!(report.polls, 4, "polls: {report:?}");
         assert_eq!(report.funding_rows, 12);
@@ -428,9 +541,19 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_limiter_refusal_is_counted_apart_from_a_failure() {
         let src = FixtureSource::new();
-        *src.fail_with.lock().unwrap() = Some(FundingError::RateLimited(crate::ratelimit::Denied { retry_after: Duration::from_secs(60), available: 0, needed: 1 }));
+        *src.fail_with.lock().unwrap() =
+            Some(FundingError::RateLimited(crate::ratelimit::Denied {
+                retry_after: Duration::from_secs(60),
+                available: 0,
+                needed: 1,
+            }));
         let c = ForwardCollector::new(src, CountingSink::default());
-        let report = c.run(Duration::from_secs(3600), tokio::time::sleep(Duration::from_secs(3600 + 1))).await;
+        let report = c
+            .run(
+                Duration::from_secs(3600),
+                tokio::time::sleep(Duration::from_secs(3600 + 1)),
+            )
+            .await;
         assert_eq!(report.rate_limited, 1);
         assert_eq!(report.failures, 0, "a refusal is not a failure: {report:?}");
         assert_eq!(report.polls, 1, "and the next tick still runs");

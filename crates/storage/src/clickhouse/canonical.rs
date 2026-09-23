@@ -164,29 +164,47 @@ pub async fn migrate_to_canonical(ch_url: &str, pg: &PgPool) -> Result<Canonical
         .map_err(|e| ch_err("distinct pairs", e))?;
     let identity = PgIdentityService::new(pg.clone(), ch_url);
     for p in &pairs {
-        let venue = sqlx::query_scalar::<_, i32>("SELECT venue_id FROM dataplane.venue WHERE name = $1")
-            .bind(&p.venue)
-            .fetch_optional(pg)
-            .await
-            .map_err(|e| ch_err("venue lookup", e))?;
-        let venue_name = if venue.is_some() { p.venue.as_str() } else { "unknown" };
+        let venue =
+            sqlx::query_scalar::<_, i32>("SELECT venue_id FROM dataplane.venue WHERE name = $1")
+                .bind(&p.venue)
+                .fetch_optional(pg)
+                .await
+                .map_err(|e| ch_err("venue lookup", e))?;
+        let venue_name = if venue.is_some() {
+            p.venue.as_str()
+        } else {
+            "unknown"
+        };
         identity
-            .ensure_instrument(venue_name, &p.symbol, guess_class(&p.symbol, &p.venue), chrono::Utc::now())
+            .ensure_instrument(
+                venue_name,
+                &p.symbol,
+                guess_class(&p.symbol, &p.venue),
+                chrono::Utc::now(),
+            )
             .await
             .map_err(|e| ch_err("ensure identity", e))?;
     }
-    report.identities = identity.sync_dims().await.map_err(|e| ch_err("sync dims", e))?;
+    report.identities = identity
+        .sync_dims()
+        .await
+        .map_err(|e| ch_err("sync dims", e))?;
 
     // 2. Source map, inlined as a literal table (Postgres is the system of record).
-    let sources: Vec<(String, i32, i64, String)> =
-        sqlx::query_as("SELECT name, source_id, declared_vendor_lag_ms, kind FROM dataplane.source")
-            .fetch_all(pg)
-            .await
-            .map_err(|e| ch_err("sources", e))?;
+    let sources: Vec<(String, i32, i64, String)> = sqlx::query_as(
+        "SELECT name, source_id, declared_vendor_lag_ms, kind FROM dataplane.source",
+    )
+    .fetch_all(pg)
+    .await
+    .map_err(|e| ch_err("sources", e))?;
     let source_values = sources
         .iter()
         .map(|(name, id, lag, kind)| {
-            format!("('{}', {id}, {lag}, {})", name.replace('\'', "''"), u8::from(kind == "live_stream"))
+            format!(
+                "('{}', {id}, {lag}, {})",
+                name.replace('\'', "''"),
+                u8::from(kind == "live_stream")
+            )
         })
         .collect::<Vec<_>>()
         .join(", ");
@@ -223,7 +241,9 @@ pub async fn migrate_to_canonical(ch_url: &str, pg: &PgPool) -> Result<Canonical
         // `CanonicalReport::stale_rule_chunks`.
         for d in &rows {
             if d.provenance_rule < PROVENANCE_RULE {
-                report.stale_rule_chunks.push((d.timeframe.clone(), d.month));
+                report
+                    .stale_rule_chunks
+                    .push((d.timeframe.clone(), d.month));
             }
         }
         rows.into_iter().map(|d| (d.timeframe, d.month)).collect()
@@ -265,7 +285,11 @@ pub async fn migrate_to_canonical(ch_url: &str, pg: &PgPool) -> Result<Canonical
                LEFT JOIN (SELECT * FROM values('name String, source_id Int32, lag_ms Int64, live UInt8', {source_values})) AS src
                        ON src.name = v.source"
         );
-        client.query(&insert).execute().await.map_err(|e| ch_err("copy chunk", e))?;
+        client
+            .query(&insert)
+            .execute()
+            .await
+            .map_err(|e| ch_err("copy chunk", e))?;
 
         // Verify: every distinct v2 cell has a canonical cell.
         #[derive(Row, Deserialize)]
@@ -426,7 +450,10 @@ mod tests {
     /// and derived in the other.
     #[test]
     fn the_grace_window_matches_the_pure_kernel() {
-        assert_eq!(RECEIPT_GRACE_SECS, dataplane::bar::RECEIPT_GRACE.num_seconds());
+        assert_eq!(
+            RECEIPT_GRACE_SECS,
+            dataplane::bar::RECEIPT_GRACE.num_seconds()
+        );
     }
 
     /// The regression this module was fixed for. Provenance must not be keyed on the
@@ -436,9 +463,15 @@ mod tests {
     #[test]
     fn the_copy_does_not_decide_provenance_from_the_transport() {
         let class = receipt_class_sql();
-        assert!(!class.contains("src.live"), "transport is not provenance: {class}");
+        assert!(
+            !class.contains("src.live"),
+            "transport is not provenance: {class}"
+        );
         assert!(!class.contains("kind"), "{class}");
-        assert!(class.contains("v.ingested_time"), "the axis is the row's receipt: {class}");
+        assert!(
+            class.contains("v.ingested_time"),
+            "the axis is the row's receipt: {class}"
+        );
     }
 
     /// The three class codes the copy branches on, spelled out so a reordering of
@@ -448,10 +481,18 @@ mod tests {
         let class = receipt_class_sql();
         // Impossible is tested first and yields 2; the receipt window yields 0; the
         // fallthrough is 1.
-        let impossible = class.find("v.ingested_time < v.event_time, 2").expect("impossible arm");
+        let impossible = class
+            .find("v.ingested_time < v.event_time, 2")
+            .expect("impossible arm");
         let receipt = class.find("SECOND, 0").expect("receipt arm");
-        assert!(impossible < receipt, "an impossible receipt must be caught before the window test");
-        assert!(class.trim_end().ends_with("1)"), "the fallthrough is a history pull: {class}");
+        assert!(
+            impossible < receipt,
+            "an impossible receipt must be caught before the window test"
+        );
+        assert!(
+            class.trim_end().ends_with("1)"),
+            "the fallthrough is a history pull: {class}"
+        );
     }
 
     /// A source the map does not know falls back to 60 s and `unknown_legacy`, which

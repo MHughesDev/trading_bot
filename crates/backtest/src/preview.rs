@@ -147,7 +147,11 @@ pub fn preview_signals(
     // first time the rules for deriving a feature list changed.
     let requirements = crate::requirements::derive_requirements(definition, timeframe)
         .map_err(|e| PreviewError::Requirements(e.to_string()))?;
-    let names: Vec<String> = requirements.features.iter().map(|f| f.name.clone()).collect();
+    let names: Vec<String> = requirements
+        .features
+        .iter()
+        .map(|f| f.name.clone())
+        .collect();
     let indicators: Vec<(String, std::sync::Arc<dyn features::Feature>)> = names
         .iter()
         .map(|n| Ok((n.clone(), features::runtime::feature(n)?)))
@@ -341,54 +345,69 @@ fn diagnose(
     ordering: &HashSet<&str>,
 ) -> (&'static str, String) {
     if (warmup as usize) >= n_bars {
-        return ("warmup_exceeds_window", format!(
-            "the longest feature needs {warmup} bars of warm-up and the window has {n_bars}. \
+        return (
+            "warmup_exceeds_window",
+            format!(
+                "the longest feature needs {warmup} bars of warm-up and the window has {n_bars}. \
              No signal could fire here whatever the conditions say — widen the window."
-        ));
+            ),
+        );
     }
     if evaluated == 0 {
-        return ("warmup_exceeds_window", format!(
+        return (
+            "warmup_exceeds_window",
+            format!(
             "no bar had a value for every feature, so the conditions were never evaluated on a \
              complete input set. Warm-up is {warmup} bars over a {n_bars}-bar window."
-        ));
+        ),
+        );
     }
     if let Some(dead) = features.iter().find(|f| f.bars_with_value == 0) {
-        return ("warmup_exceeds_window", format!(
+        return (
+            "warmup_exceeds_window",
+            format!(
             "`{}` produced no value on any bar, so any condition naming it is false everywhere. \
              It needs {} bars of warm-up.",
             dead.name, dead.warmup_bars
-        ));
+        ),
+        );
     }
     if signals.is_empty() {
-        return ("never_fires", format!(
+        return (
+            "never_fires",
+            format!(
             "the conditions were evaluated on {evaluated} bars and no signal was ever true. The \
              inputs are fine; the thresholds are not met on this window."
-        ));
+        ),
+        );
     }
     // The signals fired; nothing was listening. Worth naming separately because
     // every other reason here sends the author to the `nodes` block, and this
     // one is the only one whose fix is in `actions`.
     if let Some(flag) = signals.iter().find(|s| s.fires > 0) {
         if !ordering.contains(flag.signal.as_str()) {
-            return ("signal_has_no_action", format!(
-                "`{}` became true {} times, but no action names it — `actions` lists {}. The \
+            return (
+                "signal_has_no_action",
+                format!(
+                    "`{}` became true {} times, but no action names it — `actions` lists {}. The \
                  conditions are working; nothing is wired to trade them.",
-                flag.signal,
-                flag.fires,
-                if ordering.is_empty() {
-                    "no signal at all".to_string()
-                } else {
-                    let mut names: Vec<&str> = ordering.iter().copied().collect();
-                    names.sort_unstable();
-                    names.join(", ")
-                }
-            ));
+                    flag.signal,
+                    flag.fires,
+                    if ordering.is_empty() {
+                        "no signal at all".to_string()
+                    } else {
+                        let mut names: Vec<&str> = ordering.iter().copied().collect();
+                        names.sort_unstable();
+                        names.join(", ")
+                    }
+                ),
+            );
         }
     }
     (
         "never_fires",
         format!(
-        "signals were true on some bars but never became true — they were already true at the \
+            "signals were true on some bars but never became true — they were already true at the \
          first evaluated bar and stayed that way. An entry fires on the rising edge, so a \
          condition that is always true never fires. Evaluated on {evaluated} bars."
         ),

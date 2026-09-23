@@ -171,8 +171,9 @@ async fn dispatcher_draws_are_recorded_as_decisions() {
         .expect("define");
 
     let d = Dispatcher::new(&campaign, &led);
-    let candidates: Vec<serde_json::Value> =
-        (0..4).map(|i| serde_json::json!({ "fast": 8 + i })).collect();
+    let candidates: Vec<serde_json::Value> = (0..4)
+        .map(|i| serde_json::json!({ "fast": 8 + i }))
+        .collect();
     // A fixed sequence: the verdict must not depend on the day it ran.
     let mut i = 0usize;
     let seq = [0.90_f64, 0.10, 0.40, 0.70, 0.20, 0.60];
@@ -241,7 +242,9 @@ async fn a_campaign_resumes_at_the_same_child_and_spends_no_second_trial() {
     let led = PgTrialLedger::new(pg.clone());
     let tenant = "t-fold";
 
-    let handle = led.define_campaign(tenant, &definition("resume-me")).expect("define");
+    let handle = led
+        .define_campaign(tenant, &definition("resume-me"))
+        .expect("define");
     let id = handle.campaign_id();
 
     // DEFINE opened the log in the same transaction that wrote the campaign.
@@ -267,30 +270,51 @@ async fn a_campaign_resumes_at_the_same_child_and_spends_no_second_trial() {
     // A fresh one folds the same log and sees the same child.
     let resumed = led.campaign_state_async(tenant, id).await.expect("re-fold");
     assert_eq!(resumed.phase, CampaignPhase::Baseline);
-    assert_eq!(resumed.children, vec![(CampaignPhase::Baseline, 1, "job_BASE".to_string())]);
+    assert_eq!(
+        resumed.children,
+        vec![(CampaignPhase::Baseline, 1, "job_BASE".to_string())]
+    );
     // Folding again changes nothing: the fold is a function of the log.
     assert_eq!(resumed, led.campaign_state_async(tenant, id).await.unwrap());
 
     // The next phase's key is derived from the fold, so both drivers agree.
     assert_eq!(
         resumed.child_key(id, CampaignPhase::Diagnose),
-        led.campaign_state_async(tenant, id).await.unwrap().child_key(id, CampaignPhase::Diagnose)
+        led.campaign_state_async(tenant, id)
+            .await
+            .unwrap()
+            .child_key(id, CampaignPhase::Diagnose)
     );
 
     // The database refuses a transition SPEC §10 does not allow, whoever writes
     // it — this is what stops a second writer from making the fold disagree
     // with itself between two readings.
     let illegal = led
-        .append_campaign_event_async(tenant, id, &CampaignEvent::new(CampaignPhase::Gate, serde_json::json!({})))
+        .append_campaign_event_async(
+            tenant,
+            id,
+            &CampaignEvent::new(CampaignPhase::Gate, serde_json::json!({})),
+        )
         .await;
     assert!(illegal.is_err(), "gate cannot follow baseline");
 
     // And nothing may be appended after an ending.
-    led.append_campaign_event_async(tenant, id, &CampaignEvent::new(CampaignPhase::Halted, serde_json::json!({ "by": "a human" })))
-        .await
-        .expect("a campaign may be halted from anywhere");
+    led.append_campaign_event_async(
+        tenant,
+        id,
+        &CampaignEvent::new(
+            CampaignPhase::Halted,
+            serde_json::json!({ "by": "a human" }),
+        ),
+    )
+    .await
+    .expect("a campaign may be halted from anywhere");
     let after = led
-        .append_campaign_event_async(tenant, id, &CampaignEvent::new(CampaignPhase::Diagnose, serde_json::json!({})))
+        .append_campaign_event_async(
+            tenant,
+            id,
+            &CampaignEvent::new(CampaignPhase::Diagnose, serde_json::json!({})),
+        )
         .await;
     assert!(after.is_err(), "a halted campaign is over");
 
@@ -317,13 +341,23 @@ async fn the_log_is_ordered_by_position_not_by_clock() {
     let pg = scratch("campaign_seq").await;
     let led = PgTrialLedger::new(pg.clone());
     let tenant = "t-seq";
-    let handle = led.define_campaign(tenant, &definition("ordered")).expect("define");
+    let handle = led
+        .define_campaign(tenant, &definition("ordered"))
+        .expect("define");
     let id = handle.campaign_id();
 
-    for phase in [CampaignPhase::Baseline, CampaignPhase::Diagnose, CampaignPhase::Hypothesize] {
-        led.append_campaign_event_async(tenant, id, &CampaignEvent::new(phase, serde_json::json!({})))
-            .await
-            .expect("append");
+    for phase in [
+        CampaignPhase::Baseline,
+        CampaignPhase::Diagnose,
+        CampaignPhase::Hypothesize,
+    ] {
+        led.append_campaign_event_async(
+            tenant,
+            id,
+            &CampaignEvent::new(phase, serde_json::json!({})),
+        )
+        .await
+        .expect("append");
     }
 
     // Every event shares an `occurred_at` now; `seq` is what orders them.
@@ -340,7 +374,11 @@ async fn the_log_is_ordered_by_position_not_by_clock() {
     .fetch_all(&pg)
     .await
     .unwrap();
-    assert_eq!(seqs, vec![0, 1, 2, 3], "the database assigns the position, not the writer");
+    assert_eq!(
+        seqs,
+        vec![0, 1, 2, 3],
+        "the database assigns the position, not the writer"
+    );
 
     let state = led.campaign_state_async(tenant, id).await.unwrap();
     assert_eq!(state.phase, CampaignPhase::Hypothesize);

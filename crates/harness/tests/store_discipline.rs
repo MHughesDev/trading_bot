@@ -73,7 +73,11 @@ fn a_superseded_record_leaves_selection_but_not_the_store() {
     assert!(sel.ids().contains(&second));
 
     let m = manifest::render(&s, &sel.ids().into_iter().collect(), 10_000);
-    assert!(m.text.contains(&first.to_string()), "still listed:\n{}", m.text);
+    assert!(
+        m.text.contains(&first.to_string()),
+        "still listed:\n{}",
+        m.text
+    );
     assert!(
         m.text.contains(&format!("superseded by {second}")),
         "and shown as superseded:\n{}",
@@ -109,7 +113,11 @@ fn a_spill_is_invisible_except_in_latency_and_expand() {
     // And `expand` reads one back.
     let (id, _, body) = spilled.into_iter().next().expect("something spilled");
     assert!(
-        s.get(id).unwrap().body.render().contains("expand to read it"),
+        s.get(id)
+            .unwrap()
+            .body
+            .render()
+            .contains("expand to read it"),
         "a spilled body says how to get it back"
     );
     s.restore(id, body);
@@ -128,10 +136,7 @@ fn what_the_run_is_using_does_not_spill() {
 
     s.spill(10, |id| format!("work/{id}"));
     assert!(
-        !matches!(
-            s.get(oldest).unwrap().body,
-            Body::Elsewhere { .. }
-        ),
+        !matches!(s.get(oldest).unwrap().body, Body::Elsewhere { .. }),
         "a record the model has cited and asked for back is the last thing to spill"
     );
 }
@@ -187,13 +192,21 @@ fn a_required_record_survives_the_candidate_cap() {
             .with_id("experiment_id", "exp_42"),
     );
     let correction = s.insert(
-        Draft::new(0, RecordKind::Correction, "validate_strategy", Body::text("bad name"))
-            .with_id("code", "when_names_string"),
+        Draft::new(
+            0,
+            RecordKind::Correction,
+            "validate_strategy",
+            Body::text("bad name"),
+        )
+        .with_id("code", "when_names_string"),
     );
 
     let q = query(2_000).requiring("exp_42");
     let sel = select(&s, &q, 8_000, &ContextPolicy::v2());
-    assert!(sel.ids().contains(&needed), "a must-include is not a candidate");
+    assert!(
+        sel.ids().contains(&needed),
+        "a must-include is not a candidate"
+    );
     assert!(
         sel.ids().contains(&correction),
         "and the per-kind floor searches the whole store, not the scored slice"

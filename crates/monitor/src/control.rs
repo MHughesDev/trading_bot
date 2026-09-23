@@ -63,9 +63,9 @@ impl std::fmt::Display for ResetRefusal {
             ),
             Self::ReasonMissing => f.write_str("a reset requires a reason"),
             Self::NotHuman { actor } => write!(f, "{actor} may not reset the kill switch"),
-            Self::VenuesNotReconciled => f.write_str(
-                "a global reset requires every venue to reconcile clean first",
-            ),
+            Self::VenuesNotReconciled => {
+                f.write_str("a global reset requires every venue to reconcile clean first")
+            }
             Self::RateLimited { retry_after_secs } => write!(
                 f,
                 "this scope was reset less than {RESET_RATE_LIMIT_SECS}s ago; \
@@ -224,7 +224,14 @@ mod tests {
         // Asserted over the shapes that actually appear in `tripped_by`, not just
         // over `agent:`: 'monitor' trips the switch and must not be able to
         // release it either, or the fail-closed design has a self-clearing hole.
-        for actor in ["agent:run-9", "monitor", "drill", "", "human:", "service:deployer"] {
+        for actor in [
+            "agent:run-9",
+            "monitor",
+            "drill",
+            "",
+            "human:",
+            "service:deployer",
+        ] {
             let mut r = global();
             r.actor = actor.to_owned();
             assert!(

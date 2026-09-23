@@ -637,7 +637,8 @@ impl SessionWorker {
         let value = Signal::declared(objective_weight * item.source_weight());
 
         // novelty — measured from the hypothesis registry.
-        let novelty = select::novelty_from_prior(self.prior_statements(user_id, &item.question).await?);
+        let novelty =
+            select::novelty_from_prior(self.prior_statements(user_id, &item.question).await?);
 
         // feasibility — {0, 1}. The 0.5 rung needs readers that do not exist
         // (coverage, the tool breaker), so it is not emitted.
@@ -650,7 +651,9 @@ impl SessionWorker {
             .is_none_or(|(w, p)| p.may_run(w));
         let feasibility = Signal::declared(if permitted && tier_allows { 1.0 } else { 0.0 });
 
-        let cost = self.cost_signal(user_id, &item.workflow, &session.tier).await;
+        let cost = self
+            .cost_signal(user_id, &item.workflow, &session.tier)
+            .await;
 
         Ok(Inputs {
             value,
@@ -1136,7 +1139,10 @@ impl SessionWorker {
     /// [`research_session::charter::admit`] being wired here at all; see the
     /// module header.
     fn profile_health(&self, session: &ResearchSession) -> Observed<ProfileHealth> {
-        health_of(self.profiles.get(&session.tier).map(|p| p.tier), session.continuous)
+        health_of(
+            self.profiles.get(&session.tier).map(|p| p.tier),
+            session.continuous,
+        )
     }
 
     /// The session's finished children, oldest first, as §6.6 reads them.
@@ -1378,14 +1384,16 @@ impl SessionWorker {
         .map_err(|e| Self::infra("reading monitor events for the subscriptions", e))?;
         let observations = events
             .into_iter()
-            .map(|(event_id, scope, kind, metric, to_state)| Observation::MonitorEvent {
-                subject: scope,
-                kind,
-                event_id: event_id.to_string(),
-                detail: metric
-                    .or(to_state)
-                    .unwrap_or_else(|| "no metric recorded".to_string()),
-            })
+            .map(
+                |(event_id, scope, kind, metric, to_state)| Observation::MonitorEvent {
+                    subject: scope,
+                    kind,
+                    event_id: event_id.to_string(),
+                    detail: metric
+                        .or(to_state)
+                        .unwrap_or_else(|| "no metric recorded".to_string()),
+                },
+            )
             .collect();
 
         Ok(World {
@@ -1456,7 +1464,12 @@ impl SessionWorker {
         let world = self.world(user_id, agenda).await?;
         let ingest = sources::ingest(charter, &world, &mut live);
         let added = self
-            .write_inserts(session.id, "subscription", &ingest.inserted, &ingest.skipped)
+            .write_inserts(
+                session.id,
+                "subscription",
+                &ingest.inserted,
+                &ingest.skipped,
+            )
             .await?;
 
         // Written when a subscription did something. A note on every one of the
@@ -1618,10 +1631,7 @@ impl SessionWorker {
     /// [`is_stale_claim`] is: the interesting property is "may this session
     /// claim at this instant", it is a two-line rule, and it should be testable
     /// without a database, a job service or a wait until Tuesday.
-    fn window_gate(
-        schedule: &Schedule,
-        at: chrono::DateTime<Utc>,
-    ) -> Result<Openness, JobError> {
+    fn window_gate(schedule: &Schedule, at: chrono::DateTime<Utc>) -> Result<Openness, JobError> {
         Ok(Self::open_hours(schedule)?.openness(at))
     }
 
@@ -1650,8 +1660,8 @@ impl SessionWorker {
         run_id: Uuid,
         verdict: &str,
     ) -> Result<RunHarvest, JobError> {
-        let mut run = RunHarvest::new(session_id, item.id, run_id, verdict)
-            .after_attempts(item.attempts);
+        let mut run =
+            RunHarvest::new(session_id, item.id, run_id, verdict).after_attempts(item.attempts);
 
         // Source 4.3 — the questions this run opened. `blocking` first is the
         // scorer's business (§5.1 gives it a heavier source), so it arrives as
@@ -2016,9 +2026,8 @@ impl SessionWorker {
         let log = sessions::log(&self.pg, session.id)
             .await
             .map_err(|e| Self::infra("reading the session log for the digest", e))?;
-        let folded = research_session::fold(
-            &log.iter().map(|e| e.event.clone()).collect::<Vec<_>>(),
-        );
+        let folded =
+            research_session::fold(&log.iter().map(|e| e.event.clone()).collect::<Vec<_>>());
         let period = period_since(&log, folded.last_digest_seq);
         let Some(period) = period else {
             // Nothing has happened since the last digest. A second digest of an
@@ -2068,9 +2077,8 @@ impl SessionWorker {
         period: Period,
         stalled: Option<&Diagnosis>,
     ) -> Result<DigestInput, JobError> {
-        let in_period = |e: &&LoggedEvent| {
-            e.event.seq >= period.from_seq && e.event.seq <= period.to_seq
-        };
+        let in_period =
+            |e: &&LoggedEvent| e.event.seq >= period.from_seq && e.event.seq <= period.to_seq;
 
         let mut runs = Vec::new();
         for e in log.iter().filter(in_period) {
@@ -2095,10 +2103,8 @@ impl SessionWorker {
         // §2.4's next five, best first. The agenda's stored scores are the ones
         // the selection used (§5.4), so the digest shows the agenda that will
         // run rather than one recomputed for the card.
-        let mut upcoming: Vec<&AgendaItem> = agenda
-            .iter()
-            .filter(|i| i.status.is_claimable())
-            .collect();
+        let mut upcoming: Vec<&AgendaItem> =
+            agenda.iter().filter(|i| i.status.is_claimable()).collect();
         upcoming.sort_by(|a, b| {
             let key = |i: &AgendaItem| i.score.as_ref().map_or(f64::MIN, |s: &Score| s.total);
             key(b)
@@ -2126,11 +2132,7 @@ impl SessionWorker {
             // its seq is the one after the period's end. Named from the
             // diagnosis rather than paraphrased — S-11.12's acceptance is that a
             // stall writes a digest carrying the rule and what to do about it.
-            pauses.push(Pause::stalled(
-                period.to_seq + 1,
-                period.to,
-                diagnosis,
-            ));
+            pauses.push(Pause::stalled(period.to_seq + 1, period.to, diagnosis));
         }
 
         Ok(DigestInput {
@@ -2307,7 +2309,11 @@ impl SessionWorker {
         let mut agenda = sessions::agenda(&self.pg, session_id)
             .await
             .map_err(|e| Self::infra("reading the agenda", e))?;
-        if self.release_stale_claims(session_id, &agenda, &folded).await? > 0 {
+        if self
+            .release_stale_claims(session_id, &agenda, &folded)
+            .await?
+            > 0
+        {
             agenda = sessions::agenda(&self.pg, session_id)
                 .await
                 .map_err(|e| Self::infra("re-reading the agenda", e))?;
@@ -2399,10 +2405,7 @@ impl SessionWorker {
             return self.replenish(&session, survey).await;
         }
 
-        let Some(item) = self
-            .choose(&session, &agenda, &folded, user_id)
-            .await?
-        else {
+        let Some(item) = self.choose(&session, &agenda, &folded, user_id).await? else {
             // Deliberately does not name a cause. `choose` returns `None` for
             // three different reasons — an approval nobody gave, an intake that
             // refused the selection, and a slate where nothing is feasible —
@@ -2432,7 +2435,6 @@ impl SessionWorker {
                 item.id
             )));
         }
-
 
         // §6.3. The lease is sized **before** anything is claimed, because a
         // refusal here is a refusal to start a child and an item claimed for a
@@ -3076,9 +3078,8 @@ impl SessionWorker {
         let log = sessions::log(&self.pg, session.id)
             .await
             .map_err(|e| Self::infra("reading the session log for the final digest", e))?;
-        let folded = research_session::fold(
-            &log.iter().map(|e| e.event.clone()).collect::<Vec<_>>(),
-        );
+        let folded =
+            research_session::fold(&log.iter().map(|e| e.event.clone()).collect::<Vec<_>>());
         let Some(period) = period_since(&log, folded.last_digest_seq) else {
             return Ok(false);
         };
@@ -3853,9 +3854,8 @@ mod tests {
         // And the specific case: the run re-asked its own question, so layer one
         // merged onto the item it ran rather than opening a second one.
         assert!(
-            plan.iter().any(
-                |s| matches!(s, AfterRun::Merged { into, .. } if *into == running.id)
-            ),
+            plan.iter()
+                .any(|s| matches!(s, AfterRun::Merged { into, .. } if *into == running.id)),
             "the run's own question merged onto the item it ran: {plan:?}"
         );
     }
@@ -4215,12 +4215,14 @@ mod tests {
     #[test]
     fn the_next_five_say_what_wanted_them_and_never_read_an_absent_score_as_zero() {
         let session = Uuid::new_v4();
-        let mut i = item(session, "q", Source::OpenQuestionBlocking, ItemStatus::Queued);
-        let unscored = why_next(&i);
-        assert!(
-            unscored.contains("open_question_blocking"),
-            "{unscored}"
+        let mut i = item(
+            session,
+            "q",
+            Source::OpenQuestionBlocking,
+            ItemStatus::Queued,
         );
+        let unscored = why_next(&i);
+        assert!(unscored.contains("open_question_blocking"), "{unscored}");
         assert!(
             !unscored.contains("0.00"),
             "an item nothing has scored is not an item worth nothing: {unscored}"
@@ -4267,7 +4269,10 @@ mod tests {
         }
         .knowledge_units();
         assert_eq!(row.knowledge_units(), expected);
-        assert!(expected > 0, "a fixture that counted nothing proves nothing");
+        assert!(
+            expected > 0,
+            "a fixture that counted nothing proves nothing"
+        );
     }
 
     fn item(session: Uuid, q: &str, source: Source, status: ItemStatus) -> AgendaItem {
@@ -4307,7 +4312,12 @@ mod tests {
     fn an_item_that_has_not_been_approved_is_not_claimable() {
         let s = Uuid::new_v4();
         let agenda = vec![
-            item(s, "not yet approved", Source::CharterSeed, ItemStatus::Proposed),
+            item(
+                s,
+                "not yet approved",
+                Source::CharterSeed,
+                ItemStatus::Proposed,
+            ),
             item(s, "oldest queued", Source::CharterSeed, ItemStatus::Queued),
             item(s, "newer", Source::CharterSeed, ItemStatus::Queued),
         ];
@@ -4386,7 +4396,12 @@ mod tests {
     fn a_claim_the_log_never_started_is_stale_and_one_it_did_is_not() {
         let s = Uuid::new_v4();
         let run = Uuid::new_v4();
-        let mut item = item(s, "claimed", Source::User, ItemStatus::Claimed { run_id: run });
+        let mut item = item(
+            s,
+            "claimed",
+            Source::User,
+            ItemStatus::Claimed { run_id: run },
+        );
 
         // The row says claimed; the log says nothing started. The log wins.
         assert!(is_stale_claim(&item, &running_fold()));
@@ -4407,7 +4422,9 @@ mod tests {
         // finished one is not either.
         item.status = ItemStatus::Queued;
         assert!(!is_stale_claim(&item, &running_fold()));
-        item.status = ItemStatus::Done { verdict: "x".into() };
+        item.status = ItemStatus::Done {
+            verdict: "x".into(),
+        };
         assert!(!is_stale_claim(&item, &running_fold()));
     }
 
@@ -4422,7 +4439,10 @@ mod tests {
 
     #[test]
     fn a_long_question_becomes_a_title_and_a_short_one_is_itself() {
-        assert_eq!(title_of("  does momentum survive costs?  "), "does momentum survive costs?");
+        assert_eq!(
+            title_of("  does momentum survive costs?  "),
+            "does momentum survive costs?"
+        );
         let long = "a".repeat(200);
         let t = title_of(&long);
         assert_eq!(t.chars().count(), 58);
@@ -4514,7 +4534,10 @@ mod tests {
         .may_claim());
 
         // A profile the set no longer holds is gone, not merely unhealthy.
-        assert_eq!(health_of(None, true), Observed::Is(ProfileHealth::Withdrawn));
+        assert_eq!(
+            health_of(None, true),
+            Observed::Is(ProfileHealth::Withdrawn)
+        );
         assert_eq!(
             health_of(None, false),
             Observed::Is(ProfileHealth::Withdrawn)
@@ -4615,7 +4638,8 @@ mod tests {
         );
 
         let b = budget(100);
-        let refusal = execute::lease(&request(&b, unknown)).expect_err("no lease on an unread spend");
+        let refusal =
+            execute::lease(&request(&b, unknown)).expect_err("no lease on an unread spend");
         assert!(
             matches!(refusal, execute::LeaseRefusal::NotRead { .. }),
             "{refusal:?}"
@@ -4669,12 +4693,18 @@ mod tests {
     #[test]
     fn an_unmeasured_cost_is_read_off_its_provenance_and_not_off_its_number() {
         let absent = Signal::not_estimated();
-        assert!((absent.raw - 1.0).abs() < f64::EPSILON, "the identity is 1.0");
+        assert!(
+            (absent.raw - 1.0).abs() < f64::EPSILON,
+            "the identity is 1.0"
+        );
         assert!(!matches!(absent.provenance, Provenance::Measured { .. }));
 
         let refusal = execute::lease(&LeaseRequest {
             estimate: Observed::unknown("nobody measured this workflow"),
-            ..request(&budget(100), Observed::Is(Meter::trials(0.0).expect("a meter")))
+            ..request(
+                &budget(100),
+                Observed::Is(Meter::trials(0.0).expect("a meter")),
+            )
         })
         .expect_err("no estimate, no lease");
         assert!(

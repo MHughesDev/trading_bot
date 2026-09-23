@@ -193,10 +193,7 @@ fn validate(d: &Draft) -> Result<(), PreregError> {
         ("null_family", d.null_family.trim()),
         ("gate_profile", d.gate_profile.trim()),
         ("primary_hypothesis", d.primary_hypothesis.trim()),
-        (
-            "falsifier",
-            d.falsifier.trim(),
-        ),
+        ("falsifier", d.falsifier.trim()),
         ("window.start", d.window.start.trim()),
         ("window.end", d.window.end.trim()),
     ];
@@ -208,8 +205,9 @@ fn validate(d: &Draft) -> Result<(), PreregError> {
                     "falsifier" => "a hypothesis with no falsifier cannot be refuted, so a run \
                                     carrying one can only ever confirm"
                         .into(),
-                    _ => "it has no default, because a default here is a decision nobody made"
-                        .into(),
+                    _ => {
+                        "it has no default, because a default here is a decision nobody made".into()
+                    }
                 },
             });
         }
@@ -406,10 +404,7 @@ mod tests {
         for bad in [0.0, -0.1, f64::NAN, f64::INFINITY] {
             let mut d = draft();
             d.delta_practical = bad;
-            assert!(matches!(
-                seal(d, &embargo()),
-                Err(PreregError::BadDelta(_))
-            ));
+            assert!(matches!(seal(d, &embargo()), Err(PreregError::BadDelta(_))));
         }
     }
 
@@ -436,10 +431,7 @@ mod tests {
         let mut b = draft();
         b.run_id = a.run_id;
         b.objective = json!({"subject_to": {"max_dd": 0.2}, "maximize": ["sharpe"]});
-        let (x, y) = (
-            seal(a, &embargo()).unwrap(),
-            seal(b, &embargo()).unwrap(),
-        );
+        let (x, y) = (seal(a, &embargo()).unwrap(), seal(b, &embargo()).unwrap());
         assert_eq!(x.hash(), y.hash());
     }
 
@@ -454,7 +446,10 @@ mod tests {
         d.run_id = first.run_id;
         d.trial_budget = 500;
         let second = amend(&first, d, &embargo(), MAX_PREREG_AMENDMENTS).unwrap();
-        assert_eq!(second.trial_budget, first.trial_budget, "carried, not asked for");
+        assert_eq!(
+            second.trial_budget, first.trial_budget,
+            "carried, not asked for"
+        );
         assert_eq!(second.supersedes, Some(first.id));
         assert_eq!(second.amendment, 1);
         assert_ne!(second.hash(), first.hash());
@@ -472,8 +467,7 @@ mod tests {
         }
         let mut d = draft();
         d.run_id = current.run_id;
-        let err = amend(&current, d, &embargo(), MAX_PREREG_AMENDMENTS)
-            .expect_err("the cap bites");
+        let err = amend(&current, d, &embargo(), MAX_PREREG_AMENDMENTS).expect_err("the cap bites");
         assert!(
             matches!(err, PreregError::TooManyAmendments { .. }),
             "{err}"

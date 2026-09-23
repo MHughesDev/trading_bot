@@ -184,7 +184,11 @@ impl TrialCounter for PgTrialCounter {
             SubmittedBy::System => ledger::ActorKind::Scheduler,
             _ => ledger::ActorKind::Human,
         };
-        let mut ctx = ledger::DispatchContext::legacy(submission.user_id.to_string(), actor_kind, submission.user_id.to_string());
+        let mut ctx = ledger::DispatchContext::legacy(
+            submission.user_id.to_string(),
+            actor_kind,
+            submission.user_id.to_string(),
+        );
         ctx.experiment_id.clone_from(&submission.experiment_id);
         if let Some(session) = submission.session_id {
             ctx.on_behalf_of = Some(format!("session:{session}"));
@@ -203,7 +207,8 @@ impl TrialCounter for PgTrialCounter {
             split_overrides: serde_json::json!([]),
             planned_steps: None,
         };
-        let ticket = ledger::pg::register_in_tx(tx, &ledger::Registration::unlogged(&ctx, &subject)).await?;
+        let ticket =
+            ledger::pg::register_in_tx(tx, &ledger::Registration::unlogged(&ctx, &subject)).await?;
         let trial_id = ticket.trial_id();
         tracing::debug!(job = job_id, trial = %trial_id, "trial registered");
         Ok(trial_id)
@@ -216,14 +221,19 @@ async fn trial_event(
     job_id: &str,
     event: impl FnOnce(ledger::TrialState) -> Vec<ledger::TrialEvent>,
 ) -> Result<(), JobStoreError> {
-    let row: Option<(Option<Uuid>, Uuid)> = sqlx::query_as("SELECT trial_id, user_id FROM jobs WHERE job_id=$1")
-        .bind(job_id)
-        .fetch_optional(&mut **tx)
-        .await?;
-    let Some((Some(trial_id), user_id)) = row else { return Ok(()) };
+    let row: Option<(Option<Uuid>, Uuid)> =
+        sqlx::query_as("SELECT trial_id, user_id FROM jobs WHERE job_id=$1")
+            .bind(job_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    let Some((Some(trial_id), user_id)) = row else {
+        return Ok(());
+    };
     let tenant = user_id.to_string();
     let Some(state) = ledger::pg::state_in_tx(tx, &tenant, trial_id).await? else {
-        return Err(JobStoreError::Invalid(format!("job {job_id} references unknown trial {trial_id}")));
+        return Err(JobStoreError::Invalid(format!(
+            "job {job_id} references unknown trial {trial_id}"
+        )));
     };
     if state.is_terminal() {
         return Ok(());
@@ -236,9 +246,14 @@ async fn trial_event(
 
 /// A terminal failure from wherever the trial currently is. A lost worker is a
 /// preemption that was never recovered: right-censored, not failed.
-fn fail_events(state: ledger::TrialState, reason: ledger::TerminalReason, detail: String) -> Vec<ledger::TrialEvent> {
+fn fail_events(
+    state: ledger::TrialState,
+    reason: ledger::TerminalReason,
+    detail: String,
+) -> Vec<ledger::TrialEvent> {
     let mut evs = Vec::new();
-    if reason == ledger::TerminalReason::PreemptedAbandoned && state == ledger::TrialState::Running {
+    if reason == ledger::TerminalReason::PreemptedAbandoned && state == ledger::TrialState::Running
+    {
         evs.push(ledger::TrialEvent::to(ledger::TrialState::Preempted));
     }
     evs.push(ledger::TrialEvent::failed(reason, detail));
@@ -328,7 +343,11 @@ impl JobStore {
         }
     }
 
-    async fn child_at(&self, parent: &str, member: i32) -> Result<Option<Submitted>, JobStoreError> {
+    async fn child_at(
+        &self,
+        parent: &str,
+        member: i32,
+    ) -> Result<Option<Submitted>, JobStoreError> {
         let row = sqlx::query(
             "SELECT job_id, state FROM jobs WHERE parent_job_id = $1 AND member_index = $2",
         )
@@ -375,7 +394,13 @@ impl JobStore {
                     let job_id: String = row.get("job_id");
                     let trial_id = self.counter.register_trial(&mut tx, &req, &job_id).await?;
                     let tenant = req.user_id.to_string();
-                    ledger::pg::append_event_in_tx(&mut tx, &tenant, trial_id, &ledger::TrialEvent::deduplicated(prior, format!("job:{job_id}"))).await?;
+                    ledger::pg::append_event_in_tx(
+                        &mut tx,
+                        &tenant,
+                        trial_id,
+                        &ledger::TrialEvent::deduplicated(prior, format!("job:{job_id}")),
+                    )
+                    .await?;
                     tx.commit().await?;
                 }
                 return Ok(Submitted {
@@ -400,7 +425,13 @@ impl JobStore {
         // Register first: the trial must exist before the job it authorizes.
         let trial_id = if req.kind.counts_trial() {
             let id = self.counter.register_trial(&mut tx, &req, &job_id).await?;
-            ledger::pg::append_event_in_tx(&mut tx, &req.user_id.to_string(), id, &ledger::TrialEvent::to(ledger::TrialState::Queued)).await?;
+            ledger::pg::append_event_in_tx(
+                &mut tx,
+                &req.user_id.to_string(),
+                id,
+                &ledger::TrialEvent::to(ledger::TrialState::Queued),
+            )
+            .await?;
             Some(id)
         } else {
             None
@@ -622,7 +653,9 @@ impl JobStore {
             .execute(&mut *tx)
             .await?;
             trial_event(&mut tx, job_id, |state| match state {
-                ledger::TrialState::Running => vec![ledger::TrialEvent::to(ledger::TrialState::Preempted)],
+                ledger::TrialState::Running => {
+                    vec![ledger::TrialEvent::to(ledger::TrialState::Preempted)]
+                }
                 _ => Vec::new(),
             })
             .await?;
@@ -686,7 +719,14 @@ impl JobStore {
                 .fetch_all(&mut *tx)
                 .await?;
             for child in children {
-                trial_event(&mut tx, &child, |s| fail_events(s, ledger::TerminalReason::Cancelled, "cancelled before it ran".into())).await?;
+                trial_event(&mut tx, &child, |s| {
+                    fail_events(
+                        s,
+                        ledger::TerminalReason::Cancelled,
+                        "cancelled before it ran".into(),
+                    )
+                })
+                .await?;
             }
         }
 
@@ -728,7 +768,9 @@ impl JobStore {
                 .execute(&mut *tx)
                 .await?;
                 trial_event(&mut tx, &job_id, |state| match state {
-                    ledger::TrialState::Running => vec![ledger::TrialEvent::to(ledger::TrialState::Preempted)],
+                    ledger::TrialState::Running => {
+                        vec![ledger::TrialEvent::to(ledger::TrialState::Preempted)]
+                    }
                     _ => Vec::new(),
                 })
                 .await?;
@@ -754,7 +796,11 @@ impl JobStore {
                 .execute(&mut *tx)
                 .await?;
                 trial_event(&mut tx, &job_id, |state| {
-                    fail_events(state, ledger::TerminalReason::PreemptedAbandoned, "lost_worker: lease expired on the final attempt".into())
+                    fail_events(
+                        state,
+                        ledger::TerminalReason::PreemptedAbandoned,
+                        "lost_worker: lease expired on the final attempt".into(),
+                    )
                 })
                 .await?;
             }

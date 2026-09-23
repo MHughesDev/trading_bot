@@ -31,15 +31,28 @@ pub struct DiffReport {
 /// # Errors
 /// Backend failures.
 pub async fn serving_tenants(pg: &PgPool) -> anyhow::Result<Vec<String>> {
-    Ok(sqlx::query_scalar("SELECT t FROM dataplane.serving_tenants() AS t ORDER BY t").fetch_all(pg).await?)
+    Ok(
+        sqlx::query_scalar("SELECT t FROM dataplane.serving_tenants() AS t ORDER BY t")
+            .fetch_all(pg)
+            .await?,
+    )
 }
 
 /// Diff one tenant's undiffed serves with `served_at` in `[since, until)`.
 ///
 /// # Errors
 /// Backend failures. A serve that cannot be recomputed is counted, not an error.
-pub async fn diff_tenant(pg: &PgPool, clickhouse_url: &str, tenant: &str, since: DateTime<Utc>, until: DateTime<Utc>) -> anyhow::Result<DiffReport> {
-    let mut report = DiffReport { tenant: tenant.to_string(), ..DiffReport::default() };
+pub async fn diff_tenant(
+    pg: &PgPool,
+    clickhouse_url: &str,
+    tenant: &str,
+    since: DateTime<Utc>,
+    until: DateTime<Utc>,
+) -> anyhow::Result<DiffReport> {
+    let mut report = DiffReport {
+        tenant: tenant.to_string(),
+        ..DiffReport::default()
+    };
     let mut tx = ledger::pg::tenant_tx(pg, tenant).await?;
     let serves = sqlx::query(
         "SELECT l.serve_id, l.instrument_id, l.venue_id, l.period_secs, l.event_time, l.knowledge_time, l.feature_set_id,
@@ -75,19 +88,38 @@ pub async fn diff_tenant(pg: &PgPool, clickhouse_url: &str, tenant: &str, since:
         };
         let venue_id: i32 = s.get("venue_id");
         let period_secs = u32::try_from(s.get::<i32, _>("period_secs")).unwrap_or(60);
-        let lookback = record.values.keys().filter_map(|k| features::runtime::lookback_bars(k)).max().unwrap_or(1);
+        let lookback = record
+            .values
+            .keys()
+            .filter_map(|k| features::runtime::lookback_bars(k))
+            .max()
+            .unwrap_or(1);
         let period_ns = i64::from(period_secs) * 1_000_000_000;
         let event_open_ns = record.event_time.timestamp_nanos_opt().unwrap_or(0);
         let to_close = event_open_ns + period_ns + 1;
         let from_close = event_open_ns + period_ns - (i64::from(lookback) + 2) * period_ns;
-        let bars = store.load_bars_by_key(record.instrument_id, venue_id, period_secs, from_close, to_close).await?;
+        let bars = store
+            .load_bars_by_key(
+                record.instrument_id,
+                venue_id,
+                period_secs,
+                from_close,
+                to_close,
+            )
+            .await?;
         let Some(served_bar) = bars.iter().find(|b| b.open_ns == event_open_ns) else {
             report.unrecomputable += record.values.len();
             continue;
         };
         // Recompute through the same densification the serve used, or the diff
         // reports code drift every time a gap moves (SPEC 2, INV-14).
-        let clock = features::densify_bars(&bars.iter().map(backtest::warmup::bar_obs).collect::<Vec<_>>(), period_ns);
+        let clock = features::densify_bars(
+            &bars
+                .iter()
+                .map(backtest::warmup::bar_obs)
+                .collect::<Vec<_>>(),
+            period_ns,
+        );
         let Some(decision) = clock.decision_at(served_bar.knowledge_ns) else {
             report.unrecomputable += record.values.len();
             continue;

@@ -189,7 +189,10 @@ async fn a_deleted_preference_does_not_reach_the_next_brief() {
     let user = Uuid::new_v4();
 
     store
-        .put(user, &preference("pref_x", "BTC-USD", "avoid weekend gaps", user))
+        .put(
+            user,
+            &preference("pref_x", "BTC-USD", "avoid weekend gaps", user),
+        )
         .await
         .expect("stores");
     sqlx::query("UPDATE agent_memory.entry SET archived = true WHERE entry_id = 'pref_x'")
@@ -201,7 +204,10 @@ async fn a_deleted_preference_does_not_reach_the_next_brief() {
         .by_kind(user, Kind::UserPreference, 200)
         .await
         .expect("the driver's read");
-    assert!(entries.is_empty(), "the deleted preference is still readable");
+    assert!(
+        entries.is_empty(),
+        "the deleted preference is still readable"
+    );
 
     let brief = harness::memory::assemble_brief(
         &Uuid::new_v4().to_string(),

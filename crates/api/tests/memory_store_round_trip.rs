@@ -159,10 +159,16 @@ async fn every_field_survives_the_round_trip() {
     assert_eq!(r.evidence_ids, written.evidence_ids, "evidence_ids");
     assert_eq!(r.data_window, written.data_window, "data_window");
     assert_eq!(r.valid_until, written.valid_until, "valid_until");
-    assert_eq!(r.provenance, written.provenance, "provenance — all four parts");
+    assert_eq!(
+        r.provenance, written.provenance,
+        "provenance — all four parts"
+    );
     assert_eq!(r.created_by, written.created_by, "created_by");
     assert_eq!(r.conflicts_with, written.conflicts_with, "conflicts_with");
-    assert_eq!(r.corroborated_by, written.corroborated_by, "corroborated_by");
+    assert_eq!(
+        r.corroborated_by, written.corroborated_by,
+        "corroborated_by"
+    );
     assert_eq!(r.corroborations, written.corroborations, "corroborations");
     assert_eq!(r.stale, written.stale, "stale");
     assert_eq!(r.cited_by_chain, written.cited_by_chain, "cited_by_chain");
@@ -229,7 +235,11 @@ async fn one_users_memory_is_not_another_users() {
 
     let mine = store.for_subject(a, "BTC-USD 1h", 10).await.expect("runs");
     assert_eq!(mine.len(), 1, "and user a still sees their own");
-    assert_eq!(mine[0].claim, full_entry("f_a").claim, "and it came back whole");
+    assert_eq!(
+        mine[0].claim,
+        full_entry("f_a").claim,
+        "and it came back whole"
+    );
 }
 
 /// A user preference stores, lists and archives (S-4.6).
@@ -392,7 +402,11 @@ async fn a_superseded_profile_is_retained_and_the_current_view_shows_one() {
         .by_kind(user, Kind::InstrumentProfile, 10)
         .await
         .expect("the current view reads");
-    assert_eq!(current.len(), 1, "the current view shows the succession twice");
+    assert_eq!(
+        current.len(),
+        1,
+        "the current view shows the succession twice"
+    );
     assert_eq!(current[0].id, "profile_feb");
     assert!(current[0].claim.contains("19bps"));
 }
@@ -560,7 +574,10 @@ async fn every_gate_refusal_produces_an_entry_the_store_accepts() {
 
     let gates = [
         (backtest::gates::Gate::Integrity, vec!["cost.below_floor"]),
-        (backtest::gates::Gate::Integrity, vec!["lookahead.higher_tf_open"]),
+        (
+            backtest::gates::Gate::Integrity,
+            vec!["lookahead.higher_tf_open"],
+        ),
         (backtest::gates::Gate::SinglePath, vec![]),
         (backtest::gates::Gate::Robustness, vec![]),
         (backtest::gates::Gate::Significance, vec![]),

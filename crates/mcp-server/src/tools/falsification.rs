@@ -205,7 +205,6 @@ pub async fn run_oracle_test(api: &ApiClient, params: &Value) -> Value {
     .await
 }
 
-
 // ── evidence (ADR-P7-05) ─────────────────────────────────────────────────────
 
 /// `get_trade_list` — the fills, with concentration measured.
@@ -502,7 +501,10 @@ mod tests {
         p["observed"] = json!("sharpe is 0.4");
         let e = err(p);
         assert_eq!(e["error"], "not_falsifiable");
-        assert!(e["fix"].as_str().unwrap().contains("A low score is not a kill"));
+        assert!(e["fix"]
+            .as_str()
+            .unwrap()
+            .contains("A low score is not a kill"));
     }
 
     #[test]
@@ -581,7 +583,11 @@ mod tests {
     #[test]
     fn every_tool_is_declared_with_a_schema() {
         let specs = specs();
-        assert_eq!(specs.len(), 7, "four falsification tools plus three evidence tools");
+        assert_eq!(
+            specs.len(),
+            7,
+            "four falsification tools plus three evidence tools"
+        );
         for s in &specs {
             assert!(!s.description.is_empty(), "{}", s.name);
             assert_eq!(s.input_schema["type"], "object");
@@ -655,8 +661,14 @@ mod tests {
     #[test]
     fn the_evidence_tools_say_what_they_do_not_prove() {
         let trades = notes("get_trade_list");
-        assert!(trades.contains("Concentration alone is not a kill"), "{trades}");
-        assert!(trades.contains("probe_data_quality"), "it must point at the next step: {trades}");
+        assert!(
+            trades.contains("Concentration alone is not a kill"),
+            "{trades}"
+        );
+        assert!(
+            trades.contains("probe_data_quality"),
+            "it must point at the next step: {trades}"
+        );
 
         let quality = notes("probe_data_quality");
         assert!(quality.contains("NOT a clean bill of health"), "{quality}");
@@ -673,12 +685,18 @@ mod tests {
     #[test]
     fn the_frontier_tool_defaults_to_the_only_honest_execution_style() {
         let s = specs();
-        let d = s.iter().find(|s| s.name == "check_tradeable_frontier").unwrap();
+        let d = s
+            .iter()
+            .find(|s| s.name == "check_tradeable_frontier")
+            .unwrap();
         let style = &d.input_schema["properties"]["execution_style"];
         assert_eq!(style["enum"][0], "taker_both");
         // The *reason* stays in the schema rather than the guide: it is read at
         // the moment the field is filled in, which is the moment it matters.
-        assert!(style["description"].as_str().unwrap().contains("queue model"));
+        assert!(style["description"]
+            .as_str()
+            .unwrap()
+            .contains("queue model"));
     }
 
     /// The oracle test is about the simulator. A description that reads as a
@@ -688,7 +706,10 @@ mod tests {
         let n = notes("run_oracle_test");
         assert!(n.contains("test of the SIMULATOR"), "{n}");
         assert!(n.contains("must LOSE money"), "{n}");
-        assert!(n.contains("report_evaluator_defect"), "route failure onward: {n}");
+        assert!(
+            n.contains("report_evaluator_defect"),
+            "route failure onward: {n}"
+        );
         assert!(described("run_oracle_test").contains("EVALUATOR CAN SEE AN EDGE"));
     }
 }

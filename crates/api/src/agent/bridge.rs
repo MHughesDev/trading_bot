@@ -185,7 +185,6 @@ mod tests {
     use super::*;
     use harness::registry::{FINISH_TASK, SEARCH_TOOLS};
 
-
     /// The check that makes an unclassified tool impossible to ship. `stamp` already
     /// defaults an unknown tool to destructive, which is the safe direction — but
     /// silently shipping a misclassified tool is not the same as refusing to build

@@ -79,13 +79,22 @@ pub async fn trip_kill_switch(
     let event = match MonitorEvent::new(Scope::Global, Family::Platform, EventKind::Tripped, &actor)
     {
         Ok(e) => e.with_reason(reason.clone()),
-        Err(e) => return (StatusCode::FORBIDDEN, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": e.to_string() })),
+            )
+                .into_response()
+        }
     };
 
     // Durable first, mirror second. If the write fails the switch is not tripped
     // and the caller is told — which is better than an in-memory halt that the
     // next restart forgets and nobody is told about.
-    if let Err(e) = MonitorStore::new(state.pg.clone()).trip(&event, &reason).await {
+    if let Err(e) = MonitorStore::new(state.pg.clone())
+        .trip(&event, &reason)
+        .await
+    {
         tracing::error!(error = %e, "could not persist the kill switch");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,

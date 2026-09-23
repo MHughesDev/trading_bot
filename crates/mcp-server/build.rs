@@ -34,7 +34,10 @@ fn main() {
     println!("cargo:rerun-if-changed={}", templates.display());
     println!(
         "cargo:rerun-if-changed={}",
-        root.join("apps").join("skill-runner").join("preamble.py").display()
+        root.join("apps")
+            .join("skill-runner")
+            .join("preamble.py")
+            .display()
     );
 
     let mut files: Vec<(String, PathBuf)> = Vec::new();
@@ -94,6 +97,7 @@ fn main() {
     }
     out.push_str("];\n");
 
-    let dest = PathBuf::from(std::env::var("OUT_DIR").expect("cargo sets this")).join("templates.rs");
+    let dest =
+        PathBuf::from(std::env::var("OUT_DIR").expect("cargo sets this")).join("templates.rs");
     std::fs::write(&dest, out).expect("the generated template list is writable");
 }

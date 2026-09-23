@@ -73,7 +73,11 @@ const HISTORY_URL: &str = "https://futures.kraken.com/derivatives/api/v3/histori
 /// Identify the platform rather than pretending to be a browser. Kraken 403s
 /// requests with a missing or non-standard User-Agent, and an honest one is also
 /// what lets them throttle us specifically instead of our whole egress IP.
-const USER_AGENT: &str = concat!("trading_bot-research/", env!("CARGO_PKG_VERSION"), " (+forward data collector)");
+const USER_AGENT: &str = concat!(
+    "trading_bot-research/",
+    env!("CARGO_PKG_VERSION"),
+    " (+forward data collector)"
+);
 
 #[derive(Debug, thiserror::Error)]
 pub enum FundingError {
@@ -96,8 +100,13 @@ pub enum FundingError {
 /// Wraps the refusal so a clock skew that would make a row observed *before* its
 /// event surfaces as a collector error rather than a stored row that knows the
 /// future.
-fn observed(src: &SourceDecl, event_time: DateTime<Utc>, received_at: DateTime<Utc>) -> Result<Knowledge, FundingError> {
-    src.knowledge_for(event_time, Collection::Forward { received_at }).map_err(|e| FundingError::Provenance(e.to_string()))
+fn observed(
+    src: &SourceDecl,
+    event_time: DateTime<Utc>,
+    received_at: DateTime<Utc>,
+) -> Result<Knowledge, FundingError> {
+    src.knowledge_for(event_time, Collection::Forward { received_at })
+        .map_err(|e| FundingError::Provenance(e.to_string()))
 }
 
 /// A realized settlement, or the venue's prediction of the next one.
@@ -150,7 +159,12 @@ impl FundingObservation {
     /// the same key rather than writing a second row.
     #[must_use]
     pub fn dedup_key(&self) -> (String, String, &'static str, i64) {
-        (self.venue.clone(), self.instrument.clone(), self.kind.as_str(), self.event_time.timestamp_nanos_opt().unwrap_or(0))
+        (
+            self.venue.clone(),
+            self.instrument.clone(),
+            self.kind.as_str(),
+            self.event_time.timestamp_nanos_opt().unwrap_or(0),
+        )
     }
 }
 
@@ -172,7 +186,11 @@ pub struct OpenInterestObservation {
 impl OpenInterestObservation {
     #[must_use]
     pub fn dedup_key(&self) -> (String, String, i64) {
-        (self.venue.clone(), self.instrument.clone(), self.event_time.timestamp_nanos_opt().unwrap_or(0))
+        (
+            self.venue.clone(),
+            self.instrument.clone(),
+            self.event_time.timestamp_nanos_opt().unwrap_or(0),
+        )
     }
 }
 
@@ -237,7 +255,12 @@ struct WireRate {
 }
 
 fn dec(field: &'static str, n: &serde_json::Number) -> Result<Decimal, FundingError> {
-    n.to_string().parse::<Decimal>().map_err(|_| FundingError::Unparseable { field, value: n.to_string() })
+    n.to_string()
+        .parse::<Decimal>()
+        .map_err(|_| FundingError::Unparseable {
+            field,
+            value: n.to_string(),
+        })
 }
 
 /// Round an instant down to the settlement grid.
@@ -273,8 +296,12 @@ pub fn next_settlement(t: DateTime<Utc>) -> DateTime<Utc> {
 ///
 /// # Errors
 /// A non-success envelope, or malformed JSON.
-pub fn parse_tickers(body: &str, received_at: DateTime<Utc>) -> Result<TickerSnapshot, FundingError> {
-    let env: TickersEnvelope = serde_json::from_str(body).map_err(|e| FundingError::Http(e.to_string()))?;
+pub fn parse_tickers(
+    body: &str,
+    received_at: DateTime<Utc>,
+) -> Result<TickerSnapshot, FundingError> {
+    let env: TickersEnvelope =
+        serde_json::from_str(body).map_err(|e| FundingError::Http(e.to_string()))?;
     if env.result.as_deref() != Some("success") {
         return Err(FundingError::VenueError(
             env.result.unwrap_or_else(|| "missing".into()),
@@ -381,8 +408,13 @@ pub fn parse_tickers(body: &str, received_at: DateTime<Utc>) -> Result<TickerSna
 ///
 /// # Errors
 /// A non-success envelope, malformed JSON, or an unparseable rate.
-pub fn parse_history(body: &str, instrument: &str, received_at: DateTime<Utc>) -> Result<Vec<FundingObservation>, FundingError> {
-    let env: HistoryEnvelope = serde_json::from_str(body).map_err(|e| FundingError::Http(e.to_string()))?;
+pub fn parse_history(
+    body: &str,
+    instrument: &str,
+    received_at: DateTime<Utc>,
+) -> Result<Vec<FundingObservation>, FundingError> {
+    let env: HistoryEnvelope =
+        serde_json::from_str(body).map_err(|e| FundingError::Http(e.to_string()))?;
     if env.result.as_deref() != Some("success") {
         return Err(FundingError::VenueError(
             env.result.unwrap_or_else(|| "missing".into()),
@@ -393,7 +425,10 @@ pub fn parse_history(body: &str, instrument: &str, received_at: DateTime<Utc>) -
     let mut out = Vec::with_capacity(env.rates.len());
     for r in env.rates {
         let rate = dec("fundingRate", &r.funding_rate)?;
-        let relative = r.relative_funding_rate.as_ref().and_then(|n| dec("relativeFundingRate", n).ok());
+        let relative = r
+            .relative_funding_rate
+            .as_ref()
+            .and_then(|n| dec("relativeFundingRate", n).ok());
         out.push(FundingObservation {
             venue: VENUE.into(),
             instrument: instrument.to_string(),
@@ -470,7 +505,10 @@ impl KrakenFuturesClient {
     /// `(granted, denied)` for the ticker and history limiters.
     #[must_use]
     pub fn limiter_counters(&self) -> ((u64, u64), (u64, u64)) {
-        (self.ticker_limiter.counters(), self.history_limiter.counters())
+        (
+            self.ticker_limiter.counters(),
+            self.history_limiter.counters(),
+        )
     }
 
     /// Poll every perpetual's funding rate and open interest in one request.
@@ -479,11 +517,22 @@ impl KrakenFuturesClient {
     /// Refused by the limiter, an HTTP failure, or a venue error.
     pub async fn tickers(&self) -> Result<TickerSnapshot, FundingError> {
         self.ticker_limiter.try_acquire()?;
-        let resp = self.http.get(&self.base_tickers).send().await.map_err(|e| FundingError::Http(e.to_string()))?;
+        let resp = self
+            .http
+            .get(&self.base_tickers)
+            .send()
+            .await
+            .map_err(|e| FundingError::Http(e.to_string()))?;
         let status = resp.status();
-        let body = resp.text().await.map_err(|e| FundingError::Http(e.to_string()))?;
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| FundingError::Http(e.to_string()))?;
         if !status.is_success() {
-            return Err(FundingError::Http(format!("{status}: {}", body.chars().take(200).collect::<String>())));
+            return Err(FundingError::Http(format!(
+                "{status}: {}",
+                body.chars().take(200).collect::<String>()
+            )));
         }
         parse_tickers(&body, Utc::now())
     }
@@ -492,7 +541,10 @@ impl KrakenFuturesClient {
     ///
     /// # Errors
     /// Refused by the limiter, an HTTP failure, or a venue error.
-    pub async fn funding_history(&self, instrument: &str) -> Result<Vec<FundingObservation>, FundingError> {
+    pub async fn funding_history(
+        &self,
+        instrument: &str,
+    ) -> Result<Vec<FundingObservation>, FundingError> {
         self.history_limiter.try_acquire()?;
         let resp = self
             .http
@@ -502,9 +554,15 @@ impl KrakenFuturesClient {
             .await
             .map_err(|e| FundingError::Http(e.to_string()))?;
         let status = resp.status();
-        let body = resp.text().await.map_err(|e| FundingError::Http(e.to_string()))?;
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| FundingError::Http(e.to_string()))?;
         if !status.is_success() {
-            return Err(FundingError::Http(format!("{status}: {}", body.chars().take(200).collect::<String>())));
+            return Err(FundingError::Http(format!(
+                "{status}: {}",
+                body.chars().take(200).collect::<String>()
+            )));
         }
         parse_history(&body, instrument, Utc::now())
     }
@@ -544,11 +602,21 @@ mod tests {
     fn a_ticker_poll_yields_funding_and_open_interest() {
         let s = parse_tickers(TICKERS, at(5, 40)).unwrap();
         // Two perpetuals; the dated future contributes neither funding nor OI.
-        let realized: Vec<_> = s.funding.iter().filter(|f| f.kind == FundingKind::Realized).collect();
+        let realized: Vec<_> = s
+            .funding
+            .iter()
+            .filter(|f| f.kind == FundingKind::Realized)
+            .collect();
         assert_eq!(realized.len(), 2);
-        assert!(!s.open_interest.iter().any(|o| o.instrument.starts_with("FI_")));
+        assert!(!s
+            .open_interest
+            .iter()
+            .any(|o| o.instrument.starts_with("FI_")));
         assert_eq!(s.open_interest.len(), 2);
-        let btc = realized.iter().find(|f| f.instrument == "PF_XBTUSD").unwrap();
+        let btc = realized
+            .iter()
+            .find(|f| f.instrument == "PF_XBTUSD")
+            .unwrap();
         assert_eq!(btc.rate, "0.5202031591870675".parse::<Decimal>().unwrap());
         assert!(btc.relative_rate.is_some());
     }
@@ -563,13 +631,32 @@ mod tests {
         let s = parse_tickers(TICKERS, received).unwrap();
         assert!(!s.funding.is_empty() && !s.open_interest.is_empty());
         for f in &s.funding {
-            assert!(!f.knowledge.is_derived(), "{} was polled forward and must be observed", f.instrument);
-            assert!(f.knowledge.is_forward_evidence(), "{} must be admissible under D-P3", f.instrument);
-            assert!(!f.knowledge.quality_flags().contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
-            assert_eq!(f.knowledge.time(), received, "the real receipt is kept, not a sentinel");
+            assert!(
+                !f.knowledge.is_derived(),
+                "{} was polled forward and must be observed",
+                f.instrument
+            );
+            assert!(
+                f.knowledge.is_forward_evidence(),
+                "{} must be admissible under D-P3",
+                f.instrument
+            );
+            assert!(!f
+                .knowledge
+                .quality_flags()
+                .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
+            assert_eq!(
+                f.knowledge.time(),
+                received,
+                "the real receipt is kept, not a sentinel"
+            );
         }
         for o in &s.open_interest {
-            assert!(!o.knowledge.is_derived(), "{} was polled forward and must be observed", o.instrument);
+            assert!(
+                !o.knowledge.is_derived(),
+                "{} was polled forward and must be observed",
+                o.instrument
+            );
             assert!(o.knowledge.is_forward_evidence());
             assert_eq!(o.knowledge.time(), received);
         }
@@ -582,10 +669,22 @@ mod tests {
         let rows = parse_history(HISTORY, "PF_XBTUSD", at(5, 40)).unwrap();
         assert!(!rows.is_empty());
         for f in &rows {
-            assert!(f.knowledge.is_derived(), "a pulled settlement has no receipt");
-            assert!(!f.knowledge.is_forward_evidence(), "the sentinel must never reach Gate 15's evidence (D-P3)");
-            assert!(f.knowledge.quality_flags().contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
-            assert_eq!(f.knowledge.time(), f.event_time + Duration::seconds(SETTLEMENT_SECS));
+            assert!(
+                f.knowledge.is_derived(),
+                "a pulled settlement has no receipt"
+            );
+            assert!(
+                !f.knowledge.is_forward_evidence(),
+                "the sentinel must never reach Gate 15's evidence (D-P3)"
+            );
+            assert!(f
+                .knowledge
+                .quality_flags()
+                .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
+            assert_eq!(
+                f.knowledge.time(),
+                f.event_time + Duration::seconds(SETTLEMENT_SECS)
+            );
         }
     }
 
@@ -621,8 +720,16 @@ mod tests {
         // an hour boundary makes the realized leg fine and lets us aim the skew at
         // a row whose event time is genuinely ahead of the receipt.
         let src = SourceDecl::kraken_futures_ticker();
-        let skewed = src.knowledge_for(at(6, 0), Collection::Forward { received_at: at(5, 40) });
-        assert!(skewed.is_err(), "a receipt before its event must be refused, not written");
+        let skewed = src.knowledge_for(
+            at(6, 0),
+            Collection::Forward {
+                received_at: at(5, 40),
+            },
+        );
+        assert!(
+            skewed.is_err(),
+            "a receipt before its event must be refused, not written"
+        );
         assert!(observed(&src, at(6, 0), at(5, 40)).is_err());
         // The collector surfaces it as a provenance error rather than a silent row.
         match observed(&src, at(6, 0), at(5, 40)) {
@@ -638,12 +745,30 @@ mod tests {
     fn two_polls_in_one_hour_are_one_settlement() {
         let a = parse_tickers(TICKERS, at(5, 5)).unwrap();
         let b = parse_tickers(TICKERS, at(5, 55)).unwrap();
-        let ka: Vec<_> = a.funding.iter().filter(|f| f.kind == FundingKind::Realized).map(FundingObservation::dedup_key).collect();
-        let kb: Vec<_> = b.funding.iter().filter(|f| f.kind == FundingKind::Realized).map(FundingObservation::dedup_key).collect();
-        assert_eq!(ka, kb, "two polls in the same hour must produce the same idempotence keys");
+        let ka: Vec<_> = a
+            .funding
+            .iter()
+            .filter(|f| f.kind == FundingKind::Realized)
+            .map(FundingObservation::dedup_key)
+            .collect();
+        let kb: Vec<_> = b
+            .funding
+            .iter()
+            .filter(|f| f.kind == FundingKind::Realized)
+            .map(FundingObservation::dedup_key)
+            .collect();
+        assert_eq!(
+            ka, kb,
+            "two polls in the same hour must produce the same idempotence keys"
+        );
         // And the next hour is genuinely a different settlement.
         let c = parse_tickers(TICKERS, at(6, 5)).unwrap();
-        let kc: Vec<_> = c.funding.iter().filter(|f| f.kind == FundingKind::Realized).map(FundingObservation::dedup_key).collect();
+        let kc: Vec<_> = c
+            .funding
+            .iter()
+            .filter(|f| f.kind == FundingKind::Realized)
+            .map(FundingObservation::dedup_key)
+            .collect();
         assert_ne!(ka, kc);
     }
 
@@ -652,11 +777,23 @@ mod tests {
     #[test]
     fn a_prediction_is_for_the_next_settlement_and_is_kept_apart() {
         let s = parse_tickers(TICKERS, at(5, 40)).unwrap();
-        let p = s.funding.iter().find(|f| f.kind == FundingKind::Predicted).expect("a prediction");
+        let p = s
+            .funding
+            .iter()
+            .find(|f| f.kind == FundingKind::Predicted)
+            .expect("a prediction");
         assert_eq!(p.event_time, at(6, 0));
-        let r = s.funding.iter().find(|f| f.kind == FundingKind::Realized && f.instrument == p.instrument).unwrap();
+        let r = s
+            .funding
+            .iter()
+            .find(|f| f.kind == FundingKind::Realized && f.instrument == p.instrument)
+            .unwrap();
         assert_ne!(p.event_time, r.event_time);
-        assert_ne!(p.dedup_key(), r.dedup_key(), "a prediction and a settlement must never share a key");
+        assert_ne!(
+            p.dedup_key(),
+            r.dedup_key(),
+            "a prediction and a settlement must never share a key"
+        );
         assert_eq!(p.kind.as_str(), "predicted");
     }
 
@@ -695,14 +832,20 @@ mod tests {
         assert_eq!(s.funding.len(), 1);
         assert_eq!(s.funding[0].instrument, "PF_XBTUSD");
         assert_eq!(s.open_interest.len(), 2);
-        assert!(!s.open_interest.iter().any(|o| o.open_interest == Decimal::ZERO));
+        assert!(!s
+            .open_interest
+            .iter()
+            .any(|o| o.open_interest == Decimal::ZERO));
     }
 
     #[test]
     fn history_parses_the_venues_real_shape() {
         let rows = parse_history(HISTORY, "PF_XBTUSD", at(5, 40)).unwrap();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].event_time, Utc.with_ymd_and_hms(2025, 9, 10, 8, 0, 0).unwrap());
+        assert_eq!(
+            rows[0].event_time,
+            Utc.with_ymd_and_hms(2025, 9, 10, 8, 0, 0).unwrap()
+        );
         assert_eq!(rows[0].kind, FundingKind::Realized);
         assert!(rows[0].relative_rate.is_some());
         assert_ne!(rows[0].dedup_key(), rows[1].dedup_key());
@@ -716,7 +859,11 @@ mod tests {
         // A deliberately tiny budget, so the test spends it in three connect
         // failures instead of a hundred. Tightening a declared limit is always
         // safe; the real limits are what `new()` installs.
-        let limit = VenueLimit { capacity: 3, refill_tokens: 3, ..VenueLimit::kraken_futures_history() };
+        let limit = VenueLimit {
+            capacity: 3,
+            refill_tokens: 3,
+            ..VenueLimit::kraken_futures_history()
+        };
         let c = KrakenFuturesClient::new()
             .unwrap()
             .with_bases("http://127.0.0.1:1/tickers", "http://127.0.0.1:1/history")
@@ -727,7 +874,10 @@ mod tests {
             let _ = c.funding_history("PF_XBTUSD").await;
         }
         let e = c.funding_history("PF_XBTUSD").await.unwrap_err();
-        assert!(matches!(e, FundingError::RateLimited(_)), "past the declared budget the client must refuse: {e}");
+        assert!(
+            matches!(e, FundingError::RateLimited(_)),
+            "past the declared budget the client must refuse: {e}"
+        );
         let (_, (granted, denied)) = c.limiter_counters();
         assert_eq!(granted, limit.capacity);
         assert!(denied >= 1);

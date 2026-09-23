@@ -8,7 +8,8 @@
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 
 fn base_url() -> String {
-    std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://trading:trading@localhost:5432/trading".into())
+    std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://trading:trading@localhost:5432/trading".into())
 }
 
 fn with_db(url: &str, db: &str) -> String {
@@ -17,16 +18,31 @@ fn with_db(url: &str, db: &str) -> String {
 }
 
 async fn migrated() -> PgPool {
-    let mut admin = PgConnection::connect(&with_db(&base_url(), "postgres")).await.expect("postgres reachable");
-    admin.execute("DROP DATABASE IF EXISTS invariants_test WITH (FORCE)").await.unwrap();
-    admin.execute("CREATE DATABASE invariants_test").await.unwrap();
-    let pool = PgPool::connect(&with_db(&base_url(), "invariants_test")).await.unwrap();
-    storage::postgres::run_migrations(&pool).await.expect("every migration applies to an empty database");
+    let mut admin = PgConnection::connect(&with_db(&base_url(), "postgres"))
+        .await
+        .expect("postgres reachable");
+    admin
+        .execute("DROP DATABASE IF EXISTS invariants_test WITH (FORCE)")
+        .await
+        .unwrap();
+    admin
+        .execute("CREATE DATABASE invariants_test")
+        .await
+        .unwrap();
+    let pool = PgPool::connect(&with_db(&base_url(), "invariants_test"))
+        .await
+        .unwrap();
+    storage::postgres::run_migrations(&pool)
+        .await
+        .expect("every migration applies to an empty database");
     pool
 }
 
 async fn rows(pool: &PgPool, sql: &str) -> Vec<String> {
-    sqlx::query_scalar::<_, String>(sql).fetch_all(pool).await.unwrap_or_else(|e| panic!("{sql}: {e}"))
+    sqlx::query_scalar::<_, String>(sql)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_else(|e| panic!("{sql}: {e}"))
 }
 
 const PLANE: &str = "('mlops','dataplane')";
@@ -78,7 +94,10 @@ async fn catalog_invariants() {
             AND (numeric_precision IS DISTINCT FROM 38 OR numeric_scale IS DISTINCT FROM 18)",
     )
     .await;
-    assert!(wrong_scale.is_empty(), "numeric columns not (38,18): {wrong_scale:?}");
+    assert!(
+        wrong_scale.is_empty(),
+        "numeric columns not (38,18): {wrong_scale:?}"
+    );
 
     // AT-08 · INV-07: no greek column in any table.
     let greeks = rows(
@@ -91,12 +110,16 @@ async fn catalog_invariants() {
     assert!(greeks.is_empty(), "greek columns: {greeks:?}");
 
     // S-1 · the runtime role can bypass nothing.
-    let (superuser, bypass): (bool, bool) =
-        sqlx::query_as("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'platform_app'")
-            .fetch_one(&pool)
-            .await
-            .expect("platform_app exists");
-    assert!(!superuser && !bypass, "platform_app must not be superuser or BYPASSRLS");
+    let (superuser, bypass): (bool, bool) = sqlx::query_as(
+        "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'platform_app'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("platform_app exists");
+    assert!(
+        !superuser && !bypass,
+        "platform_app must not be superuser or BYPASSRLS"
+    );
 
     // S-2 / AT-37 · every tenant-scoped table forces row-level security.
     let unforced = rows(
@@ -111,7 +134,10 @@ async fn catalog_invariants() {
         ),
     )
     .await;
-    assert!(unforced.is_empty(), "tenant tables without FORCE RLS: {unforced:?}");
+    assert!(
+        unforced.is_empty(),
+        "tenant tables without FORCE RLS: {unforced:?}"
+    );
 
     // INV-19 ⛔ · the runtime role cannot rewrite history.
     let mutable = rows(
@@ -125,7 +151,10 @@ async fn catalog_invariants() {
             AND privilege_type IN ('UPDATE','DELETE','TRUNCATE')",
     )
     .await;
-    assert!(mutable.is_empty(), "append-only tables grant mutation: {mutable:?}");
+    assert!(
+        mutable.is_empty(),
+        "append-only tables grant mutation: {mutable:?}"
+    );
 
     // INV-23 · no DDL: the runtime role owns nothing and cannot create in the plane.
     let owned = rows(
@@ -138,17 +167,23 @@ async fn catalog_invariants() {
     .await;
     assert!(owned.is_empty(), "runtime role owns objects: {owned:?}");
     for schema in ["mlops", "dataplane"] {
-        let can_create: bool = sqlx::query_scalar("SELECT has_schema_privilege('platform_app', $1, 'CREATE')")
-            .bind(schema)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let can_create: bool =
+            sqlx::query_scalar("SELECT has_schema_privilege('platform_app', $1, 'CREATE')")
+                .bind(schema)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert!(!can_create, "platform_app can CREATE in {schema}");
     }
 
     pool.close().await;
-    let mut admin = PgConnection::connect(&with_db(&base_url(), "postgres")).await.unwrap();
-    admin.execute("DROP DATABASE IF EXISTS invariants_test WITH (FORCE)").await.unwrap();
+    let mut admin = PgConnection::connect(&with_db(&base_url(), "postgres"))
+        .await
+        .unwrap();
+    admin
+        .execute("DROP DATABASE IF EXISTS invariants_test WITH (FORCE)")
+        .await
+        .unwrap();
 }
 
 /// AT-63 ⛔ · The platform seed is unreadable by the agent (SPEC §12.7,
@@ -191,7 +226,10 @@ async fn at63_the_platform_seed_is_unreadable_by_the_agent() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert!(!can_read, "the database would let agent_role read the platform seed");
+    assert!(
+        !can_read,
+        "the database would let agent_role read the platform seed"
+    );
 
     // No write, either — a seed the agent can set is a seed it has chosen.
     for privilege in ["INSERT", "UPDATE"] {
@@ -202,16 +240,20 @@ async fn at63_the_platform_seed_is_unreadable_by_the_agent() {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert!(!can_write, "agent_role has {privilege} on campaign.platform_seed");
+        assert!(
+            !can_write,
+            "agent_role has {privilege} on campaign.platform_seed"
+        );
     }
 
     // AT-65's database half: the capital ladder refuses a raise under a profile
     // that does not authorise capital, whoever writes the row.
-    let paper_authorises: bool =
-        sqlx::query_scalar("SELECT authorises_capital FROM mlops.gate_profile WHERE profile_id = 'paper_v1'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let paper_authorises: bool = sqlx::query_scalar(
+        "SELECT authorises_capital FROM mlops.gate_profile WHERE profile_id = 'paper_v1'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert!(!paper_authorises, "paper_v1 must not authorise capital");
 
     let refused = sqlx::query(
@@ -222,11 +264,19 @@ async fn at63_the_platform_seed_is_unreadable_by_the_agent() {
     )
     .execute(&pool)
     .await;
-    assert!(refused.is_err(), "a paper_v1 pass must not be able to raise the capital ramp");
+    assert!(
+        refused.is_err(),
+        "a paper_v1 pass must not be able to raise the capital ramp"
+    );
 
     pool.close().await;
-    let mut admin = PgConnection::connect(&with_db(&base_url(), "postgres")).await.unwrap();
-    admin.execute("DROP DATABASE IF EXISTS invariants_test WITH (FORCE)").await.unwrap();
+    let mut admin = PgConnection::connect(&with_db(&base_url(), "postgres"))
+        .await
+        .unwrap();
+    admin
+        .execute("DROP DATABASE IF EXISTS invariants_test WITH (FORCE)")
+        .await
+        .unwrap();
 }
 
 /// AT-42 ⛔ · Nothing that evaluates a strategy can read a smoothed regime
@@ -262,7 +312,10 @@ async fn at42_smoothed_regimes_are_unreachable_from_anything_that_evaluates() {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert!(!can_read, "{role} can read smoothed regime probabilities (R-07)");
+        assert!(
+            !can_read,
+            "{role} can read smoothed regime probabilities (R-07)"
+        );
 
         // And the filtered state it *is* allowed to read really is reachable —
         // the separation has to leave the causal half usable or strategies just
@@ -274,7 +327,10 @@ async fn at42_smoothed_regimes_are_unreachable_from_anything_that_evaluates() {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert!(filtered, "{role} cannot read the filtered regime state either");
+        assert!(
+            filtered,
+            "{role} cannot read the filtered regime state either"
+        );
     }
 
     // AT-44 ⛔ — no raw point estimate leaves the recommender.
@@ -314,7 +370,10 @@ async fn at42_smoothed_regimes_are_unreachable_from_anything_that_evaluates() {
     for role in ["backtest_role", "agent_role", "internal_ml_role"] {
         for table in ["regime_state_smoothed", "regime_separation"] {
             let mut tx = pool.begin().await.unwrap();
-            sqlx::query(&format!("SET LOCAL ROLE {role}")).execute(&mut *tx).await.unwrap();
+            sqlx::query(&format!("SET LOCAL ROLE {role}"))
+                .execute(&mut *tx)
+                .await
+                .unwrap();
             let attempt = sqlx::query(&format!("SELECT 1 FROM regime_research.{table} LIMIT 1"))
                 .execute(&mut *tx)
                 .await;
@@ -334,11 +393,18 @@ async fn at42_smoothed_regimes_are_unreachable_from_anything_that_evaluates() {
         // that can add a scope can choose the market its own result is measured
         // against (§12.7).
         let mut tx = pool.begin().await.unwrap();
-        sqlx::query(&format!("SET LOCAL ROLE {role}")).execute(&mut *tx).await.unwrap();
+        sqlx::query(&format!("SET LOCAL ROLE {role}"))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
         let read = sqlx::query("SELECT 1 FROM regime_causal.regime_scope LIMIT 1")
             .execute(&mut *tx)
             .await;
-        assert!(read.is_ok(), "{role} cannot read the scope registry: {:?}", read.err());
+        assert!(
+            read.is_ok(),
+            "{role} cannot read the scope registry: {:?}",
+            read.err()
+        );
         let write = sqlx::query(
             "INSERT INTO regime_causal.regime_scope
                  (market_scope, asset_class, series_symbol, series_base_period_secs,
@@ -367,7 +433,10 @@ async fn at42_smoothed_regimes_are_unreachable_from_anything_that_evaluates() {
     )
     .execute(&pool)
     .await;
-    assert!(no_reason.is_err(), "a market scope with no rationale must be refused");
+    assert!(
+        no_reason.is_err(),
+        "a market scope with no rationale must be refused"
+    );
 
     // And the seeded configuration is exactly one scope, for the one market the
     // platform has bars for (ADR-P3-08).
@@ -390,9 +459,17 @@ async fn at42_smoothed_regimes_are_unreachable_from_anything_that_evaluates() {
     )
     .execute(&pool)
     .await;
-    assert!(no_evidence.is_err(), "an insight with no evidence must be refused");
+    assert!(
+        no_evidence.is_err(),
+        "an insight with no evidence must be refused"
+    );
 
     pool.close().await;
-    let mut admin = PgConnection::connect(&with_db(&base_url(), "postgres")).await.unwrap();
-    admin.execute("DROP DATABASE IF EXISTS invariants_test WITH (FORCE)").await.unwrap();
+    let mut admin = PgConnection::connect(&with_db(&base_url(), "postgres"))
+        .await
+        .unwrap();
+    admin
+        .execute("DROP DATABASE IF EXISTS invariants_test WITH (FORCE)")
+        .await
+        .unwrap();
 }

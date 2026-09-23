@@ -175,9 +175,7 @@ impl Score {
     /// average nobody should read.
     #[must_use]
     pub fn passed(&self) -> bool {
-        self.judgements
-            .iter()
-            .all(|j| j.not_applicable || j.passed)
+        self.judgements.iter().all(|j| j.not_applicable || j.passed)
     }
 
     /// What went wrong, named.
@@ -248,7 +246,10 @@ fn rejected_when_it_should(planted: &Planted, observed: &Observed) -> Judgement 
                  safeguard in the system exists to make harder, and it is not offset by \
                  anything else the run got right.",
             ),
-            Some(v) => pass(c, format!("did not support a planted null (said `{}`)", v.as_str())),
+            Some(v) => pass(
+                c,
+                format!("did not support a planted null (said `{}`)", v.as_str()),
+            ),
             None => fail(c, "reached no verdict on a case with a knowable answer"),
         },
         Truth::LeakingFeature { feature } => {
@@ -277,7 +278,10 @@ fn rejected_when_it_should(planted: &Planted, observed: &Observed) -> Judgement 
         }
         Truth::Dominance { winner } => match observed.ranked_first.as_deref() {
             Some(first) if first == winner => pass(c, format!("ranked `{winner}` first")),
-            Some(first) => fail(c, format!("ranked `{first}` over the planted winner `{winner}`")),
+            Some(first) => fail(
+                c,
+                format!("ranked `{first}` over the planted winner `{winner}`"),
+            ),
             None => fail(
                 c,
                 format!("found `{winner}` indistinguishable from a candidate it dominates"),
@@ -286,8 +290,10 @@ fn rejected_when_it_should(planted: &Planted, observed: &Observed) -> Judgement 
         Truth::KnownEdge { effect } => match observed.verdict {
             Some(Verdict::Refuted) => fail(
                 c,
-                format!("refuted a planted edge of {effect}. Expensive rather than dangerous, \
-                         but still wrong."),
+                format!(
+                    "refuted a planted edge of {effect}. Expensive rather than dangerous, \
+                         but still wrong."
+                ),
             ),
             Some(_) | None => pass(c, "did not refute a planted edge"),
         },
@@ -318,7 +324,10 @@ fn stopped_at_diminishing_returns(observed: &Observed) -> Judgement {
         // failure: the cap and the class rule are legitimate stops.
         (Some(other), _) => pass(
             c,
-            format!("stopped on `{}`, which is a rule and not a guess", other.as_str()),
+            format!(
+                "stopped on `{}`, which is a rule and not a guess",
+                other.as_str()
+            ),
         ),
         (None, Some(Prospect::Worthwhile) | None) => {
             pass(c, "the chain was still paying when the run ended")
@@ -336,7 +345,10 @@ fn chose_the_workflow(planted: &Planted, observed: &Observed) -> Judgement {
     if observed.workflow == planted.question_shape {
         pass(
             c,
-            format!("chose `{:?}`, which is what the question shape calls for", observed.workflow),
+            format!(
+                "chose `{:?}`, which is what the question shape calls for",
+                observed.workflow
+            ),
         )
     } else {
         fail(
@@ -404,7 +416,10 @@ fn produced_knowledge(observed: &Observed) -> Judgement {
             ),
         )
     } else if observed.yielded.trials_spent == 0 && observed.yielded.knowledge_units() == 0 {
-        skip(c, "the run spent nothing and produced nothing, which is idle rather than barren")
+        skip(
+            c,
+            "the run spent nothing and produced nothing, which is idle rather than barren",
+        )
     } else {
         pass(
             c,
@@ -494,7 +509,9 @@ mod tests {
         let s = score(&planted, &run);
         assert!(!s.passed());
         assert!(
-            s.failures().iter().any(|f| f.contains("avoided_the_duplicate")),
+            s.failures()
+                .iter()
+                .any(|f| f.contains("avoided_the_duplicate")),
             "{:?}",
             s.failures()
         );
@@ -550,9 +567,7 @@ mod tests {
         run.prospect = Some(Prospect::Exhausted);
         run.stopped_because = None;
         let s = score(&null_case(), &run);
-        let j = s
-            .judgement(Criterion::StoppedAtDiminishingReturns)
-            .unwrap();
+        let j = s.judgement(Criterion::StoppedAtDiminishingReturns).unwrap();
         assert!(!j.passed);
         assert!(j.detail.contains("looks like persistence"), "{}", j.detail);
     }
@@ -594,9 +609,7 @@ mod tests {
         let mut run = good_run();
         run.falsifier = None;
         let s = score(&null_case(), &run);
-        let j = s
-            .judgement(Criterion::SealedAnEvaluableFalsifier)
-            .unwrap();
+        let j = s.judgement(Criterion::SealedAnEvaluableFalsifier).unwrap();
         assert!(!j.passed);
         assert!(j.detail.contains("can never refute"), "{}", j.detail);
     }
@@ -631,10 +644,12 @@ mod tests {
             trials_spent: 4,
             ..Yield::default()
         };
-        assert!(!score(&null_case(), &run)
-            .judgement(Criterion::ProducedKnowledge)
-            .unwrap()
-            .passed);
+        assert!(
+            !score(&null_case(), &run)
+                .judgement(Criterion::ProducedKnowledge)
+                .unwrap()
+                .passed
+        );
 
         run.yielded = Yield::default();
         let j = score(&null_case(), &run)
@@ -657,9 +672,7 @@ mod tests {
                 question_shape: Workflow::Investigate,
             },
             Planted {
-                truth: Truth::Dominance {
-                    winner: "b".into(),
-                },
+                truth: Truth::Dominance { winner: "b".into() },
                 question_shape: Workflow::Compare,
             },
             Planted {

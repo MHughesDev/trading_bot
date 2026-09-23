@@ -80,7 +80,10 @@ pub struct BackfillPage {
 impl BackfillPage {
     #[must_use]
     pub fn end_of_window() -> Self {
-        Self { bars: Vec::new(), covered_to: None }
+        Self {
+            bars: Vec::new(),
+            covered_to: None,
+        }
     }
 }
 
@@ -115,7 +118,10 @@ impl FetchError {
     /// Whether this error pauses the job rather than failing it.
     #[must_use]
     pub const fn is_pause(&self) -> bool {
-        matches!(self, Self::RateLimited { .. } | Self::Integrity(_) | Self::Transport(_))
+        matches!(
+            self,
+            Self::RateLimited { .. } | Self::Integrity(_) | Self::Transport(_)
+        )
     }
 
     /// The backoff a pause should record, if the error names one.
@@ -210,7 +216,11 @@ impl RateLimit {
     /// `n` requests per second, no burst above `n`.
     #[must_use]
     pub const fn per_second(n: u32) -> Self {
-        Self { per_window: n, window_ms: 1_000, burst: n }
+        Self {
+            per_window: n,
+            window_ms: 1_000,
+            burst: n,
+        }
     }
 
     /// The minimum spacing between two requests, in milliseconds.
@@ -263,7 +273,11 @@ impl RateLimiter {
     #[must_use]
     pub fn new(limit: RateLimit) -> Self {
         Self {
-            state: Mutex::new(Bucket { tokens: u64::from(limit.burst) * MICRO, last_ms: 0, granted: 0 }),
+            state: Mutex::new(Bucket {
+                tokens: u64::from(limit.burst) * MICRO,
+                last_ms: 0,
+                granted: 0,
+            }),
             limit,
         }
     }
@@ -284,9 +298,14 @@ impl RateLimiter {
     /// [`Refused`] when the bucket is empty, carrying the wait until one token
     /// has refilled. The caller decides whether to wait; the limiter never does.
     pub fn try_acquire_at(&self, now_ms: i64) -> Result<(), Refused> {
-        let mut b = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut b = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if self.limit.per_window == 0 || self.limit.window_ms == 0 {
-            return Err(Refused { retry_after_ms: u64::MAX });
+            return Err(Refused {
+                retry_after_ms: u64::MAX,
+            });
         }
         // Refill for elapsed time. Non-monotonic input cannot mint tokens.
         let elapsed_ms = u64::try_from(now_ms.saturating_sub(b.last_ms).max(0)).unwrap_or(0);
@@ -295,7 +314,10 @@ impl RateLimiter {
                 .saturating_mul(u64::from(self.limit.per_window))
                 .saturating_mul(MICRO)
                 / self.limit.window_ms;
-            b.tokens = b.tokens.saturating_add(refill).min(u64::from(self.limit.burst) * MICRO);
+            b.tokens = b
+                .tokens
+                .saturating_add(refill)
+                .min(u64::from(self.limit.burst) * MICRO);
             b.last_ms = now_ms;
         }
         if b.tokens >= MICRO {
@@ -307,7 +329,9 @@ impl RateLimiter {
         // ceil(missing / rate_per_ms) where rate_per_ms = per_window*MICRO/window_ms
         let numer = missing.saturating_mul(self.limit.window_ms);
         let denom = u64::from(self.limit.per_window).saturating_mul(MICRO);
-        Err(Refused { retry_after_ms: numer.div_ceil(denom).max(1) })
+        Err(Refused {
+            retry_after_ms: numer.div_ceil(denom).max(1),
+        })
     }
 }
 
@@ -406,11 +430,21 @@ pub trait BackfillStateStore: Send + Sync {
     async fn ensure(&self, key: &BackfillKey) -> Result<BackfillState, StateError>;
 
     /// Record progress after a page landed.
-    async fn advance(&self, key: &BackfillKey, cursor: DateTime<Utc>, rows_written: i64) -> Result<(), StateError>;
+    async fn advance(
+        &self,
+        key: &BackfillKey,
+        cursor: DateTime<Utc>,
+        rows_written: i64,
+    ) -> Result<(), StateError>;
 
     /// Record a pause with its backoff. Increments `attempts`; does **not** mark
     /// the job failed.
-    async fn pause(&self, key: &BackfillKey, until: DateTime<Utc>, reason: &str) -> Result<(), StateError>;
+    async fn pause(
+        &self,
+        key: &BackfillKey,
+        until: DateTime<Utc>,
+        reason: &str,
+    ) -> Result<(), StateError>;
 
     async fn complete(&self, key: &BackfillKey) -> Result<(), StateError>;
 
@@ -442,7 +476,9 @@ mod tests {
             assert!(l.try_acquire_at(0).is_ok(), "permit {i} within burst");
         }
         // …and the eleventh is REFUSED, not delayed.
-        let refused = l.try_acquire_at(0).expect_err("the 11th permit in one instant must be refused");
+        let refused = l
+            .try_acquire_at(0)
+            .expect_err("the 11th permit in one instant must be refused");
         assert_eq!(refused.retry_after_ms, 100, "1/10 s until the next token");
     }
 
@@ -452,7 +488,11 @@ mod tests {
     /// "fixed" the limiter by sleeping instead of refusing.
     #[test]
     fn granted_permits_never_exceed_the_declared_rate_over_any_span() {
-        let limit = RateLimit { per_window: 3, window_ms: 1_000, burst: 3 };
+        let limit = RateLimit {
+            per_window: 3,
+            window_ms: 1_000,
+            burst: 3,
+        };
         let l = RateLimiter::new(limit);
         // Ask 50 times per simulated millisecond for 10 simulated seconds.
         for ms in 0..10_000_i64 {
@@ -468,7 +508,10 @@ mod tests {
             l.granted(),
             limit.per_window
         );
-        assert!(l.granted() >= u64::from(limit.per_window) * (elapsed_s - 1), "and it is not simply refusing everything");
+        assert!(
+            l.granted() >= u64::from(limit.per_window) * (elapsed_s - 1),
+            "and it is not simply refusing everything"
+        );
     }
 
     #[test]
@@ -476,31 +519,50 @@ mod tests {
         let l = limiter(2);
         assert!(l.try_acquire_at(0).is_ok());
         assert!(l.try_acquire_at(0).is_ok());
-        assert!(l.try_acquire_at(-10_000).is_err(), "rewinding the clock is not a refill");
+        assert!(
+            l.try_acquire_at(-10_000).is_err(),
+            "rewinding the clock is not a refill"
+        );
         assert!(l.try_acquire_at(0).is_err());
     }
 
     #[test]
     fn a_zero_rate_limit_refuses_everything() {
-        let l = RateLimiter::new(RateLimit { per_window: 0, window_ms: 1_000, burst: 0 });
+        let l = RateLimiter::new(RateLimit {
+            per_window: 0,
+            window_ms: 1_000,
+            burst: 0,
+        });
         assert!(l.try_acquire_at(0).is_err());
         assert!(l.try_acquire_at(1_000_000).is_err());
     }
 
     #[test]
     fn a_rate_limit_error_pauses_and_a_terms_violation_does_not() {
-        let rl = FetchError::RateLimited { venue: "coinbase".into(), retry_after_ms: 1_500 };
+        let rl = FetchError::RateLimited {
+            venue: "coinbase".into(),
+            retry_after_ms: 1_500,
+        };
         assert!(rl.is_pause());
         assert_eq!(rl.retry_after_ms(), Some(1_500));
         let terms = FetchError::Terms("history downloads are prohibited".into());
         assert!(!terms.is_pause(), "the platform never builds against terms");
         assert_eq!(terms.retry_after_ms(), None);
-        assert!(FetchError::Integrity("sha256 mismatch".into()).is_pause(), "a bad archive waits for a human, it does not fail the window");
+        assert!(
+            FetchError::Integrity("sha256 mismatch".into()).is_pause(),
+            "a bad archive waits for a human, it does not fail the window"
+        );
     }
 
     #[test]
     fn status_round_trips_through_its_stored_form() {
-        for s in [BackfillStatus::Pending, BackfillStatus::Running, BackfillStatus::Paused, BackfillStatus::Completed, BackfillStatus::Failed] {
+        for s in [
+            BackfillStatus::Pending,
+            BackfillStatus::Running,
+            BackfillStatus::Paused,
+            BackfillStatus::Completed,
+            BackfillStatus::Failed,
+        ] {
             assert_eq!(BackfillStatus::parse(s.as_str()), Some(s));
         }
         assert_eq!(BackfillStatus::parse("stuck"), None);

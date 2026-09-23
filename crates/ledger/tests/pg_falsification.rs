@@ -101,7 +101,8 @@ async fn a_report_that_refutes_nothing_is_refused_by_the_database() {
     .await
     .expect_err("expected == observed must be refused");
     assert!(
-        err.to_string().contains("chk_falsification_refutes_something"),
+        err.to_string()
+            .contains("chk_falsification_refutes_something"),
         "wrong constraint fired: {err}"
     );
 }
@@ -114,9 +115,17 @@ async fn whitespace_does_not_make_a_claim_falsifiable() {
     let t = tenant();
     let trial = a_trial(&pool, &t).await;
 
-    assert!(try_kill(&pool, &t, trial, "lookahead", "  same ", "same", vec!["s".into()])
-        .await
-        .is_err());
+    assert!(try_kill(
+        &pool,
+        &t,
+        trial,
+        "lookahead",
+        "  same ",
+        "same",
+        vec!["s".into()]
+    )
+    .await
+    .is_err());
 }
 
 /// **The `array_length` lesson, applied.** An empty `steps` array must be
@@ -148,9 +157,17 @@ async fn a_defect_class_that_names_a_threshold_is_refused() {
     let trial = a_trial(&pool, &t).await;
 
     assert!(
-        try_kill(&pool, &t, trial, "underperforms", "a", "b", vec!["s".into()])
-            .await
-            .is_err(),
+        try_kill(
+            &pool,
+            &t,
+            trial,
+            "underperforms",
+            "a",
+            "b",
+            vec!["s".into()]
+        )
+        .await
+        .is_err(),
         "'underperforms' is a result, not a defect, and must not be storable"
     );
 }
@@ -174,7 +191,10 @@ async fn a_report_may_not_carry_the_other_kinds_fields() {
     .execute(&mut *tx)
     .await
     .expect_err("a defect must not carry a kill's defect_class");
-    assert!(err.to_string().contains("chk_falsification_kind_fields"), "{err}");
+    assert!(
+        err.to_string().contains("chk_falsification_kind_fields"),
+        "{err}"
+    );
 }
 
 // ── immutability of the claim, mutability of the verdict ─────────────────────
@@ -192,12 +212,13 @@ async fn the_claim_is_immutable_after_it_is_filed() {
         .expect("filed");
 
     let mut tx = ledger::pg::tenant_tx(&pool, &t).await.expect("tx");
-    let err = sqlx::query("UPDATE mlops.falsification SET observed = $1 WHERE falsification_id = $2")
-        .bind("something more convenient")
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-        .expect_err("editing the claim must be refused");
+    let err =
+        sqlx::query("UPDATE mlops.falsification SET observed = $1 WHERE falsification_id = $2")
+            .bind("something more convenient")
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .expect_err("editing the claim must be refused");
     assert!(err.to_string().contains("immutable"), "{err}");
 }
 
@@ -237,11 +258,13 @@ async fn the_verdict_is_writable_and_needs_an_author() {
     {
         let mut tx = ledger::pg::tenant_tx(&pool, &t).await.expect("tx");
         assert!(
-            sqlx::query("UPDATE mlops.falsification SET verification='verified' WHERE falsification_id=$1")
-                .bind(id)
-                .execute(&mut *tx)
-                .await
-                .is_err(),
+            sqlx::query(
+                "UPDATE mlops.falsification SET verification='verified' WHERE falsification_id=$1"
+            )
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .is_err(),
             "a verdict without verified_by must be refused"
         );
     }
@@ -288,7 +311,9 @@ async fn a_verified_defect_outranks_a_promotion_and_an_unverified_one_scores_zer
     tx.commit().await.expect("commit");
 
     assert_eq!(
-        ledger::falsification_store::score_of(&pool, &t, defect).await.expect("score"),
+        ledger::falsification_store::score_of(&pool, &t, defect)
+            .await
+            .expect("score"),
         Some(Score::Zero),
         "an unverified report scores zero, not a discount"
     );
@@ -337,7 +362,9 @@ async fn a_verified_defect_stays_on_the_queue_until_a_test_covers_it() {
         .await
         .expect("verify");
     assert_eq!(
-        ledger::falsification_store::undischarged(&pool, &t).await.expect("queue"),
+        ledger::falsification_store::undischarged(&pool, &t)
+            .await
+            .expect("queue"),
         vec![id]
     );
 
@@ -350,17 +377,22 @@ async fn a_verified_defect_stays_on_the_queue_until_a_test_covers_it() {
     .await
     .expect("cover");
     assert!(
-        ledger::falsification_store::undischarged(&pool, &t).await.expect("queue").is_empty(),
+        ledger::falsification_store::undischarged(&pool, &t)
+            .await
+            .expect("queue")
+            .is_empty(),
         "a covered defect leaves the queue"
     );
 
     let mut tx = ledger::pg::tenant_tx(&pool, &t).await.expect("tx");
-    let discharged: bool = sqlx::query("SELECT is_discharged FROM mlops.falsification_scored WHERE falsification_id=$1")
-        .bind(id)
-        .fetch_one(&mut *tx)
-        .await
-        .expect("view")
-        .get("is_discharged");
+    let discharged: bool = sqlx::query(
+        "SELECT is_discharged FROM mlops.falsification_scored WHERE falsification_id=$1",
+    )
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await
+    .expect("view")
+    .get("is_discharged");
     assert!(discharged);
 }
 
@@ -376,8 +408,8 @@ async fn a_verified_defect_stays_on_the_queue_until_a_test_covers_it() {
 #[ignore = "requires a live Postgres"]
 async fn one_tenant_cannot_see_another_tenants_reports() {
     let url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
-    let app_pw = std::env::var("PLATFORM_DB_APP_PASSWORD")
-        .unwrap_or_else(|_| "platform_app_dev".into());
+    let app_pw =
+        std::env::var("PLATFORM_DB_APP_PASSWORD").unwrap_or_else(|_| "platform_app_dev".into());
 
     let owner = pool().await;
     let (a, b) = (tenant(), tenant());
@@ -414,7 +446,12 @@ async fn one_tenant_cannot_see_another_tenants_reports() {
 #[ignore = "requires a live Postgres"]
 async fn agent_role_holds_insert_but_not_update() {
     let pool = pool().await;
-    for (privilege, expected) in [("INSERT", true), ("SELECT", true), ("UPDATE", false), ("DELETE", false)] {
+    for (privilege, expected) in [
+        ("INSERT", true),
+        ("SELECT", true),
+        ("UPDATE", false),
+        ("DELETE", false),
+    ] {
         let has: bool = sqlx::query_scalar(
             "SELECT has_table_privilege('agent_role', 'mlops.falsification', $1)",
         )

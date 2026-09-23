@@ -238,14 +238,21 @@ pub fn resolve_from(
     match in_class.len() {
         0 => ScopeResolution::Unconfigured,
         1 => ScopeResolution::Scope(Box::new(in_class[0].clone())),
-        _ => ScopeResolution::Ambiguous(
-            in_class.iter().map(|s| s.market_scope.clone()).collect(),
-        ),
+        _ => ScopeResolution::Ambiguous(in_class.iter().map(|s| s.market_scope.clone()).collect()),
     }
 }
 
 /// `regime_causal.regime_scope` as it comes back.
-type ScopeRow = (String, String, String, Option<String>, i32, i32, Vec<String>, String);
+type ScopeRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    i32,
+    i32,
+    Vec<String>,
+    String,
+);
 
 impl From<ScopeRow> for RegimeScope {
     fn from(r: ScopeRow) -> Self {
@@ -388,15 +395,17 @@ impl RegimeStore {
 
         Ok(rows
             .into_iter()
-            .filter_map(|(event_time, label, p_filtered, knowledge_time, series_log_return)| {
-                RegimeLabel::from_code(&label).map(|label| RegimeObservation {
-                    event_time,
-                    label,
-                    p_filtered,
-                    knowledge_time,
-                    series_log_return,
-                })
-            })
+            .filter_map(
+                |(event_time, label, p_filtered, knowledge_time, series_log_return)| {
+                    RegimeLabel::from_code(&label).map(|label| RegimeObservation {
+                        event_time,
+                        label,
+                        p_filtered,
+                        knowledge_time,
+                        series_log_return,
+                    })
+                },
+            )
             .collect())
     }
 
@@ -431,15 +440,17 @@ impl RegimeStore {
         .fetch_optional(&self.pg)
         .await?;
 
-        Ok(row.and_then(|(event_time, label, p_filtered, knowledge_time, series_log_return)| {
-            RegimeLabel::from_code(&label).map(|label| RegimeObservation {
-                event_time,
-                label,
-                p_filtered,
-                knowledge_time,
-                series_log_return,
-            })
-        }))
+        Ok(row.and_then(
+            |(event_time, label, p_filtered, knowledge_time, series_log_return)| {
+                RegimeLabel::from_code(&label).map(|label| RegimeObservation {
+                    event_time,
+                    label,
+                    p_filtered,
+                    knowledge_time,
+                    series_log_return,
+                })
+            },
+        ))
     }
 }
 
@@ -542,12 +553,14 @@ impl EmbeddingStore {
 
         Ok(rows
             .into_iter()
-            .map(|(instrument_id, venue_id, distance, knowledge_time)| Neighbour {
-                instrument_id,
-                venue_id,
-                distance,
-                knowledge_time,
-            })
+            .map(
+                |(instrument_id, venue_id, distance, knowledge_time)| Neighbour {
+                    instrument_id,
+                    venue_id,
+                    distance,
+                    knowledge_time,
+                },
+            )
             .collect())
     }
 }
@@ -572,9 +585,18 @@ mod tests {
 
     #[test]
     fn a_tercile_maps_to_exactly_one_label() {
-        assert_eq!(RegimeLabel::from_tercile(VolRegime::Low), RegimeLabel::LowVol);
-        assert_eq!(RegimeLabel::from_tercile(VolRegime::Mid), RegimeLabel::MidVol);
-        assert_eq!(RegimeLabel::from_tercile(VolRegime::High), RegimeLabel::HighVol);
+        assert_eq!(
+            RegimeLabel::from_tercile(VolRegime::Low),
+            RegimeLabel::LowVol
+        );
+        assert_eq!(
+            RegimeLabel::from_tercile(VolRegime::Mid),
+            RegimeLabel::MidVol
+        );
+        assert_eq!(
+            RegimeLabel::from_tercile(VolRegime::High),
+            RegimeLabel::HighVol
+        );
     }
 
     /// The rule tier is deterministic, so its distribution is one-hot. Reporting
@@ -620,10 +642,22 @@ mod tests {
     fn a_scope_does_not_claim_a_market_it_does_not_measure() {
         let s = scope(&["BTC-USD", "ETH-USD"]);
         assert!(s.covers("crypto", Some("BTC-USD")));
-        assert!(s.covers("crypto", Some("eth-usd")), "symbol match is case-insensitive");
-        assert!(!s.covers("equity", Some("SPY")), "a crypto scope labelling an equity");
-        assert!(!s.covers("crypto", Some("SOL-USD")), "an instrument nobody decided about");
-        assert!(!s.covers("crypto", None), "an explicit list cannot be checked without a symbol");
+        assert!(
+            s.covers("crypto", Some("eth-usd")),
+            "symbol match is case-insensitive"
+        );
+        assert!(
+            !s.covers("equity", Some("SPY")),
+            "a crypto scope labelling an equity"
+        );
+        assert!(
+            !s.covers("crypto", Some("SOL-USD")),
+            "an instrument nobody decided about"
+        );
+        assert!(
+            !s.covers("crypto", None),
+            "an explicit list cannot be checked without a symbol"
+        );
 
         // An empty list is the wider claim, and it is only honest when the
         // operator wrote it down that way.
@@ -657,7 +691,10 @@ mod tests {
             resolve_from(&[one], "crypto", None),
             ScopeResolution::Scope(Box::new(scope(&["BTC-USD"])))
         );
-        assert_eq!(resolve_from(&both, "equity", None), ScopeResolution::Unconfigured);
+        assert_eq!(
+            resolve_from(&both, "equity", None),
+            ScopeResolution::Unconfigured
+        );
         assert_eq!(
             resolve_from(&both, "crypto", Some("SOL-USD")),
             ScopeResolution::Unconfigured
@@ -695,7 +732,10 @@ mod tests {
             ]
         );
         // Before any row exists there is no label, and no label is not a label.
-        assert_eq!(labels_as_of(&history, &[t(1) - chrono::Duration::days(1)]), vec![None]);
+        assert_eq!(
+            labels_as_of(&history, &[t(1) - chrono::Duration::days(1)]),
+            vec![None]
+        );
     }
 
     /// There is no function in this module that reads the smoothed path. If one

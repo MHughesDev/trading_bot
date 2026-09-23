@@ -45,7 +45,9 @@ pub enum Relation {
         why: String,
     },
     /// The same measurement, made again. Evidence, not noise.
-    NearDuplicate { quantity: String },
+    NearDuplicate {
+        quantity: String,
+    },
     Independent,
 }
 
@@ -122,13 +124,7 @@ pub fn relate(new: &Entry, candidate: &Entry) -> Relation {
             quantity: a.quantity.clone(),
             why: format!(
                 "{} is {:?} at {} in {} and {:?} at {} in {}; the intervals do not overlap",
-                a.quantity,
-                a.direction,
-                a.value,
-                new.id,
-                b.direction,
-                b.value,
-                candidate.id
+                a.quantity, a.direction, a.value, new.id, b.direction, b.value, candidate.id
             ),
         };
     }
@@ -405,10 +401,7 @@ mod tests {
         corroborate(&mut stored, &new);
         assert_eq!(stored.corroborations, 2);
         assert_eq!(stored.corroborated_by, vec!["run_2".to_string()]);
-        assert!(stored
-            .evidence_ids
-            .values()
-            .any(|v| v == "exp_44445555"));
+        assert!(stored.evidence_ids.values().any(|v| v == "exp_44445555"));
     }
 
     /// A finding that contradicts something must become a row, or the

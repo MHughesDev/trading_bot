@@ -228,7 +228,10 @@ mod tests {
             Some(DataWindow::new("2026-04-01", "2026-06-30"))
         );
 
-        let bad = results(&[("y", r#"{"window":{"start":"04/01/2026","end":"06/30/2026"}}"#)]);
+        let bad = results(&[(
+            "y",
+            r#"{"window":{"start":"04/01/2026","end":"06/30/2026"}}"#,
+        )]);
         assert_eq!(from_evidence("y", &bad), None);
     }
 
@@ -240,7 +243,10 @@ mod tests {
     #[test]
     fn a_backwards_window_is_not_quietly_swapped() {
         // One result whose own start is after its end.
-        let r = results(&[("x", r#"{"window":{"start":"2026-06-30","end":"2026-04-01"}}"#)]);
+        let r = results(&[(
+            "x",
+            r#"{"window":{"start":"2026-06-30","end":"2026-04-01"}}"#,
+        )]);
         // The union takes min(start) and max(end): 2026-06-30 and 2026-04-01,
         // which fails the ordering check rather than being swapped.
         assert_eq!(from_evidence("x", &r), None);

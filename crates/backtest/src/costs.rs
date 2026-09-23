@@ -193,11 +193,7 @@ impl FeeBook {
     #[must_use]
     pub fn resolve(&self, venue: Option<&str>, tier: Option<&str>) -> FeeSchedule {
         if let (Some(v), Some(t)) = (venue, tier) {
-            if let Some(s) = self
-                .schedules
-                .iter()
-                .find(|s| s.venue == v && s.tier == t)
-            {
+            if let Some(s) = self.schedules.iter().find(|s| s.venue == v && s.tier == t) {
                 return s.clone();
             }
         }
@@ -525,7 +521,9 @@ mod tests {
     fn walk(n: usize, sigma_bps: f64, seed: u64) -> Vec<f64> {
         let mut s = seed | 1;
         let mut next = || {
-            s = s.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            s = s
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
             ((s >> 11) as f64) / ((1u64 << 53) as f64)
         };
         let mut closes = Vec::with_capacity(n);
@@ -599,7 +597,10 @@ mod tests {
     #[test]
     fn resolving_from_an_empty_book_is_expensive_rather_than_free() {
         let s = FeeBook::new(vec![]).resolve(None, None);
-        assert!(s.taker_bps > 0.0, "a cost model that defaults to free reports free strategies");
+        assert!(
+            s.taker_bps > 0.0,
+            "a cost model that defaults to free reports free strategies"
+        );
         assert!(s.tier.contains("unknown-fallback"));
     }
 
@@ -639,7 +640,11 @@ mod tests {
         let closes = walk(20_000, 7.0, 7);
         let rt = coinbase_intro().round_trip_bps(ExecutionStyle::TakerBoth);
         let o = oracle(&closes, rt).unwrap();
-        assert!(o.always_in_net_bps < -50.0, "got {:+.2}", o.always_in_net_bps);
+        assert!(
+            o.always_in_net_bps < -50.0,
+            "got {:+.2}",
+            o.always_in_net_bps
+        );
     }
 
     /// The test is not vacuous: give the oracle a long enough horizon and it
@@ -700,10 +705,15 @@ mod tests {
         let horizons: Vec<usize> = vec![1, 5, 15, 30, 60, 120, 240, 480, 1440];
         let f = empirical_frontier(&closes, &horizons, 20.0).unwrap();
 
-        let b = f.breakeven_bars.expect("a √t walk crosses 20bp well inside a day");
+        let b = f
+            .breakeven_bars
+            .expect("a √t walk crosses 20bp well inside a day");
         // σ√h·√(2/π) > 20 ⟹ h > (20/(7·0.7979))² ≈ 12.8 bars.
         assert!((5..=30).contains(&b), "frontier at {b} bars, expected ~15");
-        assert!(f.curve.windows(2).all(|w| w[0].1 <= w[1].1), "E|Δp| must grow with horizon");
+        assert!(
+            f.curve.windows(2).all(|w| w[0].1 <= w[1].1),
+            "E|Δp| must grow with horizon"
+        );
     }
 
     #[test]
@@ -755,8 +765,14 @@ mod tests {
     fn the_analytic_frontier_reproduces_the_reviews_table() {
         let t_05 = analytic_frontier(20.0, 0.05, 7.0, 1.5).unwrap();
         let t_10 = analytic_frontier(20.0, 0.10, 7.0, 1.5).unwrap();
-        assert!((1_000.0..=2_000.0).contains(&t_05), "IC 0.05 → {t_05:.0} bars");
-        assert!((t_05 / t_10 - 4.0).abs() < 1e-6, "halving IC must quadruple the frontier");
+        assert!(
+            (1_000.0..=2_000.0).contains(&t_05),
+            "IC 0.05 → {t_05:.0} bars"
+        );
+        assert!(
+            (t_05 / t_10 - 4.0).abs() < 1e-6,
+            "halving IC must quadruple the frontier"
+        );
     }
 
     /// Cost and signal quality are symmetric and quadratic. This is the

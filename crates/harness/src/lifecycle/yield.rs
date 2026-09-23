@@ -286,7 +286,9 @@ pub fn barren_rates(runs: &[(String, String, Yield)]) -> Vec<BarrenRate> {
     let mut rows: std::collections::BTreeMap<(String, String), (u32, u32)> =
         std::collections::BTreeMap::new();
     for (tier, workflow, y) in runs {
-        let e = rows.entry((tier.clone(), workflow.clone())).or_insert((0, 0));
+        let e = rows
+            .entry((tier.clone(), workflow.clone()))
+            .or_insert((0, 0));
         e.0 += 1;
         if y.is_barren() {
             e.1 += 1;

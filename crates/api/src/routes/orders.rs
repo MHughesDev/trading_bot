@@ -32,7 +32,6 @@ pub struct PlaceOrderRequest {
     pub execution_mode: Option<String>,
 }
 
-
 /// Parse the inbound `side` string.
 ///
 /// Exactly two spellings are accepted.  The sibling of this function inside
@@ -258,15 +257,14 @@ pub async fn get_order(
         rust_decimal::Decimal,
         Option<rust_decimal::Decimal>,
         chrono::DateTime<chrono::Utc>,
-    )> =
-        sqlx::query_as(
-            "SELECT broker_order_id, filled_size, fill_price, commission, filled_at \
+    )> = sqlx::query_as(
+        "SELECT broker_order_id, filled_size, fill_price, commission, filled_at \
              FROM fills WHERE idempotency_key = $1 ORDER BY filled_at ASC",
-        )
-        .bind(id)
-        .fetch_all(&state.pg)
-        .await
-        .unwrap_or_default();
+    )
+    .bind(id)
+    .fetch_all(&state.pg)
+    .await
+    .unwrap_or_default();
 
     (
         StatusCode::OK,
@@ -422,12 +420,8 @@ mod tests {
             RiskRejection::InstrumentMetadataUnavailable {
                 instrument_id: "BTC-USD".into(),
             },
-            RiskRejection::AccountStateUnavailable {
-                detail: "x".into(),
-            },
-            RiskRejection::GateUnavailable {
-                detail: "x".into(),
-            },
+            RiskRejection::AccountStateUnavailable { detail: "x".into() },
+            RiskRejection::GateUnavailable { detail: "x".into() },
         ] {
             let (status, _) = risk_rejection_response(&r);
             assert_eq!(

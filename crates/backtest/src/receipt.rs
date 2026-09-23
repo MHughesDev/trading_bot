@@ -297,7 +297,9 @@ mod tests {
             ("strategy_version_hash", |r| {
                 r.strategy_version_hash = String::new();
             }),
-            ("cost_model_version", |r| r.cost_model_version = String::new()),
+            ("cost_model_version", |r| {
+                r.cost_model_version = String::new()
+            }),
             ("seed_digest", |r| r.seed_digest = String::new()),
             ("harness_version", |r| r.harness_version = String::new()),
         ];
@@ -450,10 +452,7 @@ mod tests {
             report.record(&Reproduction::BitIdentical);
         }
         assert!(!report.files_a_defect());
-        report.record(&Reproduction::DriftedUnderTheSameReceipt {
-            was: 1.4,
-            now: 1.3,
-        });
+        report.record(&Reproduction::DriftedUnderTheSameReceipt { was: 1.4, now: 1.3 });
         assert!(report.files_a_defect());
         assert!((report.drift_rate().unwrap() - 0.02).abs() < 1e-9);
     }

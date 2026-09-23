@@ -536,7 +536,11 @@ pub async fn get_digest(api: &crate::ApiClient, params: &Value) -> Value {
         .await
     {
         Ok(v) => {
-            let all = v.get("digests").and_then(Value::as_array).cloned().unwrap_or_default();
+            let all = v
+                .get("digests")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
             json!({ "digests": all.into_iter().take(want).collect::<Vec<_>>() })
         }
         Err(e) => e.to_tool_error(),
@@ -843,7 +847,10 @@ mod tests {
         let err = check_registration(&r).expect_err("refused");
         assert_eq!(err["field"], "falsifier");
         assert!(
-            err["fix"].as_str().unwrap().contains("after a result is not"),
+            err["fix"]
+                .as_str()
+                .unwrap()
+                .contains("after a result is not"),
             "{err}"
         );
     }
@@ -875,17 +882,17 @@ mod tests {
         r["objective"] = Value::Null;
         let err = check_registration(&r).expect_err("refused");
         assert_eq!(err["field"], "objective");
-        assert!(err["fix"].as_str().unwrap().contains("never a scalar score"));
+        assert!(err["fix"]
+            .as_str()
+            .unwrap()
+            .contains("never a scalar score"));
     }
 
     /// A falsifier that names nothing evaluable is refused, with the vocabulary.
     #[test]
     fn a_falsifier_naming_no_metric_is_refused_with_the_list() {
-        let err = check_hypothesis(
-            &json!({"falsifier": "it does not work very well"}),
-            VOCAB,
-        )
-        .expect_err("refused");
+        let err = check_hypothesis(&json!({"falsifier": "it does not work very well"}), VOCAB)
+            .expect_err("refused");
         assert_eq!(err["error"], "falsifier_names_no_metric");
         assert_eq!(err["known_metrics"], json!(VOCAB));
         assert!(
@@ -1015,7 +1022,9 @@ mod tests {
             .into_iter()
             .find(|s| s.name == "open_question")
             .expect("open_question is in the catalogue");
-        let props = spec.input_schema["properties"].as_object().expect("properties");
+        let props = spec.input_schema["properties"]
+            .as_object()
+            .expect("properties");
         for field in ["status", "closed_by", "how", "closed"] {
             assert!(!props.contains_key(field), "the schema offers `{field}`");
         }

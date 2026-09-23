@@ -21,14 +21,16 @@ use nautilus_backtest::sdk::SimulationControl;
 use domain::payloads::bar::Timeframe;
 
 use crate::collect::{collect_ranges, CollectorPlan};
-use ledger::pg::PgTrialLedger;
-use ledger::{ActorKind, DispatchContext, Registration, TerminalReason, TrialEvent, TrialState, TrialTicket};
-use crate::run::{DataSlice, EvalResolution, RunConfig, RunConfigBuilder};
 use crate::gaps::{self, ScheduleKind};
 use crate::requirements::derive_requirements;
+use crate::run::{DataSlice, EvalResolution, RunConfig, RunConfigBuilder};
 use crate::sim::{run_simulation, InstrumentPrecisions, SimulationInputs};
 use crate::store::{BarCoverage, BarStore};
 use crate::types::{BacktestSnapshot, BacktestStatus, DataCoverage, ResolvedSpec, TimeframeExt};
+use ledger::pg::PgTrialLedger;
+use ledger::{
+    ActorKind, DispatchContext, Registration, TerminalReason, TrialEvent, TrialState, TrialTicket,
+};
 
 struct JobState {
     status: BacktestStatus,
@@ -173,7 +175,11 @@ struct PhaseFailure {
 
 impl PhaseFailure {
     fn new(phase: BacktestStatus, reason: TerminalReason, detail: impl Into<String>) -> Self {
-        Self { phase, reason, detail: detail.into() }
+        Self {
+            phase,
+            reason,
+            detail: detail.into(),
+        }
     }
 }
 
@@ -300,7 +306,8 @@ impl BacktestManager {
         //
         // A refused registration means no compute runs. That is the point.
         let cfg = Self::run_config_for(&spec);
-        let ctx = DispatchContext::legacy(user_id.to_string(), ActorKind::Human, user_id.to_string());
+        let ctx =
+            DispatchContext::legacy(user_id.to_string(), ActorKind::Human, user_id.to_string());
         let subject = crate::run::trial_subject(&cfg);
         let mut ticket = self
             .ledger
@@ -317,7 +324,11 @@ impl BacktestManager {
         tokio::spawn(async move {
             // Advance to `running` before the work starts, so a trial left behind
             // by a process crash is distinguishable from one that never began.
-            if let Err(e) = manager.ledger.transition_async(&mut ticket, TrialEvent::to(TrialState::Running)).await {
+            if let Err(e) = manager
+                .ledger
+                .transition_async(&mut ticket, TrialEvent::to(TrialState::Running))
+                .await
+            {
                 tracing::warn!(error = %e, "could not mark trial running");
             }
             manager.drive(Arc::clone(&job)).await;
@@ -339,7 +350,10 @@ impl BacktestManager {
         };
         let event = match status {
             BacktestStatus::Completed => TrialEvent::completed(cfg.run_id.as_str(), None),
-            BacktestStatus::Cancelled => TrialEvent::failed(TerminalReason::Cancelled, "cancelled by the user before completion"),
+            BacktestStatus::Cancelled => TrialEvent::failed(
+                TerminalReason::Cancelled,
+                "cancelled by the user before completion",
+            ),
             // Anything else terminating here did not finish: a failure, never a
             // silently recorded completion. A job that failed through `fail`
             // carries its reason; one that ended in a non-terminal state never
@@ -475,10 +489,13 @@ impl BacktestManager {
         job.set_status(BacktestStatus::CheckingData);
         self.persist(job).await;
 
-        let requirements = derive_requirements(&spec.definition, spec.timeframe)
-            .map_err(|e| {
-                PhaseFailure::new(BacktestStatus::CheckingData, TerminalReason::IntegrityRejected, e.to_string())
-            })?;
+        let requirements = derive_requirements(&spec.definition, spec.timeframe).map_err(|e| {
+            PhaseFailure::new(
+                BacktestStatus::CheckingData,
+                TerminalReason::IntegrityRejected,
+                e.to_string(),
+            )
+        })?;
         let timeframe = requirements.timeframe;
         let schedule = ScheduleKind::for_asset_class(&spec.asset_class);
         let warmup_secs = requirements.warmup_bars * timeframe.seconds();
@@ -489,7 +506,10 @@ impl BacktestManager {
         let counts = store
             .daily_counts(&spec.instrument_id, timeframe, data_from, spec.end)
             .await
-            .map_err(fail(BacktestStatus::CheckingData, TerminalReason::DataError))?;
+            .map_err(fail(
+                BacktestStatus::CheckingData,
+                TerminalReason::DataError,
+            ))?;
         let mut coverage = gaps::analyze(data_from, spec.end, &counts, timeframe, schedule);
 
         job.state.write().expect("job state lock poisoned").coverage = Some(coverage.clone());
@@ -506,7 +526,10 @@ impl BacktestManager {
             // No collector for this asset class is a refusal of the request, not a
             // fault in the data that exists.
             let plan = CollectorPlan::for_asset_class(&spec.asset_class, &spec.instrument_id)
-                .map_err(fail(BacktestStatus::CollectingData, TerminalReason::IntegrityRejected))?;
+                .map_err(fail(
+                    BacktestStatus::CollectingData,
+                    TerminalReason::IntegrityRejected,
+                ))?;
             let collected = collect_ranges(
                 &self.http,
                 &store,
@@ -519,13 +542,19 @@ impl BacktestManager {
                 &job.cancel,
             )
             .await
-            .map_err(fail(BacktestStatus::CollectingData, TerminalReason::DataError))?;
+            .map_err(fail(
+                BacktestStatus::CollectingData,
+                TerminalReason::DataError,
+            ))?;
 
             // Re-check coverage after the backfill.
             let counts = store
                 .daily_counts(&spec.instrument_id, timeframe, data_from, spec.end)
                 .await
-                .map_err(fail(BacktestStatus::CollectingData, TerminalReason::DataError))?;
+                .map_err(fail(
+                    BacktestStatus::CollectingData,
+                    TerminalReason::DataError,
+                ))?;
             coverage = gaps::analyze(data_from, spec.end, &counts, timeframe, schedule);
             coverage.collected_bars = collected;
             job.state.write().expect("job state lock poisoned").coverage = Some(coverage.clone());
@@ -571,16 +600,13 @@ impl BacktestManager {
         job.set_status(BacktestStatus::Simulating);
         self.persist(job).await;
 
-        let initial_balance: Decimal = spec
-            .initial_balance
-            .parse()
-            .map_err(|e| {
-                PhaseFailure::new(
-                    BacktestStatus::Simulating,
-                    TerminalReason::IntegrityRejected,
-                    format!("invalid balance: {e}"),
-                )
-            })?;
+        let initial_balance: Decimal = spec.initial_balance.parse().map_err(|e| {
+            PhaseFailure::new(
+                BacktestStatus::Simulating,
+                TerminalReason::IntegrityRejected,
+                format!("invalid balance: {e}"),
+            )
+        })?;
         let precisions = self.instrument_precisions(&spec.instrument_id).await;
         let inputs = SimulationInputs {
             definition: spec.definition.clone(),
@@ -605,7 +631,10 @@ impl BacktestManager {
                     format!("simulation panicked: {e}"),
                 )
             })?
-            .map_err(fail(BacktestStatus::Simulating, TerminalReason::DependencyFailure))?;
+            .map_err(fail(
+                BacktestStatus::Simulating,
+                TerminalReason::DependencyFailure,
+            ))?;
 
         if report.cancelled || job.cancel.load(Ordering::Relaxed) {
             job.set_status(BacktestStatus::Cancelled);

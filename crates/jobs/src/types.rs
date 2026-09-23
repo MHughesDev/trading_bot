@@ -371,7 +371,11 @@ impl JobError {
     /// A failure the caller caused: the request is wrong and retrying it
     /// unchanged produces the same answer. The reason is explicit because
     /// "the caller was wrong" and "the data was missing" settle differently.
-    pub fn logic(terminal: ledger::TerminalReason, code: impl Into<String>, fix: impl Into<String>) -> Self {
+    pub fn logic(
+        terminal: ledger::TerminalReason,
+        code: impl Into<String>,
+        fix: impl Into<String>,
+    ) -> Self {
         Self {
             code: code.into(),
             terminal,
@@ -402,7 +406,11 @@ impl JobError {
     ///
     /// Not retryable: a run that diverged to NaN or exhausted its budget does so
     /// again. `infrastructure` is the retryable constructor.
-    pub fn terminal(terminal: ledger::TerminalReason, code: impl Into<String>, fix: impl Into<String>) -> Self {
+    pub fn terminal(
+        terminal: ledger::TerminalReason,
+        code: impl Into<String>,
+        fix: impl Into<String>,
+    ) -> Self {
         Self {
             code: code.into(),
             terminal,
@@ -572,7 +580,11 @@ mod tests {
     /// M3/M4/M5 read this distinction directly.
     #[test]
     fn an_asha_stop_is_censored_not_failed() {
-        let e = JobError::terminal(ledger::TerminalReason::AshaStopped, "asha_stopped", "rung 2");
+        let e = JobError::terminal(
+            ledger::TerminalReason::AshaStopped,
+            "asha_stopped",
+            "rung 2",
+        );
         assert_eq!(e.censoring(), ledger::Censoring::RightAsha);
         assert_ne!(e.censoring(), ledger::Censoring::Failed);
     }
@@ -649,7 +661,14 @@ mod tests {
 
     #[test]
     fn logic_failures_are_never_retryable() {
-        assert!(!JobError::logic(ledger::TerminalReason::IntegrityRejected, "bad_manifest", "fix it").retryable);
+        assert!(
+            !JobError::logic(
+                ledger::TerminalReason::IntegrityRejected,
+                "bad_manifest",
+                "fix it"
+            )
+            .retryable
+        );
         assert!(JobError::infrastructure("lost_worker").retryable);
     }
 }

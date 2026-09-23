@@ -4,8 +4,8 @@
 //! before persisting or applying a definition. No door has a privileged bypass.
 
 pub mod exits;
-pub mod feature_names;
 pub mod expressions;
+pub mod feature_names;
 pub mod risk;
 pub mod schema;
 pub mod teach;
@@ -146,7 +146,7 @@ pub fn validate(def: &StrategyDefinition) -> Result<ValidatedDefinition, Vec<Val
         Ok(m) => m,
         Err(e) => {
             errors.push(ValidationError {
-            code: "parameter_out_of_range",
+                code: "parameter_out_of_range",
                 path: "parameters".into(),
                 message: e.to_string(),
             });

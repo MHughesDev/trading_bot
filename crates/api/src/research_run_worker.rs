@@ -158,7 +158,11 @@ impl ResearchRunWorker {
     }
 
     /// The campaign's log, most recent first.
-    async fn events(&self, tenant: &str, campaign_id: Uuid) -> Result<Vec<(String, Value)>, JobError> {
+    async fn events(
+        &self,
+        tenant: &str,
+        campaign_id: Uuid,
+    ) -> Result<Vec<(String, Value)>, JobError> {
         let mut tx = ledger::pg::tenant_tx(&self.pg, tenant)
             .await
             .map_err(|e| JobError::infrastructure(format!("tenant transaction: {e}")))?;
@@ -197,14 +201,12 @@ impl ResearchRunWorker {
         .await;
 
         let events = self.events(tenant, campaign_id).await?;
-        let last_child = events
-            .iter()
-            .find_map(|(state, detail)| {
-                detail
-                    .get("job_id")
-                    .and_then(Value::as_str)
-                    .map(|j| (state.clone(), j.to_string()))
-            });
+        let last_child = events.iter().find_map(|(state, detail)| {
+            detail
+                .get("job_id")
+                .and_then(Value::as_str)
+                .map(|j| (state.clone(), j.to_string()))
+        });
 
         let Some((phase, job_id)) = last_child else {
             return Ok(JobOutput {
@@ -519,7 +521,12 @@ mod tests {
             r#"{"move":"change_exit","mode":"trail","hypothesis":"trailing keeps the tail","ranges":[]}"#,
         )
         .expect("a conformant reply");
-        assert_eq!(p.r#move, Move::ChangeExit { mode: ExitMode::Trail });
+        assert_eq!(
+            p.r#move,
+            Move::ChangeExit {
+                mode: ExitMode::Trail
+            }
+        );
         assert!(!unchecked.pending.is_empty());
     }
 

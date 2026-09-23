@@ -69,9 +69,14 @@ impl Worker for DataQcWorker {
         .await;
 
         // Through the single PIT reader: QC sees exactly what a strategy could.
-        let tf = <domain::payloads::bar::Timeframe as backtest::TimeframeExt>::from_key(timeframe).ok_or_else(|| {
-            JobError::logic(ledger::TerminalReason::IntegrityRejected, "unknown_timeframe", format!("no known period for timeframe {timeframe:?}"))
-        })?;
+        let tf = <domain::payloads::bar::Timeframe as backtest::TimeframeExt>::from_key(timeframe)
+            .ok_or_else(|| {
+                JobError::logic(
+                    ledger::TerminalReason::IntegrityRejected,
+                    "unknown_timeframe",
+                    format!("no known period for timeframe {timeframe:?}"),
+                )
+            })?;
         let profile = backtest::BarStore::connect(&self.clickhouse_url)
             .quality_profile(instrument, tf)
             .await
@@ -84,7 +89,15 @@ impl Worker for DataQcWorker {
                 detail_ref: None,
                 retryable: true,
             })?;
-        let backtest::store::QualityProfile { rows, distinct_bars, first_s, last_s, flat_bars, backfilled, flagged } = profile;
+        let backtest::store::QualityProfile {
+            rows,
+            distinct_bars,
+            first_s,
+            last_s,
+            flat_bars,
+            backfilled,
+            flagged,
+        } = profile;
 
         if distinct_bars == 0 {
             return Err(JobError::logic(

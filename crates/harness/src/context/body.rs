@@ -151,10 +151,7 @@ pub enum Body {
         detail: Option<String>,
     },
     /// Prose.
-    Text {
-        title: Option<String>,
-        body: String,
-    },
+    Text { title: Option<String>, body: String },
     /// A body that has been spilled to the workspace (§26.3).
     ///
     /// The *metadata* stays resident — subject, ids, kind, `tokens_full` — so
@@ -221,10 +218,7 @@ impl Body {
                     out.push_str(&r.join(" | "));
                 }
                 if *total_rows > rows.len() {
-                    out.push_str(&format!(
-                        "\n({} of {total_rows} rows)",
-                        rows.len()
-                    ));
+                    out.push_str(&format!("\n({} of {total_rows} rows)", rows.len()));
                 }
                 out
             }
@@ -475,7 +469,9 @@ fn shrink_series(
             Body::Series {
                 name: name.to_string(),
                 points: points.iter().step_by(step).copied().collect(),
-                stride: stride.saturating_mul(u32::try_from(step).unwrap_or(1)).max(1),
+                stride: stride
+                    .saturating_mul(u32::try_from(step).unwrap_or(1))
+                    .max(1),
                 total_points,
             },
             Rung::Decimated,
@@ -506,7 +502,10 @@ fn shrink_series(
 }
 
 fn shrink_text(title: Option<&str>, body: &str) -> Option<(Body, Rung)> {
-    let paras: Vec<&str> = body.split("\n\n").filter(|p| !p.trim().is_empty()).collect();
+    let paras: Vec<&str> = body
+        .split("\n\n")
+        .filter(|p| !p.trim().is_empty())
+        .collect();
     if paras.len() > 2 {
         return Some((
             Body::Text {
@@ -590,8 +589,7 @@ fn shrink_json(value: &serde_json::Value, required: &[String]) -> Option<(Body, 
     let big: Vec<String> = map
         .iter()
         .filter(|(k, v)| {
-            !required.contains(k)
-                && serde_json::to_string(v).map(|s| s.len()).unwrap_or(0) > 64
+            !required.contains(k) && serde_json::to_string(v).map(|s| s.len()).unwrap_or(0) > 64
         })
         .map(|(k, _)| k.clone())
         .collect();
@@ -789,7 +787,10 @@ mod tests {
         assert_eq!(r1, Rung::Elided);
         let r = b1.render();
         assert!(r.contains("One."), "{r}");
-        assert!(r.contains("Four."), "the last paragraph is where conclusions live");
+        assert!(
+            r.contains("Four."),
+            "the last paragraph is where conclusions live"
+        );
         assert!(r.contains("2 paragraphs"), "{r}");
     }
 
@@ -860,7 +861,10 @@ mod tests {
     #[test]
     fn precision_follows_the_error_bar() {
         assert_eq!(sig_figs_for(0.0234871629, 0.004), 2);
-        assert_eq!(format_sig(0.0234871629, sig_figs_for(0.0234871629, 0.004)), "0.023");
+        assert_eq!(
+            format_sig(0.0234871629, sig_figs_for(0.0234871629, 0.004)),
+            "0.023"
+        );
         // A tight error earns more digits, and only as many as it earns.
         assert_eq!(sig_figs_for(1.42871, 0.00004), 6);
         // No error bar is not a licence for sixteen digits.
@@ -887,7 +891,10 @@ mod tests {
         let (b1, r1) = b.shrink().expect("rung 1");
         assert_eq!(r1, Rung::Decimated);
         let r = b1.render();
-        assert!(r.contains("every 10"), "a decimated series must say so: {r}");
+        assert!(
+            r.contains("every 10"),
+            "a decimated series must say so: {r}"
+        );
         assert!(r.contains("240 points"));
     }
 }

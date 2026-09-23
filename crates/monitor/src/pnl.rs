@@ -460,7 +460,10 @@ mod tests {
 
         let ratio = crypto / equity;
         let expected = (CONTINUOUS_PERIODS_PER_YEAR / EQUITY_PERIODS_PER_YEAR).sqrt();
-        assert!((ratio - expected).abs() < 1e-9, "got {ratio}, expected {expected}");
+        assert!(
+            (ratio - expected).abs() < 1e-9,
+            "got {ratio}, expected {expected}"
+        );
     }
 
     #[test]
@@ -508,12 +511,21 @@ mod tests {
     #[test]
     fn time_under_water_counts_from_the_last_high() {
         let s = PnlSample::measure(&series(&[0.05, -0.01, -0.01, -0.01]), baseline());
-        let d = s.time_under_water_days().value().expect("four observations");
+        let d = s
+            .time_under_water_days()
+            .value()
+            .expect("four observations");
         assert!((d - 3.0).abs() < 1e-12, "got {d}");
 
         let at_high = PnlSample::measure(&series(&[-0.05, 0.10]), baseline());
-        let d = at_high.time_under_water_days().value().expect("two observations");
-        assert!(d.abs() < 1e-12, "a new high is zero days under water, got {d}");
+        let d = at_high
+            .time_under_water_days()
+            .value()
+            .expect("two observations");
+        assert!(
+            d.abs() < 1e-12,
+            "a new high is zero days under water, got {d}"
+        );
     }
 
     #[test]
@@ -540,10 +552,7 @@ mod tests {
         let mut shuffled = series(&[-0.20, 0.10, 0.10]);
         shuffled.reverse();
         let out_of_order = PnlSample::measure(&shuffled, baseline());
-        assert_eq!(
-            ordered.max_drawdown_pct(),
-            out_of_order.max_drawdown_pct()
-        );
+        assert_eq!(ordered.max_drawdown_pct(), out_of_order.max_drawdown_pct());
         assert_eq!(ordered.as_of, out_of_order.as_of);
     }
 

@@ -1,30 +1,28 @@
-pub mod evidence;
-pub mod web_and_skills;
-pub mod falsification;
-pub mod ledger;
-pub mod lifecycle;
-pub mod agent_sessions;
 pub mod agent_audit;
 pub mod agent_cost;
 pub mod agent_preview;
-pub mod desk_catalogue;
-pub mod desk_digest;
-pub mod desk_running;
-pub mod memory;
+pub mod agent_sessions;
 pub mod agent_templates;
 pub mod asset_lifecycle;
 pub mod assets;
 pub mod automations;
 pub mod backtests;
+pub mod code;
 pub mod dashboard;
 pub mod data;
-pub mod code;
-pub mod dossiers;
+pub mod desk_catalogue;
 pub mod desk_charter;
-pub mod research_sessions;
+pub mod desk_digest;
+pub mod desk_running;
+pub mod dossiers;
+pub mod evidence;
 pub mod experiments;
+pub mod falsification;
 pub mod jobs;
+pub mod ledger;
+pub mod lifecycle;
 pub mod llm;
+pub mod memory;
 pub mod models;
 pub mod models_phase6;
 pub mod monitor;
@@ -34,11 +32,13 @@ pub mod platform_health;
 pub mod portfolio;
 pub mod proposals;
 pub mod research;
+pub mod research_sessions;
 pub mod strategies;
 pub mod streams;
 pub mod synthetic;
 pub mod trading;
 pub mod venue_health;
+pub mod web_and_skills;
 
 use axum::{
     routing::{delete, get, post},
@@ -111,7 +111,10 @@ pub fn router(state: AppState) -> Router {
         // not a look and spends no trial; the trial-spending tools refuse until
         // one exists.
         .route("/api/lifecycle/preregistrations", post(lifecycle::seal))
-        .route("/api/lifecycle/hypotheses", post(lifecycle::state_hypothesis))
+        .route(
+            "/api/lifecycle/hypotheses",
+            post(lifecycle::state_hypothesis),
+        )
         .route("/api/lifecycle/metrics", get(lifecycle::metrics))
         // The campaign door (AGENT-013 §8.5; S-10.11). A run's registration
         // becomes a campaign; the campaign's HYPOTHESIZE becomes a worker
@@ -136,11 +139,23 @@ pub fn router(state: AppState) -> Router {
         )
         // Static before dynamic: `current` is the session the calling run is
         // in, so a child does not have to be told an id it could get wrong.
-        .route("/api/research/sessions/current", get(research_sessions::current))
+        .route(
+            "/api/research/sessions/current",
+            get(research_sessions::current),
+        )
         .route("/api/research/sessions/{id}", get(research_sessions::get))
-        .route("/api/research/sessions/{id}/pause", post(research_sessions::pause))
-        .route("/api/research/sessions/{id}/resume", post(research_sessions::resume))
-        .route("/api/research/sessions/{id}/stop", post(research_sessions::stop))
+        .route(
+            "/api/research/sessions/{id}/pause",
+            post(research_sessions::pause),
+        )
+        .route(
+            "/api/research/sessions/{id}/resume",
+            post(research_sessions::resume),
+        )
+        .route(
+            "/api/research/sessions/{id}/stop",
+            post(research_sessions::stop),
+        )
         .route(
             "/api/research/sessions/{id}/agenda",
             get(research_sessions::agenda).post(research_sessions::add_item),
@@ -165,10 +180,19 @@ pub fn router(state: AppState) -> Router {
             "/api/research/sessions/{id}/charter",
             axum::routing::put(research_sessions::amend_charter),
         )
-        .route("/api/research/sessions/{id}/digests", get(research_sessions::digests))
-        .route("/api/research/sessions/{id}/events", get(research_sessions::events))
+        .route(
+            "/api/research/sessions/{id}/digests",
+            get(research_sessions::digests),
+        )
+        .route(
+            "/api/research/sessions/{id}/events",
+            get(research_sessions::events),
+        )
         .route("/api/dossiers/{ticket}", get(dossiers::get))
-        .route("/api/dossiers/{ticket}/verify/{claim}", post(dossiers::verify))
+        .route(
+            "/api/dossiers/{ticket}/verify/{claim}",
+            post(dossiers::verify),
+        )
         .route(
             "/api/dossiers/{ticket}/comments",
             get(dossiers::comments).post(dossiers::add_comment),
@@ -185,7 +209,10 @@ pub fn router(state: AppState) -> Router {
         // never as one number.
         .route("/api/lifecycle/barren", get(lifecycle::barren_rates))
         .route("/api/lifecycle/campaigns", post(lifecycle::define_campaign))
-        .route("/api/lifecycle/campaigns/{campaign_id}", get(lifecycle::get_campaign))
+        .route(
+            "/api/lifecycle/campaigns/{campaign_id}",
+            get(lifecycle::get_campaign),
+        )
         // The power check runs here, before any trial (§6.3).
         .route("/api/lifecycle/designs", post(lifecycle::bind_design))
         // The only doors into rings 1 and 2 (§6.8). Creating one changes
@@ -199,30 +226,66 @@ pub fn router(state: AppState) -> Router {
             "/api/lifecycle/proposals/{proposal_id}/decision",
             post(proposals::decide),
         )
-        .route("/api/falsification/defects", post(falsification::report_defect))
+        .route(
+            "/api/falsification/defects",
+            post(falsification::report_defect),
+        )
         // Feasibility: neither of these spends a trial, which is the point of
         // asking them before a search rather than after it disappoints.
-        .route("/api/research/tradeable-frontier", post(falsification::tradeable_frontier))
-        .route("/api/research/oracle-test", post(falsification::oracle_test))
+        .route(
+            "/api/research/tradeable-frontier",
+            post(falsification::tradeable_frontier),
+        )
+        .route(
+            "/api/research/oracle-test",
+            post(falsification::oracle_test),
+        )
         // Web access (ADR-P7-01). The only two routes in the platform that
         // reach the internet; everything they return is untrusted.
         .route("/api/web/search", post(web_and_skills::search))
         .route("/api/web/fetch", post(web_and_skills::fetch))
         // The Python skill library (ADR-P7-03).
-        .route("/api/skills", get(web_and_skills::list_skills).post(web_and_skills::create_skill))
+        .route(
+            "/api/skills",
+            get(web_and_skills::list_skills).post(web_and_skills::create_skill),
+        )
         .route("/api/skills/run", post(web_and_skills::run_skill))
         // The templated tier (S-3.1). One route for every template: which one is
         // a field, not a path, so adding a tool never touches this file.
-        .route("/api/agent/templates/run", post(agent_templates::run_template))
+        .route(
+            "/api/agent/templates/run",
+            post(agent_templates::run_template),
+        )
         // The honesty arithmetic (S-3.6, S-3.7). `holdout-look` is the only
         // agent-reachable path to holdout rows in the whole platform.
-        .route("/api/agent/audit/deflated-sharpe", post(agent_audit::deflated_sharpe))
-        .route("/api/agent/audit/min-track-record", post(agent_audit::min_track_record))
-        .route("/api/agent/audit/holdout-budget", post(agent_audit::holdout_budget))
-        .route("/api/agent/audit/holdout-look", post(agent_audit::holdout_look))
-        .route("/api/agent/audit/probability-of-overfit", post(agent_audit::probability_of_overfit))
-        .route("/api/agent/audit/family-wise", post(agent_audit::family_wise))
-        .route("/api/agent/audit/metric-integrity", post(agent_audit::metric_integrity))
+        .route(
+            "/api/agent/audit/deflated-sharpe",
+            post(agent_audit::deflated_sharpe),
+        )
+        .route(
+            "/api/agent/audit/min-track-record",
+            post(agent_audit::min_track_record),
+        )
+        .route(
+            "/api/agent/audit/holdout-budget",
+            post(agent_audit::holdout_budget),
+        )
+        .route(
+            "/api/agent/audit/holdout-look",
+            post(agent_audit::holdout_look),
+        )
+        .route(
+            "/api/agent/audit/probability-of-overfit",
+            post(agent_audit::probability_of_overfit),
+        )
+        .route(
+            "/api/agent/audit/family-wise",
+            post(agent_audit::family_wise),
+        )
+        .route(
+            "/api/agent/audit/metric-integrity",
+            post(agent_audit::metric_integrity),
+        )
         .route("/api/agent/cost/estimate", post(agent_cost::estimate))
         .route("/api/agent/strategy/preview", post(agent_preview::preview))
         .route("/api/catalogue", get(desk_catalogue::catalogue))
@@ -244,13 +307,19 @@ pub fn router(state: AppState) -> Router {
         // answered 200, so `memory::list` was never reached for that bucket.
         // `kind_for` enumerates the legitimate values of `{bucket}`, which makes
         // any literal here a second spelling of one.
-        .route("/api/memory/{bucket}", get(memory::list).post(memory::record))
+        .route(
+            "/api/memory/{bucket}",
+            get(memory::list).post(memory::record),
+        )
         .route("/api/memory/{bucket}/{id}", delete(memory::forget))
         // Evidence for the falsification tools (ADR-P7-05). None of these
         // returns a verdict; each answers one defect class with a number.
         .route("/api/evidence/trades", post(evidence::trades))
         .route("/api/evidence/data-quality", post(evidence::data_quality))
-        .route("/api/evidence/similar-trials", post(evidence::similar_trials))
+        .route(
+            "/api/evidence/similar-trials",
+            post(evidence::similar_trials),
+        )
         .route("/api/data/catalog", get(data::get_catalog))
         .route("/api/data/live/{instrument}", get(data::get_live))
         .route(
@@ -316,10 +385,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/trading/resume", post(trading::reset_kill_switch))
         // ── COMP-007: the live monitor and kill switch ───────────────────────
         .route("/api/monitor/kill-switch", get(monitor::get_kill_switch))
-        .route(
-            "/api/monitor/kill-switch/{scope}/trip",
-            post(monitor::trip),
-        )
+        .route("/api/monitor/kill-switch/{scope}/trip", post(monitor::trip))
         .route(
             "/api/monitor/kill-switch/{scope}/reset",
             post(monitor::reset),
@@ -405,11 +471,20 @@ pub fn router(state: AppState) -> Router {
             "/api/agent/conversations/{id}/cancel",
             post(crate::agent::routes::cancel_conversation),
         )
-        .route("/api/agent/trajectory", post(crate::agent::routes::record_trajectory_step))
+        .route(
+            "/api/agent/trajectory",
+            post(crate::agent::routes::record_trajectory_step),
+        )
         // The audit trail's two halves (SPEC §15, AT-64). Every front door opens
         // a record here before it dispatches, including the external MCP process.
-        .route("/api/agent/audit", post(crate::agent::routes::open_audit_record))
-        .route("/api/agent/audit/{audit_id}", post(crate::agent::routes::close_audit_record))
+        .route(
+            "/api/agent/audit",
+            post(crate::agent::routes::open_audit_record),
+        )
+        .route(
+            "/api/agent/audit/{audit_id}",
+            post(crate::agent::routes::close_audit_record),
+        )
         .route("/api/agent/runs", get(crate::agent::routes::list_runs))
         .route("/api/agent/runs/{id}", get(crate::agent::routes::get_run))
         .route(
@@ -455,19 +530,13 @@ pub fn router(state: AppState) -> Router {
         // P4-T06 dashboard rollup
         .route("/api/dashboard/rollup", get(dashboard::get_rollup))
         // Portfolio, execution, risk, alerts and settings (0042).
-        .route(
-            "/api/portfolio/equity-curve",
-            get(portfolio::equity_curve),
-        )
+        .route("/api/portfolio/equity-curve", get(portfolio::equity_curve))
         .route("/api/portfolio/positions", get(portfolio::positions))
         .route("/api/execution/orders", get(portfolio::list_orders))
         .route("/api/execution/fills", get(portfolio::list_fills))
         .route("/api/orders/{id}/cancel", post(portfolio::cancel_order))
         .route("/api/risk/summary", get(portfolio::risk_summary))
-        .route(
-            "/api/account/transactions",
-            get(portfolio::transactions),
-        )
+        .route("/api/account/transactions", get(portfolio::transactions))
         .route(
             "/api/alerts",
             get(portfolio::list_alerts).post(portfolio::create_alert),
@@ -571,7 +640,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/models/for-node", get(models::for_node))
         // ── Platform self-monitoring (§16.2) ─────────────────────────────────
         .route("/api/platform/health", get(platform_health::health))
-        .route("/api/platform/gates/{subject}", get(platform_health::gate_stack))
+        .route(
+            "/api/platform/gates/{subject}",
+            get(platform_health::gate_stack),
+        )
         .route("/api/platform/timeline", get(platform_health::timeline))
         // I-2.11 leaderboard (static path must precede dynamic /{id})
         .route("/api/models/leaderboard", get(models::leaderboard))

@@ -52,9 +52,13 @@ pub struct CensusRecord {
 impl CensusRecord {
     #[must_use]
     fn new(c: CoverageCensus, kind: SeriesKind) -> Self {
-        let last_row_age_secs =
-            dataplane::census::staleness(c.last_bar_ns, c.period_secs, c.as_of).map(|d| d.num_seconds());
-        Self { census: c, kind, last_row_age_secs }
+        let last_row_age_secs = dataplane::census::staleness(c.last_bar_ns, c.period_secs, c.as_of)
+            .map(|d| d.num_seconds());
+        Self {
+            census: c,
+            kind,
+            last_row_age_secs,
+        }
     }
 }
 
@@ -71,7 +75,11 @@ impl CensusRecord {
 ///
 /// # Errors
 /// Backend failures from the reader.
-pub async fn take_census<F>(store: &BarStore, as_of: DateTime<Utc>, calendar_for: F) -> anyhow::Result<Vec<CensusRecord>>
+pub async fn take_census<F>(
+    store: &BarStore,
+    as_of: DateTime<Utc>,
+    calendar_for: F,
+) -> anyhow::Result<Vec<CensusRecord>>
 where
     F: Fn(&str) -> Calendar,
 {
@@ -79,9 +87,19 @@ where
     let mut out = Vec::with_capacity(series.len());
     for s in series {
         let period_secs = period_secs_of(&s.timeframe);
-        let bars = store.census_bars(&s.instrument_id, &s.venue, period_secs).await?;
+        let bars = store
+            .census_bars(&s.instrument_id, &s.venue, period_secs)
+            .await?;
         let cal = calendar_for(&s.venue);
-        let c = census(&s.instrument_id, &s.venue, &s.timeframe, period_secs, &bars, &cal, as_of);
+        let c = census(
+            &s.instrument_id,
+            &s.venue,
+            &s.timeframe,
+            period_secs,
+            &bars,
+            &cal,
+            as_of,
+        );
         out.push(CensusRecord::new(c, SeriesKind::Historical));
     }
     Ok(out)
@@ -113,7 +131,9 @@ pub fn forward_census(
             bad.open_ns
         );
     }
-    let cal = Calendar::Continuous { version: CalendarVersion::crypto_24_7() };
+    let cal = Calendar::Continuous {
+        version: CalendarVersion::crypto_24_7(),
+    };
     let tf = cadence_key(cadence_secs);
     let c = census(series, venue, &tf, cadence_secs, observations, &cal, as_of);
     Ok(CensusRecord::new(c, SeriesKind::Forward))
@@ -173,7 +193,10 @@ pub async fn persist(pg: &sqlx::PgPool, records: &[CensusRecord]) -> anyhow::Res
 fn verdict_columns(v: FloorVerdict) -> (bool, Option<i32>) {
     match v {
         FloorVerdict::Satisfied => (true, None),
-        FloorVerdict::Short { shortfall_days, .. } => (false, Some(i32::try_from(shortfall_days).unwrap_or(i32::MAX))),
+        FloorVerdict::Short { shortfall_days, .. } => (
+            false,
+            Some(i32::try_from(shortfall_days).unwrap_or(i32::MAX)),
+        ),
         FloorVerdict::NoData => (false, None),
     }
 }
@@ -184,22 +207,43 @@ fn verdict_columns(v: FloorVerdict) -> (bool, Option<i32>) {
 #[must_use]
 pub fn summarise(records: &[CensusRecord]) -> BTreeMap<String, serde_json::Value> {
     let mut by_depth: Vec<&CensusRecord> = records.iter().collect();
-    by_depth.sort_by_key(|r| (r.census.longest_continuous_secs, r.census.instrument.clone(), r.census.venue.clone()));
+    by_depth.sort_by_key(|r| {
+        (
+            r.census.longest_continuous_secs,
+            r.census.instrument.clone(),
+            r.census.venue.clone(),
+        )
+    });
     let deepest = by_depth.last().map_or(0, |r| r.census.continuous_days());
-    let derived: u64 = records.iter().map(|r| r.census.derived_knowledge_bars).sum();
-    let observed: u64 = records.iter().map(|r| r.census.observed_knowledge_bars).sum();
+    let derived: u64 = records
+        .iter()
+        .map(|r| r.census.derived_knowledge_bars)
+        .sum();
+    let observed: u64 = records
+        .iter()
+        .map(|r| r.census.observed_knowledge_bars)
+        .sum();
     let mut m = BTreeMap::new();
     m.insert("series".into(), serde_json::json!(records.len()));
     m.insert("deepest_continuous_days".into(), serde_json::json!(deepest));
     m.insert("derived_knowledge_bars".into(), serde_json::json!(derived));
-    m.insert("observed_knowledge_bars".into(), serde_json::json!(observed));
+    m.insert(
+        "observed_knowledge_bars".into(),
+        serde_json::json!(observed),
+    );
     m.insert(
         "strict_v1_satisfied_series".into(),
-        serde_json::json!(records.iter().filter(|r| r.census.strict_v1.is_satisfied()).count()),
+        serde_json::json!(records
+            .iter()
+            .filter(|r| r.census.strict_v1.is_satisfied())
+            .count()),
     );
     m.insert(
         "paper_v1_satisfied_series".into(),
-        serde_json::json!(records.iter().filter(|r| r.census.paper_v1.is_satisfied()).count()),
+        serde_json::json!(records
+            .iter()
+            .filter(|r| r.census.paper_v1.is_satisfied())
+            .count()),
     );
     m.insert(
         "thinnest".into(),
@@ -261,7 +305,14 @@ mod tests {
     #[test]
     fn forward_census_marks_the_series_forward() {
         let obs: Vec<CensusBar> = (0..24).map(|i| CensusBar::observed(i * HOUR)).collect();
-        let r = forward_census("funding:PI_XBTUSD", "kraken_futures", 3600, &obs, at(24 * HOUR)).unwrap();
+        let r = forward_census(
+            "funding:PI_XBTUSD",
+            "kraken_futures",
+            3600,
+            &obs,
+            at(24 * HOUR),
+        )
+        .unwrap();
         assert_eq!(r.kind, SeriesKind::Forward);
         assert_eq!(r.kind.as_str(), "forward");
         assert_eq!(r.census.observed_knowledge_bars, 24);
@@ -276,11 +327,25 @@ mod tests {
     /// masquerading as forward evidence is the exact failure D-P3 exists to stop.
     #[test]
     fn a_derived_stamp_on_a_forward_series_is_refused() {
-        let obs = vec![CensusBar::observed(0), CensusBar::derived(HOUR), CensusBar::observed(2 * HOUR)];
-        let err = forward_census("funding:PI_XBTUSD", "kraken_futures", 3600, &obs, at(3 * HOUR)).unwrap_err();
+        let obs = vec![
+            CensusBar::observed(0),
+            CensusBar::derived(HOUR),
+            CensusBar::observed(2 * HOUR),
+        ];
+        let err = forward_census(
+            "funding:PI_XBTUSD",
+            "kraken_futures",
+            3600,
+            &obs,
+            at(3 * HOUR),
+        )
+        .unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("derived knowledge_time"), "{msg}");
-        assert!(msg.contains("D-P3"), "the refusal must name the decision it enforces: {msg}");
+        assert!(
+            msg.contains("D-P3"),
+            "the refusal must name the decision it enforces: {msg}"
+        );
     }
 
     #[test]
@@ -294,19 +359,35 @@ mod tests {
 
     #[test]
     fn summary_puts_the_thinnest_series_first() {
-        let deep: Vec<CensusBar> = (0..24 * 400).map(|i| CensusBar::observed(i * HOUR)).collect();
+        let deep: Vec<CensusBar> = (0..24 * 400)
+            .map(|i| CensusBar::observed(i * HOUR))
+            .collect();
         let thin: Vec<CensusBar> = (0..5).map(|i| CensusBar::observed(i * HOUR)).collect();
-        let cal = Calendar::Continuous { version: CalendarVersion::crypto_24_7() };
+        let cal = Calendar::Continuous {
+            version: CalendarVersion::crypto_24_7(),
+        };
         let records = vec![
-            CensusRecord::new(census("DEEP", "v", "1h", 3600, &deep, &cal, at(0)), SeriesKind::Historical),
-            CensusRecord::new(census("THIN", "v", "1h", 3600, &thin, &cal, at(0)), SeriesKind::Historical),
+            CensusRecord::new(
+                census("DEEP", "v", "1h", 3600, &deep, &cal, at(0)),
+                SeriesKind::Historical,
+            ),
+            CensusRecord::new(
+                census("THIN", "v", "1h", 3600, &thin, &cal, at(0)),
+                SeriesKind::Historical,
+            ),
         ];
         let s = summarise(&records);
         let thinnest = s.get("thinnest").unwrap().as_array().unwrap();
         assert_eq!(thinnest[0]["instrument"], "THIN");
         assert_eq!(s.get("series").unwrap(), &serde_json::json!(2));
-        assert_eq!(s.get("paper_v1_satisfied_series").unwrap(), &serde_json::json!(1));
-        assert_eq!(s.get("strict_v1_satisfied_series").unwrap(), &serde_json::json!(0));
+        assert_eq!(
+            s.get("paper_v1_satisfied_series").unwrap(),
+            &serde_json::json!(1)
+        );
+        assert_eq!(
+            s.get("strict_v1_satisfied_series").unwrap(),
+            &serde_json::json!(0)
+        );
     }
 
     #[test]
@@ -314,7 +395,10 @@ mod tests {
         assert_eq!(verdict_columns(FloorVerdict::Satisfied), (true, None));
         assert_eq!(verdict_columns(FloorVerdict::NoData), (false, None));
         assert_eq!(
-            verdict_columns(FloorVerdict::Short { shortfall_days: 12, days_at_current_rate: 24 }),
+            verdict_columns(FloorVerdict::Short {
+                shortfall_days: 12,
+                days_at_current_rate: 24
+            }),
             (false, Some(12))
         );
     }

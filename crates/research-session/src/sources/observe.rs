@@ -313,7 +313,12 @@ mod tests {
         };
         assert!(!o.is_subscribed());
         let mut agenda = empty_agenda();
-        let out = observations(&charter_over(&["s_1"]), &[o], &Raised::default(), &mut agenda);
+        let out = observations(
+            &charter_over(&["s_1"]),
+            &[o],
+            &Raised::default(),
+            &mut agenda,
+        );
         assert_eq!(agenda.len(), 1);
         assert_eq!(out.skipped[0].why, SkipReason::NotSubscribed);
     }

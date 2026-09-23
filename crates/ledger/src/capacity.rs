@@ -110,7 +110,10 @@ impl Exposure {
     /// revision. The number that competes for one book's liquidity.
     #[must_use]
     pub fn on_instrument(&self, instrument_id: &str) -> f64 {
-        self.by_instrument.get(instrument_id).copied().unwrap_or(0.0)
+        self.by_instrument
+            .get(instrument_id)
+            .copied()
+            .unwrap_or(0.0)
     }
 
     /// How many bindings exist.
@@ -249,7 +252,9 @@ pub fn admit(
         };
     }
 
-    Admission::Admitted { headroom_usd: c.ceiling_usd - proposed }
+    Admission::Admitted {
+        headroom_usd: c.ceiling_usd - proposed,
+    }
 }
 
 #[cfg(test)]
@@ -323,7 +328,10 @@ mod tests {
         ];
         let e = Exposure::across("rev_a", &instances).unwrap();
         assert_eq!(e.effective_instances(), 2);
-        assert_eq!(e.concentrations(), vec![("ETH-USD", 700.0), ("BTC-USD", 100.0)]);
+        assert_eq!(
+            e.concentrations(),
+            vec![("ETH-USD", 700.0), ("BTC-USD", 100.0)]
+        );
     }
 
     /// "Nothing is live" and "zero exposure" are different answers.
@@ -339,7 +347,12 @@ mod tests {
     fn a_request_that_fits_under_the_aggregate_ceiling_is_admitted() {
         let instances = vec![inst("rev_a", "a1", "BTC-USD", 100_000.0)];
         let e = Exposure::across("rev_a", &instances).unwrap();
-        match admit(Some(&e), "BTC-USD", 50_000.0, Some(&ceiling("BTC-USD", 1_000_000.0))) {
+        match admit(
+            Some(&e),
+            "BTC-USD",
+            50_000.0,
+            Some(&ceiling("BTC-USD", 1_000_000.0)),
+        ) {
             Admission::Admitted { headroom_usd } => {
                 assert!((headroom_usd - 850_000.0).abs() < 1e-6);
             }
@@ -389,7 +402,10 @@ mod tests {
     fn a_ceiling_for_another_instrument_does_not_admit() {
         match admit(None, "BTC-USD", 1.0, Some(&ceiling("ETH-USD", 1e12))) {
             Admission::Unmeasured { reason } => {
-                assert!(reason.contains("does not transfer between instruments"), "{reason}");
+                assert!(
+                    reason.contains("does not transfer between instruments"),
+                    "{reason}"
+                );
             }
             other => panic!("{other:?}"),
         }
@@ -397,9 +413,14 @@ mod tests {
 
     #[test]
     fn a_single_venue_ceiling_says_so_in_the_refusal() {
-        let c = Ceiling { single_venue: true, ..ceiling("BTC-USD", 100.0) };
+        let c = Ceiling {
+            single_venue: true,
+            ..ceiling("BTC-USD", 100.0)
+        };
         match admit(None, "BTC-USD", 1_000.0, Some(&c)) {
-            Admission::Refused { reason } => assert!(reason.contains("single-venue ADV"), "{reason}"),
+            Admission::Refused { reason } => {
+                assert!(reason.contains("single-venue ADV"), "{reason}")
+            }
             other => panic!("{other:?}"),
         }
     }
@@ -409,7 +430,13 @@ mod tests {
     fn the_check_is_per_instrument_not_per_revision_total() {
         let instances = vec![inst("rev_a", "a1", "ETH-USD", 10_000_000.0)];
         let e = Exposure::across("rev_a", &instances).unwrap();
-        assert!(admit(Some(&e), "BTC-USD", 1_000.0, Some(&ceiling("BTC-USD", 5_000.0))).is_admitted());
+        assert!(admit(
+            Some(&e),
+            "BTC-USD",
+            1_000.0,
+            Some(&ceiling("BTC-USD", 5_000.0))
+        )
+        .is_admitted());
     }
 
     #[test]

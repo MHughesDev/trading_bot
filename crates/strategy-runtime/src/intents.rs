@@ -34,7 +34,9 @@ pub enum SizingError {
     #[error("size '{size}' is not a valid decimal quantity")]
     UnparseableSize { size: String },
 
-    #[error("percent-of-balance sizing needs account equity and a mark; {missing} was not available")]
+    #[error(
+        "percent-of-balance sizing needs account equity and a mark; {missing} was not available"
+    )]
     MissingSizingContext { missing: &'static str },
 
     #[error("percent-of-balance fraction '{fraction}' is not a positive decimal fraction")]
@@ -100,11 +102,13 @@ fn size_for(
     sizing: Option<&SizingContext>,
 ) -> Result<Option<Size>, SizingError> {
     match &order.size_mode {
-        SizeMode::Fixed => Size::from_str(&order.size)
-            .map(Some)
-            .map_err(|_| SizingError::UnparseableSize {
-                size: order.size.clone(),
-            }),
+        SizeMode::Fixed => {
+            Size::from_str(&order.size)
+                .map(Some)
+                .map_err(|_| SizingError::UnparseableSize {
+                    size: order.size.clone(),
+                })
+        }
 
         SizeMode::PercentOfBalance => {
             let Some(ctx) = sizing else {
@@ -112,11 +116,10 @@ fn size_for(
                     missing: "account equity / mark",
                 });
             };
-            let fraction = Decimal::from_str(order.size.trim()).map_err(|_| {
-                SizingError::InvalidFraction {
+            let fraction =
+                Decimal::from_str(order.size.trim()).map_err(|_| SizingError::InvalidFraction {
                     fraction: order.size.clone(),
-                }
-            })?;
+                })?;
             if fraction <= Decimal::ZERO {
                 return Err(SizingError::InvalidFraction {
                     fraction: order.size.clone(),
@@ -149,11 +152,13 @@ fn size_for(
         // the one legitimate "no order, no error" outcome.
         SizeMode::Model { node_ref } => match size_overrides.get(node_ref) {
             None => Ok(None),
-            Some(fraction) => Size::from_str(fraction).map(Some).map_err(|_| {
-                SizingError::UnparseableSize {
-                    size: fraction.clone(),
-                }
-            }),
+            Some(fraction) => {
+                Size::from_str(fraction)
+                    .map(Some)
+                    .map_err(|_| SizingError::UnparseableSize {
+                        size: fraction.clone(),
+                    })
+            }
         },
     }
 }

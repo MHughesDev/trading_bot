@@ -83,7 +83,11 @@ fn param(fast: f64) -> ParamMap {
 
 #[test]
 fn members_are_insertion_ordered_not_metric_ranked() {
-    let bt = Backtest::new(InMemoryRunStore::new(), spike_executor(), InMemoryLedger::new());
+    let bt = Backtest::new(
+        InMemoryRunStore::new(),
+        spike_executor(),
+        InMemoryLedger::new(),
+    );
     let grid: Vec<ParamMap> = (8..=16).map(|i| param(f64::from(i))).collect();
     let res = StudyEngine::run(&sweep(grid, SelectionRule::None), &bt, &ctx()).unwrap();
 
@@ -99,7 +103,11 @@ fn members_are_insertion_ordered_not_metric_ranked() {
 
 #[test]
 fn carry_forward_is_the_declared_rule_not_the_peak() {
-    let bt = Backtest::new(InMemoryRunStore::new(), spike_executor(), InMemoryLedger::new());
+    let bt = Backtest::new(
+        InMemoryRunStore::new(),
+        spike_executor(),
+        InMemoryLedger::new(),
+    );
     let grid: Vec<ParamMap> = (8..=16).map(|i| param(f64::from(i))).collect();
 
     // MedianStableCentroid must return a near-median member, NOT the peak (12).
@@ -128,7 +136,11 @@ fn the_only_single_config_out_is_the_selection_rule() {
     // config is `carried_forward` (the declared rule). If you find yourself
     // wanting `res.members()[k]` "the best one", that is the p-hacking surface
     // ADR-002 seals. The distribution — median, IQR, worst-5% — is what you read.
-    let bt = Backtest::new(InMemoryRunStore::new(), spike_executor(), InMemoryLedger::new());
+    let bt = Backtest::new(
+        InMemoryRunStore::new(),
+        spike_executor(),
+        InMemoryLedger::new(),
+    );
     let grid: Vec<ParamMap> = (8..=16).map(|i| param(f64::from(i))).collect();
     let res = StudyEngine::run(&sweep(grid, SelectionRule::WorstCaseRobust), &bt, &ctx()).unwrap();
     // Worst-case rule lands on a conservative (low-return) member, never the peak.

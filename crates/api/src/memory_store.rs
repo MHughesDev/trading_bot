@@ -67,7 +67,8 @@ pub struct MemoryStore {
 /// windows, and overlap over text is a string comparison that happens to work
 /// for ISO-8601 and silently stops working for anything else.
 fn window_dates(w: &DataWindow) -> Result<(NaiveDate, NaiveDate), EntryError> {
-    let start = NaiveDate::parse_from_str(&w.start, "%Y-%m-%d").map_err(|_| EntryError::NoWindow)?;
+    let start =
+        NaiveDate::parse_from_str(&w.start, "%Y-%m-%d").map_err(|_| EntryError::NoWindow)?;
     let end = NaiveDate::parse_from_str(&w.end, "%Y-%m-%d").map_err(|_| EntryError::NoWindow)?;
     Ok((start, end))
 }
@@ -332,13 +333,12 @@ impl MemoryStore {
     /// # Errors
     /// As [`Self::by_kind`].
     pub async fn get(&self, user_id: Uuid, entry_id: &str) -> Result<Option<Entry>, MemoryError> {
-        let row = sqlx::query(
-            "SELECT * FROM agent_memory.entry WHERE user_id = $1 AND entry_id = $2",
-        )
-        .bind(user_id)
-        .bind(entry_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row =
+            sqlx::query("SELECT * FROM agent_memory.entry WHERE user_id = $1 AND entry_id = $2")
+                .bind(user_id)
+                .bind(entry_id)
+                .fetch_optional(&self.pool)
+                .await?;
         row.as_ref().map(row_to_entry).transpose()
     }
     /// The live entries for one subject, newest first.

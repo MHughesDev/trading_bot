@@ -31,7 +31,10 @@ async fn a_real_page_fetches_and_extracts_to_readable_text() {
     assert!(doc.content_type.contains("text/html"));
     let text = doc.text.read_as_untrusted_input();
     assert!(text.len() > 2_000, "extracted only {} chars", text.len());
-    assert!(text.contains("Sharpe"), "the subject of the page should survive extraction");
+    assert!(
+        text.contains("Sharpe"),
+        "the subject of the page should survive extraction"
+    );
     assert!(
         !text.contains("function(") && !text.contains("</script"),
         "script bodies must not reach the text"
@@ -61,7 +64,10 @@ async fn every_provider_answers_with_parseable_results() {
                 assert!(!hits.is_empty());
                 for h in &hits {
                     assert!(h.url.starts_with("http"), "{provider:?}: {}", h.url);
-                    assert!(!h.title.read_as_untrusted_input().is_empty(), "{provider:?}");
+                    assert!(
+                        !h.title.read_as_untrusted_input().is_empty(),
+                        "{provider:?}"
+                    );
                 }
             }
             Ok(SearchOutcome::Empty) => {
@@ -92,9 +98,15 @@ async fn scholarly_results_carry_publication_years() {
         .search(Provider::OpenAlex, "deflated sharpe ratio", 10)
         .await
         .expect("search");
-    let SearchOutcome::Found { hits } = out else { panic!("expected hits") };
+    let SearchOutcome::Found { hits } = out else {
+        panic!("expected hits")
+    };
     let dated = hits.iter().filter(|h| h.published_year.is_some()).count();
-    assert!(dated >= hits.len() / 2, "only {dated}/{} hits carried a year", hits.len());
+    assert!(
+        dated >= hits.len() / 2,
+        "only {dated}/{} hits carried a year",
+        hits.len()
+    );
     assert!(
         hits.iter().any(|h| h.cited_by.is_some()),
         "citation counts are how crowding is measured"

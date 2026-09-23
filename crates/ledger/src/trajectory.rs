@@ -52,7 +52,9 @@ impl TrajectoryStep {
             return Err(LedgerError::Invalid("tool_name is required".into()));
         }
         if !self.tool_schema_hash.starts_with("sha256:") || self.tool_schema_hash.len() != 71 {
-            return Err(LedgerError::Invalid("tool_schema_hash must be sha256:<64 hex>".into()));
+            return Err(LedgerError::Invalid(
+                "tool_schema_hash must be sha256:<64 hex>".into(),
+            ));
         }
         if self.tool_semver.trim().is_empty() {
             return Err(LedgerError::Invalid("tool_semver is required".into()));
@@ -86,7 +88,11 @@ impl PgTrialLedger {
     ///
     /// # Errors
     /// Validation and backend failures.
-    pub async fn record_trajectory_step_async(&self, tenant_id: &str, step: &TrajectoryStep) -> Result<(), LedgerError> {
+    pub async fn record_trajectory_step_async(
+        &self,
+        tenant_id: &str,
+        step: &TrajectoryStep,
+    ) -> Result<(), LedgerError> {
         step.validate()?;
         let be = |e: sqlx::Error| LedgerError::Backend(e.to_string());
         let mut tx = tenant_tx(self.pool(), tenant_id).await.map_err(be)?;
@@ -132,7 +138,9 @@ impl PgTrialLedger {
         labeled_by: &str,
     ) -> Result<(), LedgerError> {
         if !matches!(label, "good" | "unnecessary" | "mistake" | "recover") {
-            return Err(LedgerError::Invalid(format!("unknown critic label {label}")));
+            return Err(LedgerError::Invalid(format!(
+                "unknown critic label {label}"
+            )));
         }
         let be = |e: sqlx::Error| LedgerError::Backend(e.to_string());
         let mut tx = tenant_tx(self.pool(), tenant_id).await.map_err(be)?;
@@ -177,10 +185,30 @@ mod tests {
     #[test]
     fn a_step_without_its_schema_hash_is_refused() {
         assert!(step().validate().is_ok());
-        assert!(TrajectoryStep { tool_schema_hash: String::new(), ..step() }.validate().is_err());
-        assert!(TrajectoryStep { tool_schema_hash: "sha256:short".into(), ..step() }.validate().is_err());
-        assert!(TrajectoryStep { step_idx: -1, ..step() }.validate().is_err());
-        assert!(TrajectoryStep { propensity: Some(0.0), ..step() }.validate().is_err());
+        assert!(TrajectoryStep {
+            tool_schema_hash: String::new(),
+            ..step()
+        }
+        .validate()
+        .is_err());
+        assert!(TrajectoryStep {
+            tool_schema_hash: "sha256:short".into(),
+            ..step()
+        }
+        .validate()
+        .is_err());
+        assert!(TrajectoryStep {
+            step_idx: -1,
+            ..step()
+        }
+        .validate()
+        .is_err());
+        assert!(TrajectoryStep {
+            propensity: Some(0.0),
+            ..step()
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]

@@ -262,7 +262,10 @@ impl BookFeeds {
     /// grid that looks like a market with no orders in it.
     pub fn ensure(self: &Arc<Self>, instrument_id: &str, asset_class: &str) {
         if !matches!(asset_class, "crypto_spot_cex" | "perpetual_swap") {
-            debug!(instrument_id, asset_class, "no book adapter for this asset class");
+            debug!(
+                instrument_id,
+                asset_class, "no book adapter for this asset class"
+            );
             return;
         }
         if !self.running.insert(instrument_id.to_owned()) {

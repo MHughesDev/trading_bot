@@ -19,8 +19,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use dataplane::backfill::{
-    BackfillBar, BackfillKey, BackfillPage, BackfillSource, BackfillState, BackfillStateStore, BackfillStatus, BarSink,
-    FetchError, PageRequest, RateLimit, SinkError, SinkReport, StateError,
+    BackfillBar, BackfillKey, BackfillPage, BackfillSource, BackfillState, BackfillStateStore,
+    BackfillStatus, BarSink, FetchError, PageRequest, RateLimit, SinkError, SinkReport, StateError,
 };
 use jobs::kinds::backfill::{BackfillEngine, BackfillManifest, BackfillPolicy, RunOutcome};
 
@@ -42,7 +42,12 @@ struct CountingSource {
 
 impl CountingSource {
     fn new() -> Self {
-        Self { calls: Arc::new(Mutex::new(Vec::new())), rate_limit_at: Vec::new(), terms_at: None, stuck: false }
+        Self {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            rate_limit_at: Vec::new(),
+            terms_at: None,
+            stuck: false,
+        }
     }
 
     fn count(&self) -> usize {
@@ -67,13 +72,21 @@ impl BackfillSource for CountingSource {
             c.len() - 1
         };
         if self.rate_limit_at.contains(&idx) {
-            return Err(FetchError::RateLimited { venue: "coinbase".into(), retry_after_ms: 750 });
+            return Err(FetchError::RateLimited {
+                venue: "coinbase".into(),
+                retry_after_ms: 750,
+            });
         }
         if self.terms_at == Some(idx) {
-            return Err(FetchError::Terms("bulk history downloads are prohibited".into()));
+            return Err(FetchError::Terms(
+                "bulk history downloads are prohibited".into(),
+            ));
         }
         if self.stuck {
-            return Ok(BackfillPage { bars: Vec::new(), covered_to: Some(req.start) });
+            return Ok(BackfillPage {
+                bars: Vec::new(),
+                covered_to: Some(req.start),
+            });
         }
         let mut bars = Vec::new();
         let mut t = req.start;
@@ -89,7 +102,10 @@ impl BackfillSource for CountingSource {
             });
             t += Duration::minutes(1);
         }
-        Ok(BackfillPage { bars, covered_to: Some(req.end) })
+        Ok(BackfillPage {
+            bars,
+            covered_to: Some(req.end),
+        })
     }
 }
 
@@ -122,7 +138,12 @@ impl BarSink for CountingSink {
                 unchanged += 1;
             }
         }
-        Ok(SinkReport { inserted, restated: 0, unchanged, rejected: 0 })
+        Ok(SinkReport {
+            inserted,
+            restated: 0,
+            unchanged,
+            rejected: 0,
+        })
     }
 }
 
@@ -181,7 +202,12 @@ impl BackfillStateStore for MemState {
         Ok(())
     }
 
-    async fn advance(&self, key: &BackfillKey, cursor: DateTime<Utc>, rows_written: i64) -> Result<(), StateError> {
+    async fn advance(
+        &self,
+        key: &BackfillKey,
+        cursor: DateTime<Utc>,
+        rows_written: i64,
+    ) -> Result<(), StateError> {
         self.edit(key, |r| {
             let floor = r.cursor.unwrap_or(r.key.window_start);
             r.cursor = Some(floor.max(cursor.min(r.key.window_end)));
@@ -194,7 +220,12 @@ impl BackfillStateStore for MemState {
         Ok(())
     }
 
-    async fn pause(&self, key: &BackfillKey, until: DateTime<Utc>, reason: &str) -> Result<(), StateError> {
+    async fn pause(
+        &self,
+        key: &BackfillKey,
+        until: DateTime<Utc>,
+        reason: &str,
+    ) -> Result<(), StateError> {
         self.edit(key, |r| {
             r.status = BackfillStatus::Paused;
             r.backoff_until = Some(until);
@@ -243,7 +274,11 @@ fn manifest() -> BackfillManifest {
 }
 
 fn policy(max_pages: u64) -> BackfillPolicy {
-    BackfillPolicy { page_span: Duration::hours(5), max_pages_per_run: max_pages, ..BackfillPolicy::default() }
+    BackfillPolicy {
+        page_span: Duration::hours(5),
+        max_pages_per_run: max_pages,
+        ..BackfillPolicy::default()
+    }
 }
 
 fn never_cancelled() -> impl Fn() -> bool + Sync {
@@ -252,12 +287,19 @@ fn never_cancelled() -> impl Fn() -> bool + Sync {
 
 /// The coverage assertion: the recorded calls tile `[start, end)` exactly.
 /// Overlap means a page was fetched twice; a hole means one was skipped.
-fn assert_tiles_exactly(calls: &[(DateTime<Utc>, DateTime<Utc>)], start: DateTime<Utc>, end: DateTime<Utc>) {
+fn assert_tiles_exactly(
+    calls: &[(DateTime<Utc>, DateTime<Utc>)],
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+) {
     let mut sorted = calls.to_vec();
     sorted.sort();
     let mut at = start;
     for (s, e) in &sorted {
-        assert_eq!(*s, at, "page starting {s} does not continue from {at}: a page was fetched twice or skipped");
+        assert_eq!(
+            *s, at,
+            "page starting {s} does not continue from {at}: a page was fetched twice or skipped"
+        );
         assert!(e > s, "empty page request {s}..{e}");
         at = *e;
     }
@@ -278,25 +320,37 @@ async fn killing_the_worker_mid_window_refetches_no_page_and_skips_none() {
     let calls = src.calls.clone();
 
     // Run 1 dies after two pages.
-    let engine = BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(2));
+    let engine =
+        BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(2));
     let out = engine.run(&m, &never_cancelled()).await.unwrap();
-    assert!(matches!(out, RunOutcome::Paused { .. }), "budget reached is a pause, not a failure: {out:?}");
+    assert!(
+        matches!(out, RunOutcome::Paused { .. }),
+        "budget reached is a pause, not a failure: {out:?}"
+    );
     assert_eq!(src.count(), 2);
 
     // Run 2 is a *different engine instance* — a new worker process — sharing
     // only the durable cursor.
-    let engine = BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
+    let engine =
+        BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
     let out = engine.run(&m, &never_cancelled()).await.unwrap();
     assert!(matches!(out, RunOutcome::Completed { .. }), "{out:?}");
 
     let calls = calls.lock().unwrap().clone();
-    assert_eq!(calls.len(), 5, "24 h in 5 h pages is 5 pages, fetched once each");
+    assert_eq!(
+        calls.len(),
+        5,
+        "24 h in 5 h pages is 5 pages, fetched once each"
+    );
     assert_tiles_exactly(&calls, m.window_start, m.window_end);
 
     // And nothing reached the store twice.
     let written = sink.written.lock().unwrap();
     assert_eq!(written.len(), 24 * 60, "one row per minute of the window");
-    assert!(written.values().all(|n| *n == 1), "a bar was written more than once: the resume refetched");
+    assert!(
+        written.values().all(|n| *n == 1),
+        "a bar was written more than once: the resume refetched"
+    );
 }
 
 /// P-1.1: resubmitting a completed window performs **zero** fetches.
@@ -307,8 +361,12 @@ async fn resubmitting_a_completed_window_performs_zero_fetches() {
     let src = Arc::new(CountingSource::new());
     let sink = Arc::new(CountingSink::default());
 
-    let engine = BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
-    assert!(matches!(engine.run(&m, &never_cancelled()).await.unwrap(), RunOutcome::Completed { .. }));
+    let engine =
+        BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
+    assert!(matches!(
+        engine.run(&m, &never_cancelled()).await.unwrap(),
+        RunOutcome::Completed { .. }
+    ));
     let after_first = src.count();
     assert_eq!(after_first, 5);
 
@@ -316,7 +374,11 @@ async fn resubmitting_a_completed_window_performs_zero_fetches() {
         let out = engine.run(&m, &never_cancelled()).await.unwrap();
         assert_eq!(out, RunOutcome::AlreadyComplete);
     }
-    assert_eq!(src.count(), after_first, "a completed window must not be fetched again");
+    assert_eq!(
+        src.count(),
+        after_first,
+        "a completed window must not be fetched again"
+    );
 }
 
 /// P-1.1: a 429 advances `attempts` and sets a backoff **without** marking the
@@ -326,20 +388,37 @@ async fn resubmitting_a_completed_window_performs_zero_fetches() {
 async fn a_429_pauses_with_backoff_and_never_marks_the_job_failed() {
     let m = manifest();
     let state = Arc::new(MemState::default());
-    let src = Arc::new(CountingSource { rate_limit_at: vec![1], ..CountingSource::new() });
+    let src = Arc::new(CountingSource {
+        rate_limit_at: vec![1],
+        ..CountingSource::new()
+    });
     let sink = Arc::new(CountingSink::default());
 
-    let engine = BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
+    let engine =
+        BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
     let out = engine.run(&m, &never_cancelled()).await.unwrap();
 
-    let RunOutcome::Paused { until, reason, .. } = out else { panic!("a 429 must pause, got {out:?}") };
-    assert!(reason.contains("rate limited"), "the row must record why it paused, got {reason:?}");
+    let RunOutcome::Paused { until, reason, .. } = out else {
+        panic!("a 429 must pause, got {out:?}")
+    };
+    assert!(
+        reason.contains("rate limited"),
+        "the row must record why it paused, got {reason:?}"
+    );
 
     let row = state.get(&m.key()).unwrap();
-    assert_eq!(row.status, BackfillStatus::Paused, "a rate limit is a pause, never a failure");
+    assert_eq!(
+        row.status,
+        BackfillStatus::Paused,
+        "a rate limit is a pause, never a failure"
+    );
     assert_ne!(row.status, BackfillStatus::Failed);
     assert_eq!(row.attempts, 1, "the pause is counted");
-    assert_eq!(row.backoff_until, Some(until), "a pause with no deadline is a stall");
+    assert_eq!(
+        row.backoff_until,
+        Some(until),
+        "a pause with no deadline is a stall"
+    );
     assert!(until >= Utc::now() - Duration::seconds(1));
     // The first page's work is not lost.
     assert_eq!(row.cursor, Some(m.window_start + Duration::hours(5)));
@@ -351,18 +430,29 @@ async fn a_429_pauses_with_backoff_and_never_marks_the_job_failed() {
 async fn a_paused_window_inside_its_backoff_is_not_fetched() {
     let m = manifest();
     let state = Arc::new(MemState::default());
-    let src = Arc::new(CountingSource { rate_limit_at: vec![0], ..CountingSource::new() });
+    let src = Arc::new(CountingSource {
+        rate_limit_at: vec![0],
+        ..CountingSource::new()
+    });
     let sink = Arc::new(CountingSink::default());
-    let engine = BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
+    let engine =
+        BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
 
-    assert!(matches!(engine.run(&m, &never_cancelled()).await.unwrap(), RunOutcome::Paused { .. }));
+    assert!(matches!(
+        engine.run(&m, &never_cancelled()).await.unwrap(),
+        RunOutcome::Paused { .. }
+    ));
     assert_eq!(src.count(), 1);
 
     for _ in 0..20 {
         let out = engine.run(&m, &never_cancelled()).await.unwrap();
         assert!(matches!(out, RunOutcome::Paused { .. }), "{out:?}");
     }
-    assert_eq!(src.count(), 1, "20 further claims of a backed-off window must not reach the venue once");
+    assert_eq!(
+        src.count(),
+        1,
+        "20 further claims of a backed-off window must not reach the venue once"
+    );
 }
 
 /// Adversarial: an adapter that reports no progress must fail loudly rather than
@@ -371,14 +461,24 @@ async fn a_paused_window_inside_its_backoff_is_not_fetched() {
 async fn a_source_that_never_advances_fails_instead_of_spinning() {
     let m = manifest();
     let state = Arc::new(MemState::default());
-    let src = Arc::new(CountingSource { stuck: true, ..CountingSource::new() });
+    let src = Arc::new(CountingSource {
+        stuck: true,
+        ..CountingSource::new()
+    });
     let sink = Arc::new(CountingSink::default());
-    let engine = BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
+    let engine =
+        BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
 
     let out = engine.run(&m, &never_cancelled()).await.unwrap();
-    let RunOutcome::Failed { reason } = out else { panic!("expected a failure, got {out:?}") };
+    let RunOutcome::Failed { reason } = out else {
+        panic!("expected a failure, got {out:?}")
+    };
     assert!(reason.contains("did not advance"), "{reason}");
-    assert_eq!(src.count(), 1, "one call is enough to know; the loop must not retry a stuck adapter");
+    assert_eq!(
+        src.count(),
+        1,
+        "one call is enough to know; the loop must not retry a stuck adapter"
+    );
     assert_eq!(state.get(&m.key()).unwrap().status, BackfillStatus::Failed);
 }
 
@@ -389,18 +489,29 @@ async fn a_source_that_never_advances_fails_instead_of_spinning() {
 async fn a_terms_refusal_is_terminal_and_is_never_retried() {
     let m = manifest();
     let state = Arc::new(MemState::default());
-    let src = Arc::new(CountingSource { terms_at: Some(0), ..CountingSource::new() });
+    let src = Arc::new(CountingSource {
+        terms_at: Some(0),
+        ..CountingSource::new()
+    });
     let sink = Arc::new(CountingSink::default());
-    let engine = BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
+    let engine =
+        BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
 
     let out = engine.run(&m, &never_cancelled()).await.unwrap();
     assert!(matches!(out, RunOutcome::Failed { .. }), "{out:?}");
     let row = state.get(&m.key()).unwrap();
     assert_eq!(row.status, BackfillStatus::Failed);
-    assert_ne!(row.status, BackfillStatus::Paused, "a terms refusal is not something to wait out");
+    assert_ne!(
+        row.status,
+        BackfillStatus::Paused,
+        "a terms refusal is not something to wait out"
+    );
 
     // And a re-run does not ask again.
-    assert!(matches!(engine.run(&m, &never_cancelled()).await.unwrap(), RunOutcome::Failed { .. }));
+    assert!(matches!(
+        engine.run(&m, &never_cancelled()).await.unwrap(),
+        RunOutcome::Failed { .. }
+    ));
     assert_eq!(src.count(), 1);
 }
 
@@ -412,7 +523,8 @@ async fn cancelling_mid_window_pauses_at_the_cursor() {
     let state = Arc::new(MemState::default());
     let src = Arc::new(CountingSource::new());
     let sink = Arc::new(CountingSink::default());
-    let engine = BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
+    let engine =
+        BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
 
     let stop_after = std::sync::atomic::AtomicUsize::new(0);
     let cancel = || stop_after.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 2;
@@ -421,11 +533,19 @@ async fn cancelling_mid_window_pauses_at_the_cursor() {
 
     let row = state.get(&m.key()).unwrap();
     assert_eq!(row.status, BackfillStatus::Paused);
-    assert_eq!(row.cursor, Some(m.window_start + Duration::hours(10)), "two pages of work survived the cancel");
+    assert_eq!(
+        row.cursor,
+        Some(m.window_start + Duration::hours(10)),
+        "two pages of work survived the cancel"
+    );
 
     // Resuming continues rather than restarting.
-    let engine = BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
-    assert!(matches!(engine.run(&m, &never_cancelled()).await.unwrap(), RunOutcome::Completed { .. }));
+    let engine =
+        BackfillEngine::new(src.clone(), sink.clone(), state.clone()).with_policy(policy(99));
+    assert!(matches!(
+        engine.run(&m, &never_cancelled()).await.unwrap(),
+        RunOutcome::Completed { .. }
+    ));
     assert_tiles_exactly(&src.calls.lock().unwrap(), m.window_start, m.window_end);
 }
 
@@ -438,7 +558,11 @@ fn the_manifest_hash_identifies_the_window_and_nothing_else() {
     assert_eq!(a.manifest_hash(), b.manifest_hash());
 
     b.window_end += Duration::hours(1);
-    assert_ne!(a.manifest_hash(), b.manifest_hash(), "a different window is a different job");
+    assert_ne!(
+        a.manifest_hash(),
+        b.manifest_hash(),
+        "a different window is a different job"
+    );
 
     let mut c = manifest();
     c.source = "kraken_rest".into();
@@ -455,9 +579,20 @@ fn the_manifest_hash_identifies_the_window_and_nothing_else() {
 fn the_venue_s_retry_after_outranks_our_exponential_backoff() {
     let p = BackfillPolicy::default();
     assert_eq!(p.backoff(1, None), Duration::seconds(4));
-    assert_eq!(p.backoff(1, Some(90_000)), Duration::milliseconds(90_000), "a 90 s Retry-After is honoured in full");
-    assert_eq!(p.backoff(1, Some(10)), Duration::seconds(4), "a tiny Retry-After does not shorten our own backoff");
-    assert!(p.backoff(30, None) <= p.backoff_cap, "the backoff is capped rather than unbounded");
+    assert_eq!(
+        p.backoff(1, Some(90_000)),
+        Duration::milliseconds(90_000),
+        "a 90 s Retry-After is honoured in full"
+    );
+    assert_eq!(
+        p.backoff(1, Some(10)),
+        Duration::seconds(4),
+        "a tiny Retry-After does not shorten our own backoff"
+    );
+    assert!(
+        p.backoff(30, None) <= p.backoff_cap,
+        "the backoff is capped rather than unbounded"
+    );
 }
 
 /// An unknown timeframe fails the window rather than guessing a bar length. A
@@ -473,5 +608,9 @@ async fn an_unknown_timeframe_fails_rather_than_guessing_a_period() {
 
     let out = engine.run(&m, &never_cancelled()).await.unwrap();
     assert!(matches!(out, RunOutcome::Failed { .. }), "{out:?}");
-    assert_eq!(src.count(), 0, "nothing is fetched for a window we cannot interpret");
+    assert_eq!(
+        src.count(),
+        0,
+        "nothing is fetched for a window we cannot interpret"
+    );
 }

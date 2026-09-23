@@ -11,26 +11,28 @@
 //! ```
 
 pub mod evaluators;
-pub mod stack;
 pub mod profile;
+pub mod stack;
 pub mod tickets;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 pub use evaluators::{GateOutcome, LengthInputs, PerturbationInputs, VolRegime};
+pub use profile::{
+    AssetClassGates, Comparability, CrisisWindow, GateProfile, Thresholds, PAPER_V1, STRICT_V1,
+};
 pub use tickets::{check as check_tickets, Checkpoint, Missing, Requirement, Ticket};
-pub use profile::{AssetClassGates, Comparability, CrisisWindow, GateProfile, Thresholds, PAPER_V1, STRICT_V1};
 
 use crate::experiment::{Experiment, ExperimentError};
-use ledger::{DispatchContext, TrialLedger};
 use crate::nulls::{NullId, SignificanceResult};
 use crate::run::{Backtest, RunConfig, RunExecutor, RunResult, RunStatus, RunStore};
 use crate::stats::{
-    deflated_sharpe_ratio, permutation_p_value, probability_of_backtest_overfitting,
-    bhy_adjusted_within,
+    bhy_adjusted_within, deflated_sharpe_ratio, permutation_p_value,
+    probability_of_backtest_overfitting,
 };
 use crate::study::StudyResult;
+use ledger::{DispatchContext, TrialLedger};
 
 /// The five gates, in funnel order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -338,8 +340,14 @@ impl<'e> GateRunner<'e> {
             format!("{} integrity violation(s): {}", flags.len(), flags[0].code)
         };
         self.ledger.record(
-            GateVerdict::new(Gate::Integrity, passed, summary, vec![], self.profile.profile_id())
-                .with_reasons(flags.iter().map(|f| f.code.clone()).collect()),
+            GateVerdict::new(
+                Gate::Integrity,
+                passed,
+                summary,
+                vec![],
+                self.profile.profile_id(),
+            )
+            .with_reasons(flags.iter().map(|f| f.code.clone()).collect()),
         );
         if !passed {
             return Err(GateError::IntegrityHardStop);
@@ -432,7 +440,8 @@ impl<'e> GateRunner<'e> {
         #[allow(clippy::cast_possible_truncation)]
         let trials = n_eff.value().ceil() as i64;
         let raw_p = permutation_p_value(observed_statistic, null_distribution);
-        let corrected_p = bhy_adjusted_within(raw_p, &[], usize::try_from(trials).unwrap_or(usize::MAX));
+        let corrected_p =
+            bhy_adjusted_within(raw_p, &[], usize::try_from(trials).unwrap_or(usize::MAX));
         let significance = SignificanceResult::new(corrected_p, null_id, trials);
 
         let dsr = deflated_sharpe_ratio(

@@ -213,7 +213,10 @@ mod tests {
     fn a_clean_series_with_a_second_source_grades_a() {
         let b = bars(400);
         let secondary = bars(400);
-        let c = QcContext { secondary: Some(&secondary), ..ctx() };
+        let c = QcContext {
+            secondary: Some(&secondary),
+            ..ctx()
+        };
         let r = run(&b, &subject(400), &QcConfig::default(), &c);
         assert_eq!(r.graded.grade, Grade::A, "{:?}", r.graded.reasons);
         assert_eq!(r.bars_examined, 400);
@@ -223,7 +226,12 @@ mod tests {
     /// tell "passed" from "absent".
     #[test]
     fn all_eight_checks_are_always_present_in_the_report() {
-        let r = run(&bars(100), &subject(100), &QcConfig::default(), &QcContext::default());
+        let r = run(
+            &bars(100),
+            &subject(100),
+            &QcConfig::default(),
+            &QcContext::default(),
+        );
         assert_eq!(r.graded.checks.len(), 8);
         let kinds: Vec<CheckKind> = r.graded.checks.iter().map(|c| c.kind).collect();
         for k in CheckKind::ALL {
@@ -235,10 +243,21 @@ mod tests {
     /// grade is capped rather than the report claiming an A.
     #[test]
     fn a_series_with_no_second_source_and_no_membership_cannot_reach_an_a() {
-        let r = run(&bars(400), &subject(400), &QcConfig::default(), &QcContext::default());
+        let r = run(
+            &bars(400),
+            &subject(400),
+            &QcConfig::default(),
+            &QcContext::default(),
+        );
         let unevidenced = r.graded.unevidenced();
-        assert!(unevidenced.contains(&CheckKind::CrossSource), "{unevidenced:?}");
-        assert!(unevidenced.contains(&CheckKind::Survivorship), "{unevidenced:?}");
+        assert!(
+            unevidenced.contains(&CheckKind::CrossSource),
+            "{unevidenced:?}"
+        );
+        assert!(
+            unevidenced.contains(&CheckKind::Survivorship),
+            "{unevidenced:?}"
+        );
         assert!(r.graded.grade < Grade::A, "got {:?}", r.graded.grade);
     }
 
@@ -280,7 +299,11 @@ mod tests {
         assert_eq!(a.digest(), original, "prose and indices are not findings");
 
         a.graded.checks[0].outcome = Outcome::Fail;
-        assert_ne!(a.digest(), original, "an outcome change must move the digest");
+        assert_ne!(
+            a.digest(),
+            original,
+            "an outcome change must move the digest"
+        );
     }
 
     /// Several checks report no metric at all when they could not run. An
@@ -289,7 +312,12 @@ mod tests {
     /// this pins it.
     #[test]
     fn a_report_containing_absent_metrics_still_digests_consistently() {
-        let r = run(&bars(100), &subject(100), &QcConfig::default(), &QcContext::default());
+        let r = run(
+            &bars(100),
+            &subject(100),
+            &QcConfig::default(),
+            &QcContext::default(),
+        );
         assert!(
             r.graded.checks.iter().any(|c| c.metric.is_none()),
             "this fixture should contain at least one check that could not run"
@@ -328,7 +356,11 @@ mod tests {
         s.expected_bars = 400; // half the window is absent
         let r = run(&b, &s, &QcConfig::default(), &ctx());
         assert_eq!(r.graded.grade, Grade::D);
-        assert!(r.graded.reasons.iter().any(|x| x.contains("missing")), "{:?}", r.graded.reasons);
+        assert!(
+            r.graded.reasons.iter().any(|x| x.contains("missing")),
+            "{:?}",
+            r.graded.reasons
+        );
     }
 
     #[test]
@@ -338,15 +370,26 @@ mod tests {
         for x in other.iter_mut().skip(100).take(50) {
             x.close *= 1.05;
         }
-        let c = QcContext { secondary: Some(&other), ..ctx() };
+        let c = QcContext {
+            secondary: Some(&other),
+            ..ctx()
+        };
         let r = run(&b, &subject(400), &QcConfig::default(), &c);
         assert_eq!(r.graded.grade, Grade::C, "{:?}", r.graded.reasons);
-        assert!(r.graded.grade.waivable(), "a C is the case a waiver exists for");
+        assert!(
+            r.graded.grade.waivable(),
+            "a C is the case a waiver exists for"
+        );
     }
 
     #[test]
     fn an_empty_window_does_not_panic() {
-        let r = run(&[], &subject(0), &QcConfig::default(), &QcContext::default());
+        let r = run(
+            &[],
+            &subject(0),
+            &QcConfig::default(),
+            &QcContext::default(),
+        );
         assert_eq!(r.bars_examined, 0);
         assert_eq!(r.graded.checks.len(), 8);
     }

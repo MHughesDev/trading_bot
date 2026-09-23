@@ -131,11 +131,7 @@ impl Simplification {
 
 /// Every signal name something consumes: an action, or an exit rule.
 fn consumed_signals(def: &StrategyDefinition) -> BTreeSet<&str> {
-    let mut out: BTreeSet<&str> = def
-        .actions
-        .iter()
-        .map(|a| a.on_signal.as_str())
-        .collect();
+    let mut out: BTreeSet<&str> = def.actions.iter().map(|a| a.on_signal.as_str()).collect();
     // Exits are roots. A walk that started only from `actions` would delete the
     // signal a strategy exits on.
     if let Some(ExitPolicy::Rules { rules, .. }) = &def.exits {
@@ -357,7 +353,11 @@ mod tests {
     #[test]
     fn a_condition_nothing_watches_goes() {
         let d = def(
-            vec![condition("c1"), signal("s1", "c1", "long"), condition("c_orphan")],
+            vec![
+                condition("c1"),
+                signal("s1", "c1", "long"),
+                condition("c_orphan"),
+            ],
             vec![action("long")],
         );
         let out = simplify(&d);
@@ -396,7 +396,11 @@ mod tests {
     #[test]
     fn surviving_nodes_are_untouched() {
         let d = def(
-            vec![condition("c1"), signal("s1", "c1", "long"), condition("c_orphan")],
+            vec![
+                condition("c1"),
+                signal("s1", "c1", "long"),
+                condition("c_orphan"),
+            ],
             vec![action("long")],
         );
         let out = simplify(&d);

@@ -109,10 +109,12 @@ async fn creating_a_superseding_profile_succeeds_and_leaves_the_old_one_intact()
     .await
     .expect("creating a new version is the sanctioned way to change a threshold");
 
-    let rows = sqlx::query("SELECT profile_id, supersedes, thresholds FROM mlops.gate_profile ORDER BY profile_id")
-        .fetch_all(&pg)
-        .await
-        .unwrap();
+    let rows = sqlx::query(
+        "SELECT profile_id, supersedes, thresholds FROM mlops.gate_profile ORDER BY profile_id",
+    )
+    .fetch_all(&pg)
+    .await
+    .unwrap();
     assert_eq!(rows.len(), 2, "both versions exist; nothing was replaced");
 
     let stored_v1 = rows

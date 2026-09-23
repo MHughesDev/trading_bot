@@ -302,11 +302,21 @@ mod tests {
         let s = Suggestion::new("max_gpu_hours", 4.0, "one overnight run");
         assert!((s.suggested() - 4.0).abs() < f64::EPSILON);
         assert_eq!(s.value(), None);
-        assert!(!s.rationale().is_empty(), "a number with no reason is one people accept unread");
+        assert!(
+            !s.rationale().is_empty(),
+            "a number with no reason is one people accept unread"
+        );
 
         let confirmed = s.confirm(2.0);
-        assert!((confirmed.suggested() - 4.0).abs() < f64::EPSILON, "the suggestion is still visible");
-        assert_eq!(confirmed.value(), Some(2.0), "and the decision is the user's");
+        assert!(
+            (confirmed.suggested() - 4.0).abs() < f64::EPSILON,
+            "the suggestion is still visible"
+        );
+        assert_eq!(
+            confirmed.value(),
+            Some(2.0),
+            "and the decision is the user's"
+        );
     }
 
     #[test]

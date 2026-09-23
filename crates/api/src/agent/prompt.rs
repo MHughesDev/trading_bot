@@ -80,7 +80,7 @@ pub fn charter_for(kind: GoalKind) -> String {
     // does not know a Study is a counted trial will spend them.
     if matches!(kind, GoalKind::Research | GoalKind::Compare) {
         s.push_str(
-        "── FINDING AN EDGE ──\n\n\
+            "── FINDING AN EDGE ──\n\n\
          Most strategies are noise. Proving one is noise is worth more than another backtest \
          that settles nothing, so a negative result is a result — report it with the evidence \
          that establishes it.\n\
@@ -297,7 +297,11 @@ mod tests {
             "the charter is {} bytes, over the 3,200-byte cap (AGENT-005 §3.1)",
             a.len()
         );
-        assert_eq!(a, charter(), "byte-stable, or it cannot sit in a cache prefix");
+        assert_eq!(
+            a,
+            charter(),
+            "byte-stable, or it cannot sit in a cache prefix"
+        );
     }
 
     /// The charter names the three tools the model cannot get anywhere else, and
@@ -362,7 +366,9 @@ mod tests {
         assert!(opening.starts_with("WHAT THIS CONVERSATION HAS ALREADY ESTABLISHED"));
         assert!(opening.contains("158,259"));
         assert!(
-            opening.trim_end().ends_with("The user now asks: and at 1h?"),
+            opening
+                .trim_end()
+                .ends_with("The user now asks: and at 1h?"),
             "the question is last and marked: {opening}"
         );
     }

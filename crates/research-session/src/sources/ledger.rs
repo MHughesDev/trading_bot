@@ -471,8 +471,8 @@ mod tests {
 
     #[test]
     fn an_unknown_class_is_not_evaluable_and_lists_the_ones_that_are() {
-        let Fired::NotEvaluable { missing } = RetryTrigger::for_class("vibes", None)
-            .evaluate("btc", &Measured::default())
+        let Fired::NotEvaluable { missing } =
+            RetryTrigger::for_class("vibes", None).evaluate("btc", &Measured::default())
         else {
             panic!("an unknown class cannot be evaluated");
         };
@@ -486,13 +486,10 @@ mod tests {
         let mut agenda = seeded();
         let out = retry_conditions(
             &charter,
-            &[NegativeRow::new(
-                "n_1",
-                "btc",
-                "momentum at 1h",
-                "insufficient_data",
-            )
-            .measured_to("2026-01-31")],
+            &[
+                NegativeRow::new("n_1", "btc", "momentum at 1h", "insufficient_data")
+                    .measured_to("2026-01-31"),
+            ],
             &Measured::default().with_coverage("btc", "2026-03-01"),
             &mut agenda,
         );

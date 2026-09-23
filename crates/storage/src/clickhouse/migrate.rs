@@ -131,13 +131,18 @@ pub async fn ensure_market_bar_constraints(url: &str) -> Result<usize, ChError> 
     let mut added = 0usize;
     for (name, expr) in MARKET_BAR_CONSTRAINTS {
         client
-            .query(&format!("ALTER TABLE market_bar ADD CONSTRAINT IF NOT EXISTS {name} CHECK {expr}"))
+            .query(&format!(
+                "ALTER TABLE market_bar ADD CONSTRAINT IF NOT EXISTS {name} CHECK {expr}"
+            ))
             .execute()
             .await
             .map_err(|e| ChError::Client(format!("market_bar constraint {name}: {e}")))?;
         added += 1;
     }
-    debug!(constraints = added, "market_bar knowledge-time constraints ensured");
+    debug!(
+        constraints = added,
+        "market_bar knowledge-time constraints ensured"
+    );
     Ok(added)
 }
 
@@ -353,7 +358,10 @@ mod tests {
     /// would silently start guarding the wrong flag.
     #[test]
     fn the_constraint_guards_the_backfill_flag_bit() {
-        assert_eq!(dataplane::quality::QualityFlags::BACKFILLED_KNOWLEDGE_TIME.0, 32768);
+        assert_eq!(
+            dataplane::quality::QualityFlags::BACKFILLED_KNOWLEDGE_TIME.0,
+            32768
+        );
         assert!(MARKET_BAR_CONSTRAINTS[1].1.contains("32768"));
     }
 

@@ -60,7 +60,10 @@ pub struct RollEvent {
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RollError {
     #[error("roll applies at {applies} before the rule could fire at {decision}")]
-    AppliesBeforeDecision { applies: DateTime<Utc>, decision: DateTime<Utc> },
+    AppliesBeforeDecision {
+        applies: DateTime<Utc>,
+        decision: DateTime<Utc>,
+    },
     #[error("rule {rule:?} fires at {decision} but its observation at {observed} is not published until {published} (look-ahead)")]
     UsesUnpublishedObservation {
         rule: RollRule,
@@ -69,7 +72,10 @@ pub enum RollError {
         published: DateTime<Utc>,
     },
     #[error("decision_time {decision} is not known until knowledge_time {knowledge}")]
-    DecisionBeforeKnowledge { decision: DateTime<Utc>, knowledge: DateTime<Utc> },
+    DecisionBeforeKnowledge {
+        decision: DateTime<Utc>,
+        knowledge: DateTime<Utc>,
+    },
 }
 
 /// Validate a roll event (AT-07).
@@ -149,7 +155,11 @@ pub fn continuous_series(
         .filter(|r| r.knowledge_time <= as_of && validate_roll(r).is_ok())
         .collect();
     rolls.sort_by_key(|r| r.roll_event_time);
-    let Some(first) = rolls.first().map(|r| r.from_instrument_id).or_else(|| prices.first().map(|p| p.instrument_id)) else {
+    let Some(first) = rolls
+        .first()
+        .map(|r| r.from_instrument_id)
+        .or_else(|| prices.first().map(|p| p.instrument_id))
+    else {
         return Vec::new();
     };
 
@@ -194,7 +204,10 @@ pub fn continuous_series(
                 while applied < rolls.len() && rolls[applied].roll_event_time <= pt.t {
                     let r = rolls[applied];
                     let at = r.roll_event_time;
-                    if let (Some(old), Some(new)) = (close_of(r.from_instrument_id, at), close_of(r.to_instrument_id, at)) {
+                    if let (Some(old), Some(new)) = (
+                        close_of(r.from_instrument_id, at),
+                        close_of(r.to_instrument_id, at),
+                    ) {
                         if !new.is_zero() {
                             factor *= r.ratio_factor.unwrap_or(old / new);
                         }
@@ -210,7 +223,10 @@ pub fn continuous_series(
         ContinuousMethod::BackAdjustedDifference => {
             for r in rolls.iter().rev() {
                 let at = r.roll_event_time;
-                if let (Some(old), Some(new)) = (close_of(r.from_instrument_id, at), close_of(r.to_instrument_id, at)) {
+                if let (Some(old), Some(new)) = (
+                    close_of(r.from_instrument_id, at),
+                    close_of(r.to_instrument_id, at),
+                ) {
                     let gap = new - old;
                     for pt in raw.iter_mut().filter(|pt| pt.t < at) {
                         pt.value += gap;
@@ -263,14 +279,25 @@ mod tests {
     fn roll_cannot_apply_before_it_fires() {
         let mut r = oi_roll(d(10), d(12));
         r.roll_event_time = d(11);
-        assert!(matches!(validate_roll(&r), Err(RollError::AppliesBeforeDecision { .. })));
+        assert!(matches!(
+            validate_roll(&r),
+            Err(RollError::AppliesBeforeDecision { .. })
+        ));
     }
 
     fn prices() -> Vec<ContractPrice> {
         let mut v = Vec::new();
         for day in 1..=20 {
-            v.push(ContractPrice { instrument_id: InstrumentKey(1), t: d(day), close: dec!(100) + Decimal::from(day) });
-            v.push(ContractPrice { instrument_id: InstrumentKey(2), t: d(day), close: dec!(110) + Decimal::from(day) });
+            v.push(ContractPrice {
+                instrument_id: InstrumentKey(1),
+                t: d(day),
+                close: dec!(100) + Decimal::from(day),
+            });
+            v.push(ContractPrice {
+                instrument_id: InstrumentKey(2),
+                t: d(day),
+                close: dec!(110) + Decimal::from(day),
+            });
         }
         v
     }
@@ -280,9 +307,18 @@ mod tests {
         let p = prices();
         let roll = oi_roll(d(9), d(10));
         let before_roll = continuous_series(&p, &[], d(15), ContinuousMethod::ForwardAdjustedRatio);
-        let with_roll = continuous_series(&p, &[roll], d(15), ContinuousMethod::ForwardAdjustedRatio);
-        for (a, b) in before_roll.iter().zip(&with_roll).filter(|(a, _)| a.t < d(10)) {
-            assert_eq!(a.value, b.value, "pre-roll history must not change at {}", a.t);
+        let with_roll =
+            continuous_series(&p, &[roll], d(15), ContinuousMethod::ForwardAdjustedRatio);
+        for (a, b) in before_roll
+            .iter()
+            .zip(&with_roll)
+            .filter(|(a, _)| a.t < d(10))
+        {
+            assert_eq!(
+                a.value, b.value,
+                "pre-roll history must not change at {}",
+                a.t
+            );
         }
         // Continuity at the roll: the first post-roll point equals the old contract's close.
         let at_roll = with_roll.iter().find(|pt| pt.t == d(10)).unwrap();
@@ -294,10 +330,13 @@ mod tests {
     fn back_adjusted_rewrites_history_and_is_flagged() {
         let p = prices();
         let roll = oi_roll(d(9), d(10));
-        let series = continuous_series(&p, &[roll], d(15), ContinuousMethod::BackAdjustedDifference);
+        let series =
+            continuous_series(&p, &[roll], d(15), ContinuousMethod::BackAdjustedDifference);
         let first = &series[0];
         assert_eq!(first.value, dec!(111), "history shifted by the roll gap");
-        assert!(series.iter().all(|pt| pt.quality_flags.contains(QualityFlags::NON_REPRODUCIBLE)));
+        assert!(series
+            .iter()
+            .all(|pt| pt.quality_flags.contains(QualityFlags::NON_REPRODUCIBLE)));
         assert!(ContinuousMethod::BackAdjustedDifference.non_reproducible());
     }
 

@@ -285,7 +285,11 @@ mod tests {
     fn a_v13_document_without_exits_is_refused() {
         let errs = validate_exits(&def_at("1.3", None));
         assert_eq!(errs.len(), 1);
-        assert!(errs[0].message.contains("risk_layer_only"), "{}", errs[0].message);
+        assert!(
+            errs[0].message.contains("risk_layer_only"),
+            "{}",
+            errs[0].message
+        );
     }
 
     #[test]
@@ -311,7 +315,11 @@ mod tests {
         let d = def_at("1.2", Some(json!({ "mode": "risk_layer_only" })));
         let errs = validate_exits(&d);
         assert_eq!(errs.len(), 1);
-        assert!(errs[0].message.contains("1.3 or later"), "{}", errs[0].message);
+        assert!(
+            errs[0].message.contains("1.3 or later"),
+            "{}",
+            errs[0].message
+        );
     }
 
     // ── empty rules ──────────────────────────────────────────────────────────
@@ -321,7 +329,11 @@ mod tests {
         let d = def_at("1.3", Some(json!({ "mode": "rules", "rules": [] })));
         let errs = validate_exits(&d);
         assert_eq!(errs.len(), 1);
-        assert!(errs[0].message.contains("under another name"), "{}", errs[0].message);
+        assert!(
+            errs[0].message.contains("under another name"),
+            "{}",
+            errs[0].message
+        );
     }
 
     // ── well-formedness ──────────────────────────────────────────────────────

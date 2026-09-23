@@ -22,15 +22,23 @@ pub fn spawn(pg: sqlx::PgPool, clickhouse_url: String) {
 
 pub async fn run_once(pg: &sqlx::PgPool, clickhouse_url: &str) {
     let now = chrono::Utc::now();
-    let (since, until) = (now - chrono::Duration::days(7), now - chrono::Duration::hours(6));
+    let (since, until) = (
+        now - chrono::Duration::days(7),
+        now - chrono::Duration::hours(6),
+    );
     let tenants = match api::feature_consistency::serving_tenants(pg).await {
         Ok(t) => t,
         Err(e) => return warn!(error = %e, "feature consistency: could not list tenants"),
     };
     for tenant in tenants {
-        match api::feature_consistency::diff_tenant(pg, clickhouse_url, &tenant, since, until).await {
-            Ok(r) if r.code_drift > 0 => error!(report = ?r, "feature consistency: code drift detected"),
-            Ok(r) if r.p99_relative_diff >= 1e-9 => warn!(report = ?r, "feature consistency: p99 relative diff breaches the 1e-9 SLO"),
+        match api::feature_consistency::diff_tenant(pg, clickhouse_url, &tenant, since, until).await
+        {
+            Ok(r) if r.code_drift > 0 => {
+                error!(report = ?r, "feature consistency: code drift detected")
+            }
+            Ok(r) if r.p99_relative_diff >= 1e-9 => {
+                warn!(report = ?r, "feature consistency: p99 relative diff breaches the 1e-9 SLO")
+            }
             Ok(r) => info!(report = ?r, "feature consistency diff complete"),
             Err(e) => warn!(%tenant, error = %e, "feature consistency diff failed"),
         }

@@ -16,7 +16,11 @@ pub enum HoldoutClaim {
     /// This request is the lineage's one evaluation; it is claimed and logged.
     First,
     /// The lineage was already evaluated. This is that result; the request is logged.
-    Repeat { first_trial: Uuid, called_at: DateTime<Utc>, result: Value },
+    Repeat {
+        first_trial: Uuid,
+        called_at: DateTime<Utc>,
+        result: Value,
+    },
 }
 
 #[derive(Debug, Default)]

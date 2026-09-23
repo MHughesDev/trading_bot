@@ -161,7 +161,10 @@ mod tests {
         let mut p = Prefix::new();
         let charter = "identity + tools + termination";
         for turn in 0..10 {
-            let c = p.extend(charter, &names(&["search_tools", "get_bars", "finish_task"]));
+            let c = p.extend(
+                charter,
+                &names(&["search_tools", "get_bars", "finish_task"]),
+            );
             if turn == 0 {
                 assert!(!c.is_continuous(), "the first turn is always cold");
             } else {
@@ -197,7 +200,10 @@ mod tests {
         let mut p = Prefix::new();
         p.extend("c", &names(&["search_tools", "get_bars", "run_backtest"]));
         let c = p.extend("c", &names(&["search_tools"]));
-        assert_eq!(c.tools, names(&["search_tools", "get_bars", "run_backtest"]));
+        assert_eq!(
+            c.tools,
+            names(&["search_tools", "get_bars", "run_backtest"])
+        );
         assert!(
             c.is_continuous(),
             "removing a schema nobody reads would invalidate every byte after it"

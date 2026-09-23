@@ -276,7 +276,12 @@ impl Replay {
                 s.effects
                     .iter()
                     .filter(|e| e.get("note").and_then(Value::as_str) == Some("rejected"))
-                    .map(|e| e.get("code").and_then(Value::as_str).unwrap_or("").to_string())
+                    .map(|e| {
+                        e.get("code")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string()
+                    })
             })
             .collect()
     }
@@ -292,7 +297,10 @@ impl Replay {
                     .filter(|e| e.get("note").and_then(Value::as_str) == Some("core_tool"))
                     .map(|e| {
                         (
-                            e.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
+                            e.get("name")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string(),
                             e.get("detail")
                                 .and_then(Value::as_str)
                                 .unwrap_or("")
@@ -319,12 +327,7 @@ fn tool_name_of(e: &Value) -> Option<String> {
 /// differently from the run is measuring the platform's action list, not the
 /// harness. Cases that need gating build the `Loop` themselves.
 #[must_use]
-pub fn replay(
-    profile: Profile,
-    registry: ToolRegistry,
-    task: &TapeTask,
-    tape: &Tape,
-) -> Replay {
+pub fn replay(profile: Profile, registry: ToolRegistry, task: &TapeTask, tape: &Tape) -> Replay {
     let mut l = Loop::new(profile, registry, task.to_task());
     let mut steps = Vec::with_capacity(tape.len());
     for entry in tape {
@@ -415,9 +418,7 @@ pub fn diff(recorded: &Trajectory, got: &Replay) -> Vec<Diff> {
     if want_set == got_set && want_tools != got_tools {
         out.push(Diff {
             severity: Severity::Neutral,
-            detail: format!(
-                "same tools, different order: {want_tools:?} then {got_tools:?}"
-            ),
+            detail: format!("same tools, different order: {want_tools:?} then {got_tools:?}"),
         });
     }
 
@@ -540,9 +541,9 @@ mod tests {
         }));
         let d = diff(&recorded, &r);
         assert!(
-            d.iter()
-                .any(|x| x.severity == Severity::RoutingRegression
-                    && x.detail.contains("read_bars")),
+            d.iter().any(
+                |x| x.severity == Severity::RoutingRegression && x.detail.contains("read_bars")
+            ),
             "{d:?}"
         );
     }

@@ -21,8 +21,8 @@ pub mod degrade;
 pub mod fit;
 pub mod manifest;
 pub mod policy;
-pub mod projection;
 pub mod prefix;
+pub mod projection;
 pub mod render;
 pub mod select;
 pub mod store;
@@ -299,7 +299,12 @@ pub fn assemble_reserving(
     blocks: Vec<Block>,
     reserved_tokens: u32,
 ) -> Assembled {
-    assemble_within(profile, blocks, reserved_tokens, profile.input_budget_tokens())
+    assemble_within(
+        profile,
+        blocks,
+        reserved_tokens,
+        profile.input_budget_tokens(),
+    )
 }
 
 /// [`assemble_reserving`] against a window this step earned, not the profile's
@@ -525,7 +530,11 @@ pub fn cap_tool_result_within(
         // A floor of one line: a cap of zero is not a truncation, it is a
         // deletion, and a result reduced to nothing tells the model less than a
         // result reduced to its shape.
-        Some(r) => profile.context.max_tool_result_bytes.min(r).max(MIN_RESULT_BYTES),
+        Some(r) => profile
+            .context
+            .max_tool_result_bytes
+            .min(r)
+            .max(MIN_RESULT_BYTES),
         None => profile.context.max_tool_result_bytes,
     };
     if text.len() <= cap {
@@ -559,7 +568,11 @@ pub const MIN_RESULT_BYTES: usize = 256;
 #[must_use]
 pub fn calibration_factor(ratios: &[f64]) -> Option<f64> {
     const MIN_SAMPLES: usize = 10;
-    let mut usable: Vec<f64> = ratios.iter().copied().filter(|r| r.is_finite() && *r > 0.0).collect();
+    let mut usable: Vec<f64> = ratios
+        .iter()
+        .copied()
+        .filter(|r| r.is_finite() && *r > 0.0)
+        .collect();
     if usable.len() < MIN_SAMPLES {
         return None;
     }
@@ -578,9 +591,7 @@ pub fn calibration_factor(ratios: &[f64]) -> Option<f64> {
 #[must_use]
 pub fn provenance_allowed(section: Section, p: Provenance) -> bool {
     match section {
-        Section::Charter | Section::Subtask | Section::FewShot => {
-            !p.is_untrusted()
-        }
+        Section::Charter | Section::Subtask | Section::FewShot => !p.is_untrusted(),
         Section::WorkingState | Section::Reference => true,
     }
 }
@@ -1025,7 +1036,10 @@ mod tests {
             "a zero budget must still leave the shape of an answer, got {} bytes",
             out.len()
         );
-        assert!(out.contains("removed from the middle"), "and it says it was cut: {out}");
+        assert!(
+            out.contains("removed from the middle"),
+            "and it says it was cut: {out}"
+        );
     }
 
     /// A result that already fits is returned whole, whichever cap is smaller.

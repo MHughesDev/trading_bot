@@ -99,7 +99,12 @@ pub struct Signal {
 }
 
 impl Signal {
-    fn new(id: &'static str, title: &'static str, spec_ref: &'static str, severity: Severity) -> Self {
+    fn new(
+        id: &'static str,
+        title: &'static str,
+        spec_ref: &'static str,
+        severity: Severity,
+    ) -> Self {
         Self {
             id,
             title,
@@ -113,7 +118,11 @@ impl Signal {
     }
 
     fn measured(mut self, value: f64, threshold: f64, ok: bool, detail: impl Into<String>) -> Self {
-        self.state = if ok { SignalState::Ok } else { SignalState::Alarm };
+        self.state = if ok {
+            SignalState::Ok
+        } else {
+            SignalState::Alarm
+        };
         self.value = Some(value);
         self.threshold = Some(threshold);
         self.detail = detail.into();
@@ -217,7 +226,10 @@ async fn rows(pg: &PgPool, tenant: &str, sql: &str) -> Result<Vec<sqlx::postgres
     let mut tx = ledger::pg::tenant_tx(pg, tenant)
         .await
         .map_err(|e| format!("tenant transaction: {e}"))?;
-    let out = sqlx::query(sql).fetch_all(&mut *tx).await.map_err(|e| e.to_string());
+    let out = sqlx::query(sql)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| e.to_string());
     let _ = tx.commit().await;
     out
 }
@@ -226,16 +238,26 @@ async fn one(pg: &PgPool, tenant: &str, sql: &str) -> Result<sqlx::postgres::PgR
     let mut tx = ledger::pg::tenant_tx(pg, tenant)
         .await
         .map_err(|e| format!("tenant transaction: {e}"))?;
-    let out = sqlx::query(sql).fetch_one(&mut *tx).await.map_err(|e| e.to_string());
+    let out = sqlx::query(sql)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| e.to_string());
     let _ = tx.commit().await;
     out
 }
 
-async fn opt(pg: &PgPool, tenant: &str, sql: &str) -> Result<Option<sqlx::postgres::PgRow>, String> {
+async fn opt(
+    pg: &PgPool,
+    tenant: &str,
+    sql: &str,
+) -> Result<Option<sqlx::postgres::PgRow>, String> {
     let mut tx = ledger::pg::tenant_tx(pg, tenant)
         .await
         .map_err(|e| format!("tenant transaction: {e}"))?;
-    let out = sqlx::query(sql).fetch_optional(&mut *tx).await.map_err(|e| e.to_string());
+    let out = sqlx::query(sql)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| e.to_string());
     let _ = tx.commit().await;
     out
 }
@@ -305,7 +327,11 @@ async fn gate_pass_rate(pg: &PgPool, tenant: &str) -> Signal {
             }
             (Some(recent), _) => {
                 worst_recent = worst_recent.max(recent);
-                summary.push(format!("{profile}: {:.1}% over {} candidates", recent * 100.0, rate.recent_decided));
+                summary.push(format!(
+                    "{profile}: {:.1}% over {} candidates",
+                    recent * 100.0,
+                    rate.recent_decided
+                ));
             }
             (None, _) => summary.push(format!("{profile}: no candidates decided in the window")),
         }
@@ -363,7 +389,11 @@ async fn exploration_fraction(pg: &PgPool, tenant: &str) -> Signal {
         let (n, explored): (i64, i64) = (r.get("n"), r.get("explored"));
         let achieved = explored as f64 / n as f64;
         if achieved < floor {
-            breaches.push(format!("{slug}: {:.1}% < {:.1}%", achieved * 100.0, floor * 100.0));
+            breaches.push(format!(
+                "{slug}: {:.1}% < {:.1}%",
+                achieved * 100.0,
+                floor * 100.0
+            ));
         }
         if achieved < worst.0 {
             worst = (achieved, slug, floor);
@@ -375,7 +405,11 @@ async fn exploration_fraction(pg: &PgPool, tenant: &str) -> Signal {
         worst.2,
         ok,
         if ok {
-            format!("every campaign is at or above its floor; lowest is {} at {:.1}%", worst.1, worst.0 * 100.0)
+            format!(
+                "every campaign is at or above its floor; lowest is {} at {:.1}%",
+                worst.1,
+                worst.0 * 100.0
+            )
         } else {
             format!("P1 — below the declared floor: {}", breaches.join("; "))
         },
@@ -395,7 +429,7 @@ async fn feature_consistency(pg: &PgPool, tenant: &str) -> Signal {
     let row = match one(
         pg,
         tenant,
-                "SELECT count(*) AS n,
+        "SELECT count(*) AS n,
                         count(*) FILTER (WHERE diagnosis = 'code_drift') AS drift,
                         coalesce(percentile_disc(0.99) WITHIN GROUP (
                           ORDER BY abs_diff / nullif(abs(served_value), 0)), 0)::float8 AS p99
@@ -462,11 +496,18 @@ async fn leakage_suite(pg: &PgPool, tenant: &str) -> Signal {
         0.0,
         ok,
         if stale {
-            format!("P1 — last pass was {}, more than two days ago", finished.format("%Y-%m-%d %H:%M"))
+            format!(
+                "P1 — last pass was {}, more than two days ago",
+                finished.format("%Y-%m-%d %H:%M")
+            )
         } else if blocking > 0 {
             format!("P1 — {blocking} blocking findings ({flags} flags) in the last pass")
         } else {
-            format!("clean: {} checks ran, {flags} flags, last {}", checks.unwrap_or(0), finished.format("%Y-%m-%d %H:%M"))
+            format!(
+                "clean: {} checks ran, {flags} flags, last {}",
+                checks.unwrap_or(0),
+                finished.format("%Y-%m-%d %H:%M")
+            )
         },
     )
 }
@@ -484,7 +525,7 @@ async fn sealed_holdout(pg: &PgPool, tenant: &str) -> Signal {
     let row = match one(
         pg,
         tenant,
-                "SELECT count(*) AS attempts,
+        "SELECT count(*) AS attempts,
                         count(*) FILTER (WHERE served_first_result) AS repeats,
                         count(DISTINCT strategy_lineage_id) AS lineages
                    FROM mlops.sealed_holdout_attempt",
@@ -531,12 +572,17 @@ async fn neff_vs_trials(pg: &PgPool, tenant: &str) -> Signal {
     if all.trials_counted() == 0 {
         return s.not_applicable("no trials on this tenant's ledger yet");
     }
-    let baseline = match led.n_eff_before_async(tenant, Utc::now() - Duration::days(WINDOW_DAYS)).await {
+    let baseline = match led
+        .n_eff_before_async(tenant, Utc::now() - Duration::days(WINDOW_DAYS))
+        .await
+    {
         Ok(n) => n,
         Err(e) => return s.unavailable(format!("could not compute the baseline N_eff: {e}")),
     };
 
-    let d_trials = all.trials_counted().saturating_sub(baseline.trials_counted()) as f64;
+    let d_trials = all
+        .trials_counted()
+        .saturating_sub(baseline.trials_counted()) as f64;
     if d_trials < 1.0 {
         return s.not_applicable("no trials added in the window");
     }
@@ -685,7 +731,7 @@ async fn trajectory_half_life(pg: &PgPool, tenant: &str) -> Signal {
     let row = match one(
         pg,
         tenant,
-                "WITH current AS (
+        "WITH current AS (
                    SELECT DISTINCT ON (tool_name) tool_name, tool_schema_hash
                      FROM mlops.agent_trajectory ORDER BY tool_name, recorded_at DESC
                  ), aged AS (
@@ -769,11 +815,9 @@ async fn mnar_b1(pg: &PgPool, tenant: &str) -> Signal {
         "§5.5, R-05",
         Severity::P2,
     );
-    let row = match sqlx::query(
-        "SELECT to_regclass('mlops.tensor_model') IS NOT NULL AS present",
-    )
-    .fetch_one(pg)
-    .await
+    let row = match sqlx::query("SELECT to_regclass('mlops.tensor_model') IS NOT NULL AS present")
+        .fetch_one(pg)
+        .await
     {
         Ok(r) => r,
         Err(e) => return s.unavailable(format!("could not check for the tensor model: {e}")),
@@ -846,8 +890,16 @@ impl From<&HealthReport> for HealthSummary {
                 .into_iter()
                 .map(|s| (s.id.to_string(), s.detail.clone()))
                 .collect(),
-            ok: r.signals.iter().filter(|s| s.state == SignalState::Ok).count(),
-            not_fitted: r.signals.iter().filter(|s| s.state == SignalState::NotFitted).count(),
+            ok: r
+                .signals
+                .iter()
+                .filter(|s| s.state == SignalState::Ok)
+                .count(),
+            not_fitted: r
+                .signals
+                .iter()
+                .filter(|s| s.state == SignalState::NotFitted)
+                .count(),
             not_applicable: r
                 .signals
                 .iter()
@@ -899,7 +951,10 @@ mod tests {
             tenant: "t".into(),
             generated_at: Utc::now(),
             window_days: 30,
-            signals: vec![sig(SignalState::Ok, Some(1.0)), sig(SignalState::Unavailable, None)],
+            signals: vec![
+                sig(SignalState::Ok, Some(1.0)),
+                sig(SignalState::Unavailable, None),
+            ],
         };
         assert!(r.alarms().is_empty());
         assert_eq!(r.unavailable().len(), 1);
@@ -937,7 +992,10 @@ mod tests {
             window_days: 30,
             signals: vec![p2, p1],
         };
-        assert_eq!(r.alarms().iter().map(|s| s.id).collect::<Vec<_>>(), ["p1", "p2"]);
+        assert_eq!(
+            r.alarms().iter().map(|s| s.id).collect::<Vec<_>>(),
+            ["p1", "p2"]
+        );
     }
 
     /// Every §16.2 signal must be present in the report, in every state — a
@@ -963,7 +1021,10 @@ mod tests {
         // contains exactly these ids.
         assert_eq!(expected.len(), 11);
         assert_eq!(
-            expected.iter().collect::<std::collections::HashSet<_>>().len(),
+            expected
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
             expected.len(),
             "signal ids must be unique"
         );

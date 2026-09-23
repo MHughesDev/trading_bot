@@ -249,18 +249,30 @@ mod tests {
 
     #[test]
     fn closure_executor_failing_config_yields_failed() {
-        use ledger::{DispatchContext, InMemoryLedger, Registration, TrialLedger};
         use crate::run::trial_subject;
-        let exec = ClosureExecutor(|cfg: &RunConfig| RunResult::failed(cfg, ledger::TerminalReason::DependencyFailure, "boom", "engine@test"));
+        use ledger::{DispatchContext, InMemoryLedger, Registration, TrialLedger};
+        let exec = ClosureExecutor(|cfg: &RunConfig| {
+            RunResult::failed(
+                cfg,
+                ledger::TerminalReason::DependencyFailure,
+                "boom",
+                "engine@test",
+            )
+        });
         // Even here, the only way to obtain a ticket is to register a trial —
         // there is no test-only constructor for one (INV-16).
         let ledger = InMemoryLedger::new();
         let ctx = DispatchContext::human("tenant-test", "exec", 0.1).with_experiment("exp");
         let c = cfg();
         let subject = trial_subject(&c);
-        let ticket = ledger.register(&Registration::new(&ctx, &subject, 1.0)).unwrap();
+        let ticket = ledger
+            .register(&Registration::new(&ctx, &subject, 1.0))
+            .unwrap();
         let r = exec.execute(&c, &ticket);
-        assert_eq!(r.status, RunStatus::Failed(ledger::TerminalReason::DependencyFailure));
+        assert_eq!(
+            r.status,
+            RunStatus::Failed(ledger::TerminalReason::DependencyFailure)
+        );
     }
 
     #[test]

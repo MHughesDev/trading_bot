@@ -159,7 +159,10 @@ pub fn decide(profile: &Profile, ctx: &ActionContext) -> Ruling {
     if let Some(envelope) = &ctx.approval_envelope {
         return Ruling::ask(
             "policy.approval_envelope",
-            format!("{} falls under the `{envelope}` approval envelope", ctx.tool),
+            format!(
+                "{} falls under the `{envelope}` approval envelope",
+                ctx.tool
+            ),
             "a human answers this one; the session pauses and resumes where it left off",
         );
     }
@@ -283,7 +286,11 @@ mod tests {
         let r = decide(&p, &c);
         assert_eq!(r.decision, Decision::Ask, "{r:?}");
         assert_eq!(r.code, "policy.cost_above_threshold");
-        assert!(r.reason.contains("$42.00"), "the estimate is on the card: {}", r.reason);
+        assert!(
+            r.reason.contains("$42.00"),
+            "the estimate is on the card: {}",
+            r.reason
+        );
         assert!(
             r.reason.contains("$60.00"),
             "and the remaining budget beside it — $42 is a different question with $60              left than with $45: {}",
@@ -527,7 +534,10 @@ mod envelope_tests {
     /// store; what makes it gated is that later decisions read it.
     #[test]
     fn an_enveloped_action_always_asks() {
-        let ruling = decide(&interactive(), &ctx("write_insight", Some("tier3_memory"), false));
+        let ruling = decide(
+            &interactive(),
+            &ctx("write_insight", Some("tier3_memory"), false),
+        );
         assert_eq!(ruling.decision, Decision::Ask);
         assert_eq!(ruling.code, "policy.approval_envelope");
         assert!(ruling.fix.contains("pauses"), "{}", ruling.fix);
@@ -537,7 +547,10 @@ mod envelope_tests {
     /// to promotion or spending is how "always allow" becomes an incident.
     #[test]
     fn a_session_allowlist_does_not_cover_an_envelope() {
-        let ruling = decide(&interactive(), &ctx("promote_model", Some("promotion"), true));
+        let ruling = decide(
+            &interactive(),
+            &ctx("promote_model", Some("promotion"), true),
+        );
         assert_eq!(ruling.decision, Decision::Ask);
         assert_eq!(ruling.code, "policy.approval_envelope");
     }
@@ -548,8 +561,14 @@ mod envelope_tests {
     fn attendance_does_not_cover_an_envelope() {
         let mut background = interactive();
         background.archetype = Archetype::Background;
-        let attended = decide(&interactive(), &ctx("open_vault", Some("sealed_holdout"), false));
-        let unattended = decide(&background, &ctx("open_vault", Some("sealed_holdout"), false));
+        let attended = decide(
+            &interactive(),
+            &ctx("open_vault", Some("sealed_holdout"), false),
+        );
+        let unattended = decide(
+            &background,
+            &ctx("open_vault", Some("sealed_holdout"), false),
+        );
         assert_eq!(attended.decision, Decision::Ask);
         assert_eq!(unattended.decision, Decision::Ask);
         assert_eq!(attended.code, unattended.code);

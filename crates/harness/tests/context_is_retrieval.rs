@@ -175,8 +175,13 @@ fn a_run_that_fits_is_unchanged() {
     let mut store = RunStore::new();
     for step in 0..5u32 {
         store.insert(
-            Draft::new(step, RecordKind::ToolResult, "get_bars", Body::text("small"))
-                .with_subject(Subject::instrument(format!("SYM-{step}"))),
+            Draft::new(
+                step,
+                RecordKind::ToolResult,
+                "get_bars",
+                Body::text("small"),
+            )
+            .with_subject(Subject::instrument(format!("SYM-{step}"))),
         );
     }
     let query = Query {
@@ -185,7 +190,11 @@ fn a_run_that_fits_is_unchanged() {
         ..Query::default()
     };
     let sel = select(&store, &query, 100_000, &ContextPolicy::v2());
-    assert_eq!(sel.fit.kept.len(), 5, "everything fits, so everything renders");
+    assert_eq!(
+        sel.fit.kept.len(),
+        5,
+        "everything fits, so everything renders"
+    );
     assert!(sel.fit.dropped.is_empty());
     assert!(sel.fit.kept.iter().all(|k| k.degraded.is_none()));
 }
@@ -225,6 +234,9 @@ fn no_record_is_ever_byte_truncated() {
     // Everything the budget could not hold is still in the store and still
     // addressable, which is what makes the loss recoverable.
     for id in &sel.fit.dropped {
-        assert!(store.get(*id).is_some(), "{id} left the prompt, not the store");
+        assert!(
+            store.get(*id).is_some(),
+            "{id} left the prompt, not the store"
+        );
     }
 }

@@ -863,14 +863,16 @@ pub async fn get_usage(
     .await;
 
     let priced = match priced {
-        Ok((calls, input_tokens, output_tokens, cache_read, cache_write, cost_usd)) => PricedUsage {
-            calls,
-            input_tokens,
-            output_tokens,
-            cache_read,
-            cache_write,
-            cost_usd,
-        },
+        Ok((calls, input_tokens, output_tokens, cache_read, cache_write, cost_usd)) => {
+            PricedUsage {
+                calls,
+                input_tokens,
+                output_tokens,
+                cache_read,
+                cache_write,
+                cost_usd,
+            }
+        }
         Err(e) => return internal(e),
     };
 

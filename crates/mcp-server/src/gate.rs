@@ -614,7 +614,10 @@ mod tests {
         let rec = Arc::new(Recording::default());
         let gate = CallGate::new(rec.clone()).for_chat_turn();
         let err = gate
-            .admit(trial_tool("run_study", TrialKind::Falsification), &json!({}))
+            .admit(
+                trial_tool("run_study", TrialKind::Falsification),
+                &json!({}),
+            )
             .await
             .expect_err("a chat turn spends no trials");
         assert_eq!(err.code, "chat_turn_spends_no_trials");
@@ -635,7 +638,10 @@ mod tests {
         let rec = Arc::new(Recording::default());
         let gate = CallGate::new(rec.clone()).spending(Spending::Survey);
         let err = gate
-            .admit(trial_tool("run_study", TrialKind::Falsification), &json!({}))
+            .admit(
+                trial_tool("run_study", TrialKind::Falsification),
+                &json!({}),
+            )
             .await
             .expect_err("a survey issues no ticket");
         assert_eq!(err.code, "survey_spends_no_trials");
@@ -661,7 +667,11 @@ mod tests {
             "read bars",
             json!({}),
         ));
-        assert!(gate.admit(read, &json!({})).await.expect("a read").is_none());
+        assert!(gate
+            .admit(read, &json!({}))
+            .await
+            .expect("a read")
+            .is_none());
     }
 
     /// The default spends. A default of "chat" would silently disable the
@@ -672,7 +682,10 @@ mod tests {
         let rec = Arc::new(Recording::default());
         let gate = CallGate::new(rec.clone());
         assert!(gate
-            .admit(trial_tool("run_study", TrialKind::Falsification), &json!({}))
+            .admit(
+                trial_tool("run_study", TrialKind::Falsification),
+                &json!({})
+            )
             .await
             .is_ok());
         assert_eq!(rec.registered.load(Ordering::SeqCst), 1);
@@ -686,7 +699,10 @@ mod tests {
         let rec = Arc::new(Recording::default());
         let gate = CallGate::new(rec.clone()).under_preregistration(Prereg::Missing);
         let err = gate
-            .admit(trial_tool("run_study", TrialKind::Falsification), &json!({}))
+            .admit(
+                trial_tool("run_study", TrialKind::Falsification),
+                &json!({}),
+            )
             .await
             .expect_err("no commitment, no look");
         assert_eq!(err.code, "preregistration_required");
@@ -726,11 +742,14 @@ mod tests {
             }
         }
         let cap = Arc::new(Capturing::default());
-        let gate = CallGate::new(cap.clone())
-            .under_preregistration(Prereg::Sealed("sha256:abc".into()));
-        gate.admit(trial_tool("run_study", TrialKind::Falsification), &json!({}))
-            .await
-            .expect("admitted");
+        let gate =
+            CallGate::new(cap.clone()).under_preregistration(Prereg::Sealed("sha256:abc".into()));
+        gate.admit(
+            trial_tool("run_study", TrialKind::Falsification),
+            &json!({}),
+        )
+        .await
+        .expect("admitted");
         let seen = cap
             .seen
             .lock()
@@ -748,7 +767,10 @@ mod tests {
         let rec = Arc::new(Recording::default());
         let gate = CallGate::new(rec.clone());
         assert!(gate
-            .admit(trial_tool("run_study", TrialKind::Falsification), &json!({}))
+            .admit(
+                trial_tool("run_study", TrialKind::Falsification),
+                &json!({})
+            )
             .await
             .is_ok());
         assert_eq!(rec.registered.load(Ordering::SeqCst), 1);
@@ -764,7 +786,10 @@ mod tests {
             .for_chat_turn();
         assert_eq!(gate.preregistration(), &Prereg::Sealed("sha256:abc".into()));
         let err = gate
-            .admit(trial_tool("run_study", TrialKind::Falsification), &json!({}))
+            .admit(
+                trial_tool("run_study", TrialKind::Falsification),
+                &json!({}),
+            )
             .await
             .expect_err("a chat turn spends no trials, registered or not");
         assert_eq!(err.code, "chat_turn_spends_no_trials");

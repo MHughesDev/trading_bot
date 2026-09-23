@@ -255,7 +255,8 @@ mod tests {
                             purge_bars: pu,
                             embargo_bars: em.max(horizon),
                         };
-                        let generated = walk_forward_folds(1_000_000, &s, &horizon_only(horizon)).unwrap();
+                        let generated =
+                            walk_forward_folds(1_000_000, &s, &horizon_only(horizon)).unwrap();
                         assert_eq!(generated.len() as u32, folds);
 
                         for fold in &generated {

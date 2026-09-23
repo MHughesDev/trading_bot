@@ -165,7 +165,10 @@ fn the_state_words_the_column_accepts_are_the_states_that_exist() {
         .split(',')
         .map(|s| s.trim().trim_matches('\'').to_string())
         .collect();
-    let in_rust: BTreeSet<String> = SessionState::WORDS.iter().map(|s| (*s).to_string()).collect();
+    let in_rust: BTreeSet<String> = SessionState::WORDS
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
     assert_eq!(
         in_sql, in_rust,
         "the column accepts a different set of state words than the enum has. A state the fold \

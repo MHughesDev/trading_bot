@@ -146,7 +146,11 @@ impl AuditTrail {
     /// Record what the platform did about it.
     pub async fn post(&self, opened: Option<(AuditRequest, PreAudit)>, verdict: AuditVerdict) {
         let Some((req, pre)) = opened else { return };
-        if let Err(e) = self.ledger.record_audit_post_async(&req, pre, verdict, None).await {
+        if let Err(e) = self
+            .ledger
+            .record_audit_post_async(&req, pre, verdict, None)
+            .await
+        {
             tracing::error!(
                 action = %req.action,
                 verdict = verdict.as_str(),
@@ -191,7 +195,10 @@ mod tests {
         assert_eq!(verdict_of(&json!({ "ok": true })), AuditVerdict::Executed);
         // `error: null` is not an error — the bug that made three successful
         // training runs read as failures (see `bridge::execute`).
-        assert_eq!(verdict_of(&json!({ "error": null, "run_id": "r" })), AuditVerdict::Executed);
+        assert_eq!(
+            verdict_of(&json!({ "error": null, "run_id": "r" })),
+            AuditVerdict::Executed
+        );
     }
 
     #[test]
@@ -213,7 +220,10 @@ mod tests {
             verdict_of(&json!({ "error": { "code": "clickhouse_query_failed" } })),
             AuditVerdict::Failed
         );
-        assert_eq!(verdict_of(&json!({ "error": "boom" })), AuditVerdict::Failed);
+        assert_eq!(
+            verdict_of(&json!({ "error": "boom" })),
+            AuditVerdict::Failed
+        );
     }
 
     /// The attribution is read off the session, and the caller has no field to
@@ -227,7 +237,10 @@ mod tests {
         let agent = principal_for(user, "service", Some(&format!("agent-run-{run}")));
         assert_eq!(agent.actor_kind, "agent");
         assert_eq!(agent.actor_id, run.to_string());
-        assert_eq!(agent.on_behalf_of.as_deref(), Some(user.to_string().as_str()));
+        assert_eq!(
+            agent.on_behalf_of.as_deref(),
+            Some(user.to_string().as_str())
+        );
         assert_eq!(agent.tenant_id, user.to_string());
 
         // The external MCP front door. Distinct actor_kind, and its actor_id is
@@ -235,10 +248,16 @@ mod tests {
         let external = principal_for(user, "service", Some("claude-desktop"));
         assert_eq!(external.actor_kind, "mcp_client");
         assert_eq!(external.actor_id, "claude-desktop");
-        assert_eq!(external.on_behalf_of.as_deref(), Some(user.to_string().as_str()));
+        assert_eq!(
+            external.on_behalf_of.as_deref(),
+            Some(user.to_string().as_str())
+        );
 
         // An unlabelled service token is still an external client, not an agent.
-        assert_eq!(principal_for(user, "service", None).actor_kind, "mcp_client");
+        assert_eq!(
+            principal_for(user, "service", None).actor_kind,
+            "mcp_client"
+        );
 
         // A person at a browser acts for themselves.
         let human = principal_for(user, "web", None);

@@ -434,7 +434,8 @@ pub struct LeaseRequest {
 /// that would come out at zero. See [`LeaseRefusal`].
 pub fn lease(req: &LeaseRequest) -> Result<Lease, LeaseRefusal> {
     let unit = req.unit;
-    let want = check_meter(&req.estimate, "the workflow's cost estimate", unit)?.amount * LEASE_HEADROOM;
+    let want =
+        check_meter(&req.estimate, "the workflow's cost estimate", unit)?.amount * LEASE_HEADROOM;
 
     let mut unbounded = Vec::new();
     // `(kind, headroom)` pairs, in `CapKind::ALL`'s order, which is the order a
@@ -445,7 +446,11 @@ pub fn lease(req: &LeaseRequest) -> Result<Lease, LeaseRefusal> {
 
     for (kind, bound, spent) in [
         (CapKind::PerTask, &req.per_task, None),
-        (CapKind::Day, &req.day, Some((&req.spent_today, "the session's spend today"))),
+        (
+            CapKind::Day,
+            &req.day,
+            Some((&req.spent_today, "the session's spend today")),
+        ),
         (
             CapKind::Total,
             &req.total,
@@ -701,11 +706,7 @@ pub fn day_budget(
     }
     let spent = match check_meter(spent_today, "the session's spend today", unit) {
         Ok(m) => m,
-        Err(e) => {
-            return DayBudget::Unreadable {
-                why: e.to_string(),
-            }
-        }
+        Err(e) => return DayBudget::Unreadable { why: e.to_string() },
     };
     let committed: f64 = in_flight.iter().map(|l| l.size.amount).sum();
     let used = spent.amount + committed;
@@ -879,7 +880,9 @@ pub fn stop(conditions: &[crate::charter::StopWhen], s: &Stopping) -> StopVerdic
             }
             StopWhen::DeployableFound { k } => match s.deployable_found.get() {
                 Some(found) if found >= k => Met::Yes {
-                    because: format!("{found} deployable strategies found; the charter asked for {k}"),
+                    because: format!(
+                        "{found} deployable strategies found; the charter asked for {k}"
+                    ),
                 },
                 Some(_) => Met::No,
                 None => Met::NotEvaluable {
@@ -920,13 +923,17 @@ pub fn stop(conditions: &[crate::charter::StopWhen], s: &Stopping) -> StopVerdic
 /// Whether one condition holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Met {
-    Yes { because: String },
+    Yes {
+        because: String,
+    },
     No,
     /// Nothing on this platform can answer it. **Never folded into
     /// [`Met::No`]:** a condition that cannot fire and one that has not fired
     /// look identical on an agenda and completely different to somebody
     /// wondering why a session is still running.
-    NotEvaluable { missing: String },
+    NotEvaluable {
+        missing: String,
+    },
 }
 
 fn total_budget_met(s: &Stopping) -> Met {
@@ -1456,7 +1463,10 @@ pub fn redirect(item: &mut AgendaItem, new_question: &str) -> Result<Redirect, R
 /// *live* child).
 #[must_use]
 pub fn is_steerable(status: &ItemStatus) -> bool {
-    matches!(status, ItemStatus::Claimed { .. } | ItemStatus::Running { .. })
+    matches!(
+        status,
+        ItemStatus::Claimed { .. } | ItemStatus::Running { .. }
+    )
 }
 
 #[cfg(test)]
@@ -1583,7 +1593,13 @@ mod tests {
         r.in_flight = issued;
         let e = lease(&r).expect_err("eighteen trials are committed");
         assert!(
-            matches!(e, LeaseRefusal::Exhausted { which: CapKind::Day, .. }),
+            matches!(
+                e,
+                LeaseRefusal::Exhausted {
+                    which: CapKind::Day,
+                    ..
+                }
+            ),
             "{e}"
         );
         assert!(e.to_string().contains("children still running"), "{e}");
@@ -1613,10 +1629,7 @@ mod tests {
         ] {
             r.item = item_id(9);
             let e = lease(&r).expect_err("{what} was not read");
-            assert!(
-                matches!(e, LeaseRefusal::NotRead { .. }),
-                "{what}: {e:?}"
-            );
+            assert!(matches!(e, LeaseRefusal::NotRead { .. }), "{what}: {e:?}");
         }
     }
 
@@ -1625,10 +1638,7 @@ mod tests {
         let mut r = a_request();
         r.day = Observed::Is(Bound::Cap(Meter::usd(25.0).expect("a day budget")));
         let e = lease(&r).expect_err("dollars do not cap trials");
-        assert!(
-            matches!(e, LeaseRefusal::UnitMismatch { .. }),
-            "{e:?}"
-        );
+        assert!(matches!(e, LeaseRefusal::UnitMismatch { .. }), "{e:?}");
         assert!(e.to_string().contains("trials"), "{e}");
         assert!(e.to_string().contains("USD"), "{e}");
         assert!(
@@ -2256,7 +2266,10 @@ mod tests {
                                     .count();
                                 assert_eq!(terminal, 1, "{s:?} -> {steps:?}");
                                 assert!(
-                                    matches!(steps.last(), Some(Step::Claim { .. } | Step::Hold { .. })),
+                                    matches!(
+                                        steps.last(),
+                                        Some(Step::Claim { .. } | Step::Hold { .. })
+                                    ),
                                     "and it is last: {steps:?}"
                                 );
                                 if let (Some(r), Some(cl)) =
@@ -2318,7 +2331,11 @@ mod tests {
             siblings: &siblings,
         });
         assert_eq!(b.recent.len(), RECENT_VERDICTS);
-        assert!(b.recent[0].contains("question 8"), "newest first: {:?}", b.recent);
+        assert!(
+            b.recent[0].contains("question 8"),
+            "newest first: {:?}",
+            b.recent
+        );
         assert!(b.recent[4].contains("question 4"), "{:?}", b.recent);
         assert_eq!(
             b.preferences,
@@ -2361,13 +2378,19 @@ mod tests {
 
     #[test]
     fn why_now_says_which_source_and_cites_it_and_never_invents_an_age() {
-        let mut item = AgendaItem::new(session(), "is f_31a still true?", "btc", Source::StaleFinding)
-            .with_source_ref("f_31a");
+        let mut item = AgendaItem::new(
+            session(),
+            "is f_31a still true?",
+            "btc",
+            Source::StaleFinding,
+        )
+        .with_source_ref("f_31a");
         let s = why_now(&item);
         assert!(s.contains("valid_until"), "{s}");
         assert!(s.contains("f_31a"), "{s}");
         assert!(
-            !s.chars().any(|c| c.is_ascii_digit() && c != '3' && c != '1'),
+            !s.chars()
+                .any(|c| c.is_ascii_digit() && c != '3' && c != '1'),
             "the spec's example says `94 days stale` and no source carries an age: {s}"
         );
 
@@ -2391,7 +2414,10 @@ mod tests {
         for src in Source::ALL {
             let item = AgendaItem::new(session(), "q", "btc", *src).with_source_ref("r_1");
             let s = why_now(&item);
-            assert!(!seen.contains(&s), "{src:?} reuses another source's sentence");
+            assert!(
+                !seen.contains(&s),
+                "{src:?} reuses another source's sentence"
+            );
             seen.push(s);
         }
         assert_eq!(seen.len(), Source::ALL.len());

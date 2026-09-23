@@ -27,13 +27,13 @@ pub mod pg;
 pub mod phase;
 pub mod portfolio;
 pub mod prereg;
-pub mod reservation;
-pub mod workflow_verdict;
-pub mod proposal;
 pub mod presets;
+pub mod proposal;
+pub mod reservation;
 pub mod state;
 pub mod tiers;
 pub mod trajectory;
+pub mod workflow_verdict;
 
 use std::sync::Mutex;
 
@@ -93,7 +93,11 @@ pub struct DispatchContext {
 
 impl DispatchContext {
     #[must_use]
-    pub fn human(tenant_id: impl Into<String>, actor_id: impl Into<String>, delta_practical: f64) -> Self {
+    pub fn human(
+        tenant_id: impl Into<String>,
+        actor_id: impl Into<String>,
+        delta_practical: f64,
+    ) -> Self {
         Self {
             tenant_id: tenant_id.into(),
             campaign_id: None,
@@ -186,7 +190,11 @@ impl DispatchContext {
     /// The only way to register without a propensity or declared effect size. The
     /// missing declaration is a defect of the calling path; this records it.
     #[must_use]
-    pub fn legacy(tenant_id: impl Into<String>, actor_kind: ActorKind, actor_id: impl Into<String>) -> Self {
+    pub fn legacy(
+        tenant_id: impl Into<String>,
+        actor_kind: ActorKind,
+        actor_id: impl Into<String>,
+    ) -> Self {
         Self {
             tenant_id: tenant_id.into(),
             campaign_id: None,
@@ -278,7 +286,10 @@ impl<'a> Registration<'a> {
     /// A registration with no propensity. Accepted only under [`LEGACY_POLICY`].
     #[must_use]
     pub fn unlogged(ctx: &'a DispatchContext, subject: &'a TrialSubject) -> Self {
-        Self { propensity: None, ..Self::new(ctx, subject, 1.0) }
+        Self {
+            propensity: None,
+            ..Self::new(ctx, subject, 1.0)
+        }
     }
 
     #[must_use]
@@ -310,8 +321,20 @@ impl<'a> Registration<'a> {
         }
         h.update(self.ctx.policy_id.as_bytes());
         h.update(self.ctx.policy_version.to_be_bytes());
-        h.update(self.ctx.campaign_id.map(|c| c.to_string()).unwrap_or_default().as_bytes());
-        h.update(self.ctx.experiment_id.as_deref().unwrap_or_default().as_bytes());
+        h.update(
+            self.ctx
+                .campaign_id
+                .map(|c| c.to_string())
+                .unwrap_or_default()
+                .as_bytes(),
+        );
+        h.update(
+            self.ctx
+                .experiment_id
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes(),
+        );
         format!("sha256:{}", hex::encode(h.finalize()))
     }
 
@@ -370,7 +393,12 @@ impl TrialTicket {
 }
 
 pub(crate) fn mint(trial_id: Uuid, tenant_id: String, config_hash: String) -> TrialTicket {
-    TrialTicket { trial_id, tenant_id, config_hash, state: TrialState::Registered }
+    TrialTicket {
+        trial_id,
+        tenant_id,
+        config_hash,
+        state: TrialState::Registered,
+    }
 }
 
 /// One lifecycle transition.
@@ -399,17 +427,28 @@ pub struct TrialEvent {
 impl TrialEvent {
     #[must_use]
     pub fn to(state: TrialState) -> Self {
-        Self { state: Some(state), ..Self::default() }
+        Self {
+            state: Some(state),
+            ..Self::default()
+        }
     }
 
     #[must_use]
     pub fn completed(run_id: impl Into<String>, outcome: Option<OutcomeVector>) -> Self {
-        Self { run_id: Some(run_id.into()), outcome, ..Self::to(TrialState::Completed) }
+        Self {
+            run_id: Some(run_id.into()),
+            outcome,
+            ..Self::to(TrialState::Completed)
+        }
     }
 
     #[must_use]
     pub fn deduplicated(prior: Uuid, run_id: impl Into<String>) -> Self {
-        Self { deduplicated_of: Some(prior), run_id: Some(run_id.into()), ..Self::to(TrialState::Deduplicated) }
+        Self {
+            deduplicated_of: Some(prior),
+            run_id: Some(run_id.into()),
+            ..Self::to(TrialState::Deduplicated)
+        }
     }
 
     /// A terminal failure. Censoring follows from the reason.
@@ -442,29 +481,49 @@ impl TrialEvent {
     }
 
     fn effective_censoring(&self) -> Censoring {
-        self.censoring.or_else(|| self.terminal_reason.map(TerminalReason::censoring)).unwrap_or(Censoring::None)
+        self.censoring
+            .or_else(|| self.terminal_reason.map(TerminalReason::censoring))
+            .unwrap_or(Censoring::None)
     }
 
     pub(crate) fn validate(&self, from: TrialState) -> Result<TrialState, LedgerError> {
-        let to = self.state.ok_or(LedgerError::Invalid("event has no target state".into()))?;
+        let to = self
+            .state
+            .ok_or(LedgerError::Invalid("event has no target state".into()))?;
         if !from.can_transition_to(to) {
             return Err(LedgerError::IllegalTransition { from, to });
         }
         let censoring = self.effective_censoring();
         if let Some(r) = self.terminal_reason {
-            if r.censoring() != censoring && !(r == TerminalReason::IntegrityRejected && censoring == Censoring::None) {
-                return Err(LedgerError::Invalid(format!("reason {} implies censoring {}", r.as_str(), r.censoring().as_str())));
+            if r.censoring() != censoring
+                && !(r == TerminalReason::IntegrityRejected && censoring == Censoring::None)
+            {
+                return Err(LedgerError::Invalid(format!(
+                    "reason {} implies censoring {}",
+                    r.as_str(),
+                    r.censoring().as_str()
+                )));
             }
         }
         match to {
-            TrialState::Failed if censoring == Censoring::None || self.terminal_reason.is_none() => {
-                return Err(LedgerError::Invalid("a failed trial must carry a terminal_reason and censoring (INV-17)".into()));
+            TrialState::Failed
+                if censoring == Censoring::None || self.terminal_reason.is_none() =>
+            {
+                return Err(LedgerError::Invalid(
+                    "a failed trial must carry a terminal_reason and censoring (INV-17)".into(),
+                ));
             }
-            TrialState::Completed | TrialState::CompletedPass | TrialState::CompletedFail if censoring != Censoring::None => {
-                return Err(LedgerError::Invalid("a completed trial is not censored".into()));
+            TrialState::Completed | TrialState::CompletedPass | TrialState::CompletedFail
+                if censoring != Censoring::None =>
+            {
+                return Err(LedgerError::Invalid(
+                    "a completed trial is not censored".into(),
+                ));
             }
             TrialState::Deduplicated if self.deduplicated_of.is_none() => {
-                return Err(LedgerError::Invalid("deduplicated must name the prior trial (SPEC §9)".into()));
+                return Err(LedgerError::Invalid(
+                    "deduplicated must name the prior trial (SPEC §9)".into(),
+                ));
             }
             _ => {}
         }
@@ -525,7 +584,11 @@ pub trait TrialLedger: Send + Sync {
     ///
     /// # Errors
     /// Malformed series, a second write, and backend failures.
-    fn persist_returns(&self, ticket: &TrialTicket, series: &neff::ReturnSeries) -> Result<String, LedgerError>;
+    fn persist_returns(
+        &self,
+        ticket: &TrialTicket,
+        series: &neff::ReturnSeries,
+    ) -> Result<String, LedgerError>;
 
     /// The platform-computed `N_eff` over the tenant's whole ledger (INV-22). The
     /// only way to obtain an [`neff::NEff`].
@@ -584,13 +647,24 @@ pub trait TrialLedger: Send + Sync {
     ///
     /// # Errors
     /// A lineage claimed without a recorded result, and backend failures.
-    fn claim_sealed_holdout(&self, tenant_id: &str, lineage: &str, requested_by: &str) -> Result<holdout::HoldoutClaim, LedgerError>;
+    fn claim_sealed_holdout(
+        &self,
+        tenant_id: &str,
+        lineage: &str,
+        requested_by: &str,
+    ) -> Result<holdout::HoldoutClaim, LedgerError>;
 
     /// Record the result of a claimed evaluation. Written once per lineage.
     ///
     /// # Errors
     /// A second result, a result without a claim, and backend failures.
-    fn record_sealed_holdout(&self, tenant_id: &str, lineage: &str, trial_id: Uuid, result: &serde_json::Value) -> Result<(), LedgerError>;
+    fn record_sealed_holdout(
+        &self,
+        tenant_id: &str,
+        lineage: &str,
+        trial_id: Uuid,
+        result: &serde_json::Value,
+    ) -> Result<(), LedgerError>;
 
     /// DEFINE a campaign (SPEC §10). The only way to obtain a
     /// [`campaign::CampaignHandle`], so a dispatch cannot name a campaign that
@@ -600,7 +674,11 @@ pub trait TrialLedger: Send + Sync {
     /// A definition that fails [`campaign::CampaignDefinition::validate`] (a
     /// missing `delta_practical` above all), a duplicate slug, and backend
     /// failures.
-    fn define_campaign(&self, tenant_id: &str, def: &campaign::CampaignDefinition) -> Result<campaign::CampaignHandle, LedgerError>;
+    fn define_campaign(
+        &self,
+        tenant_id: &str,
+        def: &campaign::CampaignDefinition,
+    ) -> Result<campaign::CampaignHandle, LedgerError>;
 
     /// The campaign's achieved exploration fraction, for the floor check.
     /// Defaults to the tenant-wide fraction where a backend cannot scope it.
@@ -714,19 +792,38 @@ impl<T: TrialLedger + ?Sized> TrialLedger for std::sync::Arc<T> {
     fn exploration_fraction(&self, tenant_id: &str) -> f64 {
         (**self).exploration_fraction(tenant_id)
     }
-    fn persist_returns(&self, ticket: &TrialTicket, series: &neff::ReturnSeries) -> Result<String, LedgerError> {
+    fn persist_returns(
+        &self,
+        ticket: &TrialTicket,
+        series: &neff::ReturnSeries,
+    ) -> Result<String, LedgerError> {
         (**self).persist_returns(ticket, series)
     }
     fn n_eff(&self, tenant_id: &str) -> Result<neff::NEff, LedgerError> {
         (**self).n_eff(tenant_id)
     }
-    fn claim_sealed_holdout(&self, tenant_id: &str, lineage: &str, requested_by: &str) -> Result<holdout::HoldoutClaim, LedgerError> {
+    fn claim_sealed_holdout(
+        &self,
+        tenant_id: &str,
+        lineage: &str,
+        requested_by: &str,
+    ) -> Result<holdout::HoldoutClaim, LedgerError> {
         (**self).claim_sealed_holdout(tenant_id, lineage, requested_by)
     }
-    fn record_sealed_holdout(&self, tenant_id: &str, lineage: &str, trial_id: Uuid, result: &serde_json::Value) -> Result<(), LedgerError> {
+    fn record_sealed_holdout(
+        &self,
+        tenant_id: &str,
+        lineage: &str,
+        trial_id: Uuid,
+        result: &serde_json::Value,
+    ) -> Result<(), LedgerError> {
         (**self).record_sealed_holdout(tenant_id, lineage, trial_id, result)
     }
-    fn define_campaign(&self, tenant_id: &str, def: &campaign::CampaignDefinition) -> Result<campaign::CampaignHandle, LedgerError> {
+    fn define_campaign(
+        &self,
+        tenant_id: &str,
+        def: &campaign::CampaignDefinition,
+    ) -> Result<campaign::CampaignHandle, LedgerError> {
         (**self).define_campaign(tenant_id, def)
     }
     fn campaign_exploration_fraction(&self, tenant_id: &str, campaign_id: Uuid) -> f64 {
@@ -786,7 +883,12 @@ impl TrialRow {
     /// Mirrors `mlops.trial_chain()` byte for byte.
     #[must_use]
     pub fn recompute_hash(&self) -> Vec<u8> {
-        let seeds = self.seed_set.iter().map(ToString::to_string).collect::<Vec<_>>().join(",");
+        let seeds = self
+            .seed_set
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
         let mut h = Sha256::new();
         h.update(&self.prev_hash);
         h.update(self.trial_id.to_string());
@@ -812,7 +914,11 @@ impl TrialRow {
         if let Some(p) = self.propensity {
             h.update(p.to_be_bytes());
         }
-        h.update(if self.exploration_flag { "true" } else { "false" });
+        h.update(if self.exploration_flag {
+            "true"
+        } else {
+            "false"
+        });
         h.update(self.supersedes.map(|s| s.to_string()).unwrap_or_default());
         h.finalize().to_vec()
     }
@@ -850,9 +956,17 @@ impl EventRow {
         h.update(&self.state);
         h.update(&self.censoring);
         h.update(self.terminal_reason.as_deref().unwrap_or_default());
-        h.update(self.censor_at_step.map(|s| s.to_string()).unwrap_or_default());
+        h.update(
+            self.censor_at_step
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+        );
         h.update(self.run_id.as_deref().unwrap_or_default());
-        h.update(self.deduplicated_of.map(|d| d.to_string()).unwrap_or_default());
+        h.update(
+            self.deduplicated_of
+                .map(|d| d.to_string())
+                .unwrap_or_default(),
+        );
         h.update(self.outcome_digest.as_deref().unwrap_or_default());
         h.update(self.returns_uri.as_deref().unwrap_or_default());
         h.update(self.predictions_uri.as_deref().unwrap_or_default());
@@ -869,7 +983,11 @@ pub struct ChainBreak {
 
 impl std::fmt::Display for ChainBreak {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ledger chain broken at seq {} ({}): {}", self.seq, self.id, self.reason)
+        write!(
+            f,
+            "ledger chain broken at seq {} ({}): {}",
+            self.seq, self.id, self.reason
+        )
     }
 }
 
@@ -883,7 +1001,11 @@ pub fn verify_trials(rows: &[TrialRow]) -> Result<usize, ChainBreak> {
     let mut prev = GENESIS_HASH.to_vec();
     for (i, r) in rows.iter().enumerate() {
         let expected = i as i64;
-        let brk = |reason: String| ChainBreak { id: r.trial_id, seq: r.seq, reason };
+        let brk = |reason: String| ChainBreak {
+            id: r.trial_id,
+            seq: r.seq,
+            reason,
+        };
         if r.seq != expected {
             return Err(brk(format!("expected seq {expected}, found {}", r.seq)));
         }
@@ -907,7 +1029,11 @@ pub fn verify_events(trial: &TrialRow, events: &[EventRow]) -> Result<usize, Cha
     let mut prev = trial.row_hash.clone();
     let mut state = TrialState::Registered;
     for (i, e) in events.iter().enumerate() {
-        let brk = |reason: String| ChainBreak { id: e.event_id, seq: i64::from(e.event_seq), reason };
+        let brk = |reason: String| ChainBreak {
+            id: e.event_id,
+            seq: i64::from(e.event_seq),
+            reason,
+        };
         if e.trial_id != trial.trial_id || e.event_seq != i as i32 {
             return Err(brk("event out of sequence or for another trial".into()));
         }
@@ -916,7 +1042,9 @@ pub fn verify_events(trial: &TrialRow, events: &[EventRow]) -> Result<usize, Cha
         }
         if let (Some(o), Some(d)) = (&e.outcome, &e.outcome_digest) {
             if &o.digest() != d {
-                return Err(brk("outcome values no longer match their chained digest".into()));
+                return Err(brk(
+                    "outcome values no longer match their chained digest".into()
+                ));
             }
         }
         if e.outcome.is_some() != e.outcome_digest.is_some() {
@@ -925,7 +1053,8 @@ pub fn verify_events(trial: &TrialRow, events: &[EventRow]) -> Result<usize, Cha
         if e.recompute_hash() != e.row_hash {
             return Err(brk("row_hash does not match the event's contents".into()));
         }
-        let to = TrialState::parse(&e.state).ok_or_else(|| brk(format!("unknown state {}", e.state)))?;
+        let to =
+            TrialState::parse(&e.state).ok_or_else(|| brk(format!("unknown state {}", e.state)))?;
         if !state.can_transition_to(to) {
             return Err(brk(format!("illegal transition {state:?} -> {to:?}")));
         }
@@ -1018,7 +1147,9 @@ impl Decision {
             }
         }
         if self.candidate_set.is_empty() {
-            return Err(LedgerError::Invalid("candidate_set must list every option considered".into()));
+            return Err(LedgerError::Invalid(
+                "candidate_set must list every option considered".into(),
+            ));
         }
         if ctx.campaign_id.is_none() && ctx.experiment_id.is_none() {
             return Err(LedgerError::NoCampaign);
@@ -1031,7 +1162,8 @@ pub trait DecisionLog: Send + Sync {
     ///
     /// # Errors
     /// Missing propensity, empty candidate set, or backend failure.
-    fn log_decision(&self, ctx: &DispatchContext, decision: &Decision) -> Result<Uuid, LedgerError>;
+    fn log_decision(&self, ctx: &DispatchContext, decision: &Decision)
+        -> Result<Uuid, LedgerError>;
 }
 
 // ── in-memory implementation ──────────────────────────────────────────────────
@@ -1074,7 +1206,11 @@ impl InMemoryLedger {
     /// from "it measured zero", and that is the exact confusion every gate here
     /// exists to prevent.
     #[must_use]
-    pub fn gate_evidence(&self, tenant_id: &str, trial_id: Uuid) -> Option<evidence::TrialEvidence> {
+    pub fn gate_evidence(
+        &self,
+        tenant_id: &str,
+        trial_id: Uuid,
+    ) -> Option<evidence::TrialEvidence> {
         self.gate_evidence
             .lock()
             .expect("ledger poisoned")
@@ -1084,21 +1220,40 @@ impl InMemoryLedger {
 
     #[must_use]
     pub fn rows(&self, tenant_id: &str) -> Vec<TrialRow> {
-        self.trials.lock().expect("ledger poisoned").iter().filter(|t| t.row.tenant_id == tenant_id).map(|t| t.row.clone()).collect()
+        self.trials
+            .lock()
+            .expect("ledger poisoned")
+            .iter()
+            .filter(|t| t.row.tenant_id == tenant_id)
+            .map(|t| t.row.clone())
+            .collect()
     }
 
     #[must_use]
     pub fn events(&self, trial_id: Uuid) -> Vec<EventRow> {
-        self.trials.lock().expect("ledger poisoned").iter().find(|t| t.row.trial_id == trial_id).map(|t| t.events.clone()).unwrap_or_default()
+        self.trials
+            .lock()
+            .expect("ledger poisoned")
+            .iter()
+            .find(|t| t.row.trial_id == trial_id)
+            .map(|t| t.events.clone())
+            .unwrap_or_default()
     }
 
     #[must_use]
     pub fn state_of(&self, trial_id: Uuid) -> Option<(TrialState, Censoring)> {
         let trials = self.trials.lock().expect("ledger poisoned");
         let t = trials.iter().find(|t| t.row.trial_id == trial_id)?;
-        Some(t.events.last().map_or((TrialState::Registered, Censoring::None), |e| {
-            (TrialState::parse(&e.state).unwrap_or(TrialState::Registered), Censoring::parse(&e.censoring).unwrap_or(Censoring::None))
-        }))
+        Some(
+            t.events
+                .last()
+                .map_or((TrialState::Registered, Censoring::None), |e| {
+                    (
+                        TrialState::parse(&e.state).unwrap_or(TrialState::Registered),
+                        Censoring::parse(&e.censoring).unwrap_or(Censoring::None),
+                    )
+                }),
+        )
     }
 
     /// Logged sealed-holdout requests for a lineage (the claim and every repeat).
@@ -1113,21 +1268,42 @@ impl InMemoryLedger {
 
     #[must_use]
     pub fn decisions(&self) -> Vec<Decision> {
-        self.decisions.lock().expect("ledger poisoned").iter().map(|(_, d)| d.clone()).collect()
+        self.decisions
+            .lock()
+            .expect("ledger poisoned")
+            .iter()
+            .map(|(_, d)| d.clone())
+            .collect()
     }
 
-    fn append(&self, ticket_id: Uuid, event: &TrialEvent, from: TrialState) -> Result<TrialState, LedgerError> {
+    fn append(
+        &self,
+        ticket_id: Uuid,
+        event: &TrialEvent,
+        from: TrialState,
+    ) -> Result<TrialState, LedgerError> {
         let to = event.validate(from)?;
         // Mirrors chk_event_returns_persisted (migration 0043).
-        if matches!(to, TrialState::Completed | TrialState::CompletedPass | TrialState::CompletedFail)
-            && event.outcome.is_some_and(|o| o.sharpe_net.is_some())
+        if matches!(
+            to,
+            TrialState::Completed | TrialState::CompletedPass | TrialState::CompletedFail
+        ) && event.outcome.is_some_and(|o| o.sharpe_net.is_some())
             && event.returns_uri.is_none()
         {
-            return Err(LedgerError::Invalid("a completion reporting a Sharpe must carry its persisted return series (INV-18)".into()));
+            return Err(LedgerError::Invalid(
+                "a completion reporting a Sharpe must carry its persisted return series (INV-18)"
+                    .into(),
+            ));
         }
         let mut trials = self.trials.lock().expect("ledger poisoned");
-        let t = trials.iter_mut().find(|t| t.row.trial_id == ticket_id).ok_or(LedgerError::UnknownTrial(ticket_id))?;
-        let prev = t.events.last().map_or_else(|| t.row.row_hash.clone(), |e| e.row_hash.clone());
+        let t = trials
+            .iter_mut()
+            .find(|t| t.row.trial_id == ticket_id)
+            .ok_or(LedgerError::UnknownTrial(ticket_id))?;
+        let prev = t
+            .events
+            .last()
+            .map_or_else(|| t.row.row_hash.clone(), |e| e.row_hash.clone());
         let mut row = EventRow {
             event_id: Uuid::new_v4(),
             trial_id: ticket_id,
@@ -1139,7 +1315,10 @@ impl InMemoryLedger {
             run_id: event.run_id.clone(),
             deduplicated_of: event.deduplicated_of,
             outcome: event.outcome.filter(|o| *o != OutcomeVector::default()),
-            outcome_digest: event.outcome.filter(|o| *o != OutcomeVector::default()).map(|o| o.digest()),
+            outcome_digest: event
+                .outcome
+                .filter(|o| *o != OutcomeVector::default())
+                .map(|o| o.digest()),
             returns_uri: event.returns_uri.clone(),
             predictions_uri: event.predictions_uri.clone(),
             prev_hash: prev,
@@ -1160,7 +1339,9 @@ impl TrialLedger for InMemoryLedger {
             .iter()
             .filter(|t| &t.row.tenant_id == tenant)
             .max_by_key(|t| t.row.seq)
-            .map_or((GENESIS_HASH.to_vec(), 0), |t| (t.row.row_hash.clone(), t.row.seq + 1));
+            .map_or((GENESIS_HASH.to_vec(), 0), |t| {
+                (t.row.row_hash.clone(), t.row.seq + 1)
+            });
         let trial_id = Uuid::new_v4();
         let mut row = TrialRow {
             trial_id,
@@ -1188,13 +1369,22 @@ impl TrialLedger for InMemoryLedger {
             supersedes: reg.supersedes,
         };
         row.row_hash = row.recompute_hash();
-        trials.push(MemTrial { row, events: Vec::new() });
-        Ok(mint(trial_id, tenant.clone(), reg.subject.config_hash.clone()))
+        trials.push(MemTrial {
+            row,
+            events: Vec::new(),
+        });
+        Ok(mint(
+            trial_id,
+            tenant.clone(),
+            reg.subject.config_hash.clone(),
+        ))
     }
 
     fn transition(&self, ticket: &mut TrialTicket, event: TrialEvent) -> Result<(), LedgerError> {
         if event.state.is_some_and(TrialState::is_terminal) {
-            return Err(LedgerError::Invalid("terminal transitions go through settle(), which consumes the ticket".into()));
+            return Err(LedgerError::Invalid(
+                "terminal transitions go through settle(), which consumes the ticket".into(),
+            ));
         }
         ticket.state = self.append(ticket.trial_id, &event, ticket.state)?;
         Ok(())
@@ -1202,7 +1392,9 @@ impl TrialLedger for InMemoryLedger {
 
     fn settle(&self, ticket: TrialTicket, event: TrialEvent) -> Result<(), LedgerError> {
         if !event.state.is_some_and(TrialState::is_terminal) {
-            return Err(LedgerError::Invalid("settle() requires a terminal state".into()));
+            return Err(LedgerError::Invalid(
+                "settle() requires a terminal state".into(),
+            ));
         }
         self.append(ticket.trial_id, &event, ticket.state)?;
         Ok(())
@@ -1213,73 +1405,137 @@ impl TrialLedger for InMemoryLedger {
         trials
             .iter()
             .filter(|t| t.row.tenant_id == tenant_id && t.row.config_hash == config_hash)
-            .filter(|t| t.events.last().is_some_and(|e| e.state != "deduplicated" && TrialState::parse(&e.state).is_some_and(TrialState::is_terminal)))
+            .filter(|t| {
+                t.events.last().is_some_and(|e| {
+                    e.state != "deduplicated"
+                        && TrialState::parse(&e.state).is_some_and(TrialState::is_terminal)
+                })
+            })
             .max_by_key(|t| t.row.seq)
             .map(|t| t.row.trial_id)
     }
 
     fn trial_count(&self, tenant_id: &str) -> usize {
-        self.trials.lock().expect("ledger poisoned").iter().filter(|t| t.row.tenant_id == tenant_id).count()
+        self.trials
+            .lock()
+            .expect("ledger poisoned")
+            .iter()
+            .filter(|t| t.row.tenant_id == tenant_id)
+            .count()
     }
 
     fn exploration_fraction(&self, tenant_id: &str) -> f64 {
         let trials = self.trials.lock().expect("ledger poisoned");
-        let rows: Vec<_> = trials.iter().filter(|t| t.row.tenant_id == tenant_id).collect();
+        let rows: Vec<_> = trials
+            .iter()
+            .filter(|t| t.row.tenant_id == tenant_id)
+            .collect();
         if rows.is_empty() {
             return 0.0;
         }
         rows.iter().filter(|t| t.row.exploration_flag).count() as f64 / rows.len() as f64
     }
 
-    fn persist_returns(&self, ticket: &TrialTicket, series: &neff::ReturnSeries) -> Result<String, LedgerError> {
+    fn persist_returns(
+        &self,
+        ticket: &TrialTicket,
+        series: &neff::ReturnSeries,
+    ) -> Result<String, LedgerError> {
         series.validate()?;
-        if !self.trials.lock().expect("ledger poisoned").iter().any(|t| t.row.trial_id == ticket.trial_id && t.row.tenant_id == ticket.tenant_id) {
+        if !self
+            .trials
+            .lock()
+            .expect("ledger poisoned")
+            .iter()
+            .any(|t| t.row.trial_id == ticket.trial_id && t.row.tenant_id == ticket.tenant_id)
+        {
             return Err(LedgerError::UnknownTrial(ticket.trial_id));
         }
         let mut returns = self.returns.lock().expect("ledger poisoned");
         if returns.iter().any(|(id, _, _)| *id == ticket.trial_id) {
-            return Err(LedgerError::Invalid(format!("trial {} already has a return series", ticket.trial_id)));
+            return Err(LedgerError::Invalid(format!(
+                "trial {} already has a return series",
+                ticket.trial_id
+            )));
         }
         returns.push((ticket.trial_id, ticket.tenant_id.clone(), series.clone()));
-        Ok(format!("mem://mlops.trial_return_series/{}", ticket.trial_id))
+        Ok(format!(
+            "mem://mlops.trial_return_series/{}",
+            ticket.trial_id
+        ))
     }
 
     fn n_eff(&self, tenant_id: &str) -> Result<neff::NEff, LedgerError> {
         let trials = self.trial_count(tenant_id);
-        let series: Vec<neff::ReturnSeries> =
-            self.returns.lock().expect("ledger poisoned").iter().filter(|(_, t, _)| t == tenant_id).map(|(_, _, s)| s.clone()).collect();
+        let series: Vec<neff::ReturnSeries> = self
+            .returns
+            .lock()
+            .expect("ledger poisoned")
+            .iter()
+            .filter(|(_, t, _)| t == tenant_id)
+            .map(|(_, _, s)| s.clone())
+            .collect();
         Ok(neff::NEff::compute(trials, &series))
     }
 
-    fn claim_sealed_holdout(&self, tenant_id: &str, lineage: &str, _requested_by: &str) -> Result<holdout::HoldoutClaim, LedgerError> {
+    fn claim_sealed_holdout(
+        &self,
+        tenant_id: &str,
+        lineage: &str,
+        _requested_by: &str,
+    ) -> Result<holdout::HoldoutClaim, LedgerError> {
         let mut holdouts = self.holdouts.lock().expect("ledger poisoned");
-        let h = holdouts.entry((tenant_id.to_string(), lineage.to_string())).or_default();
+        let h = holdouts
+            .entry((tenant_id.to_string(), lineage.to_string()))
+            .or_default();
         if let Some((first_trial, called_at, result)) = &h.call {
             h.attempts += 1;
-            return Ok(holdout::HoldoutClaim::Repeat { first_trial: *first_trial, called_at: *called_at, result: result.clone() });
+            return Ok(holdout::HoldoutClaim::Repeat {
+                first_trial: *first_trial,
+                called_at: *called_at,
+                result: result.clone(),
+            });
         }
         if h.claimed {
-            return Err(LedgerError::Invalid(holdout::claimed_without_result(lineage)));
+            return Err(LedgerError::Invalid(holdout::claimed_without_result(
+                lineage,
+            )));
         }
         h.claimed = true;
         h.attempts += 1;
         Ok(holdout::HoldoutClaim::First)
     }
 
-    fn record_sealed_holdout(&self, tenant_id: &str, lineage: &str, trial_id: Uuid, result: &serde_json::Value) -> Result<(), LedgerError> {
+    fn record_sealed_holdout(
+        &self,
+        tenant_id: &str,
+        lineage: &str,
+        trial_id: Uuid,
+        result: &serde_json::Value,
+    ) -> Result<(), LedgerError> {
         let mut holdouts = self.holdouts.lock().expect("ledger poisoned");
-        let h = holdouts.entry((tenant_id.to_string(), lineage.to_string())).or_default();
+        let h = holdouts
+            .entry((tenant_id.to_string(), lineage.to_string()))
+            .or_default();
         if !h.claimed {
-            return Err(LedgerError::Invalid(format!("no claim exists for the sealed holdout of lineage '{lineage}'")));
+            return Err(LedgerError::Invalid(format!(
+                "no claim exists for the sealed holdout of lineage '{lineage}'"
+            )));
         }
         if h.call.is_some() {
-            return Err(LedgerError::Invalid(format!("the sealed holdout of lineage '{lineage}' already has its result")));
+            return Err(LedgerError::Invalid(format!(
+                "the sealed holdout of lineage '{lineage}' already has its result"
+            )));
         }
         h.call = Some((trial_id, chrono::Utc::now(), result.clone()));
         Ok(())
     }
 
-    fn define_campaign(&self, tenant_id: &str, def: &campaign::CampaignDefinition) -> Result<campaign::CampaignHandle, LedgerError> {
+    fn define_campaign(
+        &self,
+        tenant_id: &str,
+        def: &campaign::CampaignDefinition,
+    ) -> Result<campaign::CampaignHandle, LedgerError> {
         def.validate()?;
         let mut campaigns = self.campaigns.lock().expect("ledger poisoned");
         let key = (tenant_id.to_string(), def.slug.clone());
@@ -1290,7 +1546,11 @@ impl TrialLedger for InMemoryLedger {
             )));
         }
         campaigns.push((key, def.clone()));
-        Ok(campaign::CampaignHandle::seal(Uuid::new_v4(), tenant_id.to_string(), def.clone()))
+        Ok(campaign::CampaignHandle::seal(
+            Uuid::new_v4(),
+            tenant_id.to_string(),
+            def.clone(),
+        ))
     }
 
     fn campaign_exploration_fraction(&self, tenant_id: &str, campaign_id: Uuid) -> f64 {
@@ -1373,32 +1633,53 @@ impl InMemoryLedger {
     /// Campaigns defined on this ledger, in definition order.
     #[must_use]
     pub fn campaigns(&self) -> Vec<campaign::CampaignDefinition> {
-        self.campaigns.lock().expect("ledger poisoned").iter().map(|(_, d)| d.clone()).collect()
+        self.campaigns
+            .lock()
+            .expect("ledger poisoned")
+            .iter()
+            .map(|(_, d)| d.clone())
+            .collect()
     }
 
     /// Gate verdicts recorded on this ledger, in decision order.
     #[must_use]
     pub fn gate_verdicts(&self) -> Vec<gates::GateRecord> {
-        self.gate_verdicts.lock().expect("ledger poisoned").iter().map(|(_, _, r)| r.clone()).collect()
+        self.gate_verdicts
+            .lock()
+            .expect("ledger poisoned")
+            .iter()
+            .map(|(_, _, r)| r.clone())
+            .collect()
     }
 }
 
 impl gates::GateLog for InMemoryLedger {
-    fn record_gate(&self, tenant_id: &str, record: &gates::GateRecord) -> Result<Uuid, LedgerError> {
+    fn record_gate(
+        &self,
+        tenant_id: &str,
+        record: &gates::GateRecord,
+    ) -> Result<Uuid, LedgerError> {
         record.validate()?;
-        self.gate_verdicts
-            .lock()
-            .expect("ledger poisoned")
-            .push((tenant_id.to_string(), chrono::Utc::now(), record.clone()));
+        self.gate_verdicts.lock().expect("ledger poisoned").push((
+            tenant_id.to_string(),
+            chrono::Utc::now(),
+            record.clone(),
+        ));
         Ok(Uuid::new_v4())
     }
 
-    fn pass_rate(&self, tenant_id: &str, profile_id: &str, window_days: i64) -> Result<gates::PassRate, LedgerError> {
+    fn pass_rate(
+        &self,
+        tenant_id: &str,
+        profile_id: &str,
+        window_days: i64,
+    ) -> Result<gates::PassRate, LedgerError> {
         let cutoff = chrono::Utc::now() - chrono::Duration::days(window_days.max(0));
         let verdicts = self.gate_verdicts.lock().expect("ledger poisoned");
         // A candidate passed when no gate failed it: group by subject, then count.
         let mut recent: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
-        let mut baseline: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+        let mut baseline: std::collections::HashMap<String, bool> =
+            std::collections::HashMap::new();
         for (t, at, r) in verdicts.iter() {
             if t != tenant_id || r.profile_id != profile_id {
                 continue;
@@ -1408,7 +1689,11 @@ impl gates::GateLog for InMemoryLedger {
                 .clone()
                 .or_else(|| r.trial_id.map(|id| id.to_string()))
                 .unwrap_or_default();
-            let bucket = if *at >= cutoff { &mut recent } else { &mut baseline };
+            let bucket = if *at >= cutoff {
+                &mut recent
+            } else {
+                &mut baseline
+            };
             let e = bucket.entry(subject).or_insert(true);
             *e = *e && r.passed;
         }
@@ -1417,14 +1702,26 @@ impl gates::GateLog for InMemoryLedger {
         };
         let (recent_decided, recent_passed) = count(&recent);
         let (baseline_decided, baseline_passed) = count(&baseline);
-        Ok(gates::PassRate { recent_decided, recent_passed, baseline_decided, baseline_passed })
+        Ok(gates::PassRate {
+            recent_decided,
+            recent_passed,
+            baseline_decided,
+            baseline_passed,
+        })
     }
 }
 
 impl DecisionLog for InMemoryLedger {
-    fn log_decision(&self, ctx: &DispatchContext, decision: &Decision) -> Result<Uuid, LedgerError> {
+    fn log_decision(
+        &self,
+        ctx: &DispatchContext,
+        decision: &Decision,
+    ) -> Result<Uuid, LedgerError> {
         decision.validate(ctx)?;
-        self.decisions.lock().expect("ledger poisoned").push((ctx.clone(), decision.clone()));
+        self.decisions
+            .lock()
+            .expect("ledger poisoned")
+            .push((ctx.clone(), decision.clone()));
         Ok(Uuid::new_v4())
     }
 }
@@ -1458,14 +1755,26 @@ mod tests {
         let l = InMemoryLedger::new();
         let s = subject(1);
         let c = ctx();
-        assert!(matches!(l.register(&Registration::unlogged(&c, &s)), Err(LedgerError::MissingPropensity)));
+        assert!(matches!(
+            l.register(&Registration::unlogged(&c, &s)),
+            Err(LedgerError::MissingPropensity)
+        ));
         let mut nodelta = ctx();
         nodelta.delta_practical = None;
-        assert!(matches!(l.register(&Registration::new(&nodelta, &s, 0.5)), Err(LedgerError::MissingDeltaPractical)));
+        assert!(matches!(
+            l.register(&Registration::new(&nodelta, &s, 0.5)),
+            Err(LedgerError::MissingDeltaPractical)
+        ));
         let unscoped = DispatchContext::human("tenant-a", "m", 0.1);
-        assert!(matches!(l.register(&Registration::new(&unscoped, &s, 0.5)), Err(LedgerError::NoCampaign)));
+        assert!(matches!(
+            l.register(&Registration::new(&unscoped, &s, 0.5)),
+            Err(LedgerError::NoCampaign)
+        ));
         for bad in [0.0, 1.5, f64::NAN] {
-            assert!(matches!(l.register(&Registration::new(&c, &s, bad)), Err(LedgerError::BadPropensity(_))));
+            assert!(matches!(
+                l.register(&Registration::new(&c, &s, bad)),
+                Err(LedgerError::BadPropensity(_))
+            ));
         }
         assert_eq!(l.trial_count("tenant-a"), 0);
     }
@@ -1477,7 +1786,11 @@ mod tests {
         let legacy = DispatchContext::legacy("tenant-a", ActorKind::Human, "ui");
         let t = l.register(&Registration::unlogged(&legacy, &s)).unwrap();
         assert_eq!(l.rows("tenant-a")[0].delta_practical, None);
-        l.settle(t, TrialEvent::failed(TerminalReason::Cancelled, "user stop")).unwrap();
+        l.settle(
+            t,
+            TrialEvent::failed(TerminalReason::Cancelled, "user stop"),
+        )
+        .unwrap();
         assert_eq!(l.trial_count("tenant-a"), 1);
     }
 
@@ -1488,13 +1801,42 @@ mod tests {
         let s = subject(1);
         let mut t = l.register(&Registration::new(&c, &s, 0.25)).unwrap();
         let id = t.trial_id();
-        for st in [TrialState::Queued, TrialState::Provision, TrialState::Running, TrialState::Preempted, TrialState::Recovering, TrialState::Running, TrialState::Evaluate, TrialState::Gated] {
+        for st in [
+            TrialState::Queued,
+            TrialState::Provision,
+            TrialState::Running,
+            TrialState::Preempted,
+            TrialState::Recovering,
+            TrialState::Running,
+            TrialState::Evaluate,
+            TrialState::Gated,
+        ] {
             l.transition(&mut t, TrialEvent::to(st)).unwrap();
         }
-        let outcome = OutcomeVector { sharpe_net: Some(1.1), ..Default::default() };
+        let outcome = OutcomeVector {
+            sharpe_net: Some(1.1),
+            ..Default::default()
+        };
         let t0 = chrono::Utc::now();
-        let uri = l.persist_returns(&t, &neff::ReturnSeries { timestamps: vec![t0, t0 + chrono::Duration::days(1)], returns: vec![0.01, -0.002] }).unwrap();
-        l.settle(t, TrialEvent { outcome: Some(outcome), gate_profile: Some("strict_v1".into()), ..TrialEvent::to(TrialState::CompletedPass) }.with_returns(uri)).unwrap();
+        let uri = l
+            .persist_returns(
+                &t,
+                &neff::ReturnSeries {
+                    timestamps: vec![t0, t0 + chrono::Duration::days(1)],
+                    returns: vec![0.01, -0.002],
+                },
+            )
+            .unwrap();
+        l.settle(
+            t,
+            TrialEvent {
+                outcome: Some(outcome),
+                gate_profile: Some("strict_v1".into()),
+                ..TrialEvent::to(TrialState::CompletedPass)
+            }
+            .with_returns(uri),
+        )
+        .unwrap();
         let rows = l.rows("tenant-a");
         assert_eq!(verify_trials(&rows).unwrap(), 1);
         let evs = l.events(id);
@@ -1507,10 +1849,19 @@ mod tests {
         let c = ctx();
         let s = subject(1);
         let mut t = l.register(&Registration::new(&c, &s, 0.5)).unwrap();
-        assert!(matches!(l.transition(&mut t, TrialEvent::to(TrialState::Gated)), Err(LedgerError::IllegalTransition { .. })));
-        l.transition(&mut t, TrialEvent::to(TrialState::Running)).unwrap();
-        l.transition(&mut t, TrialEvent::to(TrialState::Evaluate)).unwrap();
-        assert!(l.settle(t, TrialEvent::to(TrialState::CompletedPass)).is_err(), "cannot pass without gating");
+        assert!(matches!(
+            l.transition(&mut t, TrialEvent::to(TrialState::Gated)),
+            Err(LedgerError::IllegalTransition { .. })
+        ));
+        l.transition(&mut t, TrialEvent::to(TrialState::Running))
+            .unwrap();
+        l.transition(&mut t, TrialEvent::to(TrialState::Evaluate))
+            .unwrap();
+        assert!(
+            l.settle(t, TrialEvent::to(TrialState::CompletedPass))
+                .is_err(),
+            "cannot pass without gating"
+        );
     }
 
     /// AT-22: every terminal kind writes a row with the right censoring.
@@ -1519,14 +1870,49 @@ mod tests {
         let l = InMemoryLedger::new();
         let c = ctx();
         let cases: Vec<(Vec<TrialState>, TrialEvent, Censoring)> = vec![
-            (vec![TrialState::Running], TrialEvent::completed("r1", None), Censoring::None),
-            (vec![TrialState::Running, TrialState::Evaluate, TrialState::Gated], TrialEvent { terminal_reason: Some(TerminalReason::GateFailed), ..TrialEvent::to(TrialState::CompletedFail) }, Censoring::None),
-            (vec![TrialState::Running], TrialEvent::failed(TerminalReason::Oom, "oom"), Censoring::Failed),
-            (vec![TrialState::Running], TrialEvent::failed(TerminalReason::NanDivergence, "nan"), Censoring::Failed),
-            (vec![TrialState::Running], TrialEvent::failed(TerminalReason::Timeout, "t"), Censoring::Failed),
-            (vec![TrialState::Queued], TrialEvent::failed(TerminalReason::Cancelled, "c"), Censoring::RightCancel),
-            (vec![TrialState::Running, TrialState::Preempted], TrialEvent::failed(TerminalReason::PreemptedAbandoned, "p"), Censoring::RightPreempt),
-            (vec![TrialState::Running], TrialEvent::failed(TerminalReason::AshaStopped, "a").at_step(40), Censoring::RightAsha),
+            (
+                vec![TrialState::Running],
+                TrialEvent::completed("r1", None),
+                Censoring::None,
+            ),
+            (
+                vec![TrialState::Running, TrialState::Evaluate, TrialState::Gated],
+                TrialEvent {
+                    terminal_reason: Some(TerminalReason::GateFailed),
+                    ..TrialEvent::to(TrialState::CompletedFail)
+                },
+                Censoring::None,
+            ),
+            (
+                vec![TrialState::Running],
+                TrialEvent::failed(TerminalReason::Oom, "oom"),
+                Censoring::Failed,
+            ),
+            (
+                vec![TrialState::Running],
+                TrialEvent::failed(TerminalReason::NanDivergence, "nan"),
+                Censoring::Failed,
+            ),
+            (
+                vec![TrialState::Running],
+                TrialEvent::failed(TerminalReason::Timeout, "t"),
+                Censoring::Failed,
+            ),
+            (
+                vec![TrialState::Queued],
+                TrialEvent::failed(TerminalReason::Cancelled, "c"),
+                Censoring::RightCancel,
+            ),
+            (
+                vec![TrialState::Running, TrialState::Preempted],
+                TrialEvent::failed(TerminalReason::PreemptedAbandoned, "p"),
+                Censoring::RightPreempt,
+            ),
+            (
+                vec![TrialState::Running],
+                TrialEvent::failed(TerminalReason::AshaStopped, "a").at_step(40),
+                Censoring::RightAsha,
+            ),
         ];
         for (n, (path, terminal, want)) in cases.into_iter().enumerate() {
             let s = subject(n as u64);
@@ -1560,13 +1946,16 @@ mod tests {
         let s = subject(7);
         let mut first = l.register(&Registration::new(&c, &s, 0.5)).unwrap();
         let first_id = first.trial_id();
-        l.transition(&mut first, TrialEvent::to(TrialState::Running)).unwrap();
-        l.settle(first, TrialEvent::completed("run7", None)).unwrap();
+        l.transition(&mut first, TrialEvent::to(TrialState::Running))
+            .unwrap();
+        l.settle(first, TrialEvent::completed("run7", None))
+            .unwrap();
         let second = l.register(&Registration::new(&c, &s, 0.5)).unwrap();
         let prior = l.prior_trial("tenant-a", &s.config_hash).unwrap();
         assert_eq!(prior, first_id);
         let second_id = second.trial_id();
-        l.settle(second, TrialEvent::deduplicated(prior, "run7")).unwrap();
+        l.settle(second, TrialEvent::deduplicated(prior, "run7"))
+            .unwrap();
         assert_eq!(l.events(second_id)[0].deduplicated_of, Some(first_id));
         assert_eq!(l.trial_count("tenant-a"), 2, "the dedup is still a look");
     }
@@ -1594,9 +1983,29 @@ mod tests {
         let s = subject(1);
         let mut t = l.register(&Registration::new(&c, &s, 0.5)).unwrap();
         let id = t.trial_id();
-        l.transition(&mut t, TrialEvent::to(TrialState::Running)).unwrap();
-        let uri = l.persist_returns(&t, &neff::ReturnSeries { timestamps: vec![chrono::Utc::now()], returns: vec![0.004] }).unwrap();
-        l.settle(t, TrialEvent::completed("r", Some(OutcomeVector { sharpe_net: Some(0.4), ..Default::default() })).with_returns(uri)).unwrap();
+        l.transition(&mut t, TrialEvent::to(TrialState::Running))
+            .unwrap();
+        let uri = l
+            .persist_returns(
+                &t,
+                &neff::ReturnSeries {
+                    timestamps: vec![chrono::Utc::now()],
+                    returns: vec![0.004],
+                },
+            )
+            .unwrap();
+        l.settle(
+            t,
+            TrialEvent::completed(
+                "r",
+                Some(OutcomeVector {
+                    sharpe_net: Some(0.4),
+                    ..Default::default()
+                }),
+            )
+            .with_returns(uri),
+        )
+        .unwrap();
         let row = l.rows("tenant-a").remove(0);
         let mut evs = l.events(id);
         evs[1].outcome.as_mut().unwrap().sharpe_net = Some(2.4);
@@ -1621,7 +2030,10 @@ mod tests {
         assert!(l.log_decision(&c, &d).is_ok());
         let mut nop = d.clone();
         nop.propensity = None;
-        assert!(matches!(l.log_decision(&c, &nop), Err(LedgerError::MissingPropensity)));
+        assert!(matches!(
+            l.log_decision(&c, &nop),
+            Err(LedgerError::MissingPropensity)
+        ));
         let mut empty = d;
         empty.candidate_set.clear();
         assert!(l.log_decision(&c, &empty).is_err());
@@ -1639,7 +2051,9 @@ mod statistic_tests {
     fn an_unknown_statistic_name_is_refused() {
         let led = InMemoryLedger::new();
         let trial = Uuid::new_v4();
-        assert!(led.record_statistic("t", trial, "pbo", 0.1, "funnel").is_ok());
+        assert!(led
+            .record_statistic("t", trial, "pbo", 0.1, "funnel")
+            .is_ok());
         let err = led
             .record_statistic("t", trial, "PBO", 0.1, "funnel")
             .expect_err("case matters");
@@ -1647,7 +2061,9 @@ mod statistic_tests {
         // `sharpe` is accepted since migration 0130: a falsifier names an
         // objective metric, and until 0130 there was no name it could use that
         // this table would take.
-        assert!(led.record_statistic("t", trial, "sharpe", 1.0, "funnel").is_ok());
+        assert!(led
+            .record_statistic("t", trial, "sharpe", 1.0, "funnel")
+            .is_ok());
         // `sharpe_after_costs` is the example of a refused name on purpose. It
         // is what `lifecycle.hypothesise` validated falsifiers against until
         // 2026-09-17, and it was never a name this table would accept — which is
@@ -1662,8 +2078,12 @@ mod statistic_tests {
     fn a_non_finite_value_is_not_an_observation() {
         let led = InMemoryLedger::new();
         let trial = Uuid::new_v4();
-        assert!(led.record_statistic("t", trial, "pbo", f64::NAN, "funnel").is_err());
-        assert!(led.record_statistic("t", trial, "pbo", f64::INFINITY, "funnel").is_err());
+        assert!(led
+            .record_statistic("t", trial, "pbo", f64::NAN, "funnel")
+            .is_err());
+        assert!(led
+            .record_statistic("t", trial, "pbo", f64::INFINITY, "funnel")
+            .is_err());
     }
 
     /// The names are exactly the ones the gate worker reads and the database

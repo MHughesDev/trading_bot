@@ -21,9 +21,7 @@ use domain::order::{OrderIntent, OrderType, Side};
 use domain::RiskRejection;
 use execution::mock_broker::MockBroker;
 use execution::ExecutionEngine;
-use reconciliation::forward::{
-    DeploymentSpec, DivergenceThresholds, ExpectedBar, PaperVenue,
-};
+use reconciliation::forward::{DeploymentSpec, DivergenceThresholds, ExpectedBar, PaperVenue};
 use reconciliation::{DivergenceVerdict, ForwardRecorder};
 use risk::{GateContext, GlobalRiskLimits, HumanActor, KillSwitch, RiskGate};
 use rust_decimal::Decimal;
@@ -41,7 +39,6 @@ fn ensure_journal() {
         execution::journal::memory::MemoryOrderJournal::new(),
     ));
 }
-
 
 const STRATEGY: &str = "sma-cross-1";
 const BAR: i64 = 60;
@@ -133,12 +130,8 @@ async fn try_submit(rig: &Rig) -> Result<(), RiskRejection> {
 async fn a_planted_position_divergence_stops_the_next_order_at_the_gate() {
     ensure_journal();
     let rig = rig();
-    let recorder = ForwardRecorder::new(
-        spec(),
-        dec("100000"),
-        Arc::clone(rig.gate.halt_registry()),
-    )
-    .unwrap();
+    let recorder =
+        ForwardRecorder::new(spec(), dec("100000"), Arc::clone(rig.gate.halt_registry())).unwrap();
 
     // One order goes out normally.
     try_submit(&rig).await.expect("the first order is fine");
@@ -155,7 +148,9 @@ async fn a_planted_position_divergence_stops_the_next_order_at_the_gate() {
     // strategy's simulator fidelity — and the kill switch is checked first, so
     // that is the rejection the caller sees. Either refusal is the deliverable;
     // what must not happen is an order.
-    let err = try_submit(&rig).await.expect_err("the next order must be refused");
+    let err = try_submit(&rig)
+        .await
+        .expect_err("the next order must be refused");
     assert!(
         matches!(
             err,
@@ -177,7 +172,10 @@ async fn a_planted_position_divergence_stops_the_next_order_at_the_gate() {
     let err = try_submit(&rig)
         .await
         .expect_err("resetting the kill switch must not resume a halted strategy");
-    assert!(matches!(err, RiskRejection::StrategyHalted { .. }), "{err:?}");
+    assert!(
+        matches!(err, RiskRejection::StrategyHalted { .. }),
+        "{err:?}"
+    );
     assert_eq!(rig.broker.submit_call_count(), 1);
 }
 
@@ -185,12 +183,8 @@ async fn a_planted_position_divergence_stops_the_next_order_at_the_gate() {
 async fn a_planted_return_divergence_stops_the_next_order_at_the_gate() {
     ensure_journal();
     let rig = rig();
-    let recorder = ForwardRecorder::new(
-        spec(),
-        dec("100000"),
-        Arc::clone(rig.gate.halt_registry()),
-    )
-    .unwrap();
+    let recorder =
+        ForwardRecorder::new(spec(), dec("100000"), Arc::clone(rig.gate.halt_registry())).unwrap();
 
     try_submit(&rig).await.expect("the first order is fine");
     assert_eq!(rig.broker.submit_call_count(), 1);
@@ -220,7 +214,9 @@ async fn a_planted_return_divergence_stops_the_next_order_at_the_gate() {
         "a 5% gap against a 1% threshold must halt: {verdict:?}"
     );
 
-    let err = try_submit(&rig).await.expect_err("the next order must be refused");
+    let err = try_submit(&rig)
+        .await
+        .expect_err("the next order must be refused");
     assert!(matches!(err, RiskRejection::StrategyHalted { .. }));
     assert_eq!(rig.broker.submit_call_count(), 1);
 }
@@ -229,12 +225,8 @@ async fn a_planted_return_divergence_stops_the_next_order_at_the_gate() {
 async fn a_halted_strategy_resumes_only_through_a_recorded_human_act() {
     ensure_journal();
     let rig = rig();
-    let recorder = ForwardRecorder::new(
-        spec(),
-        dec("100000"),
-        Arc::clone(rig.gate.halt_registry()),
-    )
-    .unwrap();
+    let recorder =
+        ForwardRecorder::new(spec(), dec("100000"), Arc::clone(rig.gate.halt_registry())).unwrap();
     recorder.reconcile_position("AAPL", dec("2"), &rig.kill_switch);
     try_submit(&rig).await.expect_err("halted");
 
@@ -274,12 +266,8 @@ async fn a_halted_strategy_resumes_only_through_a_recorded_human_act() {
 async fn the_halt_is_scoped_to_the_diverging_strategy() {
     ensure_journal();
     let rig = rig();
-    let recorder = ForwardRecorder::new(
-        spec(),
-        dec("100000"),
-        Arc::clone(rig.gate.halt_registry()),
-    )
-    .unwrap();
+    let recorder =
+        ForwardRecorder::new(spec(), dec("100000"), Arc::clone(rig.gate.halt_registry())).unwrap();
 
     // A return divergence halts only this strategy — no kill switch, because a
     // strategy whose realised returns stopped matching its backtest says

@@ -90,7 +90,12 @@ pub struct LabelInterval {
 
 #[must_use]
 pub fn horizon_intervals(n: usize, horizon: u32) -> Vec<LabelInterval> {
-    (0..n).map(|i| LabelInterval { t0: i, t1: (i + horizon as usize).min(n.saturating_sub(1)) }).collect()
+    (0..n)
+        .map(|i| LabelInterval {
+            t0: i,
+            t1: (i + horizon as usize).min(n.saturating_sub(1)),
+        })
+        .collect()
 }
 
 /// Average-uniqueness sample weights: each label's mean of 1/concurrency over its span.

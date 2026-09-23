@@ -12,6 +12,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
+use domain::Price;
 use domain::{
     money::Size,
     order::{OrderIntent, OrderType, Side},
@@ -19,7 +20,6 @@ use domain::{
 };
 use risk::{GateContext, GlobalRiskLimits, KillSwitch, RiskGate, Scope};
 use rust_decimal::Decimal;
-use domain::Price;
 
 fn ctx() -> GateContext {
     GateContext::for_manual_order(
@@ -76,7 +76,10 @@ fn losing_the_lease_stops_order_flow() {
     ks.require_monitor_lease();
     ks.observe_lease(true);
     let g = gate(&ks);
-    assert!(g.check(intent(), &ctx()).is_ok(), "a live lease permits orders");
+    assert!(
+        g.check(intent(), &ctx()).is_ok(),
+        "a live lease permits orders"
+    );
 
     ks.observe_lease(false); // the monitor died
     assert!(matches!(
@@ -238,7 +241,10 @@ fn a_strategy_halt_stops_that_strategy_and_leaves_the_others_trading() {
         Err(RiskRejection::KillSwitchActive)
     ));
     assert!(g.check(intent(), &ctx().from_strategy("s-2")).is_ok());
-    assert!(g.check(intent(), &ctx()).is_ok(), "a manual order is not a strategy");
+    assert!(
+        g.check(intent(), &ctx()).is_ok(),
+        "a manual order is not a strategy"
+    );
 }
 
 #[test]

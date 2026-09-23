@@ -170,7 +170,9 @@ fn a_measured_criterion_round_trips_as_true_or_false() {
 fn the_old_acceptance_wire_shape_still_loads() {
     // Built from a current state so the row differs from today's in exactly one
     // way: `acceptance` as it was written before `met` existed.
-    let mut v = wire(&WorkingState::new("find whether BTC-USD has momentum at 1h"));
+    let mut v = wire(&WorkingState::new(
+        "find whether BTC-USD has momentum at 1h",
+    ));
     v["acceptance"] = json!([
         "the claim survives the null it was measured against",
         {"text": "every number reported is in a tool result this run cited", "met": true},
@@ -183,7 +185,10 @@ fn the_old_acceptance_wire_shape_still_loads() {
         Met::Unevaluated,
         "a bare string carries no evaluation, and does not acquire one on the way in"
     );
-    assert_eq!(s.acceptance[0].text, "the claim survives the null it was measured against");
+    assert_eq!(
+        s.acceptance[0].text,
+        "the claim survives the null it was measured against"
+    );
     assert_eq!(s.acceptance[1].met, Met::Met);
     assert_eq!(s.acceptance[2].met, Met::Unevaluated);
 }

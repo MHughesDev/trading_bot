@@ -89,10 +89,7 @@ impl FamilyPrecision {
 
 /// Score every family for a month, so the report cannot quietly omit one.
 #[must_use]
-pub fn report(
-    period_month: NaiveDate,
-    counts: &[(Family, u32, u32)],
-) -> Vec<FamilyPrecision> {
+pub fn report(period_month: NaiveDate, counts: &[(Family, u32, u32)]) -> Vec<FamilyPrecision> {
     Family::all()
         .into_iter()
         .map(|family| {
@@ -147,7 +144,11 @@ mod tests {
         let p = FamilyPrecision::compute(month(), Family::Venue, 0, 0);
         assert_eq!(p.precision, None);
         assert!(!p.flagged, "an unmeasured family must not be flagged");
-        assert_ne!(p.precision, Some(1.0), "and must not be reported as perfect");
+        assert_ne!(
+            p.precision,
+            Some(1.0),
+            "and must not be reported as perfect"
+        );
     }
 
     #[test]
@@ -165,7 +166,10 @@ mod tests {
         assert_eq!(rows.len(), Family::all().len());
         let listed: Vec<Family> = rows.iter().map(|r| r.family).collect();
         assert_eq!(listed, Family::all().to_vec());
-        let venue = rows.iter().find(|r| r.family == Family::Venue).expect("venue");
+        let venue = rows
+            .iter()
+            .find(|r| r.family == Family::Venue)
+            .expect("venue");
         assert_eq!(venue.precision, None);
     }
 }

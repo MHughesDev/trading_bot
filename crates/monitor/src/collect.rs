@@ -542,30 +542,32 @@ impl BehaviourSample {
             .filter(|o| window.contains(o.placed_at))
             .collect();
         let terminal = inside.iter().filter(|o| o.outcome.is_terminal()).count();
-        let cancelled = inside
+        let cancelled = inside.iter().filter(|o| o.outcome.was_cancelled()).count();
+        let holds: Vec<f64> = holding_periods
             .iter()
-            .filter(|o| o.outcome.was_cancelled())
-            .count();
-        let holds: Vec<f64> = holding_periods.iter().filter_map(HoldingPeriod::seconds).collect();
+            .filter_map(HoldingPeriod::seconds)
+            .collect();
 
         Self {
             window,
             orders_per_minute: Measurement::rate(inside.len(), &window, Duration::minutes(1)),
             cancel_ratio: Measurement::ratio(cancelled, terminal),
-            signals_per_hour: signals.map_or(
-                Measurement::Unobserved(Unobserved::NoObservations),
-                |n| Measurement::rate(n, &window, Duration::hours(1)),
-            ),
-            holding_period_p50_secs: Measurement::percentile(&holds, 50.0),
-            position_count: positions_held
+            signals_per_hour: signals
                 .map_or(Measurement::Unobserved(Unobserved::NoObservations), |n| {
+                    Measurement::rate(n, &window, Duration::hours(1))
+                }),
+            holding_period_p50_secs: Measurement::percentile(&holds, 50.0),
+            position_count: positions_held.map_or(
+                Measurement::Unobserved(Unobserved::NoObservations),
+                |n| {
                     // One observation: the snapshot itself. Zero positions is a
                     // measurement; no snapshot is not.
                     Measurement::Measured {
                         value: n as f64,
                         observations: 1,
                     }
-                }),
+                },
+            ),
         }
     }
 
@@ -700,7 +702,10 @@ mod tests {
             panic!("three terminal orders is a measurement");
         };
         assert!((value - 2.0 / 3.0).abs() < 1e-12, "got {value}");
-        assert_eq!(observations, 3, "the two working orders are not in the denominator");
+        assert_eq!(
+            observations, 3,
+            "the two working orders are not in the denominator"
+        );
     }
 
     #[test]
@@ -708,7 +713,11 @@ mod tests {
         let mut orders = vec![order(10, OrderOutcome::Filled)];
         orders.push(order(600, OrderOutcome::Rejected));
         let s = ExecutionSample::measure(window(), &orders);
-        assert_eq!(s.fill_rate.observations(), 1, "only the in-window order counts");
+        assert_eq!(
+            s.fill_rate.observations(),
+            1,
+            "only the in-window order counts"
+        );
     }
 
     #[test]
@@ -720,7 +729,10 @@ mod tests {
             order(4, OrderOutcome::Rejected),
         ];
         let s = ExecutionSample::measure(window(), &orders);
-        let v = s.partial_fill_share.value().expect("two fills is a measurement");
+        let v = s
+            .partial_fill_share
+            .value()
+            .expect("two fills is a measurement");
         assert!((v - 0.5).abs() < 1e-12, "got {v}");
     }
 
@@ -728,7 +740,10 @@ mod tests {
     fn slippage_with_no_fill_model_prediction_is_unobserved_and_not_zero() {
         // The dangerous direction on this surface: a fill model that is not wired
         // up would otherwise report perfect agreement with itself.
-        let orders = vec![order(1, OrderOutcome::Filled), order(2, OrderOutcome::Filled)];
+        let orders = vec![
+            order(1, OrderOutcome::Filled),
+            order(2, OrderOutcome::Filled),
+        ];
         let s = ExecutionSample::measure(window(), &orders);
         assert_eq!(
             s.slippage_bps_p50,
@@ -747,7 +762,11 @@ mod tests {
         }
         orders.push(order(9, OrderOutcome::Filled)); // no prediction
         let s = ExecutionSample::measure(window(), &orders);
-        assert_eq!(s.slippage_bps_p50.observations(), 4, "the fifth order carries no prediction");
+        assert_eq!(
+            s.slippage_bps_p50.observations(),
+            4,
+            "the fifth order carries no prediction"
+        );
         let p95 = s.slippage_bps_p95.value().expect("four observations");
         assert!((p95 - 40.0).abs() < 1e-12, "got {p95}");
     }
@@ -783,7 +802,10 @@ mod tests {
 
     #[test]
     fn a_rate_over_a_zero_length_window_is_unobserved_rather_than_infinite() {
-        let w = Window { from: t(5), to: t(5) };
+        let w = Window {
+            from: t(5),
+            to: t(5),
+        };
         let b = BehaviourSample::measure(w, &[order(5, OrderOutcome::Filled)], Some(3), &[], None);
         assert_eq!(
             b.orders_per_minute,
@@ -799,10 +821,15 @@ mod tests {
         // `signals_per_hour` lower limit is declared to catch. Suppressing it
         // would hide a strategy that has silently stopped trading.
         let b = BehaviourSample::measure(window(), &[], Some(0), &[], None);
-        let v = b.signals_per_hour.value().expect("a rate of zero is a measurement");
+        let v = b
+            .signals_per_hour
+            .value()
+            .expect("a rate of zero is a measurement");
         assert!(v.abs() < f64::EPSILON);
         assert!(
-            b.readings("s").iter().any(|r| r.metric == Metric::SignalsPerHour.as_str()),
+            b.readings("s")
+                .iter()
+                .any(|r| r.metric == Metric::SignalsPerHour.as_str()),
             "and it must reach the evaluator"
         );
     }
@@ -811,10 +838,16 @@ mod tests {
     fn an_hourly_rate_is_scaled_to_the_window_the_collector_actually_covered() {
         // A collector that fell behind and covered nine minutes must not report
         // its rate as though it covered one cadence.
-        let w = Window { from: t(0), to: t(30) };
+        let w = Window {
+            from: t(0),
+            to: t(30),
+        };
         let b = BehaviourSample::measure(w, &[], Some(6), &[], None);
         let v = b.signals_per_hour.value().expect("measured");
-        assert!((v - 12.0).abs() < 1e-9, "six signals in half an hour is 12/h, got {v}");
+        assert!(
+            (v - 12.0).abs() < 1e-9,
+            "six signals in half an hour is 12/h, got {v}"
+        );
     }
 
     #[test]
@@ -823,7 +856,10 @@ mod tests {
         assert_eq!(none.position_count.value(), None);
 
         let flat = BehaviourSample::measure(window(), &[], Some(0), &[], Some(0));
-        let v = flat.position_count.value().expect("a taken snapshot of zero is a measurement");
+        let v = flat
+            .position_count
+            .value()
+            .expect("a taken snapshot of zero is a measurement");
         assert!(v.abs() < f64::EPSILON);
     }
 
@@ -833,14 +869,32 @@ mod tests {
         // `cancelled`. Reading that as an unfilled cancel hides every partial fill
         // the venue gave; reading it only as a partial fill loses the cancel.
         use domain::order::OrderState as S;
-        assert_eq!(OrderOutcome::observed(S::Cancelled, 2), OrderOutcome::PartiallyFilled);
-        assert_eq!(OrderOutcome::observed(S::Cancelled, 0), OrderOutcome::Cancelled);
+        assert_eq!(
+            OrderOutcome::observed(S::Cancelled, 2),
+            OrderOutcome::PartiallyFilled
+        );
+        assert_eq!(
+            OrderOutcome::observed(S::Cancelled, 0),
+            OrderOutcome::Cancelled
+        );
         assert_eq!(OrderOutcome::observed(S::Filled, 3), OrderOutcome::Filled);
-        assert_eq!(OrderOutcome::observed(S::Rejected, 0), OrderOutcome::Rejected);
+        assert_eq!(
+            OrderOutcome::observed(S::Rejected, 0),
+            OrderOutcome::Rejected
+        );
         // Still open, whatever it has filled so far.
-        assert_eq!(OrderOutcome::observed(S::PartiallyFilled, 1), OrderOutcome::Working);
-        assert_eq!(OrderOutcome::observed(S::Submitted, 0), OrderOutcome::Working);
-        assert_eq!(OrderOutcome::observed(S::Accepted, 0), OrderOutcome::Working);
+        assert_eq!(
+            OrderOutcome::observed(S::PartiallyFilled, 1),
+            OrderOutcome::Working
+        );
+        assert_eq!(
+            OrderOutcome::observed(S::Submitted, 0),
+            OrderOutcome::Working
+        );
+        assert_eq!(
+            OrderOutcome::observed(S::Accepted, 0),
+            OrderOutcome::Working
+        );
 
         assert!(OrderOutcome::PartiallyFilled.was_cancelled());
         assert!(OrderOutcome::PartiallyFilled.filled_any());
@@ -858,7 +912,13 @@ mod tests {
 
     #[test]
     fn a_cancel_ratio_needs_terminal_orders_to_divide_by() {
-        let b = BehaviourSample::measure(window(), &[order(1, OrderOutcome::Working)], None, &[], None);
+        let b = BehaviourSample::measure(
+            window(),
+            &[order(1, OrderOutcome::Working)],
+            None,
+            &[],
+            None,
+        );
         assert_eq!(
             b.cancel_ratio,
             Measurement::Unobserved(Unobserved::NoObservations)
@@ -868,9 +928,18 @@ mod tests {
     #[test]
     fn a_holding_period_median_ignores_a_round_trip_that_closed_before_it_opened() {
         let holds = vec![
-            HoldingPeriod { opened_at: t(0), closed_at: t(10) },
-            HoldingPeriod { opened_at: t(0), closed_at: t(20) },
-            HoldingPeriod { opened_at: t(30), closed_at: t(29) },
+            HoldingPeriod {
+                opened_at: t(0),
+                closed_at: t(10),
+            },
+            HoldingPeriod {
+                opened_at: t(0),
+                closed_at: t(20),
+            },
+            HoldingPeriod {
+                opened_at: t(30),
+                closed_at: t(29),
+            },
         ];
         let b = BehaviourSample::measure(window(), &[], None, &holds, None);
         assert_eq!(b.holding_period_p50_secs.observations(), 2);
@@ -878,10 +947,16 @@ mod tests {
 
     #[test]
     fn readings_carry_the_family_the_precision_report_scores_them_under() {
-        let orders = vec![order(1, OrderOutcome::Filled), order(2, OrderOutcome::Cancelled)];
+        let orders = vec![
+            order(1, OrderOutcome::Filled),
+            order(2, OrderOutcome::Cancelled),
+        ];
         let s = ExecutionSample::measure(window(), &orders);
         let rs = s.readings("s-1");
-        assert!(!rs.is_empty(), "two terminal orders must produce at least one reading");
+        assert!(
+            !rs.is_empty(),
+            "two terminal orders must produce at least one reading"
+        );
         for r in &rs {
             assert_eq!(r.family, Family::Execution, "{}", r.metric);
             assert_eq!(r.strategy_id, "s-1");

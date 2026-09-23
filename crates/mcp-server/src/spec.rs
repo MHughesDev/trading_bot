@@ -1083,7 +1083,9 @@ mod tests {
                     continue;
                 }
                 let after = &rest[open + 1..];
-                let Some(close) = after.find('"') else { continue };
+                let Some(close) = after.find('"') else {
+                    continue;
+                };
                 let code = &after[..close];
                 if !ERROR_CODES.contains(&code) {
                     undeclared.push(format!("{file}: `{code}`"));

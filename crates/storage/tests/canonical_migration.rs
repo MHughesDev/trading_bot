@@ -29,18 +29,36 @@ struct N {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires live ClickHouse and a migrated Postgres"]
 async fn migrates_v2_honestly() {
-    let (Some(ch_base), Some(pg_url)) = (env("CANON_TEST_CH_URL"), env("CANON_TEST_PG_URL")) else { return };
+    let (Some(ch_base), Some(pg_url)) = (env("CANON_TEST_CH_URL"), env("CANON_TEST_PG_URL")) else {
+        return;
+    };
     let admin = storage::clickhouse::connect(&ch_base);
-    admin.query("DROP DATABASE IF EXISTS canon_mig").execute().await.unwrap();
-    admin.query("CREATE DATABASE canon_mig").execute().await.unwrap();
-    admin.query("CREATE TABLE canon_mig.market_bars_v2 AS trading.market_bars_v2").execute().await.unwrap();
+    admin
+        .query("DROP DATABASE IF EXISTS canon_mig")
+        .execute()
+        .await
+        .unwrap();
+    admin
+        .query("CREATE DATABASE canon_mig")
+        .execute()
+        .await
+        .unwrap();
+    admin
+        .query("CREATE TABLE canon_mig.market_bars_v2 AS trading.market_bars_v2")
+        .execute()
+        .await
+        .unwrap();
     admin.query("INSERT INTO canon_mig.market_bars_v2 SELECT * EXCEPT snapshot_id FROM trading.market_bars_v2").execute().await.unwrap();
     let url = with_db(&ch_base, "canon_mig");
-    storage::clickhouse::migrate::run_migrations(&url).await.unwrap();
+    storage::clickhouse::migrate::run_migrations(&url)
+        .await
+        .unwrap();
 
     let pg = sqlx::PgPool::connect(&pg_url).await.unwrap();
     storage::postgres::run_migrations(&pg).await.unwrap();
-    let report = storage::clickhouse::canonical::migrate_to_canonical(&url, &pg).await.expect("migration");
+    let report = storage::clickhouse::canonical::migrate_to_canonical(&url, &pg)
+        .await
+        .expect("migration");
     println!("{report:?}");
     assert!(report.chunks_copied > 0);
 
@@ -51,8 +69,14 @@ async fn migrates_v2_honestly() {
     };
 
     // Every distinct v2 cell has a canonical cell.
-    let v2 = q("SELECT uniqExact(instrument_id, venue_id, event_time, revision) AS n FROM market_bars_v2").await;
-    let canon = q("SELECT uniqExact(instrument_id, venue_id, event_time, revision_seq) AS n FROM market_bar").await;
+    let v2 = q(
+        "SELECT uniqExact(instrument_id, venue_id, event_time, revision) AS n FROM market_bars_v2",
+    )
+    .await;
+    let canon = q(
+        "SELECT uniqExact(instrument_id, venue_id, event_time, revision_seq) AS n FROM market_bar",
+    )
+    .await;
     assert_eq!(v2, canon, "cell counts must match");
 
     // Bar timestamps are the OPEN: aligned to their period.
@@ -69,7 +93,10 @@ async fn migrates_v2_honestly() {
             AND bitAnd(quality_flags, 32768) = 0",
     )
     .await;
-    assert_eq!(late_unflagged, 0, "every late row carries BACKFILLED_KNOWLEDGE_TIME");
+    assert_eq!(
+        late_unflagged, 0,
+        "every late row carries BACKFILLED_KNOWLEDGE_TIME"
+    );
     let flagged = q("SELECT countIf(bitAnd(quality_flags, 32768) != 0) AS n FROM market_bar").await;
     assert!(flagged > 0, "the REST history is backfilled");
 
@@ -86,24 +113,24 @@ async fn migrates_v2_honestly() {
         "SELECT count() AS n FROM market_bar WHERE bitAnd(quality_flags, 32768) = 0 AND knowledge_time < ingest_time",
     )
     .await;
-    assert_eq!(unflagged_without_receipt, 0, "an unflagged row must be a real receipt");
+    assert_eq!(
+        unflagged_without_receipt, 0,
+        "an unflagged row must be a real receipt"
+    );
     let observed = q("SELECT countIf(bitAnd(quality_flags, 32768) = 0) AS n FROM market_bar").await;
     println!("defensibly observed rows (Gate-15-admissible, D-P3): {observed}");
     assert_eq!(
-        observed,
-        report.observed_rows,
+        observed, report.observed_rows,
         "the repair's recorded count must equal what is on disk"
     );
 
     // And the rule is symmetric: a row from a `rest_history` source that WAS watched
     // arrive is observed. Nothing here requires such a row to exist, only that if it
     // does it was not flagged for its transport.
-    let rest_marked_derived_despite_a_receipt = q(
-        "SELECT count() AS n FROM market_bar
+    let rest_marked_derived_despite_a_receipt = q("SELECT count() AS n FROM market_bar
           WHERE bitAnd(quality_flags, 32768) != 0
             AND ingest_time <= event_time + toIntervalSecond(period_secs) + INTERVAL 5 MINUTE
-            AND ingest_time >= event_time + toIntervalSecond(period_secs)",
-    )
+            AND ingest_time >= event_time + toIntervalSecond(period_secs)")
     .await;
     assert_eq!(
         rest_marked_derived_despite_a_receipt, 0,
@@ -119,9 +146,15 @@ async fn migrates_v2_honestly() {
     assert!(btc_venues >= 2);
 
     // Idempotent: a second run copies nothing.
-    let again = storage::clickhouse::canonical::migrate_to_canonical(&url, &pg).await.unwrap();
+    let again = storage::clickhouse::canonical::migrate_to_canonical(&url, &pg)
+        .await
+        .unwrap();
     assert_eq!(again.chunks_copied, 0);
     assert_eq!(q("SELECT uniqExact(instrument_id, venue_id, event_time, revision_seq) AS n FROM market_bar").await, canon);
 
-    admin.query("DROP DATABASE canon_mig").execute().await.unwrap();
+    admin
+        .query("DROP DATABASE canon_mig")
+        .execute()
+        .await
+        .unwrap();
 }

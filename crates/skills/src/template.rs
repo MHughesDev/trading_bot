@@ -730,7 +730,10 @@ mod tests {
             return;
         }
         let mut seen = 0usize;
-        for namespace in std::fs::read_dir(&root).expect("readable").filter_map(Result::ok) {
+        for namespace in std::fs::read_dir(&root)
+            .expect("readable")
+            .filter_map(Result::ok)
+        {
             if !namespace.path().is_dir() {
                 continue;
             }
@@ -743,7 +746,11 @@ mod tests {
                 if path.extension().and_then(|e| e.to_str()) != Some("py") {
                     continue;
                 }
-                let name = path.file_name().expect("a file").to_string_lossy().to_string();
+                let name = path
+                    .file_name()
+                    .expect("a file")
+                    .to_string_lossy()
+                    .to_string();
                 let rel = format!("{ns}/{name}");
                 let text = std::fs::read_to_string(&path).expect("readable");
                 let template = parse(&rel, &text)

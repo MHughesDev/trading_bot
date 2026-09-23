@@ -179,7 +179,10 @@ fn a_chat_row_cannot_carry_a_wider_ring() {
 fn the_defaults_are_the_narrow_reading() {
     let sql = statements(&migration());
     assert!(sql.contains("mode TEXT NOT NULL DEFAULT 'chat'"), "{sql}");
-    assert!(sql.contains("ring TEXT NOT NULL DEFAULT 'research'"), "{sql}");
+    assert!(
+        sql.contains("ring TEXT NOT NULL DEFAULT 'research'"),
+        "{sql}"
+    );
     assert!(
         sql.contains("stage TEXT NOT NULL DEFAULT 'explore'"),
         "{sql}"
@@ -256,7 +259,10 @@ fn the_roles_are_the_rust_enum() {
 #[test]
 fn inconclusive_is_the_only_status_with_a_reason_and_it_is_required() {
     let sql = statements(&migration_named("0127_preregistration.sql"));
-    assert!(sql.contains("inconclusive_says_why"), "the constraint is missing");
+    assert!(
+        sql.contains("inconclusive_says_why"),
+        "the constraint is missing"
+    );
     assert!(
         sql.contains("status <> 'inconclusive' AND inconclusive_why IS NULL"),
         "nothing else may carry a reason"

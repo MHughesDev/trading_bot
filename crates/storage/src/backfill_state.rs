@@ -24,7 +24,9 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
-use dataplane::backfill::{BackfillKey, BackfillState, BackfillStateStore, BackfillStatus, StateError};
+use dataplane::backfill::{
+    BackfillKey, BackfillState, BackfillStateStore, BackfillStatus, StateError,
+};
 
 /// Postgres-backed [`BackfillStateStore`].
 #[derive(Clone, Debug)]
@@ -54,8 +56,9 @@ fn err(e: sqlx::Error) -> StateError {
 }
 
 fn row_to_state(r: Row) -> Result<BackfillState, StateError> {
-    let status = BackfillStatus::parse(&r.7)
-        .ok_or_else(|| StateError::Backend(format!("unknown backfill status {:?} in the database", r.7)))?;
+    let status = BackfillStatus::parse(&r.7).ok_or_else(|| {
+        StateError::Backend(format!("unknown backfill status {:?} in the database", r.7))
+    })?;
     Ok(BackfillState {
         key: BackfillKey {
             source: r.0,
@@ -100,7 +103,11 @@ impl PgBackfillState {
               ORDER BY window_start ASC
               LIMIT $1"
         );
-        let rows: Vec<Row> = sqlx::query_as(&sql).bind(limit).fetch_all(&self.pool).await.map_err(err)?;
+        let rows: Vec<Row> = sqlx::query_as(&sql)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(err)?;
         rows.into_iter().map(row_to_state).collect()
     }
 
@@ -110,7 +117,11 @@ impl PgBackfillState {
     /// Backend failures.
     pub async fn for_instrument(&self, instrument: &str) -> Result<Vec<BackfillState>, StateError> {
         let sql = format!("{SELECT_ROW} WHERE instrument = $1 ORDER BY timeframe, window_start");
-        let rows: Vec<Row> = sqlx::query_as(&sql).bind(instrument).fetch_all(&self.pool).await.map_err(err)?;
+        let rows: Vec<Row> = sqlx::query_as(&sql)
+            .bind(instrument)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(err)?;
         rows.into_iter().map(row_to_state).collect()
     }
 
@@ -118,7 +129,11 @@ impl PgBackfillState {
     ///
     /// # Errors
     /// Backend failures.
-    pub async fn record_manifest(&self, key: &BackfillKey, manifest_hash: &str) -> Result<(), StateError> {
+    pub async fn record_manifest(
+        &self,
+        key: &BackfillKey,
+        manifest_hash: &str,
+    ) -> Result<(), StateError> {
         sqlx::query(
             "UPDATE dataplane.backfill_state SET manifest_hash = $7, updated_at = now()
               WHERE source=$1 AND venue=$2 AND instrument=$3 AND timeframe=$4
@@ -176,9 +191,9 @@ impl BackfillStateStore for PgBackfillState {
         .execute(&self.pool)
         .await
         .map_err(err)?;
-        self.load(key)
-            .await?
-            .ok_or_else(|| StateError::Backend("backfill_state row vanished immediately after insert".into()))
+        self.load(key).await?.ok_or_else(|| {
+            StateError::Backend("backfill_state row vanished immediately after insert".into())
+        })
     }
 
     async fn start(&self, key: &BackfillKey) -> Result<(), StateError> {
@@ -203,7 +218,12 @@ impl BackfillStateStore for PgBackfillState {
         Ok(())
     }
 
-    async fn advance(&self, key: &BackfillKey, cursor: DateTime<Utc>, rows_written: i64) -> Result<(), StateError> {
+    async fn advance(
+        &self,
+        key: &BackfillKey,
+        cursor: DateTime<Utc>,
+        rows_written: i64,
+    ) -> Result<(), StateError> {
         // GREATEST, so an out-of-order retry cannot rewind coverage; LEAST, so a
         // source that over-reports cannot push the cursor past the window and
         // trip the 0099 CHECK.
@@ -231,7 +251,12 @@ impl BackfillStateStore for PgBackfillState {
         Ok(())
     }
 
-    async fn pause(&self, key: &BackfillKey, until: DateTime<Utc>, reason: &str) -> Result<(), StateError> {
+    async fn pause(
+        &self,
+        key: &BackfillKey,
+        until: DateTime<Utc>,
+        reason: &str,
+    ) -> Result<(), StateError> {
         sqlx::query(
             "UPDATE dataplane.backfill_state
                 SET status='paused', backoff_until=$7, attempts = attempts + 1,

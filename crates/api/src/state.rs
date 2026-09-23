@@ -345,14 +345,18 @@ impl AppState {
         // The order journal: `execution::ExecutionEngine::submit` refuses to
         // submit anything at all without one, because an order that cannot be
         // recorded cannot be reconciled (FM-4, SC-7).
-        execution::journal::install(Arc::new(execution::journal::PgOrderJournal::new(pg.clone())));
+        execution::journal::install(Arc::new(execution::journal::PgOrderJournal::new(
+            pg.clone(),
+        )));
 
         // The risk-context provider: the single source of a measured
         // `GateContext` for both order doors (SC-2).
-        risk::context::install(Arc::new(crate::risk_context::PaperRiskContextProvider::new(
-            Arc::clone(&paper_engine),
-            Arc::clone(&instrument_meta),
-        )));
+        risk::context::install(Arc::new(
+            crate::risk_context::PaperRiskContextProvider::new(
+                Arc::clone(&paper_engine),
+                Arc::clone(&instrument_meta),
+            ),
+        ));
 
         // Keep the metadata snapshot fresh.  Inside a runtime only; outside one
         // (unit tests, tools) the cache stays empty and every order is refused

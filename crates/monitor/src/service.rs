@@ -288,8 +288,7 @@ fn rank(ev: &Evaluation) -> u8 {
 /// Absolute rather than signed: a limit may be an upper or a lower bound, and
 /// "furthest outside" is the same question either way.
 fn distance(ev: &Evaluation) -> f64 {
-    ev.limit_value
-        .map_or(0.0, |l| (ev.reading.value - l).abs())
+    ev.limit_value.map_or(0.0, |l| (ev.reading.value - l).abs())
 }
 
 fn kind_of(t: &Transition) -> EventKind {
@@ -387,12 +386,9 @@ impl MonitorService {
     /// event row explaining why, and go on trading. [`MonitorStore::trip`] writes
     /// the event and the switch row in one transaction, record first, so §8.5's
     /// ordering survives here too.
-    pub async fn apply(
-        &self,
-        decision: &CadenceDecision,
-    ) -> Result<(), crate::store::StoreError> {
-        let halting = decision.transition.to == StrategyState::Halted
-            && decision.transition.changed();
+    pub async fn apply(&self, decision: &CadenceDecision) -> Result<(), crate::store::StoreError> {
+        let halting =
+            decision.transition.to == StrategyState::Halted && decision.transition.changed();
 
         for event in &decision.events {
             if halting && event.kind == EventKind::Halted {
@@ -456,7 +452,10 @@ impl MonitorService {
         };
         let reason = verdict.reason();
         match (note, &verdict) {
-            (crate::platform::PlatformNote::Lost, crate::platform::PlatformVerdict::Halt { .. }) => {
+            (
+                crate::platform::PlatformNote::Lost,
+                crate::platform::PlatformVerdict::Halt { .. },
+            ) => {
                 let event = MonitorEvent::new(
                     risk::Scope::Global,
                     Family::Platform,
@@ -546,12 +545,10 @@ impl MonitorService {
 
         let mut out = Vec::new();
         for id in ids {
-            let (state, _, policy) = known
-                .iter()
-                .find(|(k, ..)| *k == id)
-                .map_or((StrategyState::Nominal, 100, HaltPolicy::Hold), |(_, s, p, h)| {
-                    (*s, *p, *h)
-                });
+            let (state, _, policy) = known.iter().find(|(k, ..)| *k == id).map_or(
+                (StrategyState::Nominal, 100, HaltPolicy::Hold),
+                |(_, s, p, h)| (*s, *p, *h),
+            );
             let empty: Vec<crate::collect::OrderObservation> = Vec::new();
             let orders = observations.get(&id).unwrap_or(&empty);
 
@@ -1022,7 +1019,10 @@ mod tests {
         // The one that matters: a runtime booted while the monitor is down is
         // refusing every order, and with no row saying so the operator's first
         // question has no answer anywhere.
-        assert_eq!(lease_note(SEEN_NOTHING_YET, SEEN_LOST), Some(LeaseNote::Lost));
+        assert_eq!(
+            lease_note(SEEN_NOTHING_YET, SEEN_LOST),
+            Some(LeaseNote::Lost)
+        );
     }
 
     #[test]
@@ -1085,10 +1085,30 @@ mod tests {
     /// existed — which is the only order COMP-007 §P2 allows.
     fn cadence() -> Cadence {
         let mut book = LimitBook::new();
-        book.declare(limit(Metric::FillRate, Some(0.80), None, LimitSeverity::Breach));
-        book.declare(limit(Metric::CancelRatio, None, Some(0.50), LimitSeverity::Breach));
-        book.declare(limit(Metric::CusumLow, Some(-5.0), None, LimitSeverity::Breach));
-        book.declare(limit(Metric::Sharpe60d, Some(0.50), None, LimitSeverity::Warning));
+        book.declare(limit(
+            Metric::FillRate,
+            Some(0.80),
+            None,
+            LimitSeverity::Breach,
+        ));
+        book.declare(limit(
+            Metric::CancelRatio,
+            None,
+            Some(0.50),
+            LimitSeverity::Breach,
+        ));
+        book.declare(limit(
+            Metric::CusumLow,
+            Some(-5.0),
+            None,
+            LimitSeverity::Breach,
+        ));
+        book.declare(limit(
+            Metric::Sharpe60d,
+            Some(0.50),
+            None,
+            LimitSeverity::Warning,
+        ));
         Cadence::new(Evaluator::new(book, DwellConfig::default()))
     }
 
@@ -1134,7 +1154,10 @@ mod tests {
             });
         }
         let readings = ExecutionSample::measure(w, &orders).readings(STRATEGY);
-        assert!(!readings.is_empty(), "ten terminal orders must measure something");
+        assert!(
+            !readings.is_empty(),
+            "ten terminal orders must measure something"
+        );
 
         let mut c = cadence();
         let d = drive(&mut c, &readings, 3, StrategyState::Nominal);
@@ -1178,7 +1201,12 @@ mod tests {
         // book — and in the event log it is, because there are no events either
         // way. Only `judged` separates them.
         let mut c = cadence();
-        let nothing = c.assess(STRATEGY, Vec::new(), StrategyState::Nominal, HaltPolicy::Hold);
+        let nothing = c.assess(
+            STRATEGY,
+            Vec::new(),
+            StrategyState::Nominal,
+            HaltPolicy::Hold,
+        );
         assert_eq!(nothing.judged, 0);
         assert!(!nothing.acted());
 
@@ -1219,12 +1247,18 @@ mod tests {
         // leave a strategy whose returns have broken still trading, at a quarter
         // of the size, which is not what §4 says happens to it.
         let mut c = cadence();
-        let readings = vec![reading(Metric::FillRate, 0.1), reading(Metric::CusumLow, -9.0)];
+        let readings = vec![
+            reading(Metric::FillRate, 0.1),
+            reading(Metric::CusumLow, -9.0),
+        ];
         let d = drive(&mut c, &readings, 3, StrategyState::Nominal);
         assert_eq!(d.transition.to, StrategyState::Halted);
         assert_eq!(d.events.len(), 1, "one incident, one record");
         assert_eq!(d.events[0].kind, EventKind::Halted);
-        assert_eq!(d.events[0].metric.as_deref(), Some(Metric::CusumLow.as_str()));
+        assert_eq!(
+            d.events[0].metric.as_deref(),
+            Some(Metric::CusumLow.as_str())
+        );
         assert_eq!(d.events[0].family, Family::Pnl);
     }
 
@@ -1241,13 +1275,21 @@ mod tests {
         let d = drive(&mut c, &readings, 3, StrategyState::Nominal);
         assert_eq!(d.transition.to, StrategyState::ScaledDown);
         assert_eq!(d.events.len(), 1);
-        assert_eq!(d.events[0].metric.as_deref(), Some(Metric::CancelRatio.as_str()));
+        assert_eq!(
+            d.events[0].metric.as_deref(),
+            Some(Metric::CancelRatio.as_str())
+        );
     }
 
     #[test]
     fn a_warning_records_a_warning_and_does_not_scale() {
         let mut c = cadence();
-        let d = drive(&mut c, &[reading(Metric::Sharpe60d, 0.1)], 3, StrategyState::Nominal);
+        let d = drive(
+            &mut c,
+            &[reading(Metric::Sharpe60d, 0.1)],
+            3,
+            StrategyState::Nominal,
+        );
         assert_eq!(d.transition.to, StrategyState::Warning);
         assert_eq!(d.scale_pct, 100);
         assert_eq!(d.events.len(), 1);
@@ -1260,7 +1302,12 @@ mod tests {
         // carries `Action::Record` first, and `apply` writes the events before it
         // touches the state.
         let mut c = cadence();
-        let d = drive(&mut c, &[reading(Metric::CusumLow, -9.0)], 3, StrategyState::Nominal);
+        let d = drive(
+            &mut c,
+            &[reading(Metric::CusumLow, -9.0)],
+            3,
+            StrategyState::Nominal,
+        );
         assert_eq!(d.transition.actions.first(), Some(&Action::Record));
         assert!(!d.events.is_empty(), "and there is a record to write");
     }
@@ -1269,7 +1316,12 @@ mod tests {
     fn recovery_needs_twice_the_dwell_and_then_releases_the_scale() {
         // §4.1's hysteresis, through the cadence rather than through the tracker.
         let mut c = cadence();
-        let breach = drive(&mut c, &[reading(Metric::FillRate, 0.1)], 3, StrategyState::Nominal);
+        let breach = drive(
+            &mut c,
+            &[reading(Metric::FillRate, 0.1)],
+            3,
+            StrategyState::Nominal,
+        );
         assert_eq!(breach.transition.to, StrategyState::ScaledDown);
 
         let recovery = DwellConfig::default().recovery_cadences();
@@ -1277,7 +1329,10 @@ mod tests {
         let mut state = StrategyState::ScaledDown;
         for i in 1..recovery {
             let d = c.assess(STRATEGY, good.clone(), state, HaltPolicy::Hold);
-            assert!(!d.acted(), "released after {i} good cadences, needs {recovery}");
+            assert!(
+                !d.acted(),
+                "released after {i} good cadences, needs {recovery}"
+            );
             state = d.transition.to;
         }
         let d = c.assess(STRATEGY, good, state, HaltPolicy::Hold);
@@ -1317,7 +1372,10 @@ mod tests {
         assert_eq!(state, StrategyState::Nominal);
         // And this did not pass by judging nothing: every odd cadence was outside
         // the declared floor and was recorded as a blip.
-        assert_eq!(blips, 50, "the excursions must have been seen, and recorded");
+        assert_eq!(
+            blips, 50,
+            "the excursions must have been seen, and recorded"
+        );
     }
 
     #[test]
@@ -1330,7 +1388,10 @@ mod tests {
         for _ in 0..50 {
             let d = c.assess(
                 STRATEGY,
-                vec![reading(Metric::FillRate, 0.99), reading(Metric::CusumLow, 0.0)],
+                vec![
+                    reading(Metric::FillRate, 0.99),
+                    reading(Metric::CusumLow, 0.0),
+                ],
                 state,
                 HaltPolicy::Hold,
             );
@@ -1380,12 +1441,17 @@ mod tests {
                 slippage_vs_model_bps: None,
             })
             .collect();
-        let readings: Vec<MetricReading> = BehaviourSample::measure(w, &orders, Some(4), &[], Some(2))
-            .readings(STRATEGY)
-            .into_iter()
-            .filter(|r| r.metric == Metric::CancelRatio.as_str())
-            .collect();
-        assert_eq!(readings.len(), 1, "the cancel ratio must have been measured");
+        let readings: Vec<MetricReading> =
+            BehaviourSample::measure(w, &orders, Some(4), &[], Some(2))
+                .readings(STRATEGY)
+                .into_iter()
+                .filter(|r| r.metric == Metric::CancelRatio.as_str())
+                .collect();
+        assert_eq!(
+            readings.len(),
+            1,
+            "the cancel ratio must have been measured"
+        );
 
         let mut c = cadence();
         let d = drive(&mut c, &readings, 3, StrategyState::Nominal);
@@ -1419,7 +1485,9 @@ mod tests {
         let mut chart = crate::baseline::Cusum::default();
         let readings = sample.readings(STRATEGY, &mut chart);
         assert!(
-            readings.iter().any(|r| r.metric == Metric::CusumLow.as_str()),
+            readings
+                .iter()
+                .any(|r| r.metric == Metric::CusumLow.as_str()),
             "the series must produce a cusum reading"
         );
 
@@ -1429,7 +1497,11 @@ mod tests {
         assert_eq!(d.events.len(), 1);
         assert_eq!(d.events[0].kind, EventKind::Halted);
         assert!(d.events[0].names_metric_value_limit_and_scope());
-        assert_eq!(d.events[0].limit_value, Some(-5.0), "the declared decision interval");
+        assert_eq!(
+            d.events[0].limit_value,
+            Some(-5.0),
+            "the declared decision interval"
+        );
     }
 
     #[test]
@@ -1442,7 +1514,12 @@ mod tests {
         // which needs exactly two things from the decision: a `Halted` event, and
         // a reason on it.
         let mut c = cadence();
-        let d = drive(&mut c, &[reading(Metric::CusumLow, -9.0)], 3, StrategyState::Nominal);
+        let d = drive(
+            &mut c,
+            &[reading(Metric::CusumLow, -9.0)],
+            3,
+            StrategyState::Nominal,
+        );
         assert_eq!(d.transition.to, StrategyState::Halted);
         let halt = d
             .events
@@ -1451,7 +1528,10 @@ mod tests {
             .expect("a halting decision must carry a Halted event for `trip` to find");
         let reason = halt.reason.as_deref().expect("`trip` requires a reason");
         assert!(reason.contains(Metric::CusumLow.as_str()), "{reason}");
-        assert!(reason.contains("-5"), "the reason must name the bound: {reason}");
+        assert!(
+            reason.contains("-5"),
+            "the reason must name the bound: {reason}"
+        );
         assert_eq!(halt.scope.to_string(), "strategy:s-1");
     }
 
@@ -1512,7 +1592,12 @@ mod tests {
         // string in, and `assess` has no parameter to thread one through.
         assert!(!MONITOR_ACTOR.starts_with("agent:"));
         let mut c = cadence();
-        let d = drive(&mut c, &[reading(Metric::FillRate, 0.1)], 3, StrategyState::Nominal);
+        let d = drive(
+            &mut c,
+            &[reading(Metric::FillRate, 0.1)],
+            3,
+            StrategyState::Nominal,
+        );
         assert!(!d.events.is_empty());
         for e in &d.events {
             assert_eq!(e.actor, MONITOR_ACTOR);

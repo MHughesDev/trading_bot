@@ -23,9 +23,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use backtest::costs::{empirical_frontier, oracle, ExecutionStyle, FeeBook, FeeSchedule};
-use ledger::falsification::{
-    EvaluatorDefect, Kill, KillClass, Reproduction,
-};
+use ledger::falsification::{EvaluatorDefect, Kill, KillClass, Reproduction};
 
 use crate::{auth::BearerToken, state::AppState};
 
@@ -33,7 +31,9 @@ use crate::{auth::BearerToken, state::AppState};
 ///
 /// Geometric rather than linear: the curve is `√h`-shaped, so evenly spaced
 /// horizons spend most of their samples on the flat part where nothing changes.
-const FRONTIER_HORIZONS: &[usize] = &[1, 2, 5, 10, 15, 30, 60, 120, 240, 480, 960, 1440, 2880, 10_080];
+const FRONTIER_HORIZONS: &[usize] = &[
+    1, 2, 5, 10, 15, 30, 60, 120, 240, 480, 960, 1440, 2880, 10_080,
+];
 
 // ── shared request shapes ────────────────────────────────────────────────────
 
@@ -382,7 +382,6 @@ pub async fn oracle_test(
         .into_response()
 }
 
-
 // ── reading the ledger ───────────────────────────────────────────────────────
 
 /// GET /api/falsification — the tenant's reports, newest first.
@@ -390,10 +389,7 @@ pub async fn oracle_test(
 /// Returns the score the **database** assigned, read from
 /// `mlops.falsification_scored` rather than recomputed here. If the SQL function
 /// and the Rust type ever disagree, a surface that recomputed would hide it.
-pub async fn list_reports(
-    State(state): State<AppState>,
-    token: BearerToken,
-) -> impl IntoResponse {
+pub async fn list_reports(State(state): State<AppState>, token: BearerToken) -> impl IntoResponse {
     let tenant = token.user_id().to_string();
     let mut tx = match ledger::pg::tenant_tx(&state.pg, &tenant).await {
         Ok(t) => t,
@@ -466,7 +462,10 @@ pub async fn list_reports(
         .iter()
         .filter(|r| r["report_kind"] == "evaluator_defect" && r["is_discharged"] == false)
         .count();
-    let unverified = reports.iter().filter(|r| r["verification"] == "unverified").count();
+    let unverified = reports
+        .iter()
+        .filter(|r| r["verification"] == "unverified")
+        .count();
 
     (
         StatusCode::OK,
@@ -513,9 +512,9 @@ async fn load_closes(
     start: Option<chrono::DateTime<chrono::Utc>>,
     end: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<Vec<f64>, axum::response::Response> {
-    let Some(tf) = <domain::payloads::bar::Timeframe as backtest::types::TimeframeExt>::from_key(
-        timeframe,
-    ) else {
+    let Some(tf) =
+        <domain::payloads::bar::Timeframe as backtest::types::TimeframeExt>::from_key(timeframe)
+    else {
         return Err((
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(json!({ "error": "unknown_timeframe", "got": timeframe })),
@@ -563,7 +562,10 @@ mod tests {
     /// price against maker fills it cannot demonstrate.
     #[test]
     fn the_default_style_is_the_one_ohlcv_can_support() {
-        assert_eq!(parse_style(&default_style()), Some(ExecutionStyle::TakerBoth));
+        assert_eq!(
+            parse_style(&default_style()),
+            Some(ExecutionStyle::TakerBoth)
+        );
         assert!(!ExecutionStyle::TakerBoth.requires_fill_model());
     }
 
@@ -590,7 +592,11 @@ mod tests {
     fn the_frontier_horizons_are_ascending_and_span_a_minute_to_a_week() {
         assert!(FRONTIER_HORIZONS.windows(2).all(|w| w[0] < w[1]));
         assert_eq!(FRONTIER_HORIZONS[0], 1);
-        assert_eq!(*FRONTIER_HORIZONS.last().unwrap(), 10_080, "one week of minutes");
+        assert_eq!(
+            *FRONTIER_HORIZONS.last().unwrap(),
+            10_080,
+            "one week of minutes"
+        );
     }
 
     /// The pre-flight the agent sees. A claim that refutes nothing is refused

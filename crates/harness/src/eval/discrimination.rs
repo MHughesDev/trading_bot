@@ -146,8 +146,7 @@ impl Discrimination {
     /// Planted nulls the tier called an edge, over planted nulls.
     #[must_use]
     pub fn false_positive_rate(&self) -> Option<f64> {
-        (self.nulls_planted > 0)
-            .then(|| self.nulls_called_edge as f64 / self.nulls_planted as f64)
+        (self.nulls_planted > 0).then(|| self.nulls_called_edge as f64 / self.nulls_planted as f64)
     }
 
     /// Planted leaks the tier did not find, over planted leaks.
@@ -792,7 +791,10 @@ mod tests {
         // governance page renders.
         let json = serde_json::to_string(&score).unwrap();
         assert!(json.contains("unmeasured"), "{json}");
-        assert!(!json.contains("0.0"), "an unmeasured tier rendered a rate: {json}");
+        assert!(
+            !json.contains("0.0"),
+            "an unmeasured tier rendered a rate: {json}"
+        );
     }
 
     /// A tier run on a handful of cases reports `unmeasured` rather than a
@@ -868,7 +870,10 @@ mod tests {
         );
         for t in TIERS_IN_SCOPE {
             let th = Threshold::for_tier(t);
-            assert!(th.max_false_positive_rate() < 0.5, "{t:?} may call coin flips");
+            assert!(
+                th.max_false_positive_rate() < 0.5,
+                "{t:?} may call coin flips"
+            );
             assert!(!th.declared_in().is_empty(), "{t:?} has a bar from nowhere");
         }
     }
@@ -907,7 +912,10 @@ mod tests {
             );
         }
         let verdict = done_4(&scores);
-        assert!(!verdict.met, "an unmeasured frontier fails the first clause");
+        assert!(
+            !verdict.met,
+            "an unmeasured frontier fails the first clause"
+        );
         assert_eq!(verdict.unmeasured.len(), TIERS_IN_SCOPE.len());
 
         scores.insert(

@@ -110,9 +110,8 @@ impl ArtifactRegistry {
         // be caught — afterwards the run resumes, the curve looks plausible, and
         // the divergence announces itself to nobody (ADR-P2-07, AT-61).
         if artifact_type == "checkpoint" {
-            crate::checkpoint::CheckpointManifest::parse(&manifest).map_err(|e| {
-                JobStoreError::Invalid(format!("checkpoint manifest refused: {e}"))
-            })?;
+            crate::checkpoint::CheckpointManifest::parse(&manifest)
+                .map_err(|e| JobStoreError::Invalid(format!("checkpoint manifest refused: {e}")))?;
         }
 
         let sha = sha256_hex(bytes);

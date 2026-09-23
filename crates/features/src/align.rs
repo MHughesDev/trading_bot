@@ -150,9 +150,13 @@ pub fn densify_bars(obs: &[BarObs], step_ns: i64) -> MasterClockFrame {
 
     let mut frame = MasterClockFrame::default();
     for (i, &tick) in ticks.iter().enumerate() {
-        let (Some(o), Some(h), Some(l), Some(c), Some(v)) =
-            (open[i].value, high[i].value, low[i].value, close[i].value, volume[i].value)
-        else {
+        let (Some(o), Some(h), Some(l), Some(c), Some(v)) = (
+            open[i].value,
+            high[i].value,
+            low[i].value,
+            close[i].value,
+            volume[i].value,
+        ) else {
             // Before the first observation.
             continue;
         };
@@ -210,7 +214,9 @@ mod tests {
 
     #[test]
     fn a_contiguous_series_densifies_to_itself_with_zero_age() {
-        let obs: Vec<BarObs> = (0..5).map(|i| bar(i, 100.0 + i as f64, QualityFlags::NONE)).collect();
+        let obs: Vec<BarObs> = (0..5)
+            .map(|i| bar(i, 100.0 + i as f64, QualityFlags::NONE))
+            .collect();
         let f = densify_to_master_clock(&obs);
         assert_eq!(f.len(), 5);
         assert!(f.age_minutes.iter().all(|a| *a == 0));
@@ -266,10 +272,16 @@ mod tests {
         let f = densify_to_master_clock(&obs);
         let (age, q) = f.provenance(3, 2);
         assert_eq!(age, 0, "the newest input is fresh");
-        assert!(q.contains(QualityFlags::SUSPECT_VOLUME), "an older input was not");
+        assert!(
+            q.contains(QualityFlags::SUSPECT_VOLUME),
+            "an older input was not"
+        );
 
         let (_, narrow) = f.provenance(1, 2);
-        assert!(!narrow.contains(QualityFlags::SUSPECT_VOLUME), "outside the window");
+        assert!(
+            !narrow.contains(QualityFlags::SUSPECT_VOLUME),
+            "outside the window"
+        );
     }
 
     #[test]
@@ -285,7 +297,10 @@ mod tests {
 
     #[test]
     fn coarser_bars_densify_on_their_own_period() {
-        let obs = vec![bar(0, 100.0, QualityFlags::NONE), bar(15, 101.0, QualityFlags::NONE)];
+        let obs = vec![
+            bar(0, 100.0, QualityFlags::NONE),
+            bar(15, 101.0, QualityFlags::NONE),
+        ];
         let f = densify_bars(&obs, 5 * MINUTE_NS);
         assert_eq!(f.len(), 4);
         assert_eq!(f.age_minutes, vec![0, 5, 10, 0]);
@@ -293,14 +308,20 @@ mod tests {
 
     #[test]
     fn knowledge_times_survive_the_carry() {
-        let obs = vec![bar(0, 100.0, QualityFlags::NONE), bar(3, 101.0, QualityFlags::NONE)];
+        let obs = vec![
+            bar(0, 100.0, QualityFlags::NONE),
+            bar(3, 101.0, QualityFlags::NONE),
+        ];
         let f = densify_to_master_clock(&obs);
         assert_eq!(f.knowledge_ns(), vec![m(0), m(0), m(0), m(3)]);
     }
 
     #[test]
     fn decision_at_finds_the_row_a_reader_would_have_been_on() {
-        let obs = vec![bar(0, 100.0, QualityFlags::NONE), bar(3, 101.0, QualityFlags::NONE)];
+        let obs = vec![
+            bar(0, 100.0, QualityFlags::NONE),
+            bar(3, 101.0, QualityFlags::NONE),
+        ];
         let f = densify_to_master_clock(&obs);
         assert_eq!(f.decision_at(m(2)), Some(2));
         assert_eq!(f.decision_at(m(3)), Some(3));

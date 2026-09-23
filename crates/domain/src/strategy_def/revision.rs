@@ -66,7 +66,9 @@ impl RevisionHash {
     /// When `s` is not 64 lowercase hex characters.
     pub fn parse(s: impl Into<String>) -> Result<Self, RevisionHashError> {
         let s = s.into();
-        let ok = s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        let ok = s.len() == 64
+            && s.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
         ok.then_some(Self(s.clone()))
             .ok_or(RevisionHashError::Malformed(s))
     }
@@ -182,14 +184,20 @@ mod tests {
 
     #[test]
     fn the_same_document_hashes_the_same_way_every_time() {
-        assert_eq!(RevisionHash::of(&def()).unwrap(), RevisionHash::of(&def()).unwrap());
+        assert_eq!(
+            RevisionHash::of(&def()).unwrap(),
+            RevisionHash::of(&def()).unwrap()
+        );
     }
 
     #[test]
     fn a_hash_is_sixty_four_lowercase_hex_characters() {
         let h = RevisionHash::of(&def()).unwrap();
         assert_eq!(h.as_str().len(), 64);
-        assert!(h.as_str().bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+        assert!(h
+            .as_str()
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
         assert_eq!(h.short().len(), 12);
     }
 
@@ -216,11 +224,16 @@ mod tests {
 
         let mut stopped = def();
         stopped.exits = Some(ExitPolicy::Rules {
-            rules: vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }],
+            rules: vec![ExitRule::StopLoss {
+                distance: ExitDistance::of_entry(dec!(0.02)),
+            }],
         });
         let stopped_hash = RevisionHash::of(&stopped).unwrap();
 
-        assert_ne!(bare, delegated_hash, "pre-1.3 and 'risk layer only' are different claims");
+        assert_ne!(
+            bare, delegated_hash,
+            "pre-1.3 and 'risk layer only' are different claims"
+        );
         assert_ne!(delegated_hash, stopped_hash);
         assert_ne!(bare, stopped_hash);
     }
@@ -235,8 +248,12 @@ mod tests {
             d.exits = Some(ExitPolicy::Rules { rules: vec![a, b] });
             RevisionHash::of(&d).unwrap()
         };
-        let stop = ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) };
-        let trail = ExitRule::TrailingStop { distance: ExitDistance::of_entry(dec!(0.03)) };
+        let stop = ExitRule::StopLoss {
+            distance: ExitDistance::of_entry(dec!(0.02)),
+        };
+        let trail = ExitRule::TrailingStop {
+            distance: ExitDistance::of_entry(dec!(0.03)),
+        };
         assert_ne!(rules(stop.clone(), trail.clone()), rules(trail, stop));
     }
 
@@ -281,7 +298,10 @@ mod tests {
     fn a_malformed_hash_is_refused_at_the_type_rather_than_the_database() {
         assert!(RevisionHash::parse("a".repeat(64)).is_ok());
         assert!(RevisionHash::parse("a".repeat(63)).is_err());
-        assert!(RevisionHash::parse("A".repeat(64)).is_err(), "uppercase is a different string");
+        assert!(
+            RevisionHash::parse("A".repeat(64)).is_err(),
+            "uppercase is a different string"
+        );
         assert!(RevisionHash::parse("g".repeat(64)).is_err(), "g is not hex");
         assert!(RevisionHash::parse("").is_err());
     }

@@ -199,9 +199,9 @@ impl ItemStatus {
             ItemStatus::Proposed => "proposed",
             ItemStatus::Approved | ItemStatus::Queued => "queued",
             ItemStatus::Claimed { .. } | ItemStatus::Running { .. } => "running",
-            ItemStatus::Done { .. } | ItemStatus::Superseded { .. } | ItemStatus::Expired { .. } => {
-                "done"
-            }
+            ItemStatus::Done { .. }
+            | ItemStatus::Superseded { .. }
+            | ItemStatus::Expired { .. } => "done",
             ItemStatus::Vetoed { .. } => "vetoed",
         }
     }
@@ -558,11 +558,7 @@ impl DedupeScorecard {
         DedupeLayer::ALL
             .iter()
             .map(|l| match self.of(*l) {
-                LayerCount::Caught(n) => format!(
-                    "{}: {n} refused at {}",
-                    l.as_str(),
-                    l.in_prose()
-                ),
+                LayerCount::Caught(n) => format!("{}: {n} refused at {}", l.as_str(), l.in_prose()),
                 LayerCount::NotReported => format!(
                     "{}: not reported this period — {} was not consulted, which is not the same \
                      as catching nothing",
@@ -694,16 +690,24 @@ mod tests {
     fn a_merge_returns_only_the_refs_it_added() {
         // The caller appends with `source_refs || $3`, so returning a ref the
         // item already holds duplicates it in the row.
-        let mut agenda = vec![AgendaItem::new(session(), "q", "s", Source::CharterSeed)
-            .with_source_ref("f_31a")];
+        let mut agenda = vec![
+            AgendaItem::new(session(), "q", "s", Source::CharterSeed).with_source_ref("f_31a")
+        ];
         let again = AgendaItem::new(session(), "q", "s", Source::Contradiction)
             .with_source_ref("f_31a")
             .with_source_ref("f_99z");
         let Insert::Merged { source_refs, .. } = offer(&mut agenda, again) else {
             panic!("the key matched and the item was inserted anyway");
         };
-        assert_eq!(source_refs, vec!["f_99z".to_string()], "`f_31a` was already there");
-        assert_eq!(agenda[0].source_refs, vec!["f_31a".to_string(), "f_99z".to_string()]);
+        assert_eq!(
+            source_refs,
+            vec!["f_99z".to_string()],
+            "`f_31a` was already there"
+        );
+        assert_eq!(
+            agenda[0].source_refs,
+            vec!["f_31a".to_string(), "f_99z".to_string()]
+        );
     }
 
     #[test]
@@ -749,7 +753,9 @@ mod tests {
             ItemStatus::Queued,
             ItemStatus::Claimed { run_id: r },
             ItemStatus::Running { run_id: r },
-            ItemStatus::Done { verdict: "x".into() },
+            ItemStatus::Done {
+                verdict: "x".into(),
+            },
             ItemStatus::Vetoed { by: "x".into() },
             ItemStatus::Superseded { by_item: r },
             ItemStatus::Expired { why: "x".into() },
@@ -781,7 +787,9 @@ mod tests {
             ItemStatus::Queued,
             ItemStatus::Claimed { run_id: r },
             ItemStatus::Running { run_id: r },
-            ItemStatus::Done { verdict: "x".into() },
+            ItemStatus::Done {
+                verdict: "x".into(),
+            },
             ItemStatus::Vetoed { by: "x".into() },
             ItemStatus::Superseded { by_item: r },
             ItemStatus::Expired { why: "x".into() },
@@ -801,7 +809,10 @@ mod tests {
 
     #[test]
     fn a_terminal_status_is_terminal_and_a_claimable_one_is_not() {
-        assert!(ItemStatus::Done { verdict: "x".into() }.is_terminal());
+        assert!(ItemStatus::Done {
+            verdict: "x".into()
+        }
+        .is_terminal());
         assert!(ItemStatus::Vetoed { by: "mason".into() }.is_terminal());
         assert!(!ItemStatus::Queued.is_terminal());
         assert!(ItemStatus::Queued.is_claimable());
@@ -820,7 +831,9 @@ mod tests {
             ItemStatus::Queued,
             ItemStatus::Claimed { run_id: r },
             ItemStatus::Running { run_id: r },
-            ItemStatus::Done { verdict: "x".into() },
+            ItemStatus::Done {
+                verdict: "x".into(),
+            },
             ItemStatus::Vetoed { by: "x".into() },
             ItemStatus::Superseded { by_item: r },
             ItemStatus::Expired { why: "x".into() },
@@ -831,10 +844,14 @@ mod tests {
 
     // ── The scorecard (AGENT-014 P3) ────────────────────────────────────────
 
-
     #[test]
     fn the_scorecard_counts_layer_one_off_the_offers_it_was_given() {
-        let mut agenda = vec![AgendaItem::new(session(), "does x work?", "btc", Source::User)];
+        let mut agenda = vec![AgendaItem::new(
+            session(),
+            "does x work?",
+            "btc",
+            Source::User,
+        )];
         let inserts = vec![
             offer(
                 &mut agenda,
@@ -883,7 +900,11 @@ mod tests {
         let card = DedupeScorecard::over(&[]).with_intake(0).with_ledger(0);
         assert!(card.unreported().is_empty());
         assert_eq!(card.caught_where_reported(), 0);
-        assert!(card.lines().iter().all(|l| l.contains("refused at")), "{:?}", card.lines());
+        assert!(
+            card.lines().iter().all(|l| l.contains("refused at")),
+            "{:?}",
+            card.lines()
+        );
     }
 
     #[test]

@@ -189,7 +189,11 @@ impl BarStore {
     /// Connect using a full URL that may include credentials and a database path
     /// (`http://user:pass@host:8123/dbname`).
     pub fn connect(url: &str) -> Self {
-        Self { client: storage::clickhouse::connect(url), as_of: None, venue: None }
+        Self {
+            client: storage::clickhouse::connect(url),
+            as_of: None,
+            venue: None,
+        }
     }
 
     /// Read the world as it stood at `as_of`.
@@ -215,7 +219,9 @@ impl BarStore {
     async fn facts(&self, symbol: &str) -> anyhow::Result<Vec<Fact>> {
         let horizon = self.horizon_ns();
         let venue_filter = match &self.venue {
-            Some(_) => "AND s.venue_id = (SELECT venue_id FROM venue_dim FINAL WHERE name = ? LIMIT 1)",
+            Some(_) => {
+                "AND s.venue_id = (SELECT venue_id FROM venue_dim FINAL WHERE name = ? LIMIT 1)"
+            }
             None => "",
         };
         let sql = format!(
@@ -264,7 +270,11 @@ impl BarStore {
         struct Tier {
             venue_id: i32,
         }
-        let list = ids.iter().map(ToString::to_string).collect::<Vec<_>>().join(",");
+        let list = ids
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
         let best: Option<Tier> = self
             .client
             .query(&format!("SELECT venue_id FROM venue_dim FINAL WHERE venue_id IN ({list}) ORDER BY quality_tier, venue_id LIMIT 1"))
@@ -280,13 +290,23 @@ impl BarStore {
     /// Backend failures.
     pub async fn resolve_instrument(&self, symbol: &str) -> anyhow::Result<Option<(i64, i32)>> {
         let facts = self.facts(symbol).await?;
-        Ok(facts.iter().max_by_key(|f| f.valid_from_ns).map(|f| (f.instrument.0, f.venue.0)))
+        Ok(facts
+            .iter()
+            .max_by_key(|f| f.valid_from_ns)
+            .map(|f| (f.instrument.0, f.venue.0)))
     }
 
     /// The core PIT read. `from`/`to` bound bar CLOSE times, `[from, to)`.
-    async fn read(&self, symbol: &str, period_secs: u32, from_close_ns: i64, to_close_ns: i64) -> anyhow::Result<Vec<LoadedBar>> {
+    async fn read(
+        &self,
+        symbol: &str,
+        period_secs: u32,
+        from_close_ns: i64,
+        to_close_ns: i64,
+    ) -> anyhow::Result<Vec<LoadedBar>> {
         let facts = self.facts(symbol).await?;
-        self.read_facts(&facts, period_secs, from_close_ns, to_close_ns).await
+        self.read_facts(&facts, period_secs, from_close_ns, to_close_ns)
+            .await
     }
 
     /// Bars of one surrogate `(instrument, venue)` whose close falls in
@@ -296,12 +316,36 @@ impl BarStore {
     ///
     /// # Errors
     /// Backend failures.
-    pub async fn load_bars_by_key(&self, instrument_id: i64, venue_id: i32, period_secs: u32, from_close_ns: i64, to_close_ns: i64) -> anyhow::Result<Vec<LoadedBar>> {
-        let fact = Fact { instrument: InstrumentKey(instrument_id), venue: VenueKey(venue_id), valid_from_ns: i64::MIN, valid_to_ns: i64::MAX };
-        self.read_facts(std::slice::from_ref(&fact), period_secs, from_close_ns, to_close_ns).await
+    pub async fn load_bars_by_key(
+        &self,
+        instrument_id: i64,
+        venue_id: i32,
+        period_secs: u32,
+        from_close_ns: i64,
+        to_close_ns: i64,
+    ) -> anyhow::Result<Vec<LoadedBar>> {
+        let fact = Fact {
+            instrument: InstrumentKey(instrument_id),
+            venue: VenueKey(venue_id),
+            valid_from_ns: i64::MIN,
+            valid_to_ns: i64::MAX,
+        };
+        self.read_facts(
+            std::slice::from_ref(&fact),
+            period_secs,
+            from_close_ns,
+            to_close_ns,
+        )
+        .await
     }
 
-    async fn read_facts(&self, facts: &[Fact], period_secs: u32, from_close_ns: i64, to_close_ns: i64) -> anyhow::Result<Vec<LoadedBar>> {
+    async fn read_facts(
+        &self,
+        facts: &[Fact],
+        period_secs: u32,
+        from_close_ns: i64,
+        to_close_ns: i64,
+    ) -> anyhow::Result<Vec<LoadedBar>> {
         if facts.is_empty() {
             return Ok(Vec::new());
         }
@@ -354,7 +398,11 @@ impl BarStore {
             let sql = if restated_dates.is_empty() {
                 fast.replace("{exclude}", "")
             } else {
-                let list = restated_dates.iter().map(|r| format!("'{}'", r.d)).collect::<Vec<_>>().join(",");
+                let list = restated_dates
+                    .iter()
+                    .map(|r| format!("'{}'", r.d))
+                    .collect::<Vec<_>>()
+                    .join(",");
                 format!(
                     "SELECT * FROM (
                        {fast_part}
@@ -409,8 +457,15 @@ impl BarStore {
     }
 
     /// Resolved bars whose close falls in `[from, to)`, ordered by time.
-    pub async fn load_bars(&self, instrument_id: &str, timeframe: Timeframe, from: DateTime<Utc>, to: DateTime<Utc>) -> anyhow::Result<Vec<LoadedBar>> {
-        self.read(instrument_id, period_of(timeframe)?, nanos(from), nanos(to)).await
+    pub async fn load_bars(
+        &self,
+        instrument_id: &str,
+        timeframe: Timeframe,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> anyhow::Result<Vec<LoadedBar>> {
+        self.read(instrument_id, period_of(timeframe)?, nanos(from), nanos(to))
+            .await
     }
 
     /// Bars rolled up from a finer stored timeframe into `bucket_seconds` candles.
@@ -423,7 +478,9 @@ impl BarStore {
         from: DateTime<Utc>,
         to: DateTime<Utc>,
     ) -> anyhow::Result<Vec<LoadedBar>> {
-        let bars = self.load_bars(instrument_id, base_timeframe, from, to).await?;
+        let bars = self
+            .load_bars(instrument_id, base_timeframe, from, to)
+            .await?;
         let bucket_ns = i64::from(bucket_seconds.max(1)) * 1_000_000_000;
         let mut out: Vec<LoadedBar> = Vec::new();
         for b in bars {
@@ -438,18 +495,29 @@ impl BarStore {
                     cur.knowledge_ns = cur.knowledge_ns.max(b.knowledge_ns);
                     cur.quality_flags |= b.quality_flags;
                 }
-                _ => out.push(LoadedBar { open_ns: start, ts_ns: start, ..b }),
+                _ => out.push(LoadedBar {
+                    open_ns: start,
+                    ts_ns: start,
+                    ..b
+                }),
             }
         }
         Ok(out)
     }
 
     /// Per-day distinct bar counts (by bar close date).
-    pub async fn daily_counts(&self, instrument_id: &str, timeframe: Timeframe, from: DateTime<Utc>, to: DateTime<Utc>) -> anyhow::Result<HashMap<NaiveDate, u64>> {
+    pub async fn daily_counts(
+        &self,
+        instrument_id: &str,
+        timeframe: Timeframe,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> anyhow::Result<HashMap<NaiveDate, u64>> {
         let bars = self.load_bars(instrument_id, timeframe, from, to).await?;
         let mut out: HashMap<NaiveDate, u64> = HashMap::new();
         for b in bars {
-            *out.entry(DateTime::from_timestamp_nanos(b.ts_ns).date_naive()).or_default() += 1;
+            *out.entry(DateTime::from_timestamp_nanos(b.ts_ns).date_naive())
+                .or_default() += 1;
         }
         Ok(out)
     }
@@ -525,7 +593,12 @@ impl BarStore {
     ///
     /// # Errors
     /// Backend failures.
-    pub async fn census_bars(&self, symbol: &str, venue: &str, period_secs: u32) -> anyhow::Result<Vec<dataplane::census::CensusBar>> {
+    pub async fn census_bars(
+        &self,
+        symbol: &str,
+        venue: &str,
+        period_secs: u32,
+    ) -> anyhow::Result<Vec<dataplane::census::CensusBar>> {
         #[derive(Row, Deserialize)]
         struct CensusRow {
             open_ns: i64,
@@ -566,7 +639,11 @@ impl BarStore {
     }
 
     /// Close time of the latest visible bar.
-    pub async fn last_bar_time(&self, instrument_id: &str, timeframe: Timeframe) -> anyhow::Result<Option<DateTime<Utc>>> {
+    pub async fn last_bar_time(
+        &self,
+        instrument_id: &str,
+        timeframe: Timeframe,
+    ) -> anyhow::Result<Option<DateTime<Utc>>> {
         let facts = self.facts(instrument_id).await?;
         if facts.is_empty() {
             return Ok(None);
@@ -596,11 +673,16 @@ impl BarStore {
                 best = Some(best.map_or(row.open_ns, |b| b.max(row.open_ns)));
             }
         }
-        Ok(best.map(|open| DateTime::from_timestamp_nanos(open + i64::from(period) * 1_000_000_000)))
+        Ok(best
+            .map(|open| DateTime::from_timestamp_nanos(open + i64::from(period) * 1_000_000_000)))
     }
 
     /// Data-quality profile for one symbol and timeframe at the horizon.
-    pub async fn quality_profile(&self, instrument_id: &str, timeframe: Timeframe) -> anyhow::Result<QualityProfile> {
+    pub async fn quality_profile(
+        &self,
+        instrument_id: &str,
+        timeframe: Timeframe,
+    ) -> anyhow::Result<QualityProfile> {
         let facts = self.facts(instrument_id).await?;
         let period = period_of(timeframe)?;
         let horizon = self.horizon_ns();
@@ -637,7 +719,11 @@ impl BarStore {
             if q.rows == 0 {
                 continue;
             }
-            p.first_s = if p.rows == 0 { q.first_s } else { p.first_s.min(q.first_s) };
+            p.first_s = if p.rows == 0 {
+                q.first_s
+            } else {
+                p.first_s.min(q.first_s)
+            };
             p.last_s = p.last_s.max(q.last_s);
             p.rows += q.rows;
             p.distinct_bars += q.distinct_bars;
@@ -669,29 +755,57 @@ impl BarStore {
         timeframe: Timeframe,
         bars: &[CollectedBar],
     ) -> anyhow::Result<()> {
-        self.write_collected(instrument_id, venue_id, source, timeframe, bars).await.map(|_| ())
+        self.write_collected(instrument_id, venue_id, source, timeframe, bars)
+            .await
+            .map(|_| ())
     }
 
     /// As [`Self::insert_collected`], returning what happened.
     ///
     /// # Errors
     /// See [`Self::insert_collected`].
-    pub async fn write_collected(&self, symbol: &str, venue: &str, source: &str, timeframe: Timeframe, bars: &[CollectedBar]) -> anyhow::Result<WriteReport> {
+    pub async fn write_collected(
+        &self,
+        symbol: &str,
+        venue: &str,
+        source: &str,
+        timeframe: Timeframe,
+        bars: &[CollectedBar],
+    ) -> anyhow::Result<WriteReport> {
         let mut report = WriteReport::default();
         if bars.is_empty() {
             return Ok(report);
         }
-        let identity = storage::identity::installed()
-            .ok_or_else(|| anyhow::anyhow!("bar writes require an installed identity resolver (storage::identity::install)"))?;
+        let identity = storage::identity::installed().ok_or_else(|| {
+            anyhow::anyhow!(
+                "bar writes require an installed identity resolver (storage::identity::install)"
+            )
+        })?;
         let period = period_of(timeframe)?;
         let period_ns = i64::from(period) * 1_000_000_000;
-        let first_open = bars.iter().map(|b| nanos(b.available_time) - period_ns).min().unwrap_or(0);
-        let last_open = bars.iter().map(|b| nanos(b.available_time) - period_ns).max().unwrap_or(0);
+        let first_open = bars
+            .iter()
+            .map(|b| nanos(b.available_time) - period_ns)
+            .min()
+            .unwrap_or(0);
+        let last_open = bars
+            .iter()
+            .map(|b| nanos(b.available_time) - period_ns)
+            .max()
+            .unwrap_or(0);
         let (instrument, venue_key) = identity
-            .ensure_instrument(venue, symbol, asset_class_guess(symbol), DateTime::from_timestamp_nanos(first_open))
+            .ensure_instrument(
+                venue,
+                symbol,
+                asset_class_guess(symbol),
+                DateTime::from_timestamp_nanos(first_open),
+            )
             .await?;
         let src = identity.source(source).await?;
-        let lag = VendorLag { source_id: src.source_id, lag: src.declared_vendor_lag };
+        let lag = VendorLag {
+            source_id: src.source_id,
+            lag: src.declared_vendor_lag,
+        };
         let ingest = Utc::now();
 
         // Existing cells in range, for idempotence and restatement detection.
@@ -711,13 +825,17 @@ impl BarStore {
             ))
             .fetch_all()
             .await?;
-        let existing: HashMap<i64, (String, u32)> = existing.into_iter().map(|c| (c.open_ns, (c.values, c.max_rev))).collect();
+        let existing: HashMap<i64, (String, u32)> = existing
+            .into_iter()
+            .map(|c| (c.open_ns, (c.values, c.max_rev)))
+            .collect();
 
         let mut rows = Vec::with_capacity(bars.len());
         let mut restated_dates: HashMap<NaiveDate, (u32, i64)> = HashMap::new();
         for b in bars {
             let open_time = b.available_time - Duration::nanoseconds(period_ns);
-            let parse = |s: &str| -> anyhow::Result<Decimal> { Ok(numeric(s)?.parse::<Decimal>()?) };
+            let parse =
+                |s: &str| -> anyhow::Result<Decimal> { Ok(numeric(s)?.parse::<Decimal>()?) };
             let mut cb = CanonicalBar {
                 instrument_id: instrument,
                 venue_id: venue_key,
@@ -739,14 +857,25 @@ impl BarStore {
                 revision_seq: 0,
                 source_id: src.source_id,
             };
-            let provenance = if src.live { bar::provenance_for(&cb, Duration::seconds(LIVE_TOLERANCE_SECS)) } else { KnowledgeProvenance::Backfilled };
+            let provenance = if src.live {
+                bar::provenance_for(&cb, Duration::seconds(LIVE_TOLERANCE_SECS))
+            } else {
+                KnowledgeProvenance::Backfilled
+            };
             bar::stamp_knowledge_time(&mut cb, provenance, &lag);
             if bar::validate(&cb).is_err() {
                 report.rejected += 1;
                 continue;
             }
             let open_ns = nanos(cb.event_time);
-            let values = format!("{}|{}|{}|{}|{}", fmt18(cb.open), fmt18(cb.high), fmt18(cb.low), fmt18(cb.close), fmt18(cb.volume));
+            let values = format!(
+                "{}|{}|{}|{}|{}",
+                fmt18(cb.open),
+                fmt18(cb.high),
+                fmt18(cb.low),
+                fmt18(cb.close),
+                fmt18(cb.volume)
+            );
             if let Some((prev, max_rev)) = existing.get(&open_ns) {
                 if same_values(prev, &values) {
                     report.unchanged += 1;
@@ -768,7 +897,9 @@ impl BarStore {
                 if cb.knowledge_time < cb.ingest_time {
                     cb.knowledge_time = cb.ingest_time;
                 }
-                let e = restated_dates.entry(cb.event_time.date_naive()).or_insert((0, 0));
+                let e = restated_dates
+                    .entry(cb.event_time.date_naive())
+                    .or_insert((0, 0));
                 e.0 += 1;
                 e.1 = e.1.max(nanos(cb.knowledge_time));
                 report.restated += 1;
@@ -833,7 +964,8 @@ fn nanos(t: DateTime<Utc>) -> i64 {
 }
 
 fn period_of(tf: Timeframe) -> anyhow::Result<u32> {
-    u32::try_from(tf.seconds()).map_err(|_| anyhow::anyhow!("timeframe {} does not fit in u32 seconds", tf.key()))
+    u32::try_from(tf.seconds())
+        .map_err(|_| anyhow::anyhow!("timeframe {} does not fit in u32 seconds", tf.key()))
 }
 
 fn timeframe_key(period_secs: u32) -> String {
@@ -872,15 +1004,26 @@ fn fmt18(d: Decimal) -> String {
 
 /// ClickHouse renders `Decimal(38,18)` with trailing zeros trimmed; compare numerically.
 fn same_values(stored: &str, incoming: &str) -> bool {
-    let a: Vec<Option<Decimal>> = stored.split('|').map(|s| s.parse::<Decimal>().ok()).collect();
-    let b: Vec<Option<Decimal>> = incoming.split('|').map(|s| s.parse::<Decimal>().ok()).collect();
-    a.len() == b.len() && a.iter().zip(&b).all(|(x, y)| matches!((x, y), (Some(x), Some(y)) if x.normalize() == y.normalize()))
+    let a: Vec<Option<Decimal>> = stored
+        .split('|')
+        .map(|s| s.parse::<Decimal>().ok())
+        .collect();
+    let b: Vec<Option<Decimal>> = incoming
+        .split('|')
+        .map(|s| s.parse::<Decimal>().ok())
+        .collect();
+    a.len() == b.len()
+        && a.iter()
+            .zip(&b)
+            .all(|(x, y)| matches!((x, y), (Some(x), Some(y)) if x.normalize() == y.normalize()))
 }
 
 /// A plain decimal literal from the collector boundary — never an expression.
 fn numeric(s: &str) -> anyhow::Result<&str> {
     let ok = !s.is_empty()
-        && s.chars().enumerate().all(|(i, c)| c.is_ascii_digit() || c == '.' || (i == 0 && c == '-'))
+        && s.chars()
+            .enumerate()
+            .all(|(i, c)| c.is_ascii_digit() || c == '.' || (i == 0 && c == '-'))
         && s.chars().filter(|&c| c == '.').count() <= 1;
     anyhow::ensure!(ok, "invalid numeric literal from collector: {s:?}");
     Ok(s)
@@ -894,15 +1037,24 @@ mod tests {
     #[test]
     fn mantissa_is_value_times_1e18() {
         assert_eq!(mantissa(dec!(1)).unwrap(), 1_000_000_000_000_000_000);
-        assert_eq!(mantissa(dec!(64449.5)).unwrap(), 64_449_500_000_000_000_000_000);
+        assert_eq!(
+            mantissa(dec!(64449.5)).unwrap(),
+            64_449_500_000_000_000_000_000
+        );
         assert_eq!(mantissa(dec!(0.00000001)).unwrap(), 10_000_000_000);
         assert_eq!(mantissa(dec!(-2.5)).unwrap(), -2_500_000_000_000_000_000);
     }
 
     #[test]
     fn values_compare_numerically() {
-        assert!(same_values("100|101.5|99|100.25|3", "100.000|101.50|99.0|100.250|3.0"));
-        assert!(!same_values("100|101.5|99|100.25|3", "100|101.5|99|100.26|3"));
+        assert!(same_values(
+            "100|101.5|99|100.25|3",
+            "100.000|101.50|99.0|100.250|3.0"
+        ));
+        assert!(!same_values(
+            "100|101.5|99|100.25|3",
+            "100|101.5|99|100.26|3"
+        ));
     }
 
     #[test]
