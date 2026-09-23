@@ -555,7 +555,10 @@ move to `DONE` below.
 - **S-6.6** — a fresh instance of this file's own named defect shape, one day old:
   `d29f5c7` (09-21) deleted Pause/Resume/Escalate from the frontend because the backend
   404'd on all three; `831b925` (09-22) mounted `pause` and `resume`. The frontend still
-  says they're gone and the backend now answers to two of the three with nobody calling.
+  said they were gone while the backend answered to two of the three with nobody calling.
+  **This one was closed the same day it was found** — see S-6.6 below. It stays `PARTIAL`
+  on Escalate, which is still genuinely unmounted, and on the "frontier run and local run"
+  half, which needs a live run nobody can reach from here.
 - **S-6.22** — both of its two remaining named clauses (browser-notification opt-in with
   quiet hours; an `aria-live` region for new-approval/question/run-finished) were closed by
   `e0f9c3f` (09-22), which this task's own note was never updated to reflect. The one
@@ -799,14 +802,33 @@ do).
 ## Working with the agent
 
 ### S-6.6 The controls row and the keyboard map — M
-`PARTIAL` 2026-09-16, re-audited 2026-09-23 — `ControlsRow.tsx` (174 lines), with the
-keyboard map exercised by `__tests__/controls-and-replay.test.tsx`. **A fresh instance of
-this file's own defect shape, one day old:** `d29f5c7` (2026-09-21) deleted Pause / Resume
-/ Escalate from this component because the backend answered 404 for all three;
-`831b925` (2026-09-22) mounted `POST /api/agent/runs/{id}/pause` and `…/resume` the very
-next day. The backend capability now exists with zero frontend caller —
-`api/desk.ts:1749` still says "pause, resume and escalate are gone," and all three still
-answer 404 from the frontend's perspective because nothing calls the two that now exist.
+`PARTIAL` 2026-09-16, re-audited 2026-09-23, **and the gap the audit found was closed the
+same day** — `ControlsRow.tsx`, with the keyboard map exercised by
+`__tests__/controls-and-replay.test.tsx`.
+
+**What the audit found:** a fresh instance of this file's own defect shape, one day old.
+`d29f5c7` (2026-09-21) deleted Pause / Resume / Escalate from this component because the
+backend answered 404 for all three; `831b925` (2026-09-22) mounted `POST
+/api/agent/runs/{id}/pause` and `…/resume` the very next day, and nothing called them.
+
+**Closed 2026-09-23.** Pause and Resume are wired again, and the wiring is shaped by why
+they were deleted: the old caller set a local `paused` flag *before* the request, so the
+header read "paused" over a run still spending trials. The state now comes from `GET
+/api/agent/runs/{id}` (`paused`, `paused_until`, `pause_on_expiry` are on every run read,
+not only on the pause reply — the backend landed that way deliberately), polled while the
+run is live, so there is no local flag to be wrong. `paused: null` — a run this replica is
+not driving — is a **third state**, not a synonym for `false`: it draws neither button and
+leaves `space` unbound, because a pause posted into it answers 409. The bounded window is
+stated in both tooltips and carried as a deadline label beside Resume, because a pause that
+silently becomes a stop is the same class of false reading as one that never happened.
+
+**What keeps it `PARTIAL`:** the acceptance says *every* control works from the keyboard
+mid-call, and this task's own body names **Escalate** among them. `…/runs/{id}/escalate` is
+still unmounted, so Escalate is still absent and still should be. The second half — "on a
+frontier run and on a local run" — is also still unverified: the desk is behind a login, the
+control only renders for a live run, and the platform binary on :7080 predates these routes,
+so what is proven is DOM-level component behaviour (609 frontend tests, four of them new
+covering all three pause states and both keyboard branches), not a pause reaching a real run.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
