@@ -28,3 +28,4 @@ hex = "0.4"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+rust_decimal_macros = { workspace = true }
