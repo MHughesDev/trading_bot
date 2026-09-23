@@ -36,9 +36,20 @@
 //!
 //! # The scope this build covers, named rather than implied
 //!
-//! AGENT-014 §11's phases 1 and 2's selection half: charter seeds and user
-//! items (sources 4.1, 4.2), `replenish = false`, and the scored agenda of §5
-//! with its forced exploration share and its decision row (S-11.3).
+//! AGENT-014 §11's phases 1–3: the scored agenda of §5 with its forced
+//! exploration share and its decision row (S-11.3), all nine agenda sources
+//! that have a store (§4), the three couplings (§6.6, §7 rows 8–10), the
+//! endless setting (§4.9), the lease (§6.3) and the endings (§7 row 3).
+//!
+//! Phase 11 closed the shape this file was the worst example of.
+//! `crates/research-session` reached 276 passing tests with **five** modules
+//! that nothing called: `sources::ingest`, `couplings::evaluate`,
+//! `charter::admit`, `replenish::on_drain` and the whole of `execute`. The
+//! modules were right, the driver's tests passed, and the controls did not
+//! exist. `tests/the_session_driver_calls_the_modules_it_was_given.rs` is what
+//! keeps that from happening again to the next one, and its `UNWIRED` list is
+//! the honest half: a decision with no caller here names the symbol that is
+//! missing.
 //!
 //! # What the scorer can measure here, and what it cannot
 //!
@@ -103,18 +114,54 @@
 //! subjects (see `routes::desk_charter`), so most seeded items reach here
 //! without one.
 //!
-//! # The four modules this driver calls, and what each call costs it
+//! # The nine decisions this driver calls, and what each call costs it
 //!
-//! `research_session` holds four decisions that had no caller until this
-//! build. They are wired in the order §3's loop performs them, and each is a
-//! decision made there and a *query* made here — which is the whole division:
+//! Each is a decision made in `research_session` and a *query* made here, which
+//! is the whole division: the module says what the rule is and this file says
+//! what the database holds. Wired in the order §3's loop performs them.
 //!
-//! * **[`research_session::schedule`]** — before anything is claimed.
-//!   [`OpenHours::parse`] is fallible and there is no path to UTC, so a session
-//!   whose charter names a zone the platform does not know stops the driver by
-//!   name rather than running in a fence that silently moved.
-//!   [`Openness::Open::closes_at`] is the drain boundary and rides on
-//!   `run_started`.
+//! * **[`research_session::couplings`]** — first, before the calendar, because
+//!   a kill switch tripping is about the world and a window is only about the
+//!   session. [`SessionWorker::signals`] fills three [`Observed`] slots and
+//!   decides nothing: an unread `monitor.kill_switch` becomes
+//!   `Verdict::CannotDecide`, which holds the iteration **without** appending a
+//!   pause a human would then have to clear. §8's frontier-only rule reaches
+//!   production through [`health_of`], and §6.6's breaker through
+//!   [`child_end`] — where an unattributed failure is its own variant, because
+//!   a breaker opened on one would name no tool to exclude.
+//! * **[`research_session::execute::plan`]** — §7 rows 1–2 and 8–10 as one
+//!   ordered answer. Every [`HoldReason`] reaches its own arm in
+//!   [`SessionWorker::hold`], and the split between the three that are
+//!   transitions and the four that are failed iterations is
+//!   [`HoldReason::is_a_transition`]'s rather than this file's.
+//!   `Step::Drain` and `Step::Resume` are **recorded and not performed**; see
+//!   below.
+//! * **[`research_session::schedule`]** — [`OpenHours::parse`] is fallible and
+//!   there is no path to UTC, so a session whose charter names a zone the
+//!   platform does not know stops the driver by name rather than running in a
+//!   fence that silently moved. [`Openness::Open::closes_at`] is the drain
+//!   boundary and rides on `run_started`.
+//! * **[`research_session::sources`]** — §4.3–4.7 on every iteration, because
+//!   §4's own word for them is *subscriptions* and a subscription nobody polls
+//!   is a source that does not exist. [`SessionWorker::world`] fills the reads;
+//!   the two feeds this platform has no store for arrive empty and are named on
+//!   the log rather than in a comment, so a subscription that was asked nothing
+//!   does not look like one that fired and said no.
+//! * **[`research_session::replenish::on_drain`]** — §7 rows 4–5. A drained
+//!   agenda is an ending, a wait or a survey, and which of the three is not
+//!   decided here. Endless means replenish: the budget still ends it.
+//! * **[`research_session::execute::stop`]** — §7 row 3. `max_runs`, the total
+//!   budget and the charter's own `stop_when`, which had been a five-word
+//!   vocabulary with a `Serialize` and **no reader** since it was written. A
+//!   condition nothing can answer lands in `not_evaluable` and is written down
+//!   once, because a condition that cannot fire and one that has not fired look
+//!   identical on a board.
+//! * **[`research_session::execute::lease`]** — §6.3, before anything is
+//!   claimed. It **refuses** rather than guessing, and the refusals are the
+//!   feature: today a blank `max_trials` form field stores `trials_total = 0`,
+//!   the tier's per-task cap is in dollars and there is no per-day figure in
+//!   trials, so nothing bounds the lease and no child starts. An estimate is
+//!   not a ceiling.
 //! * **[`research_session::harvest`]** — on every finished run. The ordering is
 //!   load-bearing and [`after_run`] is the function that holds it: every offer
 //!   is planned and written *before* the item is settled, because
@@ -128,9 +175,9 @@
 //!   `agent_lifecycle.hypothesis`, `agent_memory.entry` and the agenda — not a
 //!   replay.
 //! * **[`research_session::digest`]** — every `review_every`, and again on
-//!   stall and on complete. [`Folded::last_digest_seq`] and the log's own
-//!   `seq` are the cadence; nothing consults a clock to decide whether one is
-//!   due.
+//!   stall, on pause and on complete. [`Folded::last_digest_seq`] and the log's
+//!   own `seq` are the cadence; nothing consults a clock to decide whether one
+//!   is due.
 //!
 //! # Three measurements this platform does not record, named rather than faked
 //!
@@ -159,14 +206,43 @@
 //!
 //! # Still not here, and not pretended to be
 //!
-//! Budget leases (§6.3) and the per-run drain (§7 row 1's "suspend at the
-//! boundary"): the driver refuses to *claim* outside a window and records the
-//! boundary a live child is running past, but AGENT-010 §10.1's suspend is a
-//! property of the run loop and does not exist. The **day budget** (§7 row 2)
-//! is denominated in dollars and there is no per-run dollar to subtract, so
-//! nothing here claims to enforce it — a budget bar that counted nothing would
-//! be a control the operator would believe in. Sources 4.4–4.7 and 4.9, and
-//! §6.6's session-level `platform_defect` breaker, are their own tasks.
+//! * **The per-run drain (§7 row 1, §7 rows 8 and 10).** `plan` asks for it and
+//!   [`SessionWorker::record_unperformable`] writes down that it did not happen,
+//!   naming why: AGENT-010 §10.1's suspend is a property of the run loop and
+//!   there is no column, no status word and no signal that pauses a turn
+//!   mid-step. The child is **not** cancelled instead — it may already have
+//!   spent counted trials and INV-17 forbids abandoning them unsettled, and a
+//!   cancel is not a suspend because a suspend resumes. What this driver can
+//!   honestly promise is that it claims nothing new past the boundary. Because
+//!   nothing suspends, `Situation::suspended` is always empty and `Step::Resume`
+//!   is unreachable; both are wired so the day the suspend lands, the ordering
+//!   rule is already in place rather than discovered.
+//! * **The day budget as a number (§7 row 2).** `usd_per_day` is the only
+//!   per-day figure this platform holds and a run is metered in trials, so
+//!   [`execute::day_bound`] answers `NotDenominated` and the gate lets the
+//!   session claim. That is not silent: [`execute::lease`] records the same gap
+//!   in `unbounded_by` on every lease it issues, so the fact that nothing
+//!   bounded the day rides on the `run_started` event and into the digest.
+//! * **`charter::admit`, and the frontier rule's other half.** The readable
+//!   half of §8 — frontier-only — is enforced, in [`health_of`]. The rest needs
+//!   a `judgement` pass rate per (profile, workflow) and nothing on this
+//!   platform records one: `eval_scorecards` carries `profile_id` and `tier`,
+//!   but its `metrics` are a harness-version aggregate. Handed an empty map,
+//!   `admit` refuses every charter ever written — a refusal manufactured by the
+//!   absence of the reader. Its call site is session creation in any case, which
+//!   is not this file.
+//! * **`replenish::absorb` and §4.9's value estimates.** A survey's proposals
+//!   reach the agenda through the ordinary harvest, as the `open_question`
+//!   entries the run wrote, so the questions are not lost. The estimates are:
+//!   there is no per-run store of a survey's proposals and no column for an
+//!   estimate, and `Replenished::value_estimates` names the three things that
+//!   would have to exist.
+//! * **§12.4's concurrency arithmetic.** A `Lease` is sealed to
+//!   [`execute::lease`] and persisted nowhere, so a sibling child's committed
+//!   lease cannot be counted. This driver starts one child per iteration and
+//!   awaits it, which makes `in_flight` genuinely empty — and when the plan
+//!   offers a second slot while a child is already running, the lease is
+//!   **refused** rather than sized against a total that is missing one.
 
 // `JobError` is the job service's wire type — see `gate_worker` for why this is
 // allowed rather than boxed.
@@ -179,15 +255,25 @@ use chrono::Utc;
 use jobs::{JobContext, JobError, JobKind, JobOutput, Progress, Worker};
 use research_session::{
     agenda::{AgendaItem, DedupeLayer, Insert, ItemStatus, Source},
-    charter::{ReviewEvery, Schedule},
-    digest::{self, Entry, NegativeRecord, Pause, Period, RunRecord, Upcoming},
+    charter::{ReviewEvery, Schedule, SessionBudget},
+    couplings::{self, ChildEnd, DefectFailure, KillSwitch, Observed, ProfileHealth, Signals},
+    digest::{self, Entry, NegativeRecord, Pause, Period, RunRecord, SpendUnit, Upcoming},
+    execute::{self, Bound, DrainAt, HoldReason, LeaseRequest, Meter, Situation, Stopping},
     fold::EventKind,
     harvest::{
         self, AwaitingHuman, Harvest, NextQuestion, OpenQuestion, Ring, RunHarvest, RunProposal,
-        SkipReason,
+        SkipReason, Skipped,
     },
+    replenish::{self, Drain},
     schedule::{OpenHours, Openness},
-    select::{self, Inputs, Scored, Signal},
+    select::{self, Inputs, Provenance, Scored, Signal},
+    sources::{
+        self,
+        ledger::{Measured, NegativeRow},
+        memory::{FindingRow, QuestionRow},
+        observe::{Observation, Raised, MONITOR_KINDS},
+        World,
+    },
     stall::{self, Diagnosis, FinishedRun, Precheck},
     DigestInput, Folded, ResearchSession, Score,
 };
@@ -232,6 +318,30 @@ const MAX_ITERATIONS: u32 = 64;
 /// that a build which later measures dollars has to say so here rather than
 /// inheriting a word somebody wrote in 2026.
 const SPEND_UNIT: &str = "trials";
+
+/// The same statement as a type, for the modules that take one.
+///
+/// [`SPEND_UNIT`] is the word the digest row stores and this is the value
+/// `execute` meters a lease in. They are two spellings of one fact and
+/// `the_stored_spend_unit_is_the_unit_the_lease_is_metered_in` is what keeps
+/// them from drifting — a driver whose lease is priced in trials and whose
+/// digest says dollars would be a budget nobody could check.
+const SPEND_METER: SpendUnit = SpendUnit::Trials;
+
+/// How many of the session's own children the defect breaker looks back over.
+///
+/// A ceiling on the read, not on the rule: [`couplings::DefectBreaker`] reads
+/// the **tail** of this list, so a longer history cannot change its answer.
+const CHILDREN_LOOKBACK: i64 = 200;
+
+/// How many rows one subscription pull reads from memory.
+///
+/// Every candidate goes through layer one, so a larger slice costs a longer
+/// dedupe rather than a bigger agenda.
+const WORLD_LOOKBACK: i64 = 200;
+
+/// How far back the observation subscription (§4.7) looks at `monitor.events`.
+const OBSERVATION_DAYS: i64 = 30;
 
 /// The battery verdict that means a run went ahead over the dedupe's objection.
 ///
@@ -969,6 +1079,517 @@ impl SessionWorker {
         }
     }
 
+    // ── §7 rows 8–10: the couplings (S-11.7) ────────────────────────────────
+
+    /// What the driver measured this iteration about the world outside the
+    /// session.
+    ///
+    /// Three reads and no rules: every decision over these is
+    /// [`couplings::evaluate`]'s. What this function is careful about is the
+    /// difference between a fact and a failed read — an [`Observed::Unknown`]
+    /// here becomes [`Verdict::CannotDecide`] there, which holds the iteration
+    /// without appending a pause a human would have to clear.
+    async fn signals(&self, session: &ResearchSession) -> Result<Signals, JobError> {
+        Ok(Signals {
+            kill_switch: self.kill_switch().await,
+            profile: session.tier.clone(),
+            health: self.profile_health(session),
+            children: self.children(session.id).await?,
+        })
+    }
+
+    /// COMP-007 §6's global halt, read from the row the monitor writes.
+    ///
+    /// `routes::lifecycle::kill_switch_tripped` answers the same question with
+    /// a `bool` and reads a failed query as **tripped**, because a `bool` has
+    /// nowhere else to put it. This has somewhere: the direction is the same —
+    /// an unread switch claims nothing — but the session is not recorded as
+    /// paused for a switch nobody read.
+    ///
+    /// No row is a platform that has never tripped it, which is the reading
+    /// `kill_switch_tripped` gives and is a measurement rather than an absence:
+    /// `0075` inserts nothing until something halts.
+    async fn kill_switch(&self) -> Observed<KillSwitch> {
+        let row: Result<Option<String>, _> = sqlx::query_scalar(
+            "SELECT state FROM monitor.kill_switch WHERE scope = 'global'
+              ORDER BY updated_at DESC LIMIT 1",
+        )
+        .fetch_optional(&self.pg)
+        .await;
+        kill_switch_from(row.map_err(|e| e.to_string()))
+    }
+
+    /// The health of the profile this session runs on, and §8's frontier rule.
+    ///
+    /// Three branches, and the middle one is AGENT-014 §8 reaching production:
+    /// a **continuous** session on a non-frontier tier is paused, and
+    /// [`couplings::PauseReason::Tier`]'s own sentence is the one that says why
+    /// — *"continuous research runs on a measured frontier profile and this one
+    /// is not one"*. A bounded session is untouched by it, because §8's rule is
+    /// about being left alone with a budget over days.
+    ///
+    /// `Measured` is read off the profile's presence in the validated
+    /// [`harness::ProfileSet`] rather than off a scorecard, because **this
+    /// platform records no per-profile scorecard currency**: `eval_scorecards`
+    /// carries `profile_id` and `tier` but its `metrics` are a harness-version
+    /// aggregate, not a per-profile judgement. That gap is what stops
+    /// [`research_session::charter::admit`] being wired here at all; see the
+    /// module header.
+    fn profile_health(&self, session: &ResearchSession) -> Observed<ProfileHealth> {
+        health_of(self.profiles.get(&session.tier).map(|p| p.tier), session.continuous)
+    }
+
+    /// The session's finished children, oldest first, as §6.6 reads them.
+    ///
+    /// The defect half is a `platform_defect` memory entry naming the run: its
+    /// `subject` is the platform component, which is the tool the breaker would
+    /// exclude. A child that ended `failed` or `fenced` with **no** such entry
+    /// is [`DefectFailure::unattributed`] — it did not conclude and nobody said
+    /// what broke — and that variant deliberately cannot extend a streak and
+    /// does break one.
+    ///
+    /// The terminal test is `finished_at IS NOT NULL`, not a status equality.
+    /// `agent_runs.status` has seven terminal words and an eighth would be
+    /// silently read as "still running" by a list written here.
+    async fn children(&self, session_id: Uuid) -> Result<Vec<ChildEnd>, JobError> {
+        let rows: Vec<(Uuid, Uuid, String, Option<String>)> = sqlx::query_as(
+            "SELECT r.run_id, r.agenda_item_id, r.status, d.subject
+               FROM agent_runs r
+               LEFT JOIN LATERAL (
+                    SELECT subject FROM agent_memory.entry
+                     WHERE prov_run_id = r.run_id::text AND kind = 'platform_defect'
+                     ORDER BY created_at LIMIT 1
+               ) d ON TRUE
+              WHERE r.session_id = $1 AND r.agenda_item_id IS NOT NULL
+                AND r.finished_at IS NOT NULL
+              ORDER BY r.finished_at, r.run_id
+              LIMIT $2",
+        )
+        .bind(session_id)
+        .bind(CHILDREN_LOOKBACK)
+        .fetch_all(&self.pg)
+        .await
+        .map_err(|e| Self::infra("reading the session's children", e))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(run, item, status, tool)| child_end(run, item, &status, tool.as_deref()))
+            .collect())
+    }
+
+    // ── §6.2–§6.4 and §7 rows 1–3: the budget (S-11.9) ──────────────────────
+
+    /// §2.1's day budget as a bound on a lease metered in [`SPEND_METER`].
+    fn day_cap(budget: &SessionBudget) -> Observed<Bound> {
+        match execute::day_bound(budget, SPEND_METER) {
+            Ok(b) => Observed::Is(b),
+            Err(e) => Observed::unknown(&format!(
+                "`research_sessions.budget.usd_per_day` is not a number a meter can hold: {e}"
+            )),
+        }
+    }
+
+    /// §2.1's total budget as a bound on a lease metered in [`SPEND_METER`].
+    fn total_cap(budget: &SessionBudget) -> Observed<Bound> {
+        match execute::total_bound(budget, SPEND_METER) {
+            Ok(b) => Observed::Is(b),
+            Err(e) => Observed::unknown(&format!(
+                "`research_sessions.budget.trials_total` is not a number a meter can hold: {e}"
+            )),
+        }
+    }
+
+    /// What this session has spent, in trials, or a statement that nobody knows.
+    ///
+    /// **A finished run with a NULL `trials_spent` makes the answer
+    /// `Unknown`.** `SUM` skips nulls, so the sum of a session with one
+    /// unmeasured run is an *understatement* — and an understated spend against
+    /// a ceiling is the unsafe direction: it buys a child with budget nobody
+    /// measured. [`execute::lease`] turns the `Unknown` into
+    /// [`execute::LeaseRefusal::NotRead`] and starts nothing, which is 0062's
+    /// rule applied where it bites hardest.
+    ///
+    /// The stall detector reads the same nulls the other way — it *excludes*
+    /// the run and carries on — and the two are not in conflict: there a
+    /// missing cost narrows a window, here it would license a spend.
+    ///
+    /// `today_only` cuts the day at the **database server's** midnight, not at
+    /// the charter's zone. That is wrong for a schedule in `Asia/Tokyo` and it
+    /// is inert today: `day_bound` answers `NotDenominated` for a lease in
+    /// trials, and [`execute::lease`] skips `spent_today` entirely for a cap
+    /// that does not exist in the unit. Written down rather than left as a
+    /// surprise for whoever adds a per-day trial budget — at which point the
+    /// boundary has to come from [`OpenHours`], which is the only thing here
+    /// that knows what zone the session lives in.
+    async fn spent(&self, session_id: Uuid, today_only: bool) -> Observed<Meter> {
+        let row: Result<Option<(i64, i64)>, _> = sqlx::query_as(
+            "SELECT COALESCE(SUM(trials_spent), 0)::bigint AS spent,
+                    COUNT(*) FILTER (WHERE trials_spent IS NULL)::bigint AS unmeasured
+               FROM agent_runs
+              WHERE session_id = $1 AND finished_at IS NOT NULL
+                AND (NOT $2 OR finished_at >= date_trunc('day', now()))",
+        )
+        .bind(session_id)
+        .bind(today_only)
+        .fetch_optional(&self.pg)
+        .await;
+        spent_from(row.ok().flatten(), today_only)
+    }
+
+    /// The runs of this session that are still going.
+    ///
+    /// Read from the run rows rather than from `Folded::running`, because the
+    /// fold's map says which items a `run_started` was written for and this
+    /// question is about what is burning budget right now — a child whose
+    /// driver died has both.
+    async fn live_children(&self, session_id: Uuid) -> Result<Vec<Uuid>, JobError> {
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            "SELECT run_id FROM agent_runs
+              WHERE session_id = $1 AND finished_at IS NULL
+                AND status = ANY($2)
+              ORDER BY created_at",
+        )
+        .bind(session_id)
+        .bind(crate::agent::conversations::ACTIVE_RUN_STATES)
+        .fetch_all(&self.pg)
+        .await
+        .map_err(|e| Self::infra("reading the session's live children", e))?;
+        Ok(rows.into_iter().map(|(id,)| id).collect())
+    }
+
+    // ── §4.3–§4.7: the subscriptions (S-11.10) ──────────────────────────────
+
+    /// Everything the five subscriptions read, in one place.
+    ///
+    /// Two of §4's feeds have no store on this platform and arrive empty rather
+    /// than invented. They are named on the `note` the ingest writes, not in a
+    /// comment, so a human reading the log can see which subscriptions were
+    /// asked nothing:
+    ///
+    /// * **contradiction pairs (§4.5)** — `agent_runs.contradictions_surfaced`
+    ///   is a *count*; the pair itself is written nowhere, and
+    ///   `agent_memory.entry.conflicts_with` is a list on one entry rather than
+    ///   a resolved pair with a question;
+    /// * **data coverage (§4.4)** — [`Measured::data_coverage_end`] wants "the
+    ///   ISO date the platform's data for this subject now reaches", which lives
+    ///   in ClickHouse and not behind this pool. Absent, every
+    ///   `insufficient_data` retry answers [`sources::Fired::NotEvaluable`],
+    ///   which is the whole point of the third value: the condition is on the
+    ///   log as unanswerable rather than as a measured no.
+    ///
+    /// Regime flips and coverage extensions (§4.7's other two observations) are
+    /// absent for the same reason and by the same rule.
+    async fn world(&self, user_id: Uuid, agenda: &[AgendaItem]) -> Result<World, JobError> {
+        let opened: Vec<(String, String, String, Value)> = sqlx::query_as(
+            "SELECT entry_id, claim, subject, extra FROM agent_memory.entry
+              WHERE user_id = $1 AND kind = 'open_question' AND NOT archived
+              ORDER BY created_at DESC LIMIT $2",
+        )
+        .bind(user_id)
+        .bind(WORLD_LOOKBACK)
+        .fetch_all(&self.pg)
+        .await
+        .map_err(|e| Self::infra("reading open questions for the subscriptions", e))?;
+        let open_questions = opened
+            .into_iter()
+            .map(|(id, claim, subject, extra)| {
+                let q = QuestionRow::new(&id, &claim, &subject);
+                if extra
+                    .get("blocking")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    q.blocking()
+                } else {
+                    q
+                }
+            })
+            .collect();
+
+        // `window_end` is a NOT NULL column, so every negative carries the date
+        // its retry condition would be compared against. The **class** comes
+        // from `extra` and may be absent; absent is passed through as the empty
+        // string rather than defaulted to a class, because
+        // `RetryTrigger::for_class` answers `UnknownClass` for it and that
+        // reaches `Fired::NotEvaluable` — a line on the log — instead of a
+        // measured no.
+        let negatives: Vec<(String, String, String, String, Value)> = sqlx::query_as(
+            "SELECT entry_id, subject, claim, to_char(window_end, 'YYYY-MM-DD'), extra
+               FROM agent_memory.entry
+              WHERE user_id = $1 AND kind = 'negative_result' AND NOT archived
+              ORDER BY created_at DESC LIMIT $2",
+        )
+        .bind(user_id)
+        .bind(WORLD_LOOKBACK)
+        .fetch_all(&self.pg)
+        .await
+        .map_err(|e| Self::infra("reading negative results for the subscriptions", e))?;
+        let negatives = negatives
+            .into_iter()
+            .map(|(id, subject, claim, window_end, extra)| {
+                let class = extra
+                    .get("failure_class")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                NegativeRow::new(&id, &subject, &claim, class).measured_to(&window_end)
+            })
+            .collect();
+
+        // §4.6. The comparison is this query's, which is what `FindingRow`'s
+        // own doc asks for: `valid_until < CURRENT_DATE` is an index predicate
+        // and a second copy of it in Rust would be a second answer.
+        let stale: Vec<(String, String, String, Option<String>)> = sqlx::query_as(
+            "SELECT entry_id, subject, claim, to_char(valid_until, 'YYYY-MM-DD')
+               FROM agent_memory.entry
+              WHERE user_id = $1 AND kind = 'finding' AND confidence = 'established'
+                AND NOT archived AND valid_until IS NOT NULL AND valid_until < CURRENT_DATE
+              ORDER BY created_at DESC LIMIT $2",
+        )
+        .bind(user_id)
+        .bind(WORLD_LOOKBACK)
+        .fetch_all(&self.pg)
+        .await
+        .map_err(|e| Self::infra("reading stale findings for the subscriptions", e))?;
+        let stale_findings = stale
+            .into_iter()
+            .map(|(id, subject, claim, until)| {
+                let row = FindingRow::new(&id, &subject, &claim);
+                match until {
+                    Some(d) => row.stale_since(&d),
+                    None => row,
+                }
+            })
+            .collect();
+
+        // §4.7. A drill is a rehearsal and a suppressed event was suppressed on
+        // purpose; neither is something that happened to the world.
+        type MonitorEventRow = (Uuid, String, String, Option<String>, Option<String>);
+        let events: Vec<MonitorEventRow> = sqlx::query_as(
+            "SELECT event_id, scope, kind, metric, to_state FROM monitor.events
+              WHERE kind = ANY($1) AND NOT is_drill AND suppressed_by_window IS NULL
+                AND occurred_at > now() - make_interval(days => $2::int)
+              ORDER BY occurred_at DESC LIMIT $3",
+        )
+        .bind(MONITOR_KINDS)
+        .bind(i32::try_from(OBSERVATION_DAYS).unwrap_or(30))
+        .bind(WORLD_LOOKBACK)
+        .fetch_all(&self.pg)
+        .await
+        .map_err(|e| Self::infra("reading monitor events for the subscriptions", e))?;
+        let observations = events
+            .into_iter()
+            .map(|(event_id, scope, kind, metric, to_state)| Observation::MonitorEvent {
+                subject: scope,
+                kind,
+                event_id: event_id.to_string(),
+                detail: metric
+                    .or(to_state)
+                    .unwrap_or_else(|| "no metric recorded".to_string()),
+            })
+            .collect();
+
+        Ok(World {
+            open_questions,
+            negatives,
+            contradictions: Vec::new(),
+            stale_findings,
+            measured: Measured::default(),
+            observations,
+            // §4.7's rate limit, derived from the agenda rather than from a
+            // fourth table: an item raised for an event carries the event's
+            // fingerprint as a `source_ref`.
+            already_raised: Raised::from_refs(
+                agenda.iter().flat_map(|i| i.source_refs.iter().cloned()),
+            ),
+        })
+    }
+
+    /// Sources 4.3–4.7, on every iteration — §4's own word for them is
+    /// *subscriptions*, and a subscription nobody polls is a source that does
+    /// not exist.
+    ///
+    /// **At least one non-terminal item has to be on the board** for this to
+    /// run, and that is a property of the module rather than a choice made
+    /// here: `sources::session_of` reads the session id off the agenda it is
+    /// handed and yields nil for an empty one, and `agenda_items.session_id` is
+    /// NOT NULL with a foreign key. A session with nothing live is refused with
+    /// the reason on the log rather than handed rows the database will reject.
+    ///
+    /// A bounded session has no charter and therefore no scope for a
+    /// subscription to be admitted against, so it subscribes to nothing.
+    async fn ingest_subscriptions(
+        &self,
+        session: &ResearchSession,
+        agenda: &[AgendaItem],
+        user_id: Uuid,
+    ) -> Result<u32, JobError> {
+        let Some(charter) = session.charter.as_ref() else {
+            return Ok(0);
+        };
+        // The slice `sources::ingest` is given, and the slice it reads the
+        // session id off. Terminal items are excluded because `agenda::offer`
+        // merges onto non-terminal ones only — a question answered last week
+        // must not swallow the same question asked again today.
+        let mut live: Vec<AgendaItem> = agenda
+            .iter()
+            .filter(|i| !i.status.is_terminal())
+            .cloned()
+            .collect();
+        if live.is_empty() {
+            self.note_once(
+                session.id,
+                "subscriptions_need_an_item_to_hang_from",
+                json!({
+                    "subscriptions_need_an_item_to_hang_from": true,
+                    "why": "`sources::session_of` reads the session id off the agenda it is \
+                            given and yields nil for an empty one, and `agenda_items.session_id` \
+                            is NOT NULL with a foreign key — so the items the subscriptions \
+                            built would be refused by the database. A session with nothing \
+                            non-terminal on its board gets its seeds first. MISSING: a `session: \
+                            Uuid` parameter on `sources::ingest`.",
+                }),
+            )
+            .await?;
+            return Ok(0);
+        }
+
+        let world = self.world(user_id, agenda).await?;
+        let ingest = sources::ingest(charter, &world, &mut live);
+        let added = self
+            .write_inserts(session.id, "subscription", &ingest.inserted, &ingest.skipped)
+            .await?;
+
+        // Written when a subscription did something. A note on every one of the
+        // iterations a job performs would be sixty-four lines saying nothing,
+        // which is a log a human stops reading.
+        if added > 0 || ingest.merged_count() > 0 {
+            sessions::append(
+                &self.pg,
+                session.id,
+                EventKind::Note,
+                json!({
+                    "subscriptions": "evaluated",
+                    "added": added,
+                    "merged": ingest.merged_count(),
+                    "skipped": ingest.skipped.len(),
+                }),
+            )
+            .await
+            .map_err(|e| Self::infra("recording the subscriptions", e))?;
+        }
+
+        // What the five subscriptions were asked nothing about. On the log
+        // rather than in a comment, because a subscription that cannot fire
+        // looks exactly like one that fired and said no — and once per session,
+        // because it is a property of this platform rather than of the
+        // iteration.
+        self.note_once(
+            session.id,
+            "subscriptions_not_measured",
+            json!({
+                "subscriptions_not_measured": {
+                    "contradiction_pairs": "`agent_runs.contradictions_surfaced` is a count; no \
+                                            table holds the pair and the question it raises, and \
+                                            `agent_memory.entry.conflicts_with` is a list on one \
+                                            entry rather than a resolved pair (§4.5)",
+                    "data_coverage_end": "how far this platform's data reaches per subject lives \
+                                          in ClickHouse and not behind this pool, so every \
+                                          `insufficient_data` retry condition answers \
+                                          `not_evaluable` rather than a measured no (§4.4)",
+                    "regime_flip_and_coverage_extended": "neither observation has a store, so \
+                                                          §4.7 is fed by `monitor.events` alone",
+                    "monitor_kinds": "`observe::MONITOR_KINDS` names `divergence`, which the \
+                                      `monitor_events_kind` CHECK does not accept, so only \
+                                      `scaled_down` can ever arrive",
+                },
+            }),
+        )
+        .await?;
+        Ok(added)
+    }
+
+    /// Write what layer one decided about a batch of offers.
+    ///
+    /// One writer for three callers — the subscriptions, the replenish and the
+    /// harvest all end at `agenda::offer` and all write the same three events.
+    /// `insert_item` runs `offer` again under the row lock, and **its** answer
+    /// is the one that counts; what arrives here is the plan.
+    async fn write_inserts(
+        &self,
+        session_id: Uuid,
+        from: &str,
+        inserted: &[Insert],
+        skipped: &[Skipped],
+    ) -> Result<u32, JobError> {
+        let mut added = 0;
+        for i in inserted {
+            match i {
+                Insert::Added(item) => {
+                    let Some(id) = sessions::insert_item(&self.pg, item)
+                        .await
+                        .map_err(|e| Self::infra("offering a subscribed question", e))?
+                    else {
+                        sessions::append(
+                            &self.pg,
+                            session_id,
+                            EventKind::AgendaItemMerged,
+                            json!({ "key": item.dedupe_key, "from": from }),
+                        )
+                        .await
+                        .map_err(|e| Self::infra("recording a merge", e))?;
+                        continue;
+                    };
+                    sessions::set_status(&self.pg, id, &ItemStatus::Queued)
+                        .await
+                        .map_err(|e| Self::infra("queueing a subscribed question", e))?;
+                    sessions::append(
+                        &self.pg,
+                        session_id,
+                        EventKind::AgendaItemAdded,
+                        json!({
+                            "item": id,
+                            "source": item.sources.first().map(|s| s.as_str()),
+                            "question": item.question,
+                            "workflow": item.workflow,
+                            "from": from,
+                        }),
+                    )
+                    .await
+                    .map_err(|e| Self::infra("recording a subscribed question", e))?;
+                    added += 1;
+                }
+                Insert::Merged {
+                    into,
+                    source,
+                    source_refs,
+                } => {
+                    sessions::merge_source(&self.pg, *into, *source, source_refs)
+                        .await
+                        .map_err(|e| Self::infra("extending a merged item's sources", e))?;
+                    sessions::append(
+                        &self.pg,
+                        session_id,
+                        EventKind::AgendaItemMerged,
+                        json!({ "item": into, "source": source.as_str(), "from": from }),
+                    )
+                    .await
+                    .map_err(|e| Self::infra("recording a merge", e))?;
+                }
+            }
+        }
+        for s in skipped {
+            sessions::append(
+                &self.pg,
+                session_id,
+                EventKind::Note,
+                json!({ "skipped": s.what, "why": s.why.as_str(), "from": from }),
+            )
+            .await
+            .map_err(|e| Self::infra("recording a skipped candidate", e))?;
+        }
+        Ok(added)
+    }
+
     // ── §7 rows 1–2: the calendar (S-11.6) ──────────────────────────────────
 
     /// Read the session's windows, or stop.
@@ -1666,65 +2287,22 @@ impl SessionWorker {
             )));
         }
 
-        // §7 rows 1–2. Before the agenda is even read: an item scored and
-        // selected outside a window is work the driver was not allowed to plan,
-        // and the events it would write are events the human would have to read
-        // past.
+        // §7 rows 1–2 and 8–10, as **one** decision. `execute::plan` orders the
+        // checks by severity and nothing below re-derives one of them: the
+        // couplings outrank the calendar because a kill switch tripping is
+        // about the world rather than about the session, and the day budget
+        // outranks the calendar because row 2 re-arms on the next *day's*
+        // window, which is a longer wait than the next window.
+        let signals = self.signals(&session).await?;
+        let verdict = couplings::evaluate(&signals);
         let openness = Self::window_gate(&session.schedule, Utc::now())?;
-        if !openness.may_claim() {
-            let agenda = sessions::agenda(&self.pg, session_id)
-                .await
-                .map_err(|e| Self::infra("reading the agenda", e))?;
-            sessions::append(
-                &self.pg,
-                session_id,
-                EventKind::WindowClosed,
-                json!({
-                    "openness": openness.as_str(),
-                    "re_arms_at": openness.re_arms_at(),
-                    "why": "the local clock in this schedule's zone is outside every window it \
-                            names, so nothing is claimed",
-                }),
-            )
-            .await
-            .map_err(|e| Self::infra("recording the closed window", e))?;
-            // §2.1's `review_every: window` means once per window, and this is
-            // the boundary. `force` is `None`: a window that closed on a session
-            // that did nothing writes no digest.
-            self.maybe_digest(&session, user_id, &agenda, openness, None)
-                .await?;
-            return Ok(Step::Idle(format!(
-                "the schedule is {}{}",
-                openness.as_str(),
-                openness
-                    .re_arms_at()
-                    .map_or(String::new(), |t| format!("; it re-arms at {t}"))
-            )));
-        }
-
-        if folded.runs_started >= i64::from(session.budget.max_runs) {
-            let agenda = sessions::agenda(&self.pg, session_id)
-                .await
-                .map_err(|e| Self::infra("reading the agenda", e))?;
-            sessions::append(
-                &self.pg,
-                session_id,
-                EventKind::SessionCompleted,
-                json!({
-                    "why": "max_runs",
-                    "runs_started": folded.runs_started,
-                    "max_runs": session.budget.max_runs,
-                }),
-            )
-            .await
-            .map_err(|e| Self::infra("completing the session", e))?;
-            // §7 row 3: `complete` *after* the final digest, which is why this
-            // is not left to the cadence.
-            self.force_digest(&session, user_id, &agenda).await?;
-            return Ok(Step::Done("max_runs".into()));
-        }
-
-        self.ingest_seeds(&session).await?;
+        let day_cap = Self::day_cap(&session.budget);
+        let spent_today = self.spent(session_id, true).await;
+        // No in-flight leases. `Lease` is sealed to `execute::lease` and is
+        // persisted nowhere, so this driver holds none across iterations; what
+        // that costs is refused rather than guessed at in [`Self::lease_for`].
+        let day_budget = execute::day_budget(&day_cap, &spent_today, &[], SPEND_METER);
+        let live = self.live_children(session_id).await?;
 
         let mut agenda = sessions::agenda(&self.pg, session_id)
             .await
@@ -1734,29 +2312,107 @@ impl SessionWorker {
                 .await
                 .map_err(|e| Self::infra("re-reading the agenda", e))?;
         }
+
+        let situation = Situation {
+            openness,
+            couplings: verdict,
+            day_budget,
+            // Nothing on this platform suspends a run: AGENT-010 §10.1's
+            // per-run drain does not exist, so there is never a suspended child
+            // to resume. Declared here rather than left implied, because an
+            // empty list that *meant* something else would make
+            // `Step::Resume`'s ordering rule silently inert.
+            suspended: Vec::new(),
+            live: live.clone(),
+            max_concurrent: session.schedule.max_concurrent_runs,
+            claimable: Self::claimable(&agenda, &folded).len(),
+        };
+        let steps = execute::plan(&situation);
+        self.record_unperformable(session_id, &steps).await?;
+
+        let hold = steps.iter().find_map(|s| match s {
+            execute::Step::Hold { why, re_arms_at } => Some((why.clone(), *re_arms_at)),
+            _ => None,
+        });
+        let slots = steps.iter().find_map(|s| match s {
+            execute::Step::Claim { slots } => Some(*slots),
+            _ => None,
+        });
+        if let Some((why, re_arms_at)) = &hold {
+            // `NothingClaimable` is the one hold this driver answers rather
+            // than obeys: whether an empty agenda is a completion, a wait or a
+            // replenish is `replenish::on_drain`'s decision and it is made
+            // below, after the sources have had their iteration.
+            if !matches!(why, HoldReason::NothingClaimable) {
+                return self
+                    .hold(&session, user_id, &agenda, openness, why, *re_arms_at)
+                    .await;
+            }
+        }
+
+        // Sources 4.1–4.7. Performed only once the plan allows work, because an
+        // item ingested during a pause is a card on a board nothing may claim.
+        self.ingest_seeds(&session).await?;
+        let added = self
+            .ingest_subscriptions(&session, &agenda, user_id)
+            .await?;
+        if added > 0 {
+            agenda = sessions::agenda(&self.pg, session_id)
+                .await
+                .map_err(|e| Self::infra("re-reading the agenda after the subscriptions", e))?;
+        }
+
+        // §7 rows 3–5. Two decisions, both made by the modules that hold them:
+        // whether a drained agenda ends the session, and whether the session is
+        // finished on a condition that has nothing to do with the agenda.
+        let drain = session
+            .charter
+            .as_ref()
+            .map(|c| replenish::on_drain(session_id, c, &agenda, session.replenish));
+        // Exhaustive, so a fifth `Drain` has to say which of these it is rather
+        // than inheriting whichever arm was written last.
+        let drained = match drain.as_ref() {
+            Some(Drain::NotDrained) => false,
+            Some(Drain::Complete) => true,
+            // Not drained: a session that completed while a child was running
+            // would lose its harvest, and one that completed while an item sat
+            // in *Needs you* would complete the moment a human stepped away.
+            Some(Drain::Waiting { reason }) => return Ok(Step::Idle((*reason).to_string())),
+            // The survey is written below, after the endings have been asked:
+            // a session that has met `max_runs` must not replenish into it.
+            Some(Drain::Replenish(_)) => false,
+            // A **bounded** session is one question and one run (§2.1,
+            // ADR-0037) and has no charter, which is why `on_drain` cannot
+            // answer for it: its replenish branch surveys a charter that does
+            // not exist. Its ending is the narrower statement that its own
+            // items are all terminal, which is a different question rather than
+            // a second copy of `on_drain`'s.
+            None => agenda.iter().all(|i| i.status.is_terminal()),
+        };
+        if let Some(step) = self
+            .check_stop(&session, user_id, &folded, &agenda, drained)
+            .await?
+        {
+            return Ok(step);
+        }
+        if let Some(Drain::Replenish(survey)) = &drain {
+            return self.replenish(&session, survey).await;
+        }
+
         let Some(item) = self
             .choose(&session, &agenda, &folded, user_id)
             .await?
         else {
-            let waiting = agenda.iter().any(|i| !i.status.is_terminal());
-            if waiting {
-                return Ok(Step::Idle(
-                    "every item is waiting on something a human has not done".into(),
-                ));
-            }
-            // §7: agenda drained. `replenish` is phase 4 and is not read here;
-            // a session with it set would still complete, which is why creating
-            // one with it set is refused until the survey exists.
-            sessions::append(
-                &self.pg,
-                session_id,
-                EventKind::SessionCompleted,
-                json!({ "why": "agenda_drained" }),
-            )
-            .await
-            .map_err(|e| Self::infra("completing the session", e))?;
-            self.force_digest(&session, user_id, &agenda).await?;
-            return Ok(Step::Done("agenda_drained".into()));
+            // Deliberately does not name a cause. `choose` returns `None` for
+            // three different reasons — an approval nobody gave, an intake that
+            // refused the selection, and a slate where nothing is feasible —
+            // and it writes the one that applies on the log. A message that
+            // guessed would be the fourth reading.
+            return Ok(Step::Idle(
+                "the selection claimed nothing this iteration; the log records what it did with \
+                 each item"
+                    .into(),
+            ));
         };
 
         if session.autonomy.item_waits_for_approval()
@@ -1777,6 +2433,34 @@ impl SessionWorker {
             )));
         }
 
+
+        // §6.3. The lease is sized **before** anything is claimed, because a
+        // refusal here is a refusal to start a child and an item claimed for a
+        // child that is never started is an item somebody has to put back.
+        let lease = match self.lease_for(&session, user_id, &item, slots, &live).await {
+            Ok(lease) => lease,
+            Err(refusal) => {
+                sessions::append(
+                    &self.pg,
+                    session_id,
+                    EventKind::Note,
+                    json!({
+                        "item": item.id,
+                        "lease_refused": refusal.to_string(),
+                        "unit": SPEND_UNIT,
+                        "why": "`execute::lease` refuses rather than guessing, and a child \
+                                started without one would be an unbounded run wearing a lease's \
+                                name",
+                    }),
+                )
+                .await
+                .map_err(|e| Self::infra("recording a refused lease", e))?;
+                return Ok(Step::Idle(format!(
+                    "item {} has no lease: {refusal}",
+                    item.id
+                )));
+            }
+        };
 
         // Claimed **before** the child is started, and the order matters.
         //
@@ -1806,6 +2490,12 @@ impl SessionWorker {
             EventKind::RunStarted,
             json!({ "item": item.id, "run_id": run_id, "conversation_id":
                     sessions::child_conversation_id(session_id, item.id),
+                    // §6.3, from `Lease::event_payload`: the size, which cap
+                    // cut it, and — the half that matters — every cap that does
+                    // not exist in this unit, so a reader can tell a lease
+                    // bounded by three ceilings from one bounded by one.
+                    "lease": lease.event_payload(),
+                    "max_trials_per_task": lease.max_trials_per_task(),
                     // §7 row 1's drain boundary, from `OpenHours::closes_after`.
                     // Recorded rather than acted on: suspending a live child at
                     // it is AGENT-010 §10.1's per-run drain and does not exist,
@@ -1890,6 +2580,485 @@ impl SessionWorker {
         self.maybe_digest(&session, user_id, &agenda, openness, None)
             .await?;
         Ok(Step::Ran(item.id))
+    }
+
+    // ── the steps `plan` returns, each to its own branch ────────────────────
+
+    /// Record the steps this driver cannot perform, rather than dropping them.
+    ///
+    /// [`execute::Step::Drain`] and [`execute::Step::Resume`] both need
+    /// AGENT-010 §10.1's per-run suspend, which does not exist: there is no
+    /// column, no status word and no signal that pauses a turn mid-step. A
+    /// driver that silently ignored them would leave the operator believing a
+    /// kill switch suspends what is already running.
+    ///
+    /// The child is **not** cancelled instead. It may already have spent
+    /// counted trials and abandoning it without settling them is what INV-17
+    /// forbids; a cancel is also not a suspend, because a suspend resumes.
+    async fn record_unperformable(
+        &self,
+        session_id: Uuid,
+        steps: &[execute::Step],
+    ) -> Result<(), JobError> {
+        for step in steps {
+            let payload = match step {
+                execute::Step::Drain { at, children } => json!({
+                    "step": step.as_str(),
+                    "children": children,
+                    "at": match at {
+                        DrainAt::Now => Value::from("now"),
+                        DrainAt::At(t) => json!(t),
+                    },
+                    "not_performed": "AGENT-010 §10.1's per-run suspend does not exist, so a live \
+                                      child runs to its own end. The child is not cancelled: it \
+                                      may already have spent counted trials and INV-17 forbids \
+                                      abandoning them unsettled. What this driver can promise is \
+                                      that it claims nothing new.",
+                }),
+                execute::Step::Resume(children) => json!({
+                    "step": step.as_str(),
+                    "children": children,
+                    "not_performed": "nothing suspends a run, so nothing is ever waiting to be \
+                                      resumed; this step is unreachable until the suspend exists",
+                }),
+                execute::Step::Claim { .. } | execute::Step::Hold { .. } => continue,
+            };
+            sessions::append(&self.pg, session_id, EventKind::Note, payload)
+                .await
+                .map_err(|e| Self::infra("recording an unperformable step", e))?;
+        }
+        Ok(())
+    }
+
+    /// One [`execute::Step::Hold`], in the log and in the return value.
+    ///
+    /// The split is [`HoldReason::is_a_transition`]'s, not this function's: a
+    /// window closing and a coupling pausing are states a human comes back to,
+    /// and a read that did not happen is a failed iteration. Appending the
+    /// second as a pause would leave somebody to clear something nobody caused.
+    async fn hold(
+        &self,
+        session: &ResearchSession,
+        user_id: Uuid,
+        agenda: &[AgendaItem],
+        openness: Openness,
+        why: &HoldReason,
+        re_arms_at: Option<chrono::DateTime<Utc>>,
+    ) -> Result<Step, JobError> {
+        let session_id = session.id;
+        match why {
+            HoldReason::WindowClosed => {
+                sessions::append(
+                    &self.pg,
+                    session_id,
+                    EventKind::WindowClosed,
+                    json!({
+                        "openness": openness.as_str(),
+                        "re_arms_at": re_arms_at,
+                        "why": "the local clock in this schedule's zone is outside every window \
+                                it names, so nothing is claimed",
+                    }),
+                )
+                .await
+                .map_err(|e| Self::infra("recording the closed window", e))?;
+                // §2.1's `review_every: window` means once per window, and this
+                // is the boundary. `force` is `None`: a window that closed on a
+                // session that did nothing writes no digest.
+                self.maybe_digest(session, user_id, agenda, openness, None)
+                    .await?;
+            }
+            HoldReason::DayBudgetExhausted => {
+                sessions::append(
+                    &self.pg,
+                    session_id,
+                    EventKind::DayBudgetExhausted,
+                    json!({
+                        "unit": SPEND_UNIT,
+                        "re_arms_at": re_arms_at,
+                        "why": "§7 row 2: the day budget is spent, and it re-arms on the next \
+                                day's window rather than on the next window",
+                    }),
+                )
+                .await
+                .map_err(|e| Self::infra("recording the exhausted day budget", e))?;
+                self.force_digest(session, user_id, agenda).await?;
+            }
+            HoldReason::Paused(reasons) => {
+                // §7 rows 8–10. Every reason, not just the first: a session
+                // resumed on a kill-switch reset while its profile is still
+                // withdrawn is a session that resumed into the second thing
+                // that was wrong with it. The **word** is the first one's, and
+                // it is `PauseReason::word` rather than a string written here.
+                let primary = reasons.first().map(couplings::PauseReason::word);
+                sessions::append(
+                    &self.pg,
+                    session_id,
+                    EventKind::SessionPaused,
+                    json!({
+                        "why": primary,
+                        "reasons": reasons.iter().map(|r| json!({
+                            "word": r.word(),
+                            "sentence": r.sentence(),
+                            "drains_live_children": r.drains_live_children(),
+                        })).collect::<Vec<_>>(),
+                    }),
+                )
+                .await
+                .map_err(|e| Self::infra("recording the pause", e))?;
+                // A human is being asked to come back, so the stretch they
+                // missed is written now rather than at the next cadence.
+                self.force_digest(session, user_id, agenda).await?;
+            }
+            HoldReason::CannotDecide { missing } => {
+                sessions::append(
+                    &self.pg,
+                    session_id,
+                    EventKind::Note,
+                    json!({
+                        "hold": why.as_str(),
+                        "missing": missing,
+                        "why": "a coupling could not be read, so this iteration claims nothing. \
+                                Not a pause: an unread switch is a failed read, and recording it \
+                                as a state would need a human to clear something nobody caused.",
+                    }),
+                )
+                .await
+                .map_err(|e| Self::infra("recording an undecidable iteration", e))?;
+            }
+            HoldReason::DayBudgetUnreadable { why: detail } => {
+                sessions::append(
+                    &self.pg,
+                    session_id,
+                    EventKind::Note,
+                    json!({ "hold": why.as_str(), "detail": detail, "unit": SPEND_UNIT }),
+                )
+                .await
+                .map_err(|e| Self::infra("recording an unreadable day budget", e))?;
+            }
+            HoldReason::ScheduleIndeterminate => {
+                sessions::append(
+                    &self.pg,
+                    session_id,
+                    EventKind::Note,
+                    json!({
+                        "hold": why.as_str(),
+                        "why": "the schedule parses but its next boundary is past the search \
+                                horizon, so there is no instant to re-arm on and nothing is \
+                                claimed inside a fence nobody located",
+                    }),
+                )
+                .await
+                .map_err(|e| Self::infra("recording an indeterminate schedule", e))?;
+            }
+            // Nothing changed and nothing is owed a human: `max_concurrent_runs`
+            // is used up, which is the ordinary shape of a session doing its
+            // work one child at a time.
+            HoldReason::NoSlots | HoldReason::NothingClaimable => {}
+        }
+        Ok(Step::Idle(format!(
+            "{}{}",
+            why.as_str(),
+            re_arms_at.map_or(String::new(), |t| format!("; it re-arms at {t}"))
+        )))
+    }
+
+    /// §7 row 3 — is the session finished?
+    ///
+    /// The two the platform holds (`max_runs`, the total budget) and the
+    /// charter's own `stop_when` list, all decided by [`execute::stop`]. The
+    /// previous build compared `runs_started` against `max_runs` here and read
+    /// `stop_when` nowhere at all, which made a five-word vocabulary with a
+    /// `Serialize` and no reader.
+    ///
+    /// [`execute::StopVerdict::not_evaluable`] is **not** folded into "has not
+    /// fired". A condition nothing can answer and one that has not happened
+    /// look identical on a board and completely different to somebody
+    /// wondering why a session is still running, so the first is put on the log
+    /// — once, because it is a property of the charter rather than of the
+    /// iteration.
+    async fn check_stop(
+        &self,
+        session: &ResearchSession,
+        user_id: Uuid,
+        folded: &Folded,
+        agenda: &[AgendaItem],
+        drained: bool,
+    ) -> Result<Option<Step>, JobError> {
+        let stopping = Stopping {
+            runs_started: folded.runs_started,
+            max_runs: session.budget.max_runs,
+            unit: SPEND_METER,
+            total: Self::total_cap(&session.budget),
+            spent_total: self.spent(session.id, false).await,
+            agenda_drained: drained,
+            // False by construction: a stalled session fails `can_claim` and
+            // `iterate` returns before this is reached. Read off the fold
+            // anyway, so the day the loop changes shape this reads the state
+            // rather than a constant somebody wrote.
+            stalled: matches!(
+                folded.state,
+                Some(research_session::SessionState::Stalled { .. })
+            ),
+            deployable_found: Observed::unknown(
+                "nothing on this platform counts the deployable strategies a session found: \
+                 `agent_lifecycle.proposal` records what a run asked for and `mlops` records \
+                 what a human promoted, and neither is keyed to a session",
+            ),
+        };
+        let conditions = session
+            .charter
+            .as_ref()
+            .map_or(&[][..], |c| c.stop_when.as_slice());
+        let verdict = execute::stop(conditions, &stopping);
+
+        if !verdict.not_evaluable.is_empty() {
+            self.note_once(
+                session.id,
+                "stop_conditions_not_evaluable",
+                json!({
+                    "stop_conditions_not_evaluable": verdict.not_evaluable.iter().map(|u| json!({
+                        "condition": u.word,
+                        "missing": u.missing,
+                    })).collect::<Vec<_>>(),
+                    "why": "a condition nothing on this platform can answer is not a condition \
+                            that has not fired, and a session that never ends because of one \
+                            should say so rather than look patient",
+                }),
+            )
+            .await?;
+        }
+
+        if verdict.completes() {
+            sessions::append(
+                &self.pg,
+                session.id,
+                EventKind::SessionCompleted,
+                json!({
+                    "why": verdict.reached.first().map(|r| r.word),
+                    "reached": verdict.reached.iter().map(|r| json!({
+                        "word": r.word,
+                        "sentence": r.sentence,
+                    })).collect::<Vec<_>>(),
+                    "runs_started": folded.runs_started,
+                    "lines": verdict.lines(),
+                }),
+            )
+            .await
+            .map_err(|e| Self::infra("completing the session", e))?;
+            // §7 row 3: `complete` *after* the final digest, which is why this
+            // is not left to the cadence.
+            self.force_digest(session, user_id, agenda).await?;
+            return Ok(Some(Step::Done(
+                verdict
+                    .reached
+                    .first()
+                    .map_or_else(|| "stop_when".to_string(), |r| r.word.to_string()),
+            )));
+        }
+
+        // §7 rows 4–5. `stop` reads the drain it is handed rather than deciding
+        // it, so a charter with no `agenda_drained` condition still ends here.
+        if drained {
+            sessions::append(
+                &self.pg,
+                session.id,
+                EventKind::SessionCompleted,
+                json!({
+                    "why": "agenda_drained",
+                    "replenish": session.replenish,
+                    "continuous": session.continuous,
+                    "detail": "nothing claimable, nothing in flight and nothing waiting on a \
+                               human, and this session is not set to keep generating questions",
+                }),
+            )
+            .await
+            .map_err(|e| Self::infra("completing the session", e))?;
+            self.force_digest(session, user_id, agenda).await?;
+            return Ok(Some(Step::Done("agenda_drained".into())));
+        }
+        Ok(None)
+    }
+
+    /// §4.9 — the endless setting, at the one moment the agenda runs out.
+    ///
+    /// [`replenish::on_drain`] built the survey item; this writes it. It is an
+    /// ordinary agenda item and not a special shape, so the board shows it, a
+    /// human can veto it and the fold records its run like any other.
+    ///
+    /// **What a survey puts back is not absorbed here.**
+    /// [`replenish::absorb`] wants a [`replenish::SurveyReport`] — a list of
+    /// `{question, subject, workflow, value_estimate}` the run proposed — and
+    /// this platform stores no such thing: a survey's output reaches the agenda
+    /// through the ordinary harvest, as the `open_question` entries it wrote.
+    /// The value estimates have nowhere to go either; `Replenished::value_estimates`
+    /// names the three things that would have to exist.
+    async fn replenish(
+        &self,
+        session: &ResearchSession,
+        survey: &AgendaItem,
+    ) -> Result<Step, JobError> {
+        let inserted = sessions::insert_item(&self.pg, survey)
+            .await
+            .map_err(|e| Self::infra("offering the replenish survey", e))?;
+        let Some(id) = inserted else {
+            // The survey for this charter version is already on the board. Not
+            // an error: `survey_question` names the version, so two surveys of
+            // one charter are one item by construction.
+            return Ok(Step::Idle(
+                "the agenda drained and its replenish survey is already on the board".into(),
+            ));
+        };
+        sessions::set_status(&self.pg, id, &ItemStatus::Queued)
+            .await
+            .map_err(|e| Self::infra("queueing the replenish survey", e))?;
+        sessions::append(
+            &self.pg,
+            session.id,
+            EventKind::AgendaItemAdded,
+            json!({
+                "item": id,
+                "source": Source::Replenish.as_str(),
+                "question": survey.question,
+                "workflow": survey.workflow,
+                "why": "the agenda drained and this session is set to keep generating \
+                        questions; endless means replenish, and the budget still ends it",
+            }),
+        )
+        .await
+        .map_err(|e| Self::infra("recording the replenish survey", e))?;
+        Ok(Step::Progressed(format!("replenished with survey {id}")))
+    }
+
+    /// §6.3 — size the child's lease, or refuse to start it.
+    ///
+    /// Three of the four caps are read from the session's own budget through
+    /// [`execute::day_bound`] and [`execute::total_bound`], which is the one
+    /// place the `{unit} × {budget field}` mapping is written. The per-task cap
+    /// is **not denominated**: `harness::Budgets` holds `max_usd_per_task` and
+    /// this platform meters a run in trials, and there is no per-run price to
+    /// convert with.
+    ///
+    /// `in_flight` is empty and that is a claim about this driver rather than
+    /// about the session: it starts one child per iteration and awaits it, and
+    /// a `Lease` is sealed to [`execute::lease`] and persisted nowhere, so
+    /// there is no lease of a sibling child to reconstruct. When a child of
+    /// this session **is** already running, §12.4's "three concurrent children
+    /// cannot together exceed" has nothing to count, so the lease is refused
+    /// rather than issued against a total that is missing a committed one.
+    async fn lease_for(
+        &self,
+        session: &ResearchSession,
+        user_id: Uuid,
+        item: &AgendaItem,
+        slots: Option<usize>,
+        live: &[Uuid],
+    ) -> Result<execute::Lease, execute::LeaseRefusal> {
+        // A child of this session is already running. §12.4 says three
+        // concurrent children cannot *together* exceed the day budget, and the
+        // whole of each child's lease is committed the moment it is issued —
+        // not as it is drawn down — so a second child sized against what the
+        // first has spent so far is a second child that can push the session
+        // past the cap. This driver cannot count it: a `Lease` is sealed to
+        // `execute::lease` and stored in no column.
+        //
+        // Unconditional on `live` rather than on the slot count, because a
+        // `slots` of one with a child already running is the same missing
+        // number. At `max_concurrent_runs = 1` this is unreachable — `plan`
+        // holds on `NoSlots` first — so it bites exactly where concurrency was
+        // turned on and nothing measured what it divides.
+        if !live.is_empty() {
+            return Err(execute::LeaseRefusal::NotRead {
+                what: format!(
+                    "the leases committed by the {} child(ren) of this session already running \
+                     (the plan offered {} slot(s); a `Lease` is sealed to `execute::lease` and is \
+                     stored in no column, so a second child would be sized against a session \
+                     total that is missing theirs)",
+                    live.len(),
+                    slots.unwrap_or(0)
+                ),
+            });
+        }
+        let estimate = self.cost_estimate(session, user_id, item).await;
+        execute::lease(&LeaseRequest {
+            session: session.id,
+            item: item.id,
+            unit: SPEND_METER,
+            estimate,
+            per_task: Observed::Is(Bound::NotDenominated {
+                wants: "a per-task cap in trials; `harness::Budgets` declares `max_usd_per_task` \
+                        and nothing converts it, because `llm_usage.cost_usd` keys on the auth \
+                        session rather than on the run",
+            }),
+            day: Self::day_cap(&session.budget),
+            spent_today: self.spent(session.id, true).await,
+            total: Self::total_cap(&session.budget),
+            spent_total: self.spent(session.id, false).await,
+            in_flight: Vec::new(),
+        })
+    }
+
+    /// What this workflow has cost on this tier, as the lease's estimate.
+    ///
+    /// The same median [`Self::cost_signal`] scores with, and for the same
+    /// reason it is a median of measured trials: there is no `estimate_cost`
+    /// on this platform (`harness::policy` says so in as many words), so the
+    /// only honest estimate is what the workflow has actually spent. Below
+    /// [`MIN_RUNS_FOR_COST`] there is no estimate and the lease is refused
+    /// rather than sized on a guess.
+    ///
+    /// **The provenance is what is read, not the number.**
+    /// [`Signal::not_estimated`] carries `raw = 1.0` — the identity for a
+    /// ranking product — and a lease sized off it would be one trial, issued
+    /// because nobody measured anything.
+    async fn cost_estimate(
+        &self,
+        session: &ResearchSession,
+        user_id: Uuid,
+        item: &AgendaItem,
+    ) -> Observed<Meter> {
+        let signal = self
+            .cost_signal(user_id, &item.workflow, &session.tier)
+            .await;
+        if !matches!(signal.provenance, Provenance::Measured { .. }) {
+            return Observed::unknown(&format!(
+                "what `{}` costs on `{}`: fewer than {MIN_RUNS_FOR_COST} finished runs have \
+                 recorded a `trials_spent` for it, and this platform has no `estimate_cost` to \
+                 ask instead",
+                item.workflow, session.tier
+            ));
+        }
+        let median = signal.raw;
+        match Meter::new(median, SPEND_METER) {
+            Ok(m) => Observed::Is(m),
+            Err(e) => Observed::unknown(&format!("the measured median is not a usable meter: {e}")),
+        }
+    }
+
+    /// Append a note at most once per session.
+    ///
+    /// For the facts that are properties of the charter rather than of the
+    /// iteration: a `stop_when` nothing can evaluate is true on every pass, and
+    /// sixty-four copies of it is a log a human stops reading.
+    async fn note_once(&self, session_id: Uuid, key: &str, payload: Value) -> Result<(), JobError> {
+        // `1::bigint`, not `1`. An untyped literal is `int4` and decoding it
+        // into an `i64` fails at run time and nowhere else — a note that then
+        // never gets written, or gets written on every iteration, depending on
+        // which way the caller reads the error.
+        let seen: Option<(i64,)> = sqlx::query_as(
+            "SELECT 1::bigint FROM session_events
+              WHERE session_id = $1 AND kind = 'note' AND payload_json ? $2 LIMIT 1",
+        )
+        .bind(session_id)
+        .bind(key)
+        .fetch_optional(&self.pg)
+        .await
+        .map_err(|e| Self::infra("looking for a note already written", e))?;
+        if seen.is_some() {
+            return Ok(());
+        }
+        sessions::append(&self.pg, session_id, EventKind::Note, payload)
+            .await
+            .map_err(|e| Self::infra("recording a note", e))
     }
 
     /// Write a digest whatever the cadence says (§7 rows 3–6: complete, stop).
@@ -2308,6 +3477,111 @@ fn uuid_at(payload: &Value, key: &str) -> Option<Uuid> {
         .and_then(|s| Uuid::parse_str(s).ok())
 }
 
+/// What the kill-switch row means, including a read that did not happen.
+///
+/// `routes::lifecycle::kill_switch_tripped` answers the same question with a
+/// `bool` and therefore has to read a failed query as **tripped** — a `bool`
+/// has nowhere else to put it. This has somewhere. The direction is the same,
+/// because `couplings::Verdict::CannotDecide` claims nothing either; what it
+/// buys is that the session is not recorded as paused for a switch nobody read,
+/// which would leave a human clearing a pause nothing caused.
+///
+/// **No row is a measurement, not an absence.** `0075` inserts nothing until
+/// something halts, so an empty table is a platform that has never tripped it.
+fn kill_switch_from(row: Result<Option<String>, String>) -> Observed<KillSwitch> {
+    match row {
+        Ok(Some(state)) if state == "halted" => Observed::Is(KillSwitch::Tripped),
+        Ok(Some(_) | None) => Observed::Is(KillSwitch::Armed),
+        Err(e) => Observed::unknown(&format!(
+            "`monitor.kill_switch` could not be read ({e}), and an outage is not evidence that \
+             the platform is healthy"
+        )),
+    }
+}
+
+/// The health of the profile a session runs on, and §8's frontier-only rule.
+///
+/// Three branches, and the middle one is AGENT-014 §8 reaching production: a
+/// **continuous** session on a non-frontier tier is paused, and
+/// [`couplings::PauseReason::Tier`]'s own sentence is the one that says why —
+/// *"continuous research runs on a measured frontier profile and this one is
+/// not one"*. A bounded session is untouched, because §8's rule is about being
+/// left alone with a budget over days and a bounded session is one run with a
+/// human watching.
+///
+/// `Measured` is read off the profile's presence in the validated
+/// [`harness::ProfileSet`] rather than off a scorecard, because **this platform
+/// records no per-profile judgement**: `eval_scorecards` carries `profile_id`
+/// and `tier`, but its `metrics` are a harness-version aggregate and not a pass
+/// rate per workflow per profile. That same gap is why
+/// `research_session::charter::admit` has no caller here; see the module header.
+fn health_of(tier: Option<harness::Tier>, continuous: bool) -> Observed<ProfileHealth> {
+    let Some(tier) = tier else {
+        return Observed::Is(ProfileHealth::Withdrawn);
+    };
+    if continuous && tier != harness::Tier::Frontier {
+        return Observed::Is(ProfileHealth::Degraded);
+    }
+    Observed::Is(ProfileHealth::Measured)
+}
+
+/// How one finished child reads to §6.6's breaker.
+///
+/// The defect half is a `platform_defect` memory entry naming the run; its
+/// `subject` is the platform component, which is the tool the breaker would
+/// exclude. A child that ended `failed` or `fenced` with **no** such entry is
+/// [`DefectFailure::unattributed`] — it did not conclude and nobody said what
+/// broke — and that variant deliberately cannot extend a streak and does break
+/// one, because a breaker opened on unattributed failures would name no tool.
+///
+/// Everything else is `Concluded`, including a `cancelled` or `refused` run: a
+/// reject is a result, and a session that paused because two ideas in a row
+/// were wrong would pause on doing its job.
+fn child_end(run: Uuid, item: Uuid, status: &str, tool: Option<&str>) -> ChildEnd {
+    match tool {
+        Some(tool) if !tool.trim().is_empty() => {
+            ChildEnd::Defect(DefectFailure::on(run, item, tool))
+        }
+        _ if status == "failed" || status == "fenced" => {
+            ChildEnd::Defect(DefectFailure::unattributed(run, item))
+        }
+        _ => ChildEnd::Concluded,
+    }
+}
+
+/// What a session has spent, or a statement that nobody knows.
+///
+/// **A finished run with a NULL `trials_spent` makes the answer `Unknown`.**
+/// `SUM` skips nulls, so the sum over a session with one unmeasured run is an
+/// *understatement* — and an understated spend against a ceiling is the unsafe
+/// direction: it buys a child with budget nobody measured.
+/// [`execute::lease`] turns the `Unknown` into
+/// [`execute::LeaseRefusal::NotRead`] and starts nothing.
+///
+/// The stall detector reads the same nulls the other way — it excludes the run
+/// and carries on — and the two are not in conflict: there a missing cost
+/// narrows a window, here it would license a spend.
+fn spent_from(row: Option<(i64, i64)>, today_only: bool) -> Observed<Meter> {
+    let when = if today_only { "today" } else { "in total" };
+    let Some((spent, unmeasured)) = row else {
+        return Observed::unknown(&format!(
+            "what this session has spent {when} could not be read from `agent_runs`"
+        ));
+    };
+    if unmeasured > 0 {
+        return Observed::unknown(&format!(
+            "{unmeasured} finished run(s) recorded no `trials_spent`, so what this session spent \
+             {when} is not a number anybody holds; an unread number is not a zero, and a sum \
+             that skipped it would understate the spend against its own ceiling"
+        ));
+    }
+    #[allow(clippy::cast_precision_loss)]
+    match Meter::new(spent as f64, SPEND_METER) {
+        Ok(m) => Observed::Is(m),
+        Err(e) => Observed::unknown(&format!("the spend {when} is not a usable meter: {e}")),
+    }
+}
+
 /// Whether this item's claim was taken by a driver that did not survive to start
 /// the child.
 ///
@@ -2328,6 +3602,12 @@ enum Step {
     Idle(String),
     /// The session ended, and why.
     Done(String),
+    /// The iteration changed the agenda without starting a child.
+    ///
+    /// Distinct from [`Step::Ran`] because it starts no run and must not count
+    /// toward `runs_started`, and distinct from [`Step::Idle`] because the next
+    /// iteration has something new to look at.
+    Progressed(String),
 }
 
 /// A conversation title from the question, before the summariser gets to it.
@@ -2376,6 +3656,9 @@ impl Worker for SessionWorker {
         for _ in 0..MAX_ITERATIONS {
             match self.iterate(ctx, user_id, session_id).await? {
                 Step::Ran(_) => ran += 1,
+                // Something changed and no child started. Round again: the next
+                // fold reads an agenda this one grew.
+                Step::Progressed(_) => {}
                 Step::Idle(why) => {
                     idle = Some(why);
                     break;
@@ -3144,5 +4427,420 @@ mod tests {
         let t = title_of(&long);
         assert_eq!(t.chars().count(), 58);
         assert!(t.ends_with('…'));
+    }
+
+    // ── the couplings, as this driver reads them (S-11.7) ───────────────────
+
+    fn run_id(n: u128) -> Uuid {
+        Uuid::from_u128(0x9000_0000 + n)
+    }
+
+    fn item_id(n: u128) -> Uuid {
+        Uuid::from_u128(0xa000_0000 + n)
+    }
+
+    /// The reading each of the three rows gets, and the one that is not a row.
+    ///
+    /// The last arm is the whole point of routing this through `Observed`: an
+    /// unread switch reaches `evaluate` as a third value, and `evaluate`
+    /// answers `CannotDecide` — which claims nothing **and** records no pause.
+    /// A `bool` reader has to pick one of those two and loses the other.
+    #[test]
+    fn an_unread_kill_switch_reaches_the_module_as_neither_armed_nor_tripped() {
+        assert_eq!(
+            kill_switch_from(Ok(Some("halted".into()))),
+            Observed::Is(KillSwitch::Tripped)
+        );
+        assert_eq!(
+            kill_switch_from(Ok(Some("armed".into()))),
+            Observed::Is(KillSwitch::Armed)
+        );
+        // No row is a platform that has never tripped it (`0075` inserts
+        // nothing until something halts), which is a measurement.
+        assert_eq!(kill_switch_from(Ok(None)), Observed::Is(KillSwitch::Armed));
+
+        let unread = kill_switch_from(Err("connection reset".into()));
+        assert!(matches!(unread, Observed::Unknown { .. }), "{unread:?}");
+
+        let verdict = couplings::evaluate(&Signals {
+            kill_switch: unread,
+            ..Signals::nominal("opus")
+        });
+        match verdict {
+            couplings::Verdict::CannotDecide { ref missing } => {
+                assert!(
+                    missing.iter().any(|m| m.contains("connection reset")),
+                    "the reason the read failed travels with the refusal: {missing:?}"
+                );
+            }
+            other => panic!("an unread switch must not resolve to a state: {other:?}"),
+        }
+        assert!(!verdict.may_claim());
+        assert!(
+            !verdict.is_a_transition(),
+            "a failed read is a failed iteration, not a pause a human has to clear"
+        );
+    }
+
+    /// §8's frontier-only rule, reaching a pause rather than a doc comment.
+    #[test]
+    fn a_continuous_session_on_a_local_tier_is_paused_and_a_bounded_one_is_not() {
+        let health = health_of(Some(harness::Tier::LocalHigh), true);
+        assert_eq!(health, Observed::Is(ProfileHealth::Degraded));
+        assert_eq!(
+            health_of(Some(harness::Tier::Frontier), true),
+            Observed::Is(ProfileHealth::Measured)
+        );
+        let paused = couplings::evaluate(&Signals {
+            health,
+            ..Signals::nominal("some-model")
+        });
+        assert!(!paused.may_claim(), "{paused:?}");
+        assert_eq!(
+            paused.primary().map(couplings::PauseReason::word),
+            Some("tier")
+        );
+
+        // The same profile, a bounded session: §8 is about being left alone
+        // with a budget over days, and a bounded run is one question.
+        assert_eq!(
+            health_of(Some(harness::Tier::LocalHigh), false),
+            Observed::Is(ProfileHealth::Measured)
+        );
+        assert!(couplings::evaluate(&Signals {
+            health: health_of(Some(harness::Tier::LocalHigh), false),
+            ..Signals::nominal("some-model")
+        })
+        .may_claim());
+
+        // A profile the set no longer holds is gone, not merely unhealthy.
+        assert_eq!(health_of(None, true), Observed::Is(ProfileHealth::Withdrawn));
+        assert_eq!(
+            health_of(None, false),
+            Observed::Is(ProfileHealth::Withdrawn)
+        );
+    }
+
+    /// §6.6, and the two rows this driver's mapping has to get right.
+    #[test]
+    fn two_defects_on_one_tool_open_the_breaker_and_an_unattributed_failure_does_not() {
+        let defect = |n| child_end(run_id(n), item_id(n), "failed", Some("compare_backtests"));
+        let breaker = couplings::evaluate(&Signals {
+            children: vec![defect(1), defect(2)],
+            ..Signals::nominal("opus")
+        });
+        assert_eq!(
+            breaker.primary().map(couplings::PauseReason::word),
+            Some("platform_defect"),
+            "{breaker:?}"
+        );
+
+        // A `failed` run nobody filed a defect against names no tool to
+        // exclude, so it cannot extend a streak and it ends one.
+        let unattributed = child_end(run_id(3), item_id(3), "failed", None);
+        assert_eq!(
+            unattributed,
+            ChildEnd::Defect(DefectFailure::unattributed(run_id(3), item_id(3)))
+        );
+        assert!(couplings::evaluate(&Signals {
+            children: vec![defect(1), unattributed],
+            ..Signals::nominal("opus")
+        })
+        .may_claim());
+
+        // A run that concluded — whatever its verdict — is not a defect. A
+        // `cancelled` run is a human stopping it, not the platform breaking.
+        for word in ["completed", "cancelled", "refused", "suspended", "offered"] {
+            assert_eq!(
+                child_end(run_id(9), item_id(9), word, None),
+                ChildEnd::Concluded,
+                "`{word}` is not a platform defect"
+            );
+        }
+        // And `succeeded` is not a word `agent_runs.status` takes, which is
+        // why nothing here branches on it: an earlier build compared against
+        // it and took the failure branch for every run the platform has ever
+        // finished.
+        assert!(!crate::agent::conversations::ACTIVE_RUN_STATES.contains(&"succeeded"));
+    }
+
+    // ── the budget, as §6.3 sizes it (S-11.9) ───────────────────────────────
+
+    #[test]
+    fn the_stored_spend_unit_is_the_unit_the_lease_is_metered_in() {
+        assert_eq!(SPEND_UNIT, SPEND_METER.as_str());
+    }
+
+    fn budget(trials_total: i64) -> SessionBudget {
+        SessionBudget {
+            trials_total,
+            ..SessionBudget::default()
+        }
+    }
+
+    fn request(budget: &SessionBudget, spent: Observed<Meter>) -> LeaseRequest {
+        LeaseRequest {
+            session: Uuid::from_u128(1),
+            item: Uuid::from_u128(2),
+            unit: SPEND_METER,
+            estimate: Observed::Is(Meter::trials(8.0).expect("a meter")),
+            per_task: Observed::Is(Bound::NotDenominated {
+                wants: "a per-task cap in trials",
+            }),
+            day: SessionWorker::day_cap(budget),
+            spent_today: Observed::Is(Meter::trials(0.0).expect("a meter")),
+            total: SessionWorker::total_cap(budget),
+            spent_total: spent,
+            in_flight: Vec::new(),
+        }
+    }
+
+    /// 0062, applied where it licenses a spend rather than where it narrows a
+    /// window.
+    ///
+    /// The stall detector *excludes* a run with no `trials_spent`; this makes
+    /// the whole figure unknown, because a sum that skipped it understates the
+    /// spend against its own ceiling — and an understated spend buys a child.
+    #[test]
+    fn a_finished_run_with_no_recorded_trials_makes_the_spend_unknown_and_refuses_the_lease() {
+        assert_eq!(
+            spent_from(Some((40, 0)), false),
+            Observed::Is(Meter::trials(40.0).expect("a meter"))
+        );
+        let unknown = spent_from(Some((40, 1)), false);
+        assert!(matches!(unknown, Observed::Unknown { .. }), "{unknown:?}");
+        assert!(
+            matches!(spent_from(None, true), Observed::Unknown { .. }),
+            "a read that did not happen is not a spend of zero"
+        );
+
+        let b = budget(100);
+        let refusal = execute::lease(&request(&b, unknown)).expect_err("no lease on an unread spend");
+        assert!(
+            matches!(refusal, execute::LeaseRefusal::NotRead { .. }),
+            "{refusal:?}"
+        );
+        // And the measured case does get one, so the refusal above is about
+        // the null and not about the shape of the request.
+        let lease = execute::lease(&request(
+            &b,
+            Observed::Is(Meter::trials(40.0).expect("a meter")),
+        ))
+        .expect("a measured spend leaves headroom");
+        assert!(lease.size().amount() > 0.0);
+    }
+
+    /// §6.3's own sentence: an estimate is not a ceiling.
+    ///
+    /// `trials_total` stores `0` for a blank `max_trials` form field, and with
+    /// the per-task cap in dollars and no per-day figure in trials, that leaves
+    /// **nothing** bounding the lease. `lease` refuses; the driver records the
+    /// refusal and starts no child.
+    #[test]
+    fn a_session_whose_every_ceiling_is_undenominated_gets_no_lease_at_all() {
+        let blank = budget(0);
+        assert!(matches!(
+            SessionWorker::total_cap(&blank),
+            Observed::Is(Bound::NotDenominated { .. })
+        ));
+        assert!(
+            matches!(
+                SessionWorker::day_cap(&blank),
+                Observed::Is(Bound::NotDenominated { .. })
+            ),
+            "there is no per-day figure in trials anywhere on this platform"
+        );
+        let refusal = execute::lease(&request(
+            &blank,
+            Observed::Is(Meter::trials(0.0).expect("a meter")),
+        ))
+        .expect_err("an estimate is not a ceiling");
+        assert!(
+            matches!(refusal, execute::LeaseRefusal::NothingBounds { .. }),
+            "{refusal:?}"
+        );
+    }
+
+    /// The scorer's identity must never become a lease.
+    ///
+    /// `Signal::not_estimated` carries `raw = 1.0` because that is the identity
+    /// for a ranking product. Read as a number it is "one trial", and a child
+    /// started on it would be a child bought because nobody measured anything.
+    #[test]
+    fn an_unmeasured_cost_is_read_off_its_provenance_and_not_off_its_number() {
+        let absent = Signal::not_estimated();
+        assert!((absent.raw - 1.0).abs() < f64::EPSILON, "the identity is 1.0");
+        assert!(!matches!(absent.provenance, Provenance::Measured { .. }));
+
+        let refusal = execute::lease(&LeaseRequest {
+            estimate: Observed::unknown("nobody measured this workflow"),
+            ..request(&budget(100), Observed::Is(Meter::trials(0.0).expect("a meter")))
+        })
+        .expect_err("no estimate, no lease");
+        assert!(
+            matches!(refusal, execute::LeaseRefusal::NotRead { .. }),
+            "{refusal:?}"
+        );
+    }
+
+    // ── what this driver does with one iteration (§7) ───────────────────────
+
+    /// Every hold `plan` can return is a word the driver can print, and the
+    /// three that are transitions are the three the log records.
+    ///
+    /// The asymmetry is the control: a window closing and a coupling pausing
+    /// are states a human comes back to, and a read that did not happen is a
+    /// failed iteration. Recording the second as a pause would leave somebody
+    /// clearing a pause nothing caused.
+    #[test]
+    fn a_failed_read_holds_the_iteration_without_pausing_the_session() {
+        let paused = execute::plan(&Situation {
+            openness: Openness::AlwaysOpen,
+            couplings: couplings::evaluate(&Signals {
+                kill_switch: Observed::Is(KillSwitch::Tripped),
+                ..Signals::nominal("opus")
+            }),
+            day_budget: execute::DayBudget::NotDenominated { wants: "trials" },
+            suspended: Vec::new(),
+            live: Vec::new(),
+            max_concurrent: 1,
+            claimable: 3,
+        });
+        let why = hold_reason(&paused);
+        assert!(matches!(why, HoldReason::Paused(_)), "{why:?}");
+        assert!(why.is_a_transition(), "a pause is a state a human clears");
+
+        let undecidable = execute::plan(&Situation {
+            couplings: couplings::evaluate(&Signals {
+                kill_switch: Observed::unknown("the monitor is down"),
+                ..Signals::nominal("opus")
+            }),
+            ..Situation {
+                openness: Openness::AlwaysOpen,
+                couplings: couplings::Verdict::Clear,
+                day_budget: execute::DayBudget::NotDenominated { wants: "trials" },
+                suspended: Vec::new(),
+                live: Vec::new(),
+                max_concurrent: 1,
+                claimable: 3,
+            }
+        });
+        let why = hold_reason(&undecidable);
+        assert!(matches!(why, HoldReason::CannotDecide { .. }), "{why:?}");
+        assert!(
+            !why.is_a_transition(),
+            "an unread coupling is a failed iteration, not a pause"
+        );
+        assert_ne!(why.as_str(), HoldReason::Paused(Vec::new()).as_str());
+    }
+
+    fn hold_reason(steps: &[execute::Step]) -> HoldReason {
+        steps
+            .iter()
+            .find_map(|s| match s {
+                execute::Step::Hold { why, .. } => Some(why.clone()),
+                _ => None,
+            })
+            .expect("a plan that claims nothing says why")
+    }
+
+    /// §7 rows 3–5: the two endings this driver used to decide for itself.
+    ///
+    /// The previous build compared `runs_started` against `max_runs` inline and
+    /// read `stop_when` nowhere at all. `stop` holds both, and it keeps a
+    /// condition nothing can answer out of "has not fired".
+    #[test]
+    fn stop_holds_max_runs_and_reports_a_condition_nothing_can_answer() {
+        let stopping = |runs: i64, conditions: &[research_session::charter::StopWhen]| {
+            execute::stop(
+                conditions,
+                &Stopping {
+                    runs_started: runs,
+                    max_runs: 2,
+                    unit: SPEND_METER,
+                    total: SessionWorker::total_cap(&budget(0)),
+                    spent_total: Observed::Is(Meter::trials(0.0).expect("a meter")),
+                    agenda_drained: false,
+                    stalled: false,
+                    deployable_found: Observed::unknown("nothing counts these"),
+                },
+            )
+        };
+        assert!(!stopping(1, &[]).completes());
+        let met = stopping(2, &[]);
+        assert!(met.completes());
+        assert_eq!(met.reached.first().map(|r| r.word), Some("max_runs"));
+
+        let unanswerable = stopping(
+            0,
+            &[
+                research_session::charter::StopWhen::ScheduleEnd,
+                research_session::charter::StopWhen::DeployableFound { k: 1 },
+            ],
+        );
+        assert!(!unanswerable.completes());
+        assert_eq!(
+            unanswerable.not_evaluable.len(),
+            2,
+            "a condition that cannot fire is not one that has not fired: {unanswerable:?}"
+        );
+    }
+
+    /// §4.9: `replenish` off is an ending and `replenish` on is a survey.
+    #[test]
+    fn a_drained_agenda_ends_the_session_only_when_it_is_not_set_to_keep_going() {
+        let session = Uuid::from_u128(0x5e55);
+        let charter = research_session::Charter {
+            scope: research_session::charter::Scope::default(),
+            objective: research_session::charter::Objective::BuildKnowledge { about: vec![] },
+            seeds: vec![],
+            permitted_workflows: vec![],
+            exclusions: vec![],
+            standing_constraints: vec![],
+            exploration_share: research_session::ExplorationShare::default(),
+            stop_when: vec![],
+            delta_practical_default: None,
+            version: 1,
+        };
+        let done = item(
+            session,
+            "asked and answered",
+            Source::CharterSeed,
+            ItemStatus::Done {
+                verdict: "supported".into(),
+            },
+        );
+        assert_eq!(
+            replenish::on_drain(session, &charter, std::slice::from_ref(&done), false),
+            Drain::Complete
+        );
+        match replenish::on_drain(session, &charter, std::slice::from_ref(&done), true) {
+            Drain::Replenish(survey) => {
+                assert_eq!(survey.sources, vec![Source::Replenish]);
+                assert_eq!(survey.workflow, replenish::SURVEY_WORKFLOW);
+                assert!(
+                    harness::state::Workflow::parse(&survey.workflow).is_some(),
+                    "the survey item names a workflow the catalogue can dispatch"
+                );
+            }
+            other => panic!("the endless setting replenishes: {other:?}"),
+        }
+
+        // A child still running is not a drained agenda, whichever way the
+        // setting is turned.
+        let running = item(
+            session,
+            "still going",
+            Source::CharterSeed,
+            ItemStatus::Running {
+                run_id: Uuid::from_u128(7),
+            },
+        );
+        for endless in [true, false] {
+            assert!(matches!(
+                replenish::on_drain(session, &charter, std::slice::from_ref(&running), endless),
+                Drain::Waiting { .. }
+            ));
+        }
     }
 }
