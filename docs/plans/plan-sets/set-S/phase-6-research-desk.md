@@ -1,6 +1,6 @@
 # Phase 6 — The Research Desk
 
-**Completion: 25% (6 / 24 tasks), plus 18 `PARTIAL` — five markers were wrong low and one was wrong high; twelve of the endpoints the desk calls do not exist on the running platform.**
+**Completion: 33% (8 / 24 tasks), plus 16 `PARTIAL` — re-audited 2026-09-23: two more under-claimed (S-6.7, S-6.23), four notes corrected without a marker change (S-6.1, S-6.6, S-6.22, S-6.24), the rest confirmed. See the 2026-09-23 note below.**
 
 > **This file was wrong.** Until 2026-09-16 it recorded all 24 tasks as `NOT STARTED`. The
 > Research Desk is in fact built and shipping: `pages/DeskPage.tsx` under 13 routes, 18
@@ -512,10 +512,11 @@ of the session and it found more than most of the ones that built things.
 **Five tasks were done and marked `PARTIAL`** — S-6.2, S-6.3, S-6.4, S-6.5,
 S-6.13 — each promoted above with the specific clause that was checked. **One
 task was marked `DONE` and fails its own acceptance by twenty-eight files**
-(S-6.22). S-6.1 is almost certainly a sixth promotion; it is held back only
-because its acceptance names a clean `npm run build` and a frontend track is
-editing the tree as this is written. A build run against a half-finished edit
-proves nothing, so the marker waits for one that means something.
+(S-6.22). S-6.1 was flagged here as "almost certainly a sixth promotion,"
+held back only pending a clean build once a frontend track finished editing.
+**That was wrong in the event: `npm run lint`, the other half of S-6.1's own
+acceptance, was never run at all and currently fails with ~140 errors — see
+2026-09-23 below.**
 
 **How S-6.22 passed.** Its guard walks the desk directory plus five named files
 and asserts a claim about the whole repository. A test whose scope is narrower
@@ -534,6 +535,54 @@ current state, not state changes"* when `monitor.events` (migration `0075`)
 carries `from_state`, `to_state`, `metric`, `observed_value` and `limit_value`
 and is precisely a state-change log. A route built to prevent a silence from
 being misread now misreads it out loud.
+
+### A second audit, 2026-09-23 — the tree moved under the first one in both directions
+
+Fifteen commits landed on this tree since the 2026-09-21 audit above. Re-checked every task
+marked partial or done against its literal acceptance clauses rather than against the prior
+note. `npm test` (605/605, 63 files), `tsc --noEmit` and `npm run build` are all clean;
+**`npm run lint` is not** — see S-6.1.
+
+**Two more were under-claimed:** S-6.7 (the composer) and S-6.23 (the provenance fence)
+have every acceptance clause met against real production callers, not declared ones, and
+move to `DONE` below.
+
+**Four notes needed correcting without a marker change:**
+- **S-6.1** — the real reason `npm run lint` was never actually run is not "a track was
+  mid-edit," it currently fails with ~140 errors from `eslint-plugin-react-hooks`'s
+  React-Compiler rules, a large share inside the desk tree itself. No audit of this file has
+  ever run it before now.
+- **S-6.6** — a fresh instance of this file's own named defect shape, one day old:
+  `d29f5c7` (09-21) deleted Pause/Resume/Escalate from the frontend because the backend
+  404'd on all three; `831b925` (09-22) mounted `pause` and `resume`. The frontend still
+  says they're gone and the backend now answers to two of the three with nobody calling.
+- **S-6.22** — both of its two remaining named clauses (browser-notification opt-in with
+  quiet hours; an `aria-live` region for new-approval/question/run-finished) were closed by
+  `e0f9c3f` (09-22), which this task's own note was never updated to reflect. The one
+  clause left is a 375px usability check with no automated test anywhere in the suite.
+- **S-6.24** — the note's stated blocker ("finding and refuted need phase 4's memory
+  migrations, which do not exist") is false in current source: `desk_digest.rs:291-318`
+  runs real queries against `agent_memory.entry` and `monitor.events` for exactly those
+  kinds. This file's own later prose already documented the fix (below); the per-task
+  block was never reconciled to match, the same pattern the 2026-09-21 audit already fixed
+  once for S-6.10 and S-6.18 but missed here.
+
+**Confirmed correctly `PARTIAL`, gap unchanged:** S-6.10, S-6.11, S-6.12, S-6.14, S-6.16,
+S-6.18, S-6.21. **S-6.20** additionally: `Models.tsx:161-180` documents that Run scorecard
+and Run canary were **deleted, not merely unwired** — `grep -rn "scorecard|canary"` over
+`crates/api/src/routes` returns nothing — which the task's own note never named.
+
+**Three flagged as possible further under-claims, not conclusively verified — left `PARTIAL`
+pending a closer check rather than promoted on partial evidence:** S-6.8 (State panel — no
+remaining blocker found in source, but the "legible in under a minute" clause wasn't
+exhaustively tested), S-6.9 (Evidence panel — both clauses appear met, resolver and
+strike-through both confirmed working), S-6.15 (Approvals — no further blocker found;
+`approval_requests` holds 0 live rows, which may be why nobody re-verified it, but that is a
+data fact, not a code gap).
+
+**The running platform on :7080 is a stale binary**, missing at least the two commits named
+above — its live probe responses were not trusted for this audit and should not be trusted
+for the next one without a rebuild and restart first.
 
 ### What the running system said that the plan did not expect
 
@@ -645,7 +694,16 @@ run id returns all-zeros — deliberately not wired; and there is no route from 
 child conversation back to its session, so §3.1's session chip cannot be built.
 
 ### S-6.1 The desk shell — M
-`PARTIAL` 2026-09-16 — `pages/DeskPage.tsx` (162 lines) with 13 routes, mounted at `/desk/*` in `App.tsx`, and `/agent`, `/research` and `/approvals` redirecting into it.
+`PARTIAL` 2026-09-16, re-audited 2026-09-23 — `pages/DeskPage.tsx` (162 lines) with 13
+routes, mounted at `/desk/*` in `App.tsx`, and `/agent`, `/research` and `/approvals`
+redirecting into it. `npm run build` and `tsc --noEmit` are clean, but the acceptance also
+names `npm run lint` clean, and **no audit of this file has ever run it**: it currently
+fails with ~140 errors, a large share inside the desk tree itself (`Operations.tsx` 10,
+`AwayDigest.tsx` 8, `Dossier.tsx` 6, `Cards.tsx` 5, `MemoryBrowser.tsx` 5, `RightPanel.tsx`
+5), from `eslint-plugin-react-hooks@7.1.1`'s React-Compiler rules (`purity`,
+`immutability`, `preserve-manual-memoization`, `set-state-in-effect`) that have been in
+`package.json` all along. Stays `PARTIAL`, now for the reason its own acceptance actually
+names.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
@@ -741,7 +799,14 @@ do).
 ## Working with the agent
 
 ### S-6.6 The controls row and the keyboard map — M
-`PARTIAL` 2026-09-16 — `ControlsRow.tsx` (174 lines), with the keyboard map exercised by `__tests__/controls-and-replay.test.tsx`.
+`PARTIAL` 2026-09-16, re-audited 2026-09-23 — `ControlsRow.tsx` (174 lines), with the
+keyboard map exercised by `__tests__/controls-and-replay.test.tsx`. **A fresh instance of
+this file's own defect shape, one day old:** `d29f5c7` (2026-09-21) deleted Pause / Resume
+/ Escalate from this component because the backend answered 404 for all three;
+`831b925` (2026-09-22) mounted `POST /api/agent/runs/{id}/pause` and `…/resume` the very
+next day. The backend capability now exists with zero frontend caller —
+`api/desk.ts:1749` still says "pause, resume and escalate are gone," and all three still
+answer 404 from the frontend's perspective because nothing calls the two that now exist.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
@@ -755,7 +820,15 @@ frontier run and on a local run.
 **Traces:** AGENT-012 §3.4; §19.3.
 
 ### S-6.7 The composer — M
-`PARTIAL` 2026-09-16 — `Composer.tsx` (247 lines).
+`DONE` 2026-09-23 (was `PARTIAL` 2026-09-16, under-claimed) — `Composer.tsx` (247 lines).
+All four acceptance clauses verified against real production callers, not declarations:
+`classifyNeedsResearch` (`Composer.tsx:58`) gates the offer card and `Conversation.tsx:508`
+(`onOffer`) actually injects an `offer`-kind card; the workflow chip is included in the
+turn preamble (`Conversation.tsx:344`); `steer: running` (`Composer.tsx:167`) routes a
+mid-run send through `Conversation.tsx:335 if (s.steer) { steer(...) }` rather than a new
+turn, with `steer` a real `KIND_MAP` card kind; Chat-mode trial-spending is enforced
+structurally by `modeMaySpendTrials` (`lib/desk/rings.ts:34,40,58`). Every clause has a
+dedicated passing test in `modes.test.tsx`.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
@@ -963,7 +1036,16 @@ profile and goal, and names the reason each tool was included.
 **Traces:** AGENT-012 §9.
 
 ### S-6.20 Models and tiers — M
-`PARTIAL` 2026-09-16 — `Models.tsx` (221 lines). It is where AI providers moved to, and as of 2026-09-16 the Settings page links here instead of importing a deleted component.
+`PARTIAL` 2026-09-16, re-checked 2026-09-23 and confirmed correctly `PARTIAL`, with an
+undisclosed cause now named — `Models.tsx` (221 lines). It is where AI providers moved to,
+and as of 2026-09-16 the Settings page links here instead of importing a deleted component.
+Provider/key management is genuinely built inline (real mutations against
+`/api/llm/credentials`, `Models.tsx:53-72`) and `unmeasured` renders correctly
+(`Models.tsx:155`). What the note never named: `Models.tsx:161-180` documents that **Run
+scorecard and Run canary were deleted, not merely unwired** — `grep -rn
+"scorecard|canary"` over `crates/api/src/routes` returns nothing — and per-suite
+scorecards depend on S-4.11/S-4.13, both of which this session's phase-4 audit found are
+themselves blocked on an empty `evals/results/` corpus.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
@@ -1001,10 +1083,20 @@ acceptance by twenty-eight files.** The criterion is *"a grep for `bg-surface-2`
 outside `compat.css`"*. That grep returns **28 files** — mlops 7, workbench 6,
 automations 5, pages 4 and more. The task passed because its guard,
 `__tests__/no-deprecated-aliases.test.ts`, walks only the desk directory plus five
-named files, so it asserts a repository-wide claim over a subdirectory. Two further
-clauses are unmet: browser-notification opt-in and quiet hours do not exist, and no
-`aria-live` region announces a new approval, a new question or a finished run —
-only the kill-switch banner has one. Superseded note: `DONE` 2026-09-16 — `components/agent/` and `components/workspace/` are gone, nothing imports them, and no desk file uses a back-compat alias — all three asserted by `__tests__/no-deprecated-aliases.test.ts`, which passes.
+named files, so it asserts a repository-wide claim over a subdirectory. Superseded note: `DONE` 2026-09-16 — `components/agent/` and `components/workspace/` are gone, nothing imports them, and no desk file uses a back-compat alias — all three asserted by `__tests__/no-deprecated-aliases.test.ts`, which passes.
+
+**Re-audited 2026-09-23: both of the two further clauses named above are now closed, and
+this note was never updated to say so.** `e0f9c3f` (2026-09-22) shipped browser-notification
+opt-in with quiet hours (`lib/notify.ts`, `components/settings/BrowserNotifications.tsx`,
+mounted in `SettingsPage.tsx`) and an `aria-live` region for new-approval / new-question /
+run-finished (`LiveRegion.tsx`, mounted in `AppLayout.tsx:155`, driven by a real
+`useDeskAnnouncer` call in `Conversation.tsx:268`), each with dedicated passing tests. The
+28-file alias grep is unaffected by this and stays the reason this is not `DONE`. **One
+clause is now genuinely unverifiable rather than unmet**: "at 375px the conversation,
+composer, controls row and approval cards are fully usable" has no automated test anywhere
+in the frontend suite (`grep -rn "375"` returns nothing; the nearest breakpoint is a
+`@media (max-width: 768px)` rule in `desk.css:218`) — recorded as an open test gap, not
+assumed either way.
 
 It did not pass before 2026-09-16, and both halves of the failure were real. `SettingsPage.tsx` still imported two components from the deleted `components/agent/`, which **broke `npm run build`** — proven with a scratch file, exit 2, TS2307. Service tokens had been lost rather than moved, so `ApiAccessCard` was rebuilt under `components/settings/`; the MCP server cannot start without a token that card is the only way to mint. The alias scan also read `desk.css`'s own header — which names the forbidden tokens in order to forbid them — as a violation, and now strips comments the way `static_invariants.rs` does.
 
@@ -1023,7 +1115,17 @@ usable; live regions announce new approval, new question and run finished.
 **Traces:** AGENT-012 §13, §14, §15; §19.7, §19.8.
 
 ### S-6.23 The provenance fence has to reach the human — M
-`PARTIAL` 2026-09-16 — The provenance fence is asserted by `__tests__/honesty.test.tsx`: untrusted text renders inert, the card names its source, and the mark survives the Markdown export. All passing.
+`DONE` 2026-09-23 (was `PARTIAL` 2026-09-16, under-claimed) — The provenance fence is
+asserted by `__tests__/honesty.test.tsx`: untrusted text renders inert, the card names its
+source, and the mark survives the Markdown export. Re-verified with full call-chain
+evidence: `chainTouchesUntrusted` reaches `EvidenceChip mark={...}` in
+`Dossier.tsx:246-247`, the mark survives Markdown export (`dossierToMarkdown` embeds
+`**[fetched — untrusted source in the chain]**`, `Dossier.tsx:110`), and PDF export is
+`window.print()` of the same marked DOM. `honesty.test.tsx` and
+`provenance-reaches-the-chip.test.tsx` both pass in the current 605/605 suite. No
+remaining gap found for this task's specific acceptance clauses; the earlier note about
+zero stored messages carrying a provenance mark (below) is a live-data fact about this
+deployment, not a code gap in the fence itself.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
@@ -1050,7 +1152,7 @@ survives PDF and Markdown export; `model_summary` and `direct_stat` are visually
 
 Four of the seven line kinds have a source in this deployment and are served: `concluded` from `agent_runs.summary` (the run's own conclusion, falling back to its error and only then to its goal), `approval_defaulted` from timed-out `approval_requests` **naming what defaulted**, `budget` from `llm_usage` summed over the gap, and `waiting` for what is still pending. The under-an-hour rule is implemented and tested, and it returns `absent: true` rather than an empty list — the two render differently and mean different things.
 
-**Three kinds are declared uncovered rather than approximated**, which is what keeps this `PARTIAL`: `finding` and `refuted` need phase 4's memory migrations, which do not exist; `monitor` needs a state-*change* log, and `monitor_lease` / `kill_switch` / `monitor_limits` record current state, so a change inferred by diffing against a guess at the old state would report changes that did not happen. The response carries `kinds_not_covered` with a reason for each, because an empty digest and a blind one look identical and the operator reading it is deciding whether to stop looking. A test asserts every kind in the frontend's union is in exactly one of the two lists.
+**Three kinds were declared uncovered rather than approximated** in the note this superseded: `finding` and `refuted` supposedly needed phase 4's memory migrations that did not exist; `monitor` supposedly needed a state-*change* log the platform did not have. **That is false in current source, re-checked 2026-09-23**, and this file's own later prose already says so (below, "The digest stopped lying to the operator") without the per-task block ever being reconciled to match — the same pattern the 2026-09-21 audit fixed once for S-6.10 and S-6.18 and missed here. `desk_digest.rs:291-318` runs a real `SELECT ... FROM agent_memory.entry` for `finding`/`refuted` and a real `SELECT ... FROM monitor.events` (migration `0075`, a genuine state-change log with `from_state`/`to_state`) for `monitor`, pushing real lines for both. All seven line kinds now have a genuine code path; whether any renders on a given day is a live-data question (some tables hold 0 rows on this deployment), not a code gap — which is why this stays `PARTIAL` rather than `DONE`: the response still needs to be re-checked against a live run producing at least one row of each kind, and a `d30b309` fix to a browser-clock-vs-server-clock filtering bug in `AwayDigest.tsx` (which could silently blank the whole panel) has not been exercised against real data either.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
