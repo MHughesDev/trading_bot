@@ -45,7 +45,8 @@
 use chrono::{DateTime, Utc};
 use domain::payloads::bar::Timeframe;
 use domain::strategy_def::exits::{
-    first_triggered, ExitPolicy, ExitRule, PositionSide, PositionState,
+    first_triggered, DistanceUnit, ExitPolicy, ExitRule, PositionSide, PositionState,
+    Triggered as DomainTriggered, VolatilityReadings,
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -251,6 +252,7 @@ impl ExitTracker {
         };
 
         let mut fired: Option<(&ExitRule, Decimal)> = None;
+        let mut unmeasured: Option<(&'static str, DistanceUnit)> = None;
         for probe in probes {
             let state = PositionState {
                 side: open.side,
@@ -259,11 +261,46 @@ impl ExitTracker {
                 bars_held: open.bars_held,
                 current_price: *probe,
                 signals: signals.to_vec(),
+                // The live runtime has no volatility source. A policy with an
+                // ATR- or sigma-scaled distance therefore reports `Unmeasured`
+                // below rather than resolving, which is the honest answer: the
+                // feature engine computes `atr_{n}` for a backtest and nothing
+                // feeds it to this loop. Wiring it is what
+                // `VolatilityReadings::insert` is for.
+                volatility: VolatilityReadings::none(),
             };
-            if let Some(rule) = first_triggered(&self.policy, &state) {
-                fired = Some((rule, *probe));
-                break;
+            match first_triggered(&self.policy, &state) {
+                DomainTriggered::Fired(rule) => {
+                    fired = Some((rule, *probe));
+                    break;
+                }
+                // Evaluation stopped at a rule whose unit has no reading, and
+                // this loop must stop with it. Treating it as "nothing fired"
+                // would be the runtime holding a position because it could not
+                // evaluate the stop that would have closed it — an absent
+                // measurement spent as a safe answer, on the rule whose whole
+                // job is to cap a loss.
+                DomainTriggered::Unmeasured { rule, unit } => {
+                    unmeasured = Some((rule.kind(), unit));
+                    break;
+                }
+                DomainTriggered::NothingFired => {}
             }
+        }
+
+        if let Some((kind, unit)) = unmeasured {
+            // Loud, and not a verdict. The caller gets `None` either way, so
+            // the distinction has to leave the process some other route than
+            // the return type; a silent `None` here is indistinguishable from a
+            // bar on which nothing was due to fire.
+            tracing::error!(
+                rule = kind,
+                unit = ?unit,
+                "exit rule could not be evaluated: this runtime supplies no volatility \
+                 reading for its unit, so the position is still open and no exit was \
+                 checked past this rule"
+            );
+            return None;
         }
 
         fired.map(|(rule, probe)| Triggered {
@@ -503,11 +540,29 @@ fn fill_level(rule: &ExitRule, open: &Open, probe: Decimal, bar: &Bar) -> Decima
         PositionSide::Long => Decimal::ONE,
         PositionSide::Short => -Decimal::ONE,
     };
+    // A rule only reaches here after `first_triggered` returned `Fired`, which
+    // means its distance resolved against the same readings. `Err` is therefore
+    // unreachable rather than tolerated, and it fills at the probe rather than
+    // at a level computed from a magnitude whose unit nobody measured.
+    let vol = VolatilityReadings::none();
     let level = match rule {
-        ExitRule::StopLoss { fraction } => open.entry_price * (Decimal::ONE - sign * *fraction),
-        ExitRule::TakeProfit { fraction } => open.entry_price * (Decimal::ONE + sign * *fraction),
-        ExitRule::TrailingStop { fraction } => {
-            open.favourable_extreme * (Decimal::ONE - sign * *fraction)
+        ExitRule::StopLoss { distance } => {
+            let Ok(f) = distance.as_fraction(open.entry_price, &vol) else {
+                return probe;
+            };
+            open.entry_price * (Decimal::ONE - sign * f)
+        }
+        ExitRule::TakeProfit { distance } => {
+            let Ok(f) = distance.as_fraction(open.entry_price, &vol) else {
+                return probe;
+            };
+            open.entry_price * (Decimal::ONE + sign * f)
+        }
+        ExitRule::TrailingStop { distance } => {
+            let Ok(f) = distance.as_fraction(open.favourable_extreme, &vol) else {
+                return probe;
+            };
+            open.favourable_extreme * (Decimal::ONE - sign * f)
         }
         // No level to rest at: these fill wherever the probe found them.
         ExitRule::MaxHoldingBars { .. } | ExitRule::OnSignal { .. } => return probe,
@@ -518,6 +573,7 @@ fn fill_level(rule: &ExitRule, open: &Open, probe: Decimal, bar: &Bar) -> Decima
 #[cfg(test)]
 mod tests {
     use super::*;
+    use domain::strategy_def::exits::ExitDistance;
     use rust_decimal_macros::dec;
 
     fn ts(n: i64) -> DateTime<Utc> {
@@ -539,8 +595,8 @@ mod tests {
     #[test]
     fn a_bar_that_breaches_both_the_stop_and_the_target_resolves_to_the_stop() {
         let mut t = ExitTracker::new(policy(vec![
-            ExitRule::TakeProfit { fraction: dec!(0.05) },
-            ExitRule::StopLoss { fraction: dec!(0.02) },
+            ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) },
+            ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) },
         ]));
         t.opened(PositionSide::Long, dec!(100));
 
@@ -556,12 +612,12 @@ mod tests {
     fn declaration_order_cannot_defeat_worst_first() {
         for rules in [
             vec![
-                ExitRule::TakeProfit { fraction: dec!(0.05) },
-                ExitRule::StopLoss { fraction: dec!(0.02) },
+                ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) },
+                ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) },
             ],
             vec![
-                ExitRule::StopLoss { fraction: dec!(0.02) },
-                ExitRule::TakeProfit { fraction: dec!(0.05) },
+                ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) },
+                ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) },
             ],
         ] {
             let mut t = ExitTracker::new(policy(rules));
@@ -574,8 +630,8 @@ mod tests {
     #[test]
     fn a_short_resolves_its_adverse_extreme_first_too() {
         let mut t = ExitTracker::new(policy(vec![
-            ExitRule::TakeProfit { fraction: dec!(0.05) },
-            ExitRule::StopLoss { fraction: dec!(0.02) },
+            ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) },
+            ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) },
         ]));
         t.opened(PositionSide::Short, dec!(100));
         // Adverse for a short is the high: 103 breaches the 102 stop.
@@ -588,12 +644,12 @@ mod tests {
     /// evidence-grade policy.
     #[test]
     fn close_only_misses_a_stop_the_bar_traded_through() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { fraction: dec!(0.02) }]))
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]))
             .with_intrabar(IntrabarPolicy::CloseOnly);
         t.opened(PositionSide::Long, dec!(100));
         assert!(t.on_bar(&bar(1, dec!(101), dec!(95), dec!(100)), &[]).is_none());
 
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { fraction: dec!(0.02) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
         t.opened(PositionSide::Long, dec!(100));
         assert!(t.on_bar(&bar(1, dec!(101), dec!(95), dec!(100)), &[]).is_some());
     }
@@ -603,7 +659,7 @@ mod tests {
     /// A resting stop fills where it rested, not at the bar's extreme.
     #[test]
     fn a_stop_fills_at_its_level_when_the_bar_traded_through_it() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { fraction: dec!(0.02) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
         t.opened(PositionSide::Long, dec!(100));
         let fired = t.on_bar(&bar(1, dec!(100), dec!(90), dec!(91)), &[]).unwrap();
         assert_eq!(fired.price, dec!(98));
@@ -613,7 +669,7 @@ mod tests {
     /// level would invent liquidity that was not there.
     #[test]
     fn a_gap_through_the_stop_fills_at_the_gap_not_at_the_level() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { fraction: dec!(0.02) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
         t.opened(PositionSide::Long, dec!(100));
         // The whole bar is below the 98 stop: high 95.
         let fired = t.on_bar(&bar(1, dec!(95), dec!(93), dec!(94)), &[]).unwrap();
@@ -622,7 +678,7 @@ mod tests {
 
     #[test]
     fn a_target_fills_at_its_level_rather_than_the_bar_high() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::TakeProfit { fraction: dec!(0.05) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) }]));
         t.opened(PositionSide::Long, dec!(100));
         let fired = t.on_bar(&bar(1, dec!(120), dec!(100), dec!(118)), &[]).unwrap();
         assert_eq!(fired.price, dec!(105), "no windfall from the bar's extreme");
@@ -632,7 +688,7 @@ mod tests {
 
     #[test]
     fn the_trailing_stop_follows_the_running_high_and_fires_on_the_retrace() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::TrailingStop { fraction: dec!(0.03) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::TrailingStop { distance: ExitDistance::of_entry(dec!(0.03)) }]));
         t.opened(PositionSide::Long, dec!(100));
 
         // Each bar's own low must stay inside the 3% band, or the ratchet fires
@@ -651,7 +707,7 @@ mod tests {
     /// fire. A ratchet that un-ratchets is not a trailing stop.
     #[test]
     fn the_extreme_never_moves_backwards() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::TrailingStop { fraction: dec!(0.50) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::TrailingStop { distance: ExitDistance::of_entry(dec!(0.50)) }]));
         t.opened(PositionSide::Long, dec!(100));
         t.on_bar(&bar(1, dec!(200), dec!(100), dec!(150)), &[]);
         // A much lower bar must not reset the extreme to 150.
@@ -680,7 +736,7 @@ mod tests {
     /// adverse movement to every strategy on the platform.
     #[test]
     fn a_stop_can_fire_on_the_entry_bar() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { fraction: dec!(0.02) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
         t.opened(PositionSide::Long, dec!(100));
         let fired = t.on_bar(&bar(1, dec!(100), dec!(90), dec!(95)), &[]).unwrap();
         assert_eq!(fired.bars_held, 0);
@@ -704,7 +760,7 @@ mod tests {
     /// the first bar it is exposed for can stop it out.
     #[test]
     fn a_close_fill_is_still_stoppable_on_its_first_exposed_bar() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { fraction: dec!(0.02) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
         t.opened_at_bar_close(PositionSide::Long, dec!(100));
         let fired = t.on_bar(&bar(1, dec!(100), dec!(90), dec!(95)), &[]).unwrap();
         assert_eq!(fired.rule, "stop_loss");
@@ -742,7 +798,7 @@ mod tests {
 
     #[test]
     fn a_flat_tracker_reports_nothing() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { fraction: dec!(0.02) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
         assert!(!t.is_open());
         assert_eq!(t.bars_held(), None);
         assert!(t.on_bar(&bar(1, dec!(1), dec!(1), dec!(1)), &[]).is_none());
@@ -759,7 +815,7 @@ mod tests {
     /// entry would fire immediately on the new position.
     #[test]
     fn reopening_resets_the_entry_and_the_extreme() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { fraction: dec!(0.02) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
         t.opened(PositionSide::Long, dec!(100));
         t.on_bar(&bar(1, dec!(120), dec!(100), dec!(119)), &[]);
         t.opened(PositionSide::Long, dec!(120));
@@ -771,7 +827,7 @@ mod tests {
     /// mark a position flat that the venue had not yet closed.
     #[test]
     fn a_trigger_does_not_close_the_position_by_itself() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { fraction: dec!(0.02) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
         t.opened(PositionSide::Long, dec!(100));
         assert!(t.on_bar(&bar(1, dec!(100), dec!(90), dec!(91)), &[]).is_some());
         assert!(t.is_open(), "the caller owns the fill");
@@ -798,7 +854,7 @@ mod tests {
         let rules = || {
             policy(vec![
                 ExitRule::MaxHoldingBars { bars: 3 },
-                ExitRule::StopLoss { fraction: dec!(0.05) },
+                ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.05)) },
             ])
         };
 
@@ -848,8 +904,8 @@ mod tests {
     #[test]
     fn a_running_bar_that_breached_both_still_resolves_to_the_stop() {
         let mut t = ExitTracker::new(policy(vec![
-            ExitRule::TakeProfit { fraction: dec!(0.05) },
-            ExitRule::StopLoss { fraction: dec!(0.02) },
+            ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) },
+            ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) },
         ]));
         t.opened(PositionSide::Long, dec!(100));
         let fired = t

@@ -1165,9 +1165,25 @@ mod tests {
             available_time: Utc::now(),
         };
         let results = manager.dispatch("BTC-USDT", event);
+        // This test used to assert `results.is_empty()` — true before
+        // `SizedIntents::is_empty()` was defined to count `unresolved` too.
+        // It no longer holds, and should not: a bar arriving before either
+        // feature has a value is exactly the case `unresolved` exists to
+        // report (`intents.rs`'s own doc comment names it, "a cross on the
+        // first bar of a window"). Dropping that silently would be an absent
+        // measurement reported as a zero, on the same day this session found
+        // and fixed that mistake in three other crates. So the assertion is
+        // now the honest one: no *order* intent was placed, and the manager
+        // surfaced exactly one unresolved signal rather than nothing at all.
+        assert_eq!(results.len(), 1, "the unresolved condition must be surfaced");
+        let (_, outcome) = &results[0];
         assert!(
-            results.is_empty(),
-            "no intents expected without feature values"
+            outcome.intents.is_empty(),
+            "no order intent expected without feature values"
+        );
+        assert!(
+            !outcome.unresolved.is_empty(),
+            "the missing features should be reported as unresolved, not silently dropped"
         );
     }
 
@@ -1382,9 +1398,18 @@ mod tests {
             available_time: Utc::now(),
         };
         let intents = instance.process_event(&event);
+        // Same correction as `no_intent_without_features`: `SizedIntents::is_empty()`
+        // counts `unresolved` too, and a ModelForecast node with no result yet is
+        // exactly that case (`Verdict::Unknown(Unknown::FeatureNotReady)` in
+        // `run_signals`) — reported, not dropped. The order-intent half of the
+        // claim still holds and is what this test is actually named for.
         assert!(
-            intents.is_empty(),
+            intents.intents.is_empty(),
             "should not fire without forecast results"
+        );
+        assert!(
+            !intents.unresolved.is_empty(),
+            "an unfetched forecast should be reported as unresolved, not silently dropped"
         );
 
         // Set forecast result to true

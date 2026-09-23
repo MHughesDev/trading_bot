@@ -58,6 +58,15 @@ pub const DEFINITION_VERSION_V1_2: &str = "1.2";
 /// reports the absence rather than inventing [`ExitPolicy::RiskLayerOnly`] on
 /// its behalf. The two look identical at runtime and are different claims.
 pub const DEFINITION_VERSION_V1_3: &str = "1.3";
+/// Format version for v1.4 additions (the `unit` on an exit distance — see
+/// [`exits::DistanceUnit`] and ADR-D-09).
+///
+/// Additive in both the parser and the meaning, which 1.3 was not: the unit
+/// defaults to [`exits::DistanceUnit::FractionOfEntry`] and is omitted from the
+/// serialized form when it holds that value, so a 1.0/1.2/1.3 document parses
+/// and re-serializes **byte for byte** unchanged. What 1.4 adds is the ability
+/// to *say* `atr` or `sigma`, which no earlier version could store at all.
+pub const DEFINITION_VERSION_V1_4: &str = "1.4";
 
 /// A complete strategy definition — the artifact all three front doors produce.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -169,6 +178,46 @@ mod tests {
         let json2 = serde_json::to_string(&def).unwrap();
         let def2: StrategyDefinition = serde_json::from_str(&json2).unwrap();
         assert_eq!(def, def2);
+    }
+
+    /// Three documents copied out of the live `strategy_definitions` table: one
+    /// at each version the column actually holds (9 rows are 1.0, 1 is 1.1, 4 are
+    /// 1.2 — all 14 with `definition_version = '1.0'` in the *column*, which is
+    /// why the version inside the JSON is the one anything must read).
+    ///
+    /// 1.4 adds a field to an exit rule. The proof that it is additive is that
+    /// these come back out with the same keys and the same values, and that the
+    /// new `unit` key appears nowhere: none of them has an `exits` block at all.
+    #[test]
+    fn the_definitions_in_the_live_table_round_trip_unchanged() {
+        const STORED: [&str; 3] = [
+            // ema_cross_v1, definition_json.definition_version = "1.0"
+            r#"{"nodes": [{"id": "c1", "expr": "feature('ema_7') > feature('ema_21')", "type": "condition"}, {"id": "s1", "emit": "long", "type": "signal", "when": "c1"}], "inputs": [{"lane": "market.bars.1h", "instrument": "$bound_at_init"}, {"lane": "features.technical", "features": ["ema_7", "ema_21"], "instrument": "$bound_at_init"}], "actions": [{"type": "place_order", "order": {"side": "buy", "size": "0.01", "size_mode": "fixed"}, "on_signal": "long"}], "asset_class": "crypto_spot_cex", "strategy_id": "ema_cross_v1", "min_trust_tier": "centralized_exchange", "risk_overrides": {}, "definition_version": "1.0"}"#,
+            // ai_model_smoke, "1.1" — the ModelForecast node
+            r#"{"nodes": [{"id": "m1", "type": "model_forecast", "direction": "bullish", "model_ref": "btc_forecaster", "min_confidence": 0.6}, {"id": "s1", "emit": "entry", "type": "signal", "when": "m1"}], "inputs": [{"lane": "market.bars.1m", "instrument": "$bound_at_init"}], "actions": [{"type": "place_order", "order": {"side": "buy", "size": "0.01", "size_mode": "fixed"}, "on_signal": "entry"}], "asset_class": "crypto_spot_cex", "strategy_id": "ai_model_smoke", "min_trust_tier": "centralized_exchange", "risk_overrides": {}, "definition_version": "1.1"}"#,
+            // model_signal_v1, "1.2" — note the parameter literally named `exit`,
+            // which is what a strategy did before 1.3 gave exits a home.
+            r#"{"nodes": [{"id": "n1", "expr": "feature('model_signal') > 0.5", "type": "condition"}, {"id": "s1", "emit": "long", "type": "signal", "when": "n1"}], "inputs": [{"lane": "market.bars.1h", "instrument": "$bound_at_init"}, {"lane": "features.inference", "instrument": "$bound_at_init"}], "actions": [{"type": "place_order", "order": {"side": "buy", "size": "0.01", "size_mode": "fixed"}, "on_signal": "long"}], "parameters": {"exit": {"type": "enum", "choices": ["trail", "fixed"], "default": "trail"}}, "asset_class": "crypto_spot_cex", "strategy_id": "model_signal_v1", "min_trust_tier": "centralized_exchange", "risk_overrides": {}, "definition_version": "1.2"}"#,
+        ];
+
+        for stored in STORED {
+            let before: serde_json::Value = serde_json::from_str(stored).expect("stored JSON");
+            let def: StrategyDefinition = serde_json::from_str(stored)
+                .unwrap_or_else(|e| panic!("a stored definition must still load: {e}"));
+            assert!(
+                def.exits.is_none(),
+                "no stored document has an exit policy; reading one in would be inventing it"
+            );
+            let after = serde_json::to_value(&def).expect("serializes");
+            assert_eq!(
+                before, after,
+                "1.4 must not add, drop or alter a key in a document written before it"
+            );
+            assert!(
+                !serde_json::to_string(&after).unwrap().contains("\"unit\""),
+                "the 1.4 field must not appear in a document that never used it"
+            );
+        }
     }
 
     #[test]

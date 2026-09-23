@@ -11,6 +11,7 @@ pub mod crypto;
 pub mod dataset;
 pub mod defi;
 pub mod feature;
+pub mod fundamentals;
 pub mod futures;
 pub mod hash;
 pub mod identity;
@@ -22,6 +23,8 @@ pub mod restatement;
 pub mod retention;
 pub mod source;
 pub mod split;
+pub mod text;
+pub mod vintage;
 
 pub use hash::content_hash;
 pub use identity::{InstrumentKey, VenueKey};

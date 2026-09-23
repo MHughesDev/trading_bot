@@ -359,7 +359,11 @@ level in — `not (a or b)` with both true becomes `1 - 2 = -1`, which the runti
 reads as **true**. `normalises_or_so_that_not_of_it_is_correct` pins it.
 
 **What is refused by name rather than guessed at**, each naming the missing
-mechanism: `atr`/`sigma` exit distances (Q-S5-01), `crossed_above`/`below` and
+mechanism: `atr`/`sigma` exit distances (Q-S5-01 — the schema gained the field
+2026-09-22, so the refusal is narrower now: the grammar parses `atr`/`sigma` as
+a bare token with no period, and `DistanceUnit::Atr { period }` needs one from
+somewhere the parser does not have; the fix text says so rather than the
+now-false "the schema does not have this yet"), `crossed_above`/`below` and
 `rising`/`falling` (Q-S5-02 — the runtime has no previous-value register and
 `bytecode::Op` has no cross op), state predicates, several maths builtins,
 `cooldown`, `vol_target`/`kelly` sizing and `max_daily_loss`.

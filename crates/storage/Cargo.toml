@@ -7,6 +7,10 @@ edition = "2021"
 sha2 = "0.10"
 domain = { workspace = true }
 dataplane = { workspace = true }
+# The silence alarm's vocabulary. The dependency runs this way on purpose:
+# `observability` holds no database client, so the crate that already holds both
+# connections does the reading and hands it a census to judge.
+observability = { workspace = true }
 async-trait = "0.1"
 serde = { workspace = true }
 serde_json = { workspace = true }

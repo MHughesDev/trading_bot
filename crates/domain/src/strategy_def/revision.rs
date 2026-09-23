@@ -158,7 +158,7 @@ fn write_canonical(v: &serde_json::Value, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::strategy_def::exits::{ExitPolicy, ExitRule};
+    use crate::strategy_def::exits::{ExitDistance, ExitPolicy, ExitRule};
     use rust_decimal_macros::dec;
     use serde_json::json;
 
@@ -216,7 +216,7 @@ mod tests {
 
         let mut stopped = def();
         stopped.exits = Some(ExitPolicy::Rules {
-            rules: vec![ExitRule::StopLoss { fraction: dec!(0.02) }],
+            rules: vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }],
         });
         let stopped_hash = RevisionHash::of(&stopped).unwrap();
 
@@ -235,8 +235,8 @@ mod tests {
             d.exits = Some(ExitPolicy::Rules { rules: vec![a, b] });
             RevisionHash::of(&d).unwrap()
         };
-        let stop = ExitRule::StopLoss { fraction: dec!(0.02) };
-        let trail = ExitRule::TrailingStop { fraction: dec!(0.03) };
+        let stop = ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) };
+        let trail = ExitRule::TrailingStop { distance: ExitDistance::of_entry(dec!(0.03)) };
         assert_ne!(rules(stop.clone(), trail.clone()), rules(trail, stop));
     }
 

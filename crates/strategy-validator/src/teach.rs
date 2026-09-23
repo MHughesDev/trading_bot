@@ -93,7 +93,9 @@ pub const TEACHINGS: &[Teaching] = &[
         code: "unknown_definition_version",
         fix: "set `definition_version` to a version inside the supported range. 1.0 is the \
               base, 1.1 adds the `model_forecast` node, 1.2 adds typed `parameters`, and 1.3 \
-              adds the `exits` block — 1.3 is the newest and what the strategy compiler emits. \
+              adds the `exits` block and 1.4 adds the `unit` on an exit distance — 1.4 is \
+              the newest, and the compiler emits 1.3 unless a strategy uses a \
+              volatility-scaled distance. \
               A version above the range is refused rather than read as the nearest one below.",
         see: Some("guide#definition"),
     },
@@ -135,6 +137,28 @@ pub const TEACHINGS: &[Teaching] = &[
         fix: "a stop, target or trailing distance is a positive fraction of entry — `0.02` is \
               2%. Never an absolute price: the rule has to survive a sweep across instruments \
               at different price scales.",
+        see: Some("guide#exits.units"),
+    },
+    Teaching {
+        code: "exit_distance_not_positive",
+        fix: "a distance in `atr` or `sigma` is a positive multiple — `1.5 atr(14)` is one and a \
+              half average true ranges. There is no upper bound, because a 5-ATR stop is wide \
+              rather than wrong; zero or negative puts the stop on the wrong side of the entry.",
+        see: Some("guide#exits.units"),
+    },
+    Teaching {
+        code: "exit_unit_period_out_of_range",
+        fix: "give the unit a lookback the feature engine computes: `atr(14)`, `sigma(20)`. The \
+              period is what selects the `atr_14` / `rolling_std_20` feature, so `atr(0)` is not \
+              a missing lookback — it is a feature name nothing serves.",
+        see: Some("guide#exits.units"),
+    },
+    Teaching {
+        code: "exit_unit_version_too_low",
+        fix: "raise `definition_version` to 1.4, which is the version that has the `unit` field, \
+              or write the distance as a fraction of entry. Do not hand-convert an ATR distance \
+              into a fraction: the fraction is right on the bar you computed it and wrong on the \
+              next one, and the two look identical in storage.",
         see: Some("guide#exits.units"),
     },
     Teaching {

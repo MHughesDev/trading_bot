@@ -231,13 +231,20 @@ pub fn router(state: AppState) -> Router {
         // §2.2 Running now: per-run tier, stage, tokens and cache. The
         // conversation list answers a different question and cannot carry them.
         .route("/api/desk/running", get(desk_running::running))
-        .route("/api/memory/preferences", post(memory::record_preference))
         // S-8.2: has this hypothesis already been registered?
         .route(
             "/api/lifecycle/hypotheses/similar",
             post(lifecycle::similar_hypotheses),
         )
-        .route("/api/memory/{bucket}", get(memory::list))
+        // Every method on the bucket surface hangs off the parameter, and no
+        // literal is written under `/api/memory/`. `post` was mounted on
+        // `/api/memory/preferences` until 2026-09-22, and because matchit prefers
+        // a literal segment the literal took the path and refused the method —
+        // `GET /api/memory/preferences` answered 405 while its six siblings
+        // answered 200, so `memory::list` was never reached for that bucket.
+        // `kind_for` enumerates the legitimate values of `{bucket}`, which makes
+        // any literal here a second spelling of one.
+        .route("/api/memory/{bucket}", get(memory::list).post(memory::record))
         .route("/api/memory/{bucket}/{id}", delete(memory::forget))
         // Evidence for the falsification tools (ADR-P7-05). None of these
         // returns a verdict; each answers one defect class with a number.

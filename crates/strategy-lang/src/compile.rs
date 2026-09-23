@@ -1062,12 +1062,20 @@ impl<'a> Compiler<'a> {
 
     /// A distance in a unit the canonical `ExitRule` can store.
     ///
-    /// `ExitRule::StopLoss` carries `fraction: Decimal` — "always expressed as a
-    /// positive fraction of entry, never as an absolute price". `%` converts
-    /// exactly by moving the decimal point two places. `atr` and `sigma` do not
-    /// convert at all: their value depends on the bar, so storing one as a
-    /// fraction would be storing a different rule. See the crate report for why
-    /// this contradicts AGENT-011 §3's own example.
+    /// `ExitRule::StopLoss` carries `distance: ExitDistance`, and as of v1.4
+    /// (ADR-D-09) `ExitDistance` **can** hold an ATR- or sigma-scaled magnitude
+    /// — `DistanceUnit::Atr { period } | Sigma { period }` — so the refusal
+    /// below is no longer "the schema does not have this yet". It is narrower
+    /// and still real: **this grammar has no syntax for the period** a scaled
+    /// distance requires (`atr`/`sigma` parse to a bare [`Unit`] with no
+    /// number attached — see `parse.rs`'s `Tok::Ident(w) if w == "atr"` arm),
+    /// so there is nothing here to put in `DistanceUnit::Atr { period: ? }`
+    /// even though the target field now exists. Writing a placeholder period
+    /// would be inventing a value the author never stated, which is the
+    /// direction this compiler refuses everywhere else.
+    ///
+    /// `%` still converts exactly by moving the decimal point two places,
+    /// because a percent-of-entry distance carries no period at all.
     fn fraction(&mut self, unit: Unit, unit_span: Span, value: &Num) -> Option<String> {
         match unit {
             Unit::Percent => Some(shift_point(&value.raw, -2)),
@@ -1077,14 +1085,15 @@ impl<'a> Compiler<'a> {
                         Code::UnitNotRepresentable,
                         unit_span,
                         format!(
-                            "`{}` is a per-bar quantity, and the canonical exit rule stores a \
-                             fraction of the entry price",
+                            "`{}` is a per-bar quantity, and this grammar has no syntax for the \
+                             lookback period an ATR- or sigma-scaled distance needs",
                             unit.as_str()
                         ),
                     )
                     .with_fix(
-                        "write the distance in `%` of entry; an ATR- or sigma-scaled stop needs \
-                         an exit rule the schema does not have yet",
+                        "write the distance in `%` of entry; a scaled stop can be authored \
+                         directly in the stored definition at v1.4 until the grammar names a \
+                         period",
                     )
                     .with_see("guide#exits.units"),
                 );

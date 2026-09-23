@@ -55,6 +55,14 @@ impl Clock for ManualClock {
     }
 }
 
+/// A shared handle to a manual clock, so a test can hold one and hand the same
+/// clock to a limiter that owns its `Box<dyn Clock>`.
+impl Clock for std::sync::Arc<ManualClock> {
+    fn now_nanos(&self) -> u128 {
+        (**self).now_nanos()
+    }
+}
+
 /// A venue's published limit, with the quote that establishes it.
 ///
 /// `cost_per_request` is in the venue's own units — tokens, credits, or plain
@@ -137,6 +145,73 @@ impl VenueLimit {
         }
     }
 
+    /// SEC EDGAR's structured-data endpoints (Set P, P-3.2).
+    ///
+    /// The SEC publishes this one plainly and it is binding rather than advisory:
+    /// exceeding it gets the operator's traffic blocked, and under a free-only
+    /// data policy (ADR-0027) there is no second vendor for filings. Quoted from
+    /// <https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data>,
+    /// re-verified 2026-09-22.
+    ///
+    /// The other half of EDGAR's fair-access policy — a User-Agent that
+    /// identifies the operator — is enforced in
+    /// [`crate::fundamentals::edgar::EdgarClient`], because it is a property of
+    /// the request rather than of the budget.
+    #[must_use]
+    pub const fn sec_edgar() -> Self {
+        Self {
+            venue: "sec_edgar",
+            capacity: 10,
+            refill_tokens: 10,
+            refill_window: Duration::from_secs(1),
+            cost_per_request: 1,
+            source_quote: "Current max request rate: 10 requests/second.",
+        }
+    }
+
+    /// FRED / ALFRED (Set P, P-3.1).
+    ///
+    /// **This number is not quoted, because there is nothing to quote.** The FRED
+    /// API documentation, the API-key page and the endpoint reference publish no
+    /// request ceiling (checked 2026-09-22); a "120 requests per minute" figure
+    /// circulates widely but does not appear on any page St. Louis Fed serves as
+    /// documentation. An undocumented limit is the kind discovered by being
+    /// banned, so this is a self-imposed budget of one request a second — far
+    /// under any plausible ceiling, and ample for a vintage backfill that fetches
+    /// a whole series' revision history in a single call.
+    #[must_use]
+    pub const fn fred_api() -> Self {
+        Self {
+            venue: "fred_api",
+            capacity: 60,
+            refill_tokens: 60,
+            refill_window: Duration::from_secs(60),
+            cost_per_request: 1,
+            source_quote: "No request ceiling is published on any FRED API documentation page (checked 2026-09-22); this budget is self-imposed, not quoted.",
+        }
+    }
+
+    /// Alpaca's historical market-data REST endpoints — news and corporate
+    /// actions (Set P, P-3.3).
+    ///
+    /// Alpaca's news documentation states the archive depth and the supplier but
+    /// not the per-plan request ceiling, and the reference page that would carry
+    /// it is behind a different URL that did not resolve on 2026-09-22. So this
+    /// is declared the same way as [`Self::fred_api`]: a self-imposed budget,
+    /// stated as self-imposed. Two requests a second paginates a year of news in
+    /// minutes and cannot plausibly breach a free-tier limit.
+    #[must_use]
+    pub const fn alpaca_market_data() -> Self {
+        Self {
+            venue: "alpaca_market_data",
+            capacity: 120,
+            refill_tokens: 120,
+            refill_window: Duration::from_secs(60),
+            cost_per_request: 1,
+            source_quote: "Alpaca's historical-news documentation states the archive depth but no request ceiling (checked 2026-09-22); this budget is self-imposed, not quoted.",
+        }
+    }
+
     /// Requests per second this limit permits, sustained.
     #[must_use]
     pub fn sustained_rps(&self) -> f64 {
@@ -182,6 +257,17 @@ pub struct RateLimiter {
     limit: VenueLimit,
     clock: Box<dyn Clock>,
     bucket: Mutex<Bucket>,
+}
+
+/// Renders the declared limit only. It deliberately does not lock the bucket:
+/// a `Debug` that takes a lock can deadlock inside a `tracing` macro that is
+/// already holding it, and the declared limit is the part a reader wants.
+impl std::fmt::Debug for RateLimiter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RateLimiter")
+            .field("limit", &self.limit)
+            .finish_non_exhaustive()
+    }
 }
 
 impl RateLimiter {
@@ -377,6 +463,25 @@ mod tests {
         assert_eq!(lim.available(), before);
     }
 
+    /// P-3.2 acceptance: the limiter **refuses** above ten requests a second.
+    /// The criterion is refusal, not that ten succeed — a limiter that slows down
+    /// is a limiter nobody can assert anything about.
+    #[test]
+    fn the_edgar_limiter_refuses_above_ten_requests_a_second() {
+        let limit = VenueLimit::sec_edgar();
+        let (clock, lim) = manual(limit.clone());
+        for i in 0..10 {
+            assert!(lim.try_acquire().is_ok(), "request {i} is inside the SEC's published rate");
+        }
+        // Still inside the same second.
+        clock.advance(Duration::from_millis(999));
+        let denied = lim.try_acquire().expect_err("the eleventh request in one second MUST be refused");
+        assert_eq!(denied.available, 0);
+        clock.advance(Duration::from_millis(1));
+        assert!(lim.try_acquire().is_ok(), "the next second buys the next ten");
+        assert!((limit.sustained_rps() - 10.0).abs() < 1e-9);
+    }
+
     #[test]
     fn declared_limits_quote_their_source() {
         for l in [
@@ -384,11 +489,32 @@ mod tests {
             VenueLimit::kraken_futures_history(),
             VenueLimit::tradier_market_data(),
             VenueLimit::tradier_sandbox(),
+            VenueLimit::sec_edgar(),
+            VenueLimit::fred_api(),
+            VenueLimit::alpaca_market_data(),
         ] {
             assert!(!l.source_quote.is_empty(), "{} declares a limit with no documented source", l.venue);
             assert!(l.capacity > 0 && l.refill_tokens > 0 && l.cost_per_request > 0);
             assert!(l.sustained_rps() > 0.0);
         }
+    }
+
+    /// A budget nobody published must say that it is self-imposed. Writing an
+    /// unverified number into `source_quote` is worse than declaring none: it
+    /// invites the next reader to trust a figure that was never quoted.
+    #[test]
+    fn a_self_imposed_budget_declares_itself_self_imposed() {
+        for l in [VenueLimit::fred_api(), VenueLimit::alpaca_market_data()] {
+            assert!(
+                l.source_quote.contains("self-imposed"),
+                "{} declares an unquoted budget without saying so",
+                l.venue
+            );
+        }
+        assert!(
+            !VenueLimit::sec_edgar().source_quote.contains("self-imposed"),
+            "the SEC publishes its ceiling; this one is a real quote"
+        );
     }
 
     #[test]

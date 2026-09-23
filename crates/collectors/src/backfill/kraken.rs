@@ -75,6 +75,12 @@ struct OhlcEnvelope<'a> {
 }
 
 /// `[time, open, high, low, close, vwap, volume, count]`, time = bar **open**.
+///
+/// Field 5 is Kraken's vwap. The platform derives no vwap from a backfilled
+/// candle, so it is decoded into [`IgnoredAny`] rather than borrowed: the field
+/// has to exist to keep the tuple positions aligned with Kraken's array, and
+/// naming it as ignored says so, where a borrowed-but-unread field only says it
+/// to `dead_code`.
 #[derive(Deserialize)]
 struct Ohlc<'a>(
     #[serde(borrow)] &'a RawValue,
@@ -82,7 +88,7 @@ struct Ohlc<'a>(
     #[serde(borrow)] &'a RawValue,
     #[serde(borrow)] &'a RawValue,
     #[serde(borrow)] &'a RawValue,
-    #[serde(borrow)] &'a RawValue, // vwap, unused
+    serde::de::IgnoredAny,
     #[serde(borrow)] &'a RawValue,
     #[serde(borrow)] &'a RawValue,
 );

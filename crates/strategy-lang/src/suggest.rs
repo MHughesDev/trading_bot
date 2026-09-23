@@ -769,26 +769,43 @@ fn exits(def: &StrategyDefinition, findings: &Findings, out: &mut Suggestions) {
         let Some(rule) = rules.iter().find(|r| r.kind() == seen.reason.as_str()) else {
             continue;
         };
+        // `exit.stop 0.03` and `exit.trailing 0.03` are SLv2 text, and this
+        // grammar has no syntax for a scaled distance yet (Q-S5-01: `atr`/
+        // `sigma` are refused by name in the compiler, not merely unwritten in
+        // the printer). Suggesting a bare number for an atr- or sigma-scaled
+        // rule would silently drop its unit and hand back a fraction-of-entry
+        // clause meaning something else entirely — refused rather than
+        // guessed, same as the compiler refuses the other direction.
         let (path, literal, effect) = match rule {
-            ExitRule::StopLoss { fraction } => (
-                "exit.stop",
-                fraction.to_string(),
-                "a stop that closes nearly every trade is being hit by noise rather than by \
-                 the hypothesis failing; widening it lets the trade breathe, at a larger loss \
-                 per stop-out",
-            ),
+            ExitRule::StopLoss { distance } => {
+                let Some(fraction) = distance.as_fraction_of_entry() else {
+                    continue;
+                };
+                (
+                    "exit.stop",
+                    fraction.to_string(),
+                    "a stop that closes nearly every trade is being hit by noise rather than by \
+                     the hypothesis failing; widening it lets the trade breathe, at a larger loss \
+                     per stop-out",
+                )
+            }
             ExitRule::MaxHoldingBars { bars } => (
                 "exit.time",
                 bars.to_string(),
                 "the holding limit, not the hypothesis, is closing these trades; a longer one \
                  says whether the edge needed more bars",
             ),
-            ExitRule::TrailingStop { fraction } => (
-                "exit.trailing",
-                fraction.to_string(),
-                "the trailing stop is closing nearly every trade, so it is tracking noise; a \
-                 wider one gives the move room",
-            ),
+            ExitRule::TrailingStop { distance } => {
+                let Some(fraction) = distance.as_fraction_of_entry() else {
+                    continue;
+                };
+                (
+                    "exit.trailing",
+                    fraction.to_string(),
+                    "the trailing stop is closing nearly every trade, so it is tracking noise; a \
+                     wider one gives the move room",
+                )
+            }
             ExitRule::TakeProfit { .. } | ExitRule::OnSignal { .. } => continue,
         };
         let Some(literal) = Fragment::new(literal) else {

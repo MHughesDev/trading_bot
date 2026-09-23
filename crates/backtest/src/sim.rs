@@ -697,7 +697,8 @@ fn apply_exit_fills(trades: &mut [Trade], fills: &[ExitFill]) {
             tracing::warn!(
                 ts = %fill.ts,
                 rule = %fill.rule,
-                "a declared exit fired but no closed position matched it; the flattening order                  did not fill"
+                "a declared exit fired but no closed position matched it; the flattening order \
+                 did not fill"
             );
             continue;
         };
