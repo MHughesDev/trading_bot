@@ -58,7 +58,13 @@ AGENT-010 §4/§9, AGENT-012 §2/§3; [ADR-0037](../../../adr/0037-two-modes-con
 Phase 4 (verified findings, negative results, the brief, trajectories), Phase 8 (workflows,
 gates demanding tickets, the dossier). S-10.15 depends on Phase 6.
 **Blocks:** Phase 11 (continuous sessions run Research runs and read their yield).
-**Migration range:** 0089–0091.
+**Migration range:** the header declared 0089–0091, allocated against a tree that has
+since moved past it — the same ADR-S3-08 collision recorded for S-3.7, S-4.3 and phase 8.
+Real numbers, per task: `0126` (S-10.1, `agent_runs` mode/workflow/ring/stage), `0128`
+(S-10.9's `agent_lifecycle.proposal`, and S-10.13's yield columns), `0131` (S-10.9's
+proposal target). The per-task `**Files:**` lines below still cite 0089/0090/0091 in
+prose and are stale; each task's own status line, where present, carries the number it
+actually shipped under.
 **Parallel with:** Phase 9.
 
 This phase turns the harness Set S builds into a *research process*. Set S makes a step

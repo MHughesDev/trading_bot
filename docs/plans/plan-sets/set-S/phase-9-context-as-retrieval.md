@@ -34,7 +34,12 @@ corpus and S-9.12's promotion are built and have nothing live to run against.**
 is the only thing allowed to promote a policy).
 **Blocks:** nothing. It is the last phase because it is the only one that must *prove* itself
 against a baseline before it counts.
-**Migration range:** 0089–0091.
+**Migration range:** none. The 0089–0091 range this line once declared was never used —
+no task body below references a migration file, and this phase's whole surface is
+in-process context assembly over stores Phase 1/2 already persist. Phase 10 declared the
+identical range and drifted to real numbers elsewhere too (0126, 0128, 0131) — both were
+planning-stage placeholders against a tree that has since moved, the same ADR-S3-08
+collision recorded for S-3.7, S-4.3 and phase 8.
 **Parallel with:** Phase 8.
 
 Everything else in Set S makes context assembly **correct**. This phase changes what it
