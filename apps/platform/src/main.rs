@@ -65,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
     info!("ledger anchor and verification jobs started");
     feature_jobs::spawn(pg.clone(), cfg.clickhouse.url.clone());
     leakage_jobs::spawn(pg.clone());
-    health_jobs::spawn(pg.clone());
+    health_jobs::spawn(pg.clone(), cfg.clickhouse.url.clone());
     // The rule-tier regime labeller (SPEC §5.4, ADR-P3-02). Scoped to the
     // instruments that have bars: a regime is read against the market a strategy
     // trades, and there is no platform-wide "the market" that means the same

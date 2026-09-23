@@ -46,36 +46,13 @@
 //!
 //! [`Verdict::NeverSeen`]: observability::silence::Verdict::NeverSeen
 //!
-//! # The caller this module is still missing
+//! # The caller
 //!
-//! [`silence_report`] is complete and tested, and nothing in a running process
-//! calls it yet. It needs exactly three edits, none of them in this crate:
-//!
-//! 1. `apps/platform/src/main.rs:68` — `health_jobs::spawn(pg.clone());` becomes
-//!    `health_jobs::spawn(pg.clone(), cfg.clickhouse.url.clone());`
-//! 2. `apps/platform/src/health_jobs.rs:18` — `spawn` takes a second parameter
-//!    `ch_url: String` and threads it into `run_once`, which becomes
-//!    `run_once(pg: &sqlx::PgPool, ch_url: &str)`.
-//! 3. `apps/platform/src/health_jobs.rs`, at the end of `run_once` — one call:
-//!
-//! ```ignore
-//! observability::silence::emit(
-//!     &storage::clickhouse::census::silence_report(
-//!         pg,
-//!         ch_url,
-//!         chrono::Utc::now(),
-//!         std::num::NonZeroU32::new(
-//!             storage::clickhouse::census::REGISTRY_DEFAULT_TOLERANCE_CADENCES,
-//!         )
-//!         .expect("the registry default is positive"),
-//!     )
-//!     .await,
-//! );
-//! ```
-//!
-//! `apps/platform` already depends on both crates, and the hourly tick that
-//! `health_jobs::spawn` owns is the right cadence: the tightest deadline any
-//! registered series declares is three hours.
+//! `apps/platform/src/health_jobs.rs`'s hourly tick calls [`silence_report`] from
+//! its own `silence_pass`, not appended inside the tenant pass: that pass returns
+//! early when Postgres will not list tenants, and appending there would let a
+//! Postgres hiccup silence the silence alarm — the one failure this mechanism
+//! exists to make impossible. `silence_pass` runs unconditionally after it.
 //!
 //! [`Verdict::CannotJudge`]: observability::silence::Verdict::CannotJudge
 
