@@ -129,11 +129,8 @@ pub enum Autonomy {
 }
 
 impl Autonomy {
-    pub const ALL: &'static [Autonomy] = &[
-        Autonomy::Supervised,
-        Autonomy::Notify,
-        Autonomy::Autonomous,
-    ];
+    pub const ALL: &'static [Autonomy] =
+        &[Autonomy::Supervised, Autonomy::Notify, Autonomy::Autonomous];
 
     #[must_use]
     pub fn as_str(self) -> &'static str {
@@ -846,7 +843,10 @@ mod tests {
             }
         );
         assert!(e.to_string().contains("qwen-local"), "{e}");
-        assert!(e.to_string().contains("bounded Research"), "the way out: {e}");
+        assert!(
+            e.to_string().contains("bounded Research"),
+            "the way out: {e}"
+        );
     }
 
     #[test]
@@ -929,10 +929,7 @@ mod tests {
             .insert("investigate".into(), Judgement::Passed { rate: 0.6 });
         let e = admit(&a_charter(&["investigate"]), Autonomy::Autonomous, &p)
             .expect_err("0.6 is below 0.8");
-        assert!(matches!(
-            e,
-            TierRefusal::AutonomousBelowThreshold { .. }
-        ));
+        assert!(matches!(e, TierRefusal::AutonomousBelowThreshold { .. }));
         // And the same charter under `notify` is fine, which is what makes it a
         // refusal of the setting rather than of the profile.
         assert!(admit(&a_charter(&["investigate"]), Autonomy::Notify, &p).is_ok());
@@ -966,7 +963,10 @@ mod tests {
         let TierRefusal::AutonomousBelowThreshold { rate, .. } = e else {
             panic!("{e}")
         };
-        assert!((rate - 0.55).abs() < 1e-9, "the worst, not the mean: {rate}");
+        assert!(
+            (rate - 0.55).abs() < 1e-9,
+            "the worst, not the mean: {rate}"
+        );
     }
 
     #[test]
@@ -1042,7 +1042,13 @@ mod tests {
         // NaN compares false against everything, so `worst < threshold` would
         // let it through and grant `autonomous` on a number that is not one.
         assert_eq!(Judgement::Passed { rate: f64::NAN }.rate(), None);
-        assert_eq!(Judgement::Passed { rate: f64::INFINITY }.rate(), None);
+        assert_eq!(
+            Judgement::Passed {
+                rate: f64::INFINITY
+            }
+            .rate(),
+            None
+        );
 
         let mut p = Profile::frontier("opus", &["investigate"]);
         p.judgement
@@ -1059,5 +1065,4 @@ mod tests {
             .expect("the suite said it passed");
         assert_eq!(a.charter.permitted_workflows, vec!["investigate"]);
     }
-
 }

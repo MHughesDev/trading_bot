@@ -33,7 +33,12 @@ impl WilderAverage {
     #[must_use]
     #[allow(clippy::cast_precision_loss)]
     pub fn new(period: usize) -> Self {
-        Self { period: period as f64, seen: 0, n: period, avg: 0.0 }
+        Self {
+            period: period as f64,
+            seen: 0,
+            n: period,
+            avg: 0.0,
+        }
     }
 
     /// Push one sample, oldest first.
@@ -70,7 +75,13 @@ impl Rsi {
         assert!(period >= 2, "RSI period must be at least 2");
         let lookback = u32::try_from(period * RSI_LOOKBACK_PERIODS + 1).unwrap_or(u32::MAX);
         Self {
-            def: crate::runtime::definition(&format!("rsi_{period}"), "rsi", RSI_FEATURE_VERSION, lookback, include_str!("rsi.rs")),
+            def: crate::runtime::definition(
+                &format!("rsi_{period}"),
+                "rsi",
+                RSI_FEATURE_VERSION,
+                lookback,
+                include_str!("rsi.rs"),
+            ),
             period,
         }
     }
@@ -83,7 +94,10 @@ impl Feature for Rsi {
 
     fn compute(&self, frame: &WindowedFrame<'_>) -> Result<f64, FeatureError> {
         let oldest = frame.lookback() as usize - 1;
-        let (mut gains, mut losses) = (WilderAverage::new(self.period), WilderAverage::new(self.period));
+        let (mut gains, mut losses) = (
+            WilderAverage::new(self.period),
+            WilderAverage::new(self.period),
+        );
         let mut prev = frame.close(oldest)?;
         for back in (0..oldest).rev() {
             let c = frame.close(back)?;

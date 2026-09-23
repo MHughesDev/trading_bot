@@ -94,12 +94,30 @@ impl GoalKind {
 
         // "compare", "versus", "which of", "better than" — two or more things
         // held to one measurement.
-        if has(&["compare", " versus ", " vs ", "which of", "better than", "against each other"]) {
+        if has(&[
+            "compare",
+            " versus ",
+            " vs ",
+            "which of",
+            "better than",
+            "against each other",
+        ]) {
             return GoalKind::Compare;
         }
         // Something is already wrong and the run must find out what.
-        if has(&["why is", "why did", "why does", "diagnose", "debug", "root cause",
-                 "went wrong", "is broken", "is failing", "regression", "investigate the"]) {
+        if has(&[
+            "why is",
+            "why did",
+            "why does",
+            "diagnose",
+            "debug",
+            "root cause",
+            "went wrong",
+            "is broken",
+            "is failing",
+            "regression",
+            "investigate the",
+        ]) {
             return GoalKind::Diagnose;
         }
         // A question that needs evidence *produced* — the only kind that earns the
@@ -117,15 +135,42 @@ impl GoalKind {
         // already holds.
         //
         // So: an inquiry verb AND a market property. Both, or it stays a lookup.
-        if has(&["backtest", "sweep", "run an experiment", "hypothes", "optimi",
-                 "find an edge", "is there an edge", "strategy that"]) {
+        if has(&[
+            "backtest",
+            "sweep",
+            "run an experiment",
+            "hypothes",
+            "optimi",
+            "find an edge",
+            "is there an edge",
+            "strategy that",
+        ]) {
             return GoalKind::Research;
         }
-        let asks = has(&["find whether", "test whether", "does ", "do we know whether",
-                         "is there", "measure", "evaluate", "how well"]);
-        let about_the_market = has(&["momentum", "mean revers", "edge", "alpha", "predict",
-                                     "correlat", "seasonal", "autocorrel", "overfit",
-                                     "signal", "drawdown", "sharpe"]);
+        let asks = has(&[
+            "find whether",
+            "test whether",
+            "does ",
+            "do we know whether",
+            "is there",
+            "measure",
+            "evaluate",
+            "how well",
+        ]);
+        let about_the_market = has(&[
+            "momentum",
+            "mean revers",
+            "edge",
+            "alpha",
+            "predict",
+            "correlat",
+            "seasonal",
+            "autocorrel",
+            "overfit",
+            "signal",
+            "drawdown",
+            "sharpe",
+        ]);
         if asks && about_the_market {
             return GoalKind::Research;
         }
@@ -626,25 +671,56 @@ impl Steer {
 
         // A redirection names a different subject or revokes the current one.
         if has(&[
-            "instead", "actually", "forget", "never mind", "nevermind", "stop and",
-            "change to", "switch to", "different question", "not what i", "i meant",
-            "new goal", "rather than", "drop that", "abandon",
+            "instead",
+            "actually",
+            "forget",
+            "never mind",
+            "nevermind",
+            "stop and",
+            "change to",
+            "switch to",
+            "different question",
+            "not what i",
+            "i meant",
+            "new goal",
+            "rather than",
+            "drop that",
+            "abandon",
         ]) {
             return Steer::Redirection;
         }
         // A constraint narrows: same question, smaller. These are checked BEFORE the
         // comment words, because "just use 1h" contains "just" and is not a comment.
         if has(&[
-            "only ", "just use", "restrict", "limit it", "narrow", "focus on",
-            "stick to", "use the ", "on 1h", "on 4h", "exclude", "ignore the ",
+            "only ",
+            "just use",
+            "restrict",
+            "limit it",
+            "narrow",
+            "focus on",
+            "stick to",
+            "use the ",
+            "on 1h",
+            "on 4h",
+            "exclude",
+            "ignore the ",
             "without ",
         ]) {
             return Steer::Constraint;
         }
         // A comment has to look like one. Deliberately the smallest list here.
         if has(&[
-            "looking good", "nice", "thanks", "ok", "okay", "sounds good", "keep going",
-            "carry on", "how is it going", "how's it going", "what are you doing",
+            "looking good",
+            "nice",
+            "thanks",
+            "ok",
+            "okay",
+            "sounds good",
+            "keep going",
+            "carry on",
+            "how is it going",
+            "how's it going",
+            "what are you doing",
         ]) {
             return Steer::Comment;
         }

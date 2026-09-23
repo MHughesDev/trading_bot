@@ -110,7 +110,9 @@ fn run(def: StrategyDefinition, bars: Vec<LoadedBar>) -> backtest::sim::Detailed
 #[test]
 fn a_declared_stop_loss_fires_on_the_breaching_bar_and_fills_at_its_level() {
     let out = run(
-        long_with_exits(r#"{ "mode": "rules", "rules": [ { "rule": "stop_loss", "fraction": "0.02" } ] }"#),
+        long_with_exits(
+            r#"{ "mode": "rules", "rules": [ { "rule": "stop_loss", "fraction": "0.02" } ] }"#,
+        ),
         vec![
             flat(0, dec!(100)),
             bar(1, dec!(101), dec!(99.5), dec!(100.5)),
@@ -120,13 +122,25 @@ fn a_declared_stop_loss_fires_on_the_breaching_bar_and_fills_at_its_level() {
         ],
     );
 
-    assert_eq!(out.exit_fills.len(), 1, "one declared exit fired: {:?}", out.exit_fills);
+    assert_eq!(
+        out.exit_fills.len(),
+        1,
+        "one declared exit fired: {:?}",
+        out.exit_fills
+    );
     let fill = &out.exit_fills[0];
     assert_eq!(fill.rule, "stop_loss");
     assert_eq!(fill.level, dec!(98), "2% below the 100 entry");
     assert_eq!(fill.venue_fill, dec!(100.8), "what the market order paid");
-    assert_eq!(fill.charged, dec!(98), "the worse of the two, never the close");
-    assert_eq!(fill.bars_held, 2, "bars 1 and 2; the entry bar is not one of them");
+    assert_eq!(
+        fill.charged,
+        dec!(98),
+        "the worse of the two, never the close"
+    );
+    assert_eq!(
+        fill.bars_held, 2,
+        "bars 1 and 2; the entry bar is not one of them"
+    );
 
     assert_eq!(out.trades.len(), 1, "one round trip");
     let t = &out.trades[0];
@@ -146,7 +160,9 @@ fn a_declared_stop_loss_fires_on_the_breaching_bar_and_fills_at_its_level() {
 #[test]
 fn a_declared_take_profit_fires_at_its_level_and_not_at_the_bar_extreme() {
     let out = run(
-        long_with_exits(r#"{ "mode": "rules", "rules": [ { "rule": "take_profit", "fraction": "0.05" } ] }"#),
+        long_with_exits(
+            r#"{ "mode": "rules", "rules": [ { "rule": "take_profit", "fraction": "0.05" } ] }"#,
+        ),
         vec![
             flat(0, dec!(100)),
             bar(1, dec!(101), dec!(99.9), dec!(100.5)),
@@ -158,7 +174,11 @@ fn a_declared_take_profit_fires_at_its_level_and_not_at_the_bar_extreme() {
     assert_eq!(out.exit_fills.len(), 1, "{:?}", out.exit_fills);
     let fill = &out.exit_fills[0];
     assert_eq!(fill.rule, "take_profit");
-    assert_eq!(fill.charged, dec!(105), "no windfall from the 106 high or the 105.50 close");
+    assert_eq!(
+        fill.charged,
+        dec!(105),
+        "no windfall from the 106 high or the 105.50 close"
+    );
 
     let t = &out.trades[0];
     assert_eq!(t.exit_price, dec!(105));
@@ -181,7 +201,9 @@ fn a_declared_take_profit_fires_at_its_level_and_not_at_the_bar_extreme() {
 #[test]
 fn a_declared_time_exit_fires_on_the_declared_bar() {
     let out = run(
-        long_with_exits(r#"{ "mode": "rules", "rules": [ { "rule": "max_holding_bars", "bars": 3 } ] }"#),
+        long_with_exits(
+            r#"{ "mode": "rules", "rules": [ { "rule": "max_holding_bars", "bars": 3 } ] }"#,
+        ),
         vec![
             flat(0, dec!(100)),
             flat(1, dec!(100)),
@@ -195,10 +217,18 @@ fn a_declared_time_exit_fires_on_the_declared_bar() {
     let fill = &out.exit_fills[0];
     assert_eq!(fill.rule, "max_holding_bars");
     assert_eq!(fill.bars_held, 3, "bars 1, 2 and 3");
-    assert_eq!(fill.charged, dec!(99), "the adverse extreme, not the 101 close");
+    assert_eq!(
+        fill.charged,
+        dec!(99),
+        "the adverse extreme, not the 101 close"
+    );
 
     let t = &out.trades[0];
-    assert_eq!(t.exit_time.timestamp_nanos_opt(), Some(ts_ns(3)), "bar 3, not bar 4");
+    assert_eq!(
+        t.exit_time.timestamp_nanos_opt(),
+        Some(ts_ns(3)),
+        "bar 3, not bar 4"
+    );
     assert_eq!(t.exit_price, dec!(99));
 }
 
@@ -235,9 +265,21 @@ fn a_bar_that_breached_both_books_the_stop_and_never_the_target() {
     assert_eq!(fill.charged, dec!(98));
 
     let t = &out.trades[0];
-    assert_ne!(t.exit_price, dec!(105), "the target is the optimistic resolution");
-    assert_ne!(t.exit_price, dec!(106), "the bar high is worse than optimistic");
-    assert_ne!(t.exit_price, dec!(104), "the close is the venue's fill, better than the stop");
+    assert_ne!(
+        t.exit_price,
+        dec!(105),
+        "the target is the optimistic resolution"
+    );
+    assert_ne!(
+        t.exit_price,
+        dec!(106),
+        "the bar high is worse than optimistic"
+    );
+    assert_ne!(
+        t.exit_price,
+        dec!(104),
+        "the close is the venue's fill, better than the stop"
+    );
     assert_eq!(t.exit_price, dec!(98));
     assert!(
         t.pnl < Decimal::ZERO,
@@ -251,11 +293,23 @@ fn a_bar_that_breached_both_books_the_stop_and_never_the_target() {
 #[test]
 fn the_conservative_fill_never_returns_the_better_of_the_two_prices() {
     // Closing a long is a sale: lower is worse.
-    assert_eq!(conservative_exit_fill(PositionSide::Long, dec!(98), dec!(104)), dec!(98));
-    assert_eq!(conservative_exit_fill(PositionSide::Long, dec!(98), dec!(95)), dec!(95));
+    assert_eq!(
+        conservative_exit_fill(PositionSide::Long, dec!(98), dec!(104)),
+        dec!(98)
+    );
+    assert_eq!(
+        conservative_exit_fill(PositionSide::Long, dec!(98), dec!(95)),
+        dec!(95)
+    );
     // Closing a short is a purchase: higher is worse.
-    assert_eq!(conservative_exit_fill(PositionSide::Short, dec!(102), dec!(96)), dec!(102));
-    assert_eq!(conservative_exit_fill(PositionSide::Short, dec!(102), dec!(110)), dec!(110));
+    assert_eq!(
+        conservative_exit_fill(PositionSide::Short, dec!(102), dec!(96)),
+        dec!(102)
+    );
+    assert_eq!(
+        conservative_exit_fill(PositionSide::Short, dec!(102), dec!(110)),
+        dec!(110)
+    );
 }
 
 // ── causality ───────────────────────────────────────────────────────────────
@@ -267,7 +321,9 @@ fn the_conservative_fill_never_returns_the_better_of_the_two_prices() {
 #[test]
 fn the_entry_bar_cannot_stop_out_a_position_opened_at_its_close() {
     let out = run(
-        long_with_exits(r#"{ "mode": "rules", "rules": [ { "rule": "stop_loss", "fraction": "0.02" } ] }"#),
+        long_with_exits(
+            r#"{ "mode": "rules", "rules": [ { "rule": "stop_loss", "fraction": "0.02" } ] }"#,
+        ),
         vec![
             bar(0, dec!(100), dec!(90), dec!(100)),
             flat(1, dec!(100)),
@@ -300,7 +356,10 @@ fn a_definition_with_no_declared_exits_is_untouched() {
     );
 
     assert!(out.exit_fills.is_empty(), "no policy, no exits");
-    assert!(out.trades.is_empty(), "the position is still open at the end of the run");
+    assert!(
+        out.trades.is_empty(),
+        "the position is still open at the end of the run"
+    );
 }
 
 /// `RiskLayerOnly` is a declared delegation, not a rule set. It closes nothing
@@ -329,11 +388,21 @@ fn risk_layer_only_closes_nothing_in_the_simulator() {
 #[test]
 fn a_closed_trade_reports_the_size_it_actually_traded() {
     let out = run(
-        long_with_exits(r#"{ "mode": "rules", "rules": [ { "rule": "take_profit", "fraction": "0.05" } ] }"#),
-        vec![flat(0, dec!(100)), bar(1, dec!(106), dec!(100), dec!(105.5)), flat(2, dec!(105))],
+        long_with_exits(
+            r#"{ "mode": "rules", "rules": [ { "rule": "take_profit", "fraction": "0.05" } ] }"#,
+        ),
+        vec![
+            flat(0, dec!(100)),
+            bar(1, dec!(106), dec!(100), dec!(105.5)),
+            flat(2, dec!(105)),
+        ],
     );
 
-    assert_eq!(out.trades[0].qty, Decimal::ONE, "the order was for one unit");
+    assert_eq!(
+        out.trades[0].qty,
+        Decimal::ONE,
+        "the order was for one unit"
+    );
 }
 
 // ── costs ───────────────────────────────────────────────────────────────────
@@ -349,7 +418,9 @@ fn a_closed_trade_reports_the_size_it_actually_traded() {
 #[test]
 fn an_exit_fill_is_charged_through_the_same_fee_book_as_the_entry() {
     let out = run(
-        long_with_exits(r#"{ "mode": "rules", "rules": [ { "rule": "take_profit", "fraction": "0.05" } ] }"#),
+        long_with_exits(
+            r#"{ "mode": "rules", "rules": [ { "rule": "take_profit", "fraction": "0.05" } ] }"#,
+        ),
         vec![
             flat(0, dec!(100)),
             bar(1, dec!(106), dec!(100), dec!(105.5)),
@@ -374,7 +445,10 @@ fn an_exit_fill_is_charged_through_the_same_fee_book_as_the_entry() {
     );
 
     assert_eq!(out.fee_schedule.venue, "coinbase_advanced");
-    assert_eq!(out.fee_schedule.tier, "intro/unknown-fallback", "the fallback says so");
+    assert_eq!(
+        out.fee_schedule.tier, "intro/unknown-fallback",
+        "the fallback says so"
+    );
 }
 
 /// The assumptions are on the result, not in a log line. A reader of stored
@@ -383,8 +457,14 @@ fn an_exit_fill_is_charged_through_the_same_fee_book_as_the_entry() {
 #[test]
 fn the_run_records_the_execution_assumptions_it_was_computed_under() {
     let out = run(
-        long_with_exits(r#"{ "mode": "rules", "rules": [ { "rule": "stop_loss", "fraction": "0.02" } ] }"#),
-        vec![flat(0, dec!(100)), bar(1, dec!(101), dec!(97), dec!(100.9)), flat(2, dec!(100))],
+        long_with_exits(
+            r#"{ "mode": "rules", "rules": [ { "rule": "stop_loss", "fraction": "0.02" } ] }"#,
+        ),
+        vec![
+            flat(0, dec!(100)),
+            bar(1, dec!(101), dec!(97), dec!(100.9)),
+            flat(2, dec!(100)),
+        ],
     );
 
     let flags = out.execution_assumptions();
@@ -392,7 +472,10 @@ fn the_run_records_the_execution_assumptions_it_was_computed_under() {
     assert!(codes.contains(&"exec.fee_schedule"), "{codes:?}");
     assert!(codes.contains(&"exec.intrabar_resolution"), "{codes:?}");
 
-    let intrabar = flags.iter().find(|f| f.code == "exec.intrabar_resolution").unwrap();
+    let intrabar = flags
+        .iter()
+        .find(|f| f.code == "exec.intrabar_resolution")
+        .unwrap();
     assert!(
         intrabar.detail.contains("worst_first"),
         "the assumption must name itself: {}",

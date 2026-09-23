@@ -15,18 +15,24 @@ use std::time::Duration;
 
 use tracing::{error, info, warn};
 
-pub fn spawn(pg: sqlx::PgPool) {
+pub fn spawn(pg: sqlx::PgPool, ch_url: String) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(3600));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tick.tick().await;
-            run_once(&pg).await;
+            run_once(&pg, &ch_url).await;
         }
     });
 }
 
-pub async fn run_once(pg: &sqlx::PgPool) {
+pub async fn run_once(pg: &sqlx::PgPool, ch_url: &str) {
+    self_monitoring_pass(pg).await;
+    silence_pass(pg, ch_url).await;
+}
+
+/// The per-tenant self-monitoring signals.
+async fn self_monitoring_pass(pg: &sqlx::PgPool) {
     // Every tenant with a ledger. A tenant with no trials has nothing to report
     // on, and inventing a clean bill of health for one would be the exact failure
     // §16.2 is about.
@@ -62,4 +68,38 @@ pub async fn run_once(pg: &sqlx::PgPool) {
             Err(e) => warn!(%tenant, error = %e, "platform health pass failed"),
         }
     }
+}
+
+/// The silence alarm (Set P P-0.6): the caller
+/// `storage::clickhouse::census`'s module docs name.
+///
+/// Not tenant-scoped — a collector that died is one fact about one process, not
+/// one per tenant — and the hourly tick `spawn` already owns is the right cadence,
+/// since the tightest deadline any registered series declares is three hours.
+///
+/// [`silence_report`] never returns `Err`: every failure, including a store it
+/// could not read at all, comes back as a finding whose severity says so, and
+/// `emit` logs alarms at error, unjudgeable feeds at warn and quiet-but-fine feeds
+/// at info — the same three-way split [`self_monitoring_pass`] uses, for the same
+/// reason.
+///
+/// Its own function, called after the tenant pass rather than appended inside it,
+/// because that pass returns early when Postgres will not list tenants. Inside its
+/// body, a database hiccup would silence the silence alarm — which is the one
+/// failure this whole mechanism exists to make impossible.
+///
+/// [`silence_report`]: storage::clickhouse::census::silence_report
+async fn silence_pass(pg: &sqlx::PgPool, ch_url: &str) {
+    observability::silence::emit(
+        &storage::clickhouse::census::silence_report(
+            pg,
+            ch_url,
+            chrono::Utc::now(),
+            std::num::NonZeroU32::new(
+                storage::clickhouse::census::REGISTRY_DEFAULT_TOLERANCE_CADENCES,
+            )
+            .expect("the registry default is positive"),
+        )
+        .await,
+    );
 }

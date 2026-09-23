@@ -268,18 +268,26 @@ mod tests {
 
     #[test]
     fn a_four_for_one_split_divides_earlier_prices_by_four() {
-        let (price, volume) =
-            split_factors("AAPL", NaiveDate::from_ymd_opt(2020, 8, 31).unwrap(), dec!(1), dec!(4))
-                .expect("a positive ratio");
+        let (price, volume) = split_factors(
+            "AAPL",
+            NaiveDate::from_ymd_opt(2020, 8, 31).unwrap(),
+            dec!(1),
+            dec!(4),
+        )
+        .expect("a positive ratio");
         assert_eq!(price, dec!(0.25));
         assert_eq!(volume, dec!(4));
     }
 
     #[test]
     fn a_reverse_split_multiplies_earlier_prices() {
-        let (price, volume) =
-            split_factors("XYZ", NaiveDate::from_ymd_opt(2023, 1, 5).unwrap(), dec!(10), dec!(1))
-                .expect("a positive ratio");
+        let (price, volume) = split_factors(
+            "XYZ",
+            NaiveDate::from_ymd_opt(2023, 1, 5).unwrap(),
+            dec!(10),
+            dec!(1),
+        )
+        .expect("a positive ratio");
         assert_eq!(price, dec!(10));
         assert_eq!(volume, dec!(0.1));
     }
@@ -289,8 +297,9 @@ mod tests {
     #[test]
     fn the_stored_price_is_unadjusted_and_the_read_applies_the_factor() {
         let page = parse_corporate_actions(PAGE).expect("fixture parses");
-        let action = to_corporate_action(&page.corporate_actions.forward_splits[0], InstrumentKey(7))
-            .expect("well-formed split");
+        let action =
+            to_corporate_action(&page.corporate_actions.forward_splits[0], InstrumentKey(7))
+                .expect("well-formed split");
         let actions = vec![action];
 
         // What printed on 2020-08-03, stored and never touched.
@@ -324,8 +333,9 @@ mod tests {
     #[test]
     fn a_split_is_invisible_before_it_was_declared() {
         let page = parse_corporate_actions(PAGE).expect("fixture parses");
-        let action = to_corporate_action(&page.corporate_actions.forward_splits[0], InstrumentKey(7))
-            .expect("well-formed split");
+        let action =
+            to_corporate_action(&page.corporate_actions.forward_splits[0], InstrumentKey(7))
+                .expect("well-formed split");
         assert_eq!(action.knowledge_time, t("2020-07-30T00:00:00Z"));
         let actions = vec![action];
         let factors = factors_at(
@@ -341,9 +351,11 @@ mod tests {
     #[test]
     fn a_dividend_carries_its_cash_amount_and_no_guessed_price_factor() {
         let page = parse_corporate_actions(PAGE).expect("fixture parses");
-        let action =
-            dividend_to_corporate_action(&page.corporate_actions.cash_dividends[0], InstrumentKey(7))
-                .expect("well-formed dividend");
+        let action = dividend_to_corporate_action(
+            &page.corporate_actions.cash_dividends[0],
+            InstrumentKey(7),
+        )
+        .expect("well-formed dividend");
         assert_eq!(action.action_type, ActionType::Dividend);
         assert_eq!(action.cash_amount, Some(dec!(0.82)));
         assert_eq!(action.price_factor, None);

@@ -32,9 +32,7 @@
 
 use std::collections::BTreeMap;
 
-use backtest::stats::compare::{
-    holm_adjusted, ComparisonMatrix, ComparisonPlan, Measurement,
-};
+use backtest::stats::compare::{holm_adjusted, ComparisonMatrix, ComparisonPlan, Measurement};
 use serde::{Deserialize, Serialize};
 
 /// One candidate's measured replicates.
@@ -98,10 +96,7 @@ pub enum CompareError {
 ///
 /// # Errors
 /// [`CompareError`] when there is nothing to compare or the names collide.
-pub fn compare(
-    candidates: &[Candidate],
-    plan: &ComparisonPlan,
-) -> Result<Sweep, CompareError> {
+pub fn compare(candidates: &[Candidate], plan: &ComparisonPlan) -> Result<Sweep, CompareError> {
     if candidates.len() < 2 {
         return Err(CompareError::TooFewCandidates(candidates.len()));
     }
@@ -160,8 +155,7 @@ pub fn compare(
     }
 
     let adjusted = holm_adjusted(&raw_p);
-    let adjusted_p: BTreeMap<(String, String), f64> =
-        pairs.into_iter().zip(adjusted).collect();
+    let adjusted_p: BTreeMap<(String, String), f64> = pairs.into_iter().zip(adjusted).collect();
 
     Ok(Sweep {
         ranking: rank(candidates, &beats),
@@ -281,7 +275,9 @@ mod tests {
         p.k_max = k;
         let c = compare(&[weak, strong], &p).expect("two candidates");
         match &c.ranking {
-            Ranking::Ranked { order } => assert_eq!(order.first().map(String::as_str), Some("strong")),
+            Ranking::Ranked { order } => {
+                assert_eq!(order.first().map(String::as_str), Some("strong"))
+            }
             other => panic!("expected a ranking, got {other:?}"),
         }
     }
@@ -370,8 +366,8 @@ mod tests {
         let noise = |i: usize| ((i as f64) * 0.37).sin() * 0.05;
         let mut short = candidate("short", noise);
         short.measurements.truncate(3);
-        let c = compare(&[candidate("full", noise), short], &plan(0.5))
-            .expect("the comparison runs");
+        let c =
+            compare(&[candidate("full", noise), short], &plan(0.5)).expect("the comparison runs");
         assert_eq!(c.refused.len(), 1);
         let (a, b, why) = &c.refused[0];
         assert_eq!((a.as_str(), b.as_str()), ("full", "short"));
@@ -404,7 +400,10 @@ mod tests {
             candidate("b", |_| 0.0),
             candidate("c", |_| 0.0),
         ];
-        let beats = vec![("a".to_string(), "b".to_string()), ("b".to_string(), "c".to_string())];
+        let beats = vec![
+            ("a".to_string(), "b".to_string()),
+            ("b".to_string(), "c".to_string()),
+        ];
         let Ranking::Ranked { order } = rank(&cands, &beats) else {
             panic!("something beat something");
         };

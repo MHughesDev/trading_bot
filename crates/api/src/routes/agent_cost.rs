@@ -60,8 +60,12 @@ fn refuse(code: &str, message: impl Into<String>) -> axum::response::Response {
 /// would produce an estimate with a band around nothing.
 fn rows_from_arguments(arguments: &Value) -> Option<u64> {
     let text = |k: &str| arguments.get(k).and_then(Value::as_str);
-    let start = DateTime::parse_from_rfc3339(text("start")?).ok()?.with_timezone(&Utc);
-    let end = DateTime::parse_from_rfc3339(text("end")?).ok()?.with_timezone(&Utc);
+    let start = DateTime::parse_from_rfc3339(text("start")?)
+        .ok()?
+        .with_timezone(&Utc);
+    let end = DateTime::parse_from_rfc3339(text("end")?)
+        .ok()?
+        .with_timezone(&Utc);
     let timeframe = text("timeframe").unwrap_or("1h");
     let seconds = timeframe_seconds(timeframe)?;
     let span = (end - start).num_seconds();
@@ -150,8 +154,7 @@ pub async fn estimate(
             None,
             None,
             "unmeasured",
-            "these arguments name no window, so there is no row count to estimate from"
-                .to_string(),
+            "these arguments name no window, so there is no row count to estimate from".to_string(),
         ),
         (Some(_), false) => (
             None,

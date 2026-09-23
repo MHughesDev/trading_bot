@@ -9,12 +9,12 @@
 
 use chrono::{DateTime, Duration, Utc};
 
-use ledger::{DispatchContext, TrialLedger};
-use crate::run::RunDispatch;
 use crate::rng::DetRng;
+use crate::run::RunDispatch;
 use crate::run::{
     Backtest, MetricInputs, MetricKind, MetricSet, RunConfig, RunExecutor, RunStatus, RunStore,
 };
+use ledger::{DispatchContext, TrialLedger};
 
 /// The probability that a given expanded member was dispatched.
 ///
@@ -193,8 +193,7 @@ fn expand_members(study: &StudyConfig) -> Vec<RunConfig> {
                 // the real data and call the spread a null distribution
                 // (`StudyConfig::validate` refuses the config that would let
                 // that happen).
-                if let (StudyKind::PermutationNull, Some(null)) =
-                    (study.kind, study.null.as_ref())
+                if let (StudyKind::PermutationNull, Some(null)) = (study.kind, study.null.as_ref())
                 {
                     base.clone().in_null_world(null.clone(), seed)
                 } else {
@@ -471,9 +470,9 @@ mod tests {
         Backtest, ClosureExecutor, ComputeCost, DataSlice, EvalResolution, InMemoryRunStore,
         ParamMap, RunConfig, RunConfigBuilder, ENGINE_VERSION,
     };
-    use ledger::InMemoryLedger;
     use crate::study::config::{StudyBudget, StudyConfig};
     use chrono::TimeZone;
+    use ledger::InMemoryLedger;
 
     /// Tests dispatch through a real ledger — there is no way to reach an
     /// executor without one (INV-16).
@@ -571,7 +570,11 @@ mod tests {
 
     #[test]
     fn sweep_counts_every_member_and_seals() {
-        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true), InMemoryLedger::new());
+        let bt = Backtest::new(
+            InMemoryRunStore::new(),
+            objective_executor(true),
+            InMemoryLedger::new(),
+        );
         let grid: Vec<ParamMap> = (0..50).map(|i| param(f64::from(i))).collect();
         let res = StudyEngine::run(&sweep_cfg(grid), &bt, &ctx()).unwrap();
         assert_eq!(res.members().len(), 50);
@@ -581,7 +584,11 @@ mod tests {
 
     #[test]
     fn rerunning_uses_cache_but_still_reports_full_trial_delta() {
-        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true), InMemoryLedger::new());
+        let bt = Backtest::new(
+            InMemoryRunStore::new(),
+            objective_executor(true),
+            InMemoryLedger::new(),
+        );
         let grid: Vec<ParamMap> = (0..10).map(|i| param(f64::from(i))).collect();
         let cfg = sweep_cfg(grid);
         let first = StudyEngine::run(&cfg, &bt, &ctx()).unwrap();
@@ -593,7 +600,11 @@ mod tests {
     #[test]
     fn neighborhood_detects_plateau_vs_spike() {
         // Plateau objective → low relative spread → plateau true.
-        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true), InMemoryLedger::new());
+        let bt = Backtest::new(
+            InMemoryRunStore::new(),
+            objective_executor(true),
+            InMemoryLedger::new(),
+        );
         let study = StudyConfig {
             study_id: "nbhd".into(),
             kind: StudyKind::Neighborhood,
@@ -615,7 +626,11 @@ mod tests {
         assert_eq!(plateau_res.verdict.plateau, Some(true));
 
         // Spike objective → high relative spread → plateau false.
-        let bt2 = Backtest::new(InMemoryRunStore::new(), objective_executor(false), InMemoryLedger::new());
+        let bt2 = Backtest::new(
+            InMemoryRunStore::new(),
+            objective_executor(false),
+            InMemoryLedger::new(),
+        );
         let spike_res = StudyEngine::run(&study, &bt2, &ctx()).unwrap();
         assert_eq!(spike_res.verdict.plateau, Some(false));
     }
@@ -624,7 +639,11 @@ mod tests {
     fn selection_rule_returns_median_not_peak() {
         // Spike objective: peak at fast==12 (level 0.05); rest near zero. The
         // MedianStableCentroid rule must NOT return the peak.
-        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(false), InMemoryLedger::new());
+        let bt = Backtest::new(
+            InMemoryRunStore::new(),
+            objective_executor(false),
+            InMemoryLedger::new(),
+        );
         let grid: Vec<ParamMap> = (8..=16).map(|i| param(f64::from(i))).collect();
         let res = StudyEngine::run(&sweep_cfg(grid), &bt, &ctx()).unwrap();
         let carried = res.carried_forward.expect("a config is carried forward");
@@ -638,7 +657,11 @@ mod tests {
 
     #[test]
     fn permutation_study_requires_null_to_run() {
-        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true), InMemoryLedger::new());
+        let bt = Backtest::new(
+            InMemoryRunStore::new(),
+            objective_executor(true),
+            InMemoryLedger::new(),
+        );
         let study = StudyConfig {
             study_id: "perm".into(),
             kind: StudyKind::PermutationNull,
@@ -659,7 +682,11 @@ mod tests {
 
     #[test]
     fn cpcv_runs_all_combinations() {
-        let bt = Backtest::new(InMemoryRunStore::new(), objective_executor(true), InMemoryLedger::new());
+        let bt = Backtest::new(
+            InMemoryRunStore::new(),
+            objective_executor(true),
+            InMemoryLedger::new(),
+        );
         let study = StudyConfig {
             study_id: "cpcv".into(),
             kind: StudyKind::Cpcv,

@@ -46,36 +46,13 @@
 //!
 //! [`Verdict::NeverSeen`]: observability::silence::Verdict::NeverSeen
 //!
-//! # The caller this module is still missing
+//! # The caller
 //!
-//! [`silence_report`] is complete and tested, and nothing in a running process
-//! calls it yet. It needs exactly three edits, none of them in this crate:
-//!
-//! 1. `apps/platform/src/main.rs:68` — `health_jobs::spawn(pg.clone());` becomes
-//!    `health_jobs::spawn(pg.clone(), cfg.clickhouse.url.clone());`
-//! 2. `apps/platform/src/health_jobs.rs:18` — `spawn` takes a second parameter
-//!    `ch_url: String` and threads it into `run_once`, which becomes
-//!    `run_once(pg: &sqlx::PgPool, ch_url: &str)`.
-//! 3. `apps/platform/src/health_jobs.rs`, at the end of `run_once` — one call:
-//!
-//! ```ignore
-//! observability::silence::emit(
-//!     &storage::clickhouse::census::silence_report(
-//!         pg,
-//!         ch_url,
-//!         chrono::Utc::now(),
-//!         std::num::NonZeroU32::new(
-//!             storage::clickhouse::census::REGISTRY_DEFAULT_TOLERANCE_CADENCES,
-//!         )
-//!         .expect("the registry default is positive"),
-//!     )
-//!     .await,
-//! );
-//! ```
-//!
-//! `apps/platform` already depends on both crates, and the hourly tick that
-//! `health_jobs::spawn` owns is the right cadence: the tightest deadline any
-//! registered series declares is three hours.
+//! `apps/platform/src/health_jobs.rs`'s hourly tick calls [`silence_report`] from
+//! its own `silence_pass`, not appended inside the tenant pass: that pass returns
+//! early when Postgres will not list tenants, and appending there would let a
+//! Postgres hiccup silence the silence alarm — the one failure this mechanism
+//! exists to make impossible. `silence_pass` runs unconditionally after it.
 //!
 //! [`Verdict::CannotJudge`]: observability::silence::Verdict::CannotJudge
 
@@ -85,8 +62,8 @@ use std::num::NonZeroU32;
 use chrono::{DateTime, Utc};
 use clickhouse::Row;
 use observability::silence::{
-    evaluate, ArrivalDecl, Census, FeedExpectation, FeedKey, Heartbeat, RegistryRow, Roster, SilenceReport,
-    WHOLE_SERIES,
+    evaluate, ArrivalDecl, Census, FeedExpectation, FeedKey, Heartbeat, RegistryRow, Roster,
+    SilenceReport, WHOLE_SERIES,
 };
 use serde::Deserialize;
 use sqlx::PgPool;
@@ -123,7 +100,18 @@ pub const REGISTRY_DEFAULT_TOLERANCE_CADENCES: u32 = 3;
 
 /// One `dataplane.forward_series` row as the Postgres driver hands it over.
 /// Columns in the order the query names them.
-type RegistryTuple = (String, String, String, i32, i32, i64, String, Option<i32>, Option<i32>, bool);
+type RegistryTuple = (
+    String,
+    String,
+    String,
+    i32,
+    i32,
+    i64,
+    String,
+    Option<i32>,
+    Option<i32>,
+    bool,
+);
 
 /// Every registered forward series, as plain rows.
 ///
@@ -255,8 +243,14 @@ pub struct BarFeed {
 /// What a census of the canonical store found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CanonicalBars {
-    Taken { at: DateTime<Utc>, feeds: Vec<BarFeed> },
-    Failed { attempted_at: DateTime<Utc>, reason: String },
+    Taken {
+        at: DateTime<Utc>,
+        feeds: Vec<BarFeed>,
+    },
+    Failed {
+        attempted_at: DateTime<Utc>,
+        reason: String,
+    },
 }
 
 #[derive(Row, Deserialize)]
@@ -339,7 +333,12 @@ pub async fn canonical_bar_census(url: &str, at: DateTime<Utc>) -> CanonicalBars
     let client: ChClient = super::connect(url);
     let raw: Vec<WireBarFeed> = match client.query(&canonical_sql(at)).fetch_all().await {
         Ok(r) => r,
-        Err(e) => return CanonicalBars::Failed { attempted_at: at, reason: e.to_string() },
+        Err(e) => {
+            return CanonicalBars::Failed {
+                attempted_at: at,
+                reason: e.to_string(),
+            }
+        }
     };
 
     let mut seen: HashSet<(i64, i32, u32)> = HashSet::new();
@@ -386,7 +385,9 @@ impl CanonicalBars {
     ///   them apart. The claim is withheld rather than guessed.
     /// * `Some((exp, Some(beat)))` — judgeable on our clock.
     fn whole_store(&self, tolerance: NonZeroU32) -> Option<(FeedExpectation, Option<Heartbeat>)> {
-        let CanonicalBars::Taken { feeds, .. } = self else { return None };
+        let CanonicalBars::Taken { feeds, .. } = self else {
+            return None;
+        };
         if feeds.is_empty() {
             return Some((whole_store_expectation(1, tolerance), None));
         }
@@ -420,7 +421,10 @@ impl CanonicalBars {
     #[must_use]
     pub fn report(&self, tolerance: NonZeroU32) -> SilenceReport {
         let at = match self {
-            Self::Taken { at, .. } | Self::Failed { attempted_at: at, .. } => *at,
+            Self::Taken { at, .. }
+            | Self::Failed {
+                attempted_at: at, ..
+            } => *at,
         };
         let (exps, census) = match self {
             Self::Failed { reason, .. } => (
@@ -428,7 +432,10 @@ impl CanonicalBars {
                 // failed census `evaluate` never judges, so the deadline on this
                 // expectation is unreachable — pinned by a test.
                 vec![whole_store_expectation(1, tolerance)],
-                Census::Failed { attempted_at: at, reason: reason.clone() },
+                Census::Failed {
+                    attempted_at: at,
+                    reason: reason.clone(),
+                },
             ),
             Self::Taken { feeds, .. } => {
                 let mut beats: Vec<Heartbeat> = feeds
@@ -474,7 +481,12 @@ fn feed_series_id(period_secs: u32) -> String {
 /// our clock, and the venue clock is reported and never alarmed. There is no
 /// `Arrival::Always` here — that would be a claim that no venue this platform
 /// collects from ever closes, which nothing in this repository supports.
-fn store_expectation(series_id: &str, store_table: &str, period_secs: u32, tolerance: NonZeroU32) -> FeedExpectation {
+fn store_expectation(
+    series_id: &str,
+    store_table: &str,
+    period_secs: u32,
+    tolerance: NonZeroU32,
+) -> FeedExpectation {
     let period = period_secs.max(1);
     FeedExpectation {
         spec: dataplane::retention::ForwardSeriesSpec {
@@ -490,7 +502,9 @@ fn store_expectation(series_id: &str, store_table: &str, period_secs: u32, toler
             retention: dataplane::retention::RetentionPolicy::None,
             enabled: true,
         },
-        arrival: observability::silence::Arrival::Polled { poll_period_secs: period },
+        arrival: observability::silence::Arrival::Polled {
+            poll_period_secs: period,
+        },
         roster: Roster::WhateverAppears,
     }
 }
@@ -510,7 +524,12 @@ fn whole_store_expectation(period_secs: u32, tolerance: NonZeroU32) -> FeedExpec
 /// The shared cause is recomputed over the union of both stores' findings
 /// ([`SilenceReport::merged`]), so one host or one writer process taking both
 /// stores down pages once rather than once per store.
-pub async fn silence_report(pg: &PgPool, ch_url: &str, at: DateTime<Utc>, tolerance: NonZeroU32) -> SilenceReport {
+pub async fn silence_report(
+    pg: &PgPool,
+    ch_url: &str,
+    at: DateTime<Utc>,
+    tolerance: NonZeroU32,
+) -> SilenceReport {
     let forward = match forward_expectations(pg).await {
         Ok(exps) => {
             let census = forward_census(ch_url, at).await;
@@ -524,7 +543,10 @@ pub async fn silence_report(pg: &PgPool, ch_url: &str, at: DateTime<Utc>, tolera
             let blind = store_expectation(REGISTRY_TABLE, "forward_series_heartbeat", 1, tolerance);
             evaluate(
                 std::slice::from_ref(&blind),
-                &Census::Failed { attempted_at: at, reason: e.to_string() },
+                &Census::Failed {
+                    attempted_at: at,
+                    reason: e.to_string(),
+                },
             )
         }
     };
@@ -543,7 +565,8 @@ mod tests {
     }
 
     fn tol() -> NonZeroU32 {
-        NonZeroU32::new(REGISTRY_DEFAULT_TOLERANCE_CADENCES).expect("the registry default is positive")
+        NonZeroU32::new(REGISTRY_DEFAULT_TOLERANCE_CADENCES)
+            .expect("the registry default is positive")
     }
 
     /// The nine feeds `trading.market_bar` actually held on 2026-09-22, with the
@@ -552,16 +575,79 @@ mod tests {
     fn live_feeds() -> Vec<BarFeed> {
         let h = |hours: i64| at() - chrono::Duration::hours(hours);
         vec![
-            BarFeed { venue: "kraken".into(), instrument: "BTC-USD".into(), period_secs: 60, last_event_time: h(19), last_write_time: h(19), rows_in_last_write: 1 },
-            BarFeed { venue: "coinbase".into(), instrument: "BTC-USD".into(), period_secs: 60, last_event_time: h(24), last_write_time: h(24), rows_in_last_write: 139 },
-            BarFeed { venue: "coinbase".into(), instrument: "BTC-USDT".into(), period_secs: 3600, last_event_time: h(236), last_write_time: h(236), rows_in_last_write: 2 },
-            BarFeed { venue: "kraken".into(), instrument: "ETH-USD".into(), period_secs: 60, last_event_time: h(242), last_write_time: h(242), rows_in_last_write: 1 },
-            BarFeed { venue: "coinbase".into(), instrument: "ETH-USD".into(), period_secs: 60, last_event_time: h(242), last_write_time: h(242), rows_in_last_write: 285 },
+            BarFeed {
+                venue: "kraken".into(),
+                instrument: "BTC-USD".into(),
+                period_secs: 60,
+                last_event_time: h(19),
+                last_write_time: h(19),
+                rows_in_last_write: 1,
+            },
+            BarFeed {
+                venue: "coinbase".into(),
+                instrument: "BTC-USD".into(),
+                period_secs: 60,
+                last_event_time: h(24),
+                last_write_time: h(24),
+                rows_in_last_write: 139,
+            },
+            BarFeed {
+                venue: "coinbase".into(),
+                instrument: "BTC-USDT".into(),
+                period_secs: 3600,
+                last_event_time: h(236),
+                last_write_time: h(236),
+                rows_in_last_write: 2,
+            },
+            BarFeed {
+                venue: "kraken".into(),
+                instrument: "ETH-USD".into(),
+                period_secs: 60,
+                last_event_time: h(242),
+                last_write_time: h(242),
+                rows_in_last_write: 1,
+            },
+            BarFeed {
+                venue: "coinbase".into(),
+                instrument: "ETH-USD".into(),
+                period_secs: 60,
+                last_event_time: h(242),
+                last_write_time: h(242),
+                rows_in_last_write: 285,
+            },
             // The planted fixture: an event time in 2020, a write ten days ago.
-            BarFeed { venue: "synthetic".into(), instrument: "SYN-PLANTED-AR1-424242".into(), period_secs: 3600, last_event_time: Utc.with_ymd_and_hms(2020, 7, 27, 6, 0, 0).unwrap(), last_write_time: h(265), rows_in_last_write: 5000 },
-            BarFeed { venue: "binance".into(), instrument: "BTC-USD".into(), period_secs: 60, last_event_time: h(2204), last_write_time: h(2204), rows_in_last_write: 60 },
-            BarFeed { venue: "coinbase".into(), instrument: "BTC-USD".into(), period_secs: 3600, last_event_time: h(2735), last_write_time: h(2397), rows_in_last_write: 18 },
-            BarFeed { venue: "coinbase".into(), instrument: "ETH-USD".into(), period_secs: 3600, last_event_time: h(2402), last_write_time: h(2402), rows_in_last_write: 48 },
+            BarFeed {
+                venue: "synthetic".into(),
+                instrument: "SYN-PLANTED-AR1-424242".into(),
+                period_secs: 3600,
+                last_event_time: Utc.with_ymd_and_hms(2020, 7, 27, 6, 0, 0).unwrap(),
+                last_write_time: h(265),
+                rows_in_last_write: 5000,
+            },
+            BarFeed {
+                venue: "binance".into(),
+                instrument: "BTC-USD".into(),
+                period_secs: 60,
+                last_event_time: h(2204),
+                last_write_time: h(2204),
+                rows_in_last_write: 60,
+            },
+            BarFeed {
+                venue: "coinbase".into(),
+                instrument: "BTC-USD".into(),
+                period_secs: 3600,
+                last_event_time: h(2735),
+                last_write_time: h(2397),
+                rows_in_last_write: 18,
+            },
+            BarFeed {
+                venue: "coinbase".into(),
+                instrument: "ETH-USD".into(),
+                period_secs: 3600,
+                last_event_time: h(2402),
+                last_write_time: h(2402),
+                rows_in_last_write: 48,
+            },
         ]
     }
 
@@ -588,8 +674,15 @@ mod tests {
     #[test]
     fn a_feed_the_dimension_cannot_name_is_not_dropped() {
         let sql = canonical_sql(at());
-        assert_eq!(sql.matches("LEFT JOIN").count(), 2, "both dimensions are joined leniently:\n{sql}");
-        assert!(!sql.contains("INNER JOIN"), "an inner join here silently drops feeds:\n{sql}");
+        assert_eq!(
+            sql.matches("LEFT JOIN").count(),
+            2,
+            "both dimensions are joined leniently:\n{sql}"
+        );
+        assert!(
+            !sql.contains("INNER JOIN"),
+            "an inner join here silently drops feeds:\n{sql}"
+        );
 
         // And the fallback naming keeps it identifiable rather than blank.
         assert_eq!(name_or_id("", "instrument", 1004), "instrument#1004");
@@ -603,9 +696,15 @@ mod tests {
     #[test]
     fn the_dimension_joins_cannot_fan_out() {
         let sql = canonical_sql(at());
-        assert!(sql.contains("argMax(symbol, valid_from)"), "one symbol per instrument, the newest:\n{sql}");
+        assert!(
+            sql.contains("argMax(symbol, valid_from)"),
+            "one symbol per instrument, the newest:\n{sql}"
+        );
         assert!(sql.contains("any(name) AS venue_name"));
-        assert!(!sql.contains("DISTINCT"), "DISTINCT over an SCD table is not a deduplication:\n{sql}");
+        assert!(
+            !sql.contains("DISTINCT"),
+            "DISTINCT over an SCD table is not a deduplication:\n{sql}"
+        );
     }
 
     // ── The canonical verdicts ───────────────────────────────────────────────
@@ -614,15 +713,37 @@ mod tests {
     /// is a statement about us and needs no calendar, so it alarms — once.
     #[test]
     fn the_canonical_store_as_it_stands_today_alarms_once_for_the_whole_store() {
-        let r = CanonicalBars::Taken { at: at(), feeds: live_feeds() }.report(tol());
+        let r = CanonicalBars::Taken {
+            at: at(),
+            feeds: live_feeds(),
+        }
+        .report(tol());
 
         let alarms = r.with_severity(Severity::Alarm);
-        assert_eq!(alarms.len(), 1, "one defensible claim, one alarm: {alarms:?}");
-        assert_eq!(alarms[0].feed, FeedKey::new(WHOLE_STORE, WHOLE_SERIES, WHOLE_SERIES));
+        assert_eq!(
+            alarms.len(),
+            1,
+            "one defensible claim, one alarm: {alarms:?}"
+        );
+        assert_eq!(
+            alarms[0].feed,
+            FeedKey::new(WHOLE_STORE, WHOLE_SERIES, WHOLE_SERIES)
+        );
         match &alarms[0].verdict {
-            Verdict::CollectorSilent { write_age_secs, deadline_secs } => {
-                assert_eq!(*deadline_secs, 3 * 3600, "the longest period the store declares, times the tolerance");
-                assert_eq!(*write_age_secs, 19 * 3600, "the newest write anywhere in the store");
+            Verdict::CollectorSilent {
+                write_age_secs,
+                deadline_secs,
+            } => {
+                assert_eq!(
+                    *deadline_secs,
+                    3 * 3600,
+                    "the longest period the store declares, times the tolerance"
+                );
+                assert_eq!(
+                    *write_age_secs,
+                    19 * 3600,
+                    "the newest write anywhere in the store"
+                );
             }
             other => panic!("expected a silent whole store, got {other:?}"),
         }
@@ -635,15 +756,34 @@ mod tests {
     /// invented deadline is the one that gets the alarm muted.
     #[test]
     fn no_canonical_feed_is_judged_against_a_deadline_nobody_promised() {
-        let r = CanonicalBars::Taken { at: at(), feeds: live_feeds() }.report(tol());
-        let unjudged: Vec<_> =
-            r.findings.iter().filter(|f| matches!(f.verdict, Verdict::CannotJudge { .. })).collect();
-        assert_eq!(unjudged.len(), 9, "all nine feeds are reported: {:?}", r.findings);
+        let r = CanonicalBars::Taken {
+            at: at(),
+            feeds: live_feeds(),
+        }
+        .report(tol());
+        let unjudged: Vec<_> = r
+            .findings
+            .iter()
+            .filter(|f| matches!(f.verdict, Verdict::CannotJudge { .. }))
+            .collect();
+        assert_eq!(
+            unjudged.len(),
+            9,
+            "all nine feeds are reported: {:?}",
+            r.findings
+        );
         for f in &unjudged {
             assert_eq!(f.severity(), Severity::Info, "honest, and not a page");
-            assert!(f.feed.series.starts_with(WHOLE_STORE), "each feed names the store it came from");
+            assert!(
+                f.feed.series.starts_with(WHOLE_STORE),
+                "each feed names the store it came from"
+            );
         }
-        assert_eq!(r.findings.len(), 10, "nine feeds plus the whole-store claim");
+        assert_eq!(
+            r.findings.len(),
+            10,
+            "nine feeds plus the whole-store claim"
+        );
     }
 
     /// The planted fixture, whose event time is in 2020, must not contribute a
@@ -652,7 +792,10 @@ mod tests {
     #[test]
     fn the_planted_fixture_does_not_make_the_store_look_six_years_overdue() {
         let feeds = live_feeds();
-        let syn = feeds.iter().find(|f| f.venue == "synthetic").expect("the fixture");
+        let syn = feeds
+            .iter()
+            .find(|f| f.venue == "synthetic")
+            .expect("the fixture");
         assert!(syn.last_event_time < syn.last_write_time - chrono::Duration::days(2000));
 
         let r = CanonicalBars::Taken { at: at(), feeds }.report(tol());
@@ -663,7 +806,9 @@ mod tests {
             .expect("the whole-store finding");
         match &whole.verdict {
             // 19 hours, not six years. The event clock is not what is judged.
-            Verdict::CollectorSilent { write_age_secs, .. } => assert_eq!(*write_age_secs, 19 * 3600),
+            Verdict::CollectorSilent { write_age_secs, .. } => {
+                assert_eq!(*write_age_secs, 19 * 3600)
+            }
             other => panic!("{other:?}"),
         }
     }
@@ -674,10 +819,17 @@ mod tests {
     fn a_store_being_written_is_not_alarmed() {
         let feeds: Vec<BarFeed> = live_feeds()
             .into_iter()
-            .map(|f| BarFeed { last_write_time: at(), ..f })
+            .map(|f| BarFeed {
+                last_write_time: at(),
+                ..f
+            })
             .collect();
         let r = CanonicalBars::Taken { at: at(), feeds }.report(tol());
-        assert!(r.with_severity(Severity::Alarm).is_empty(), "{:?}", r.findings);
+        assert!(
+            r.with_severity(Severity::Alarm).is_empty(),
+            "{:?}",
+            r.findings
+        );
     }
 
     /// The guard. With one venue in the store, "everything stopped writing" and
@@ -686,16 +838,27 @@ mod tests {
     /// are still reported.
     #[test]
     fn with_a_single_venue_the_whole_store_claim_is_withheld_rather_than_guessed() {
-        let feeds: Vec<BarFeed> =
-            live_feeds().into_iter().filter(|f| f.venue == "coinbase").collect();
+        let feeds: Vec<BarFeed> = live_feeds()
+            .into_iter()
+            .filter(|f| f.venue == "coinbase")
+            .collect();
         assert!(feeds.len() >= 3, "not a vacuous filter");
         let one = CanonicalBars::Taken { at: at(), feeds };
-        assert!(one.whole_store(tol()).is_none(), "one venue cannot support a claim about every venue");
+        assert!(
+            one.whole_store(tol()).is_none(),
+            "one venue cannot support a claim about every venue"
+        );
 
         let r = one.report(tol());
-        assert!(r.with_severity(Severity::Alarm).is_empty(), "no venue-shaped claim from one venue");
+        assert!(
+            r.with_severity(Severity::Alarm).is_empty(),
+            "no venue-shaped claim from one venue"
+        );
         assert!(!r.findings.is_empty(), "the feeds are still reported");
-        assert!(!r.all_clear(), "withholding a claim is not a clean bill of health");
+        assert!(
+            !r.all_clear(),
+            "withholding a claim is not a clean bill of health"
+        );
     }
 
     /// A canonical store that holds nothing at all is an alarm, and the one case
@@ -704,14 +867,26 @@ mod tests {
     /// emptiest possible report — no findings, nothing to page, nothing to show.
     #[test]
     fn an_empty_canonical_store_alarms_rather_than_reporting_nothing() {
-        let empty = CanonicalBars::Taken { at: at(), feeds: Vec::new() };
-        let (_, beat) = empty.whole_store(tol()).expect("an empty store is still a claim");
+        let empty = CanonicalBars::Taken {
+            at: at(),
+            feeds: Vec::new(),
+        };
+        let (_, beat) = empty
+            .whole_store(tol())
+            .expect("an empty store is still a claim");
         assert!(beat.is_none(), "there is nothing to derive a clock from");
 
         let r = empty.report(tol());
         assert_eq!(r.findings.len(), 1, "an empty store is not an empty report");
-        assert_eq!(r.findings[0].feed, FeedKey::new(WHOLE_STORE, WHOLE_SERIES, WHOLE_SERIES));
-        assert_eq!(r.findings[0].verdict, Verdict::NeverSeen, "never written is not merely stale");
+        assert_eq!(
+            r.findings[0].feed,
+            FeedKey::new(WHOLE_STORE, WHOLE_SERIES, WHOLE_SERIES)
+        );
+        assert_eq!(
+            r.findings[0].verdict,
+            Verdict::NeverSeen,
+            "never written is not merely stale"
+        );
         assert_eq!(r.worst(), Some(Severity::Alarm));
         assert_eq!(r.pages().len(), 1);
     }
@@ -719,11 +894,22 @@ mod tests {
     /// A failed census is blind, not healthy, and still names the store.
     #[test]
     fn a_canonical_read_that_failed_is_unobserved_and_never_empty() {
-        let r = CanonicalBars::Failed { attempted_at: at(), reason: "connection refused".into() }.report(tol());
+        let r = CanonicalBars::Failed {
+            attempted_at: at(),
+            reason: "connection refused".into(),
+        }
+        .report(tol());
         assert_eq!(r.findings.len(), 1);
-        assert_eq!(r.findings[0].feed, FeedKey::new(WHOLE_STORE, WHOLE_SERIES, WHOLE_SERIES));
+        assert_eq!(
+            r.findings[0].feed,
+            FeedKey::new(WHOLE_STORE, WHOLE_SERIES, WHOLE_SERIES)
+        );
         assert!(matches!(r.findings[0].verdict, Verdict::Unobserved { .. }));
-        assert_eq!(r.worst(), Some(Severity::Warn), "our failure to look is not the collector's fault");
+        assert_eq!(
+            r.worst(),
+            Some(Severity::Warn),
+            "our failure to look is not the collector's fault"
+        );
         assert!(!r.all_clear());
     }
 
@@ -733,15 +919,30 @@ mod tests {
     #[test]
     fn the_whole_store_claim_never_consults_retention() {
         let exp = whole_store_expectation(3600, tol());
-        assert_eq!(exp.arrival, Arrival::Polled { poll_period_secs: 3600 });
-        assert_ne!(exp.arrival, Arrival::Always, "we hold no evidence that every venue is always open");
+        assert_eq!(
+            exp.arrival,
+            Arrival::Polled {
+                poll_period_secs: 3600
+            }
+        );
+        assert_ne!(
+            exp.arrival,
+            Arrival::Always,
+            "we hold no evidence that every venue is always open"
+        );
         assert_eq!(exp.write_deadline_secs(), Some(3 * 3600));
 
         let src = include_str!("census.rs");
         let production = src.split("#[cfg(test)]").next().unwrap_or(src);
-        let code: String =
-            production.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
-        assert!(!code.contains("Arrival::Always"), "an always-on claim needs a venue guarantee to cite");
+        let code: String = production
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !code.contains("Arrival::Always"),
+            "an always-on claim needs a venue guarantee to cite"
+        );
     }
 
     /// A 1-minute feed and an hourly feed on the same instrument are two feeds.
@@ -750,9 +951,16 @@ mod tests {
     #[test]
     fn two_periods_on_one_instrument_are_two_feeds() {
         assert_ne!(feed_series_id(60), feed_series_id(3600));
-        let r = CanonicalBars::Taken { at: at(), feeds: live_feeds() }.report(tol());
-        let coinbase_btc: Vec<_> =
-            r.findings.iter().filter(|f| f.feed.venue == "coinbase" && f.feed.instrument == "BTC-USD").collect();
+        let r = CanonicalBars::Taken {
+            at: at(),
+            feeds: live_feeds(),
+        }
+        .report(tol());
+        let coinbase_btc: Vec<_> = r
+            .findings
+            .iter()
+            .filter(|f| f.feed.venue == "coinbase" && f.feed.instrument == "BTC-USD")
+            .collect();
         assert_eq!(coinbase_btc.len(), 2, "one minute feed and one hourly feed");
         assert_ne!(coinbase_btc[0].feed.series, coinbase_btc[1].feed.series);
     }
@@ -779,7 +987,13 @@ mod tests {
             arrival: arrival_column(),
         };
         let exp = FeedExpectation::from_registry(&row, Roster::WhateverAppears).unwrap();
-        assert_eq!(exp.arrival, Arrival::Polled { poll_period_secs: 3600 }, "our cadence, not a venue claim");
+        assert_eq!(
+            exp.arrival,
+            Arrival::Polled {
+                poll_period_secs: 3600
+            },
+            "our cadence, not a venue claim"
+        );
     }
 
     // ── What is still needed ─────────────────────────────────────────────────
@@ -798,19 +1012,30 @@ mod tests {
     #[test]
     fn a_canonical_feed_becomes_judgeable_only_with_a_registry_row_and_a_beat() {
         // (1) No expectation in this module names a per-feed canonical series.
-        let r = CanonicalBars::Taken { at: at(), feeds: live_feeds() }.report(tol());
+        let r = CanonicalBars::Taken {
+            at: at(),
+            feeds: live_feeds(),
+        }
+        .report(tol());
         assert!(
-            r.findings.iter().filter(|f| f.feed.instrument != WHOLE_SERIES).all(|f| matches!(
-                f.verdict,
-                Verdict::CannotJudge { .. }
-            )),
+            r.findings
+                .iter()
+                .filter(|f| f.feed.instrument != WHOLE_SERIES)
+                .all(|f| matches!(f.verdict, Verdict::CannotJudge { .. })),
             "a per-feed canonical deadline was invented somewhere: {:?}",
             r.findings
         );
         // (2) The beat this module is waiting for exists and takes exactly the
         // arguments the bar persister has to hand. Constructed, never awaited:
         // building the future is what proves the call compiles.
-        drop(forward::beat("http://127.0.0.1:1/trading", &feed_series_id(60), "coinbase", "BTC-USD", at(), 0));
+        drop(forward::beat(
+            "http://127.0.0.1:1/trading",
+            &feed_series_id(60),
+            "coinbase",
+            "BTC-USD",
+            at(),
+            0,
+        ));
     }
 
     /// The worst case: neither store answers. Nothing is mocked — both handles
@@ -832,17 +1057,28 @@ mod tests {
 
         assert_eq!(r.findings.len(), 2, "one per store: {:?}", r.findings);
         assert!(
-            r.findings.iter().all(|f| matches!(f.verdict, Verdict::Unobserved { .. })),
+            r.findings
+                .iter()
+                .all(|f| matches!(f.verdict, Verdict::Unobserved { .. })),
             "our own outage is never a collector's fault: {:?}",
             r.findings
         );
         assert_eq!(r.worst(), Some(Severity::Warn));
-        assert!(r.pages().is_empty(), "nobody is paged for an accusation we cannot make");
+        assert!(
+            r.pages().is_empty(),
+            "nobody is paged for an accusation we cannot make"
+        );
         assert!(!r.all_clear(), "blind is not healthy");
 
         let named: Vec<&str> = r.findings.iter().map(|f| f.feed.series.as_str()).collect();
-        assert!(named.contains(&REGISTRY_TABLE), "the registry is named: {named:?}");
-        assert!(named.contains(&WHOLE_STORE), "the canonical store is named: {named:?}");
+        assert!(
+            named.contains(&REGISTRY_TABLE),
+            "the registry is named: {named:?}"
+        );
+        assert!(
+            named.contains(&WHOLE_STORE),
+            "the canonical store is named: {named:?}"
+        );
     }
 
     // ── Against the live stores ──────────────────────────────────────────────
@@ -856,9 +1092,10 @@ mod tests {
     /// ```
     #[tokio::test]
     async fn against_the_live_stores_the_pass_is_not_silent() {
-        let (Ok(ch), Ok(pg_url)) =
-            (std::env::var("STORAGE_CENSUS_CLICKHOUSE_URL"), std::env::var("STORAGE_CENSUS_PG_URL"))
-        else {
+        let (Ok(ch), Ok(pg_url)) = (
+            std::env::var("STORAGE_CENSUS_CLICKHOUSE_URL"),
+            std::env::var("STORAGE_CENSUS_PG_URL"),
+        ) else {
             eprintln!("STORAGE_CENSUS_CLICKHOUSE_URL / STORAGE_CENSUS_PG_URL unset — skipping");
             return;
         };
@@ -866,7 +1103,9 @@ mod tests {
         let now = Utc::now();
 
         let bars = canonical_bar_census(&ch, now).await;
-        let CanonicalBars::Taken { feeds, .. } = &bars else { panic!("the canonical census failed: {bars:?}") };
+        let CanonicalBars::Taken { feeds, .. } = &bars else {
+            panic!("the canonical census failed: {bars:?}")
+        };
         eprintln!("canonical feeds: {}", feeds.len());
         for f in feeds {
             eprintln!(
@@ -878,11 +1117,28 @@ mod tests {
         let report = silence_report(&pg, &ch, now, tol()).await;
         observability::silence::emit(&report);
         for f in &report.findings {
-            eprintln!("  [{:?}] {}/{}/{} {:?}", f.severity(), f.feed.series, f.feed.venue, f.feed.instrument, f.verdict);
+            eprintln!(
+                "  [{:?}] {}/{}/{} {:?}",
+                f.severity(),
+                f.feed.series,
+                f.feed.venue,
+                f.feed.instrument,
+                f.verdict
+            );
         }
         eprintln!("  pages: {}", report.pages().len());
-        assert!(!report.findings.is_empty(), "a pass that asked nothing learned nothing");
-        assert!(!report.all_clear(), "nothing in either store has been written today");
-        assert_eq!(report.worst(), Some(Severity::Alarm), "the forward series have never produced a row");
+        assert!(
+            !report.findings.is_empty(),
+            "a pass that asked nothing learned nothing"
+        );
+        assert!(
+            !report.all_clear(),
+            "nothing in either store has been written today"
+        );
+        assert_eq!(
+            report.worst(),
+            Some(Severity::Alarm),
+            "the forward series have never produced a row"
+        );
     }
 }

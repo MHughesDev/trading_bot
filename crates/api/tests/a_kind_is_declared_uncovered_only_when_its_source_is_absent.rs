@@ -84,14 +84,15 @@ fn migrations_create(table: &str) -> bool {
         .filter_map(Result::ok)
         .filter(|e| e.path().extension().is_some_and(|x| x == "sql"))
         .any(|e| {
-            let sql = std::fs::read_to_string(e.path()).unwrap_or_default().to_lowercase();
+            let sql = std::fs::read_to_string(e.path())
+                .unwrap_or_default()
+                .to_lowercase();
             sql.contains(&needle) || sql.contains(&bare)
         })
 }
 
 fn route_source() -> String {
-    let p = repo_root()
-        .join("crates/api/src/routes/desk_digest.rs");
+    let p = repo_root().join("crates/api/src/routes/desk_digest.rs");
     std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("cannot read {}: {e}", p.display()))
 }
 

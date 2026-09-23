@@ -59,7 +59,12 @@ fn links(text: &str) -> Vec<String> {
             }
             if j < bytes.len() {
                 let target: String = bytes[start..j].iter().collect();
-                let target = target.split('#').next().unwrap_or_default().trim().to_string();
+                let target = target
+                    .split('#')
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
                 if !target.is_empty() {
                     out.push(target);
                 }
@@ -78,9 +83,7 @@ fn is_external(target: &str) -> bool {
 /// Resolve a link the way a reader's viewer would: relative to the document.
 fn resolve(doc: &Path, target: &str) -> PathBuf {
     let decoded = target.replace("%20", " ");
-    doc.parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(decoded)
+    doc.parent().unwrap_or_else(|| Path::new(".")).join(decoded)
 }
 
 #[test]

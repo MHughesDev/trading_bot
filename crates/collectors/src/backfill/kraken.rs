@@ -34,7 +34,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
-use dataplane::backfill::{BackfillBar, BackfillPage, BackfillSource, FetchError, PageRequest, RateLimit};
+use dataplane::backfill::{
+    BackfillBar, BackfillPage, BackfillSource, FetchError, PageRequest, RateLimit,
+};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
@@ -50,7 +52,11 @@ pub const MAX_CANDLES: i64 = 720;
 
 #[must_use]
 pub const fn declared_rate_limit() -> RateLimit {
-    RateLimit { per_window: 1, window_ms: 1_000, burst: 1 }
+    RateLimit {
+        per_window: 1,
+        window_ms: 1_000,
+        burst: 1,
+    }
 }
 
 /// Kraken's `interval` parameter is in minutes, from a fixed set.
@@ -60,7 +66,9 @@ pub const fn declared_rate_limit() -> RateLimit {
 pub fn interval_minutes(period_secs: u32) -> Result<u32, FetchError> {
     match period_secs {
         60 | 300 | 900 | 1_800 | 3_600 | 14_400 | 86_400 | 604_800 => Ok(period_secs / 60),
-        other => Err(FetchError::Integrity(format!("Kraken has no {other} s OHLC interval"))),
+        other => Err(FetchError::Integrity(format!(
+            "Kraken has no {other} s OHLC interval"
+        ))),
     }
 }
 
@@ -109,7 +117,10 @@ pub fn parse_ohlc(body: &[u8], period_secs: u32) -> Result<Vec<BackfillBar>, Fet
         // would look like a venue with no history rather than one asking us to
         // slow down — and the backfill would record a permanent hole.
         if env.error.iter().any(|e| is_rate_limit(e)) {
-            return Err(FetchError::RateLimited { venue: VENUE.into(), retry_after_ms: 5_000 });
+            return Err(FetchError::RateLimited {
+                venue: VENUE.into(),
+                retry_after_ms: 5_000,
+            });
         }
         return Err(FetchError::Integrity(format!("kraken: {first}")));
     }
@@ -121,17 +132,18 @@ pub fn parse_ohlc(body: &[u8], period_secs: u32) -> Result<Vec<BackfillBar>, Fet
         .values()
         // json-at-boundary: the venue's own candle rows, read out of the RawValue held above
         .find_map(|v| serde_json::from_str::<Vec<Ohlc>>(v.get()).ok())
-        .ok_or_else(|| FetchError::Integrity("kraken ohlc: no candle array in the result".into()))?;
+        .ok_or_else(|| {
+            FetchError::Integrity("kraken ohlc: no candle array in the result".into())
+        })?;
 
     let mut out = Vec::with_capacity(rows.len());
     for r in rows {
         let open_s: i64 = raw_number(r.0)?
             .parse()
             .map_err(|_| FetchError::Integrity("kraken ohlc time is not an integer".into()))?;
-        let open_time = Utc
-            .timestamp_opt(open_s, 0)
-            .single()
-            .ok_or_else(|| FetchError::Integrity(format!("kraken ohlc time {open_s} is not a valid instant")))?;
+        let open_time = Utc.timestamp_opt(open_s, 0).single().ok_or_else(|| {
+            FetchError::Integrity(format!("kraken ohlc time {open_s} is not a valid instant"))
+        })?;
         out.push(BackfillBar {
             close_time: open_time + chrono::Duration::seconds(i64::from(period_secs)),
             open: raw_number(r.1)?,
@@ -167,7 +179,10 @@ pub struct KrakenOhlcBackfill {
 impl KrakenOhlcBackfill {
     #[must_use]
     pub fn new(http: Arc<dyn HttpGet>) -> Self {
-        Self { http, limiter: Limited::new(declared_rate_limit()) }
+        Self {
+            http,
+            limiter: Limited::new(declared_rate_limit()),
+        }
     }
 
     #[must_use]
@@ -190,7 +205,8 @@ impl BackfillSource for KrakenOhlcBackfill {
         let interval = interval_minutes(req.period_secs)?;
         let period = i64::from(req.period_secs);
         let span = Self::page_span_secs(req.period_secs);
-        let page_end: DateTime<Utc> = std::cmp::min(req.end, req.start + chrono::Duration::seconds(span));
+        let page_end: DateTime<Utc> =
+            std::cmp::min(req.end, req.start + chrono::Duration::seconds(span));
         if page_end <= req.start {
             return Ok(BackfillPage::end_of_window());
         }
@@ -199,10 +215,20 @@ impl BackfillSource for KrakenOhlcBackfill {
         let since = req.start.timestamp() - period - period;
 
         self.limiter.permit().await;
-        let body = self.http.get(&ohlc_url(&req.symbol, interval, since)).await?.ok_body(VENUE)?;
+        let body = self
+            .http
+            .get(&ohlc_url(&req.symbol, interval, since))
+            .await?
+            .ok_body(VENUE)?;
         let all = parse_ohlc(&body, req.period_secs)?;
-        let bars: Vec<_> = all.into_iter().filter(|b| b.close_time >= req.start && b.close_time < page_end).collect();
-        Ok(BackfillPage { bars, covered_to: Some(page_end) })
+        let bars: Vec<_> = all
+            .into_iter()
+            .filter(|b| b.close_time >= req.start && b.close_time < page_end)
+            .collect();
+        Ok(BackfillPage {
+            bars,
+            covered_to: Some(page_end),
+        })
     }
 }
 
@@ -215,7 +241,8 @@ impl BackfillSource for KrakenOhlcBackfill {
 /// A malformed row. The whole file is refused rather than the row skipped: a
 /// partially parsed archive is a gap that looks like history.
 pub fn parse_archive_csv(bytes: &[u8], period_secs: u32) -> Result<Vec<BackfillBar>, FetchError> {
-    let text = std::str::from_utf8(bytes).map_err(|e| FetchError::Integrity(format!("archive is not UTF-8: {e}")))?;
+    let text = std::str::from_utf8(bytes)
+        .map_err(|e| FetchError::Integrity(format!("archive is not UTF-8: {e}")))?;
     let mut out = Vec::new();
     for (n, line) in text.lines().enumerate() {
         let line = line.trim();
@@ -224,19 +251,36 @@ pub fn parse_archive_csv(bytes: &[u8], period_secs: u32) -> Result<Vec<BackfillB
         }
         let f: Vec<&str> = line.split(',').map(str::trim).collect();
         if f.len() < 6 {
-            return Err(FetchError::Integrity(format!("archive line {}: expected 6-7 fields, got {}", n + 1, f.len())));
+            return Err(FetchError::Integrity(format!(
+                "archive line {}: expected 6-7 fields, got {}",
+                n + 1,
+                f.len()
+            )));
         }
-        let open_s: i64 = f[0]
-            .parse()
-            .map_err(|_| FetchError::Integrity(format!("archive line {}: {:?} is not a timestamp", n + 1, f[0])))?;
-        let open_time = Utc
-            .timestamp_opt(open_s, 0)
-            .single()
-            .ok_or_else(|| FetchError::Integrity(format!("archive line {}: {open_s} is not a valid instant", n + 1)))?;
+        let open_s: i64 = f[0].parse().map_err(|_| {
+            FetchError::Integrity(format!(
+                "archive line {}: {:?} is not a timestamp",
+                n + 1,
+                f[0]
+            ))
+        })?;
+        let open_time = Utc.timestamp_opt(open_s, 0).single().ok_or_else(|| {
+            FetchError::Integrity(format!(
+                "archive line {}: {open_s} is not a valid instant",
+                n + 1
+            ))
+        })?;
         let num = |i: usize| -> Result<String, FetchError> {
             let s = f[i];
-            if s.is_empty() || !s.chars().all(|c| c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | 'e' | 'E')) {
-                return Err(FetchError::Integrity(format!("archive line {}: {s:?} is not a number", n + 1)));
+            if s.is_empty()
+                || !s
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | 'e' | 'E'))
+            {
+                return Err(FetchError::Integrity(format!(
+                    "archive line {}: {s:?} is not a number",
+                    n + 1
+                )));
             }
             Ok(s.to_string())
         };
@@ -306,7 +350,10 @@ pub struct KrakenArchiveBackfill {
 impl KrakenArchiveBackfill {
     #[must_use]
     pub fn new(dir: impl AsRef<Path>, checksums: BTreeMap<String, String>) -> Self {
-        Self { dir: dir.as_ref().to_path_buf(), checksums }
+        Self {
+            dir: dir.as_ref().to_path_buf(),
+            checksums,
+        }
     }
 
     /// Kraken's naming: `XBTUSD_1.csv` — pair alt-name, then interval minutes.
@@ -324,7 +371,10 @@ impl KrakenArchiveBackfill {
                 "no declared checksum for archive {name}; place the file and record its sha256 before backfilling from it"
             ))
         })?;
-        Ok(ArchiveFile { path: self.dir.join(&name), sha256: sha.clone() })
+        Ok(ArchiveFile {
+            path: self.dir.join(&name),
+            sha256: sha.clone(),
+        })
     }
 }
 
@@ -337,7 +387,11 @@ impl BackfillSource for KrakenArchiveBackfill {
     fn declared_limit(&self) -> RateLimit {
         // A local file has no venue to protect, but the contract asks for a
         // number rather than an exception, so the limit is generous and honest.
-        RateLimit { per_window: 1_000, window_ms: 1_000, burst: 1_000 }
+        RateLimit {
+            per_window: 1_000,
+            window_ms: 1_000,
+            burst: 1_000,
+        }
     }
 
     async fn fetch_page(&self, req: &PageRequest) -> Result<BackfillPage, FetchError> {
@@ -345,9 +399,15 @@ impl BackfillSource for KrakenArchiveBackfill {
         let file = self.file_for(&req.symbol, interval)?;
         let bytes = read_verified(&file)?;
         let all = parse_archive_csv(&bytes, req.period_secs)?;
-        let bars: Vec<_> = all.into_iter().filter(|b| b.close_time >= req.start && b.close_time < req.end).collect();
+        let bars: Vec<_> = all
+            .into_iter()
+            .filter(|b| b.close_time >= req.start && b.close_time < req.end)
+            .collect();
         // One file covers the whole window it can cover.
-        Ok(BackfillPage { bars, covered_to: Some(req.end) })
+        Ok(BackfillPage {
+            bars,
+            covered_to: Some(req.end),
+        })
     }
 }
 
@@ -369,8 +429,14 @@ mod tests {
         let csv = b"1700000000,73850.0,73899.9,73800.0,73861.99,2.00000000,7\n\
                     1700000060,73950.0,73999.9,73900.0,73961.99,1.41080000,3\n";
         let from_archive = parse_archive_csv(csv, 60).unwrap();
-        assert_eq!(from_api, from_archive, "the two Kraken paths disagree on the same window");
-        assert_eq!(from_api[0].close_time, Utc.timestamp_opt(1_700_000_060, 0).unwrap());
+        assert_eq!(
+            from_api, from_archive,
+            "the two Kraken paths disagree on the same window"
+        );
+        assert_eq!(
+            from_api[0].close_time,
+            Utc.timestamp_opt(1_700_000_060, 0).unwrap()
+        );
         assert_eq!(from_api[1].trade_count, 3);
     }
 
@@ -385,12 +451,22 @@ mod tests {
         std::fs::write(&path, b"1700000000,1,1,1,1,1,1\n").unwrap();
 
         let good = sha256_hex(&std::fs::read(&path).unwrap());
-        assert!(read_verified(&ArchiveFile { path: path.clone(), sha256: good }).is_ok());
+        assert!(read_verified(&ArchiveFile {
+            path: path.clone(),
+            sha256: good
+        })
+        .is_ok());
 
-        let tampered = ArchiveFile { path: path.clone(), sha256: "0".repeat(64) };
+        let tampered = ArchiveFile {
+            path: path.clone(),
+            sha256: "0".repeat(64),
+        };
         let e = read_verified(&tampered).expect_err("a mismatched checksum must be refused");
         assert!(matches!(e, FetchError::Integrity(_)), "{e:?}");
-        assert!(e.is_pause(), "a bad archive waits for a human; it does not fail the window");
+        assert!(
+            e.is_pause(),
+            "a bad archive waits for a human; it does not fail the window"
+        );
         assert!(e.to_string().contains("Nothing was inserted"));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -398,7 +474,9 @@ mod tests {
     #[test]
     fn an_archive_with_no_declared_checksum_is_refused_rather_than_trusted() {
         let b = KrakenArchiveBackfill::new(".", BTreeMap::new());
-        let e = b.file_for("BTC-USD", 1).expect_err("an unverified archive must not be read");
+        let e = b
+            .file_for("BTC-USD", 1)
+            .expect_err("an unverified archive must not be read");
         assert!(e.to_string().contains("no declared checksum"), "{e}");
     }
 
@@ -415,34 +493,51 @@ mod tests {
             br#"{"error":["EAPI:Rate limit exceeded"],"result":{}}"#.as_slice(),
             br#"{"error":["EGeneral:Too many requests"],"result":{}}"#.as_slice(),
         ] {
-            assert!(matches!(parse_ohlc(body, 60), Err(FetchError::RateLimited { .. })));
+            assert!(matches!(
+                parse_ohlc(body, 60),
+                Err(FetchError::RateLimited { .. })
+            ));
         }
     }
 
     #[test]
     fn a_kraken_error_body_is_never_read_as_success() {
         let body = br#"{"error":["EQuery:Unknown asset pair"],"result":{}}"#;
-        assert!(matches!(parse_ohlc(body, 60), Err(FetchError::Integrity(_))));
+        assert!(matches!(
+            parse_ohlc(body, 60),
+            Err(FetchError::Integrity(_))
+        ));
     }
 
     #[test]
     fn a_short_archive_row_fails_the_file_rather_than_skipping_the_row() {
-        let e = parse_archive_csv(b"1700000000,1,1,1\n", 60).expect_err("a short row must fail the file");
+        let e = parse_archive_csv(b"1700000000,1,1,1\n", 60)
+            .expect_err("a short row must fail the file");
         assert!(matches!(e, FetchError::Integrity(_)), "{e:?}");
-        let e = parse_archive_csv(b"1700000000,1,1,1,x,1,1\n", 60).expect_err("a non-numeric price must fail the file");
+        let e = parse_archive_csv(b"1700000000,1,1,1,x,1,1\n", 60)
+            .expect_err("a non-numeric price must fail the file");
         assert!(matches!(e, FetchError::Integrity(_)), "{e:?}");
     }
 
     #[test]
     fn archive_file_names_follow_kraken_s_own_convention() {
-        assert_eq!(KrakenArchiveBackfill::file_name("XBT-USD", 1), "XBTUSD_1.csv");
-        assert_eq!(KrakenArchiveBackfill::file_name("ETH/USD", 60), "ETHUSD_60.csv");
+        assert_eq!(
+            KrakenArchiveBackfill::file_name("XBT-USD", 1),
+            "XBTUSD_1.csv"
+        );
+        assert_eq!(
+            KrakenArchiveBackfill::file_name("ETH/USD", 60),
+            "ETHUSD_60.csv"
+        );
     }
 
     #[test]
     fn an_interval_kraken_does_not_serve_is_refused() {
         assert_eq!(interval_minutes(3_600).unwrap(), 60);
-        assert!(interval_minutes(21_600).is_err(), "Kraken has no 6h interval");
+        assert!(
+            interval_minutes(21_600).is_err(),
+            "Kraken has no 6h interval"
+        );
     }
 
     #[test]

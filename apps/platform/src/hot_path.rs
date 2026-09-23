@@ -431,8 +431,7 @@ fn resync_instances(
 ) {
     use strategy_runtime::runtime::StrategyInstance;
 
-    let wanted: Vec<strategy_runtime::live::LiveKey> =
-        declared.iter().map(|s| s.key()).collect();
+    let wanted: Vec<strategy_runtime::live::LiveKey> = declared.iter().map(|s| s.key()).collect();
 
     let before = instances.len();
     instances.retain(|(key, _)| wanted.contains(key));
@@ -717,7 +716,9 @@ mod tests {
 
         // ema_7 > ema_21 — the cross fires.
         world_prod.push(feature(instrument, "ema_7", 11.0)).unwrap();
-        world_prod.push(feature(instrument, "ema_21", 10.0)).unwrap();
+        world_prod
+            .push(feature(instrument, "ema_21", 10.0))
+            .unwrap();
         world_prod.push(bar(instrument, "50000")).unwrap();
 
         // The observable result: a filled paper order on this instrument.
@@ -1136,7 +1137,9 @@ mod tests {
         ));
 
         world_prod.push(feature(instrument, "ema_7", 11.0)).unwrap();
-        world_prod.push(feature(instrument, "ema_21", 10.0)).unwrap();
+        world_prod
+            .push(feature(instrument, "ema_21", 10.0))
+            .unwrap();
 
         let intent = eventually("a percent-of-balance intent", || intent_cons.pop().ok()).await;
         assert!(
@@ -1342,7 +1345,9 @@ mod tests {
         // What "kept" actually means is that `ema_7` is still set. A rebuilt
         // instance starts with no features, so the cross below cannot fire on
         // one — `ema_21` alone is not a crossing.
-        instances[0].1.process_event(&feature(instrument, "ema_7", 11.0));
+        instances[0]
+            .1
+            .process_event(&feature(instrument, "ema_7", 11.0));
 
         resync_instances(instrument, &mut instances, &[a, b]);
         assert_eq!(instances.len(), 2, "the second strategy is added");

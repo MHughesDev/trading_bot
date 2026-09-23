@@ -385,8 +385,8 @@ mod tests {
     fn a_failing_battery_is_not_a_missing_one() {
         let mut tickets = all_but("selection_bias_verdict");
         tickets.push(ticket("selection_bias_verdict", "fails"));
-        let err = check(Checkpoint::Funnel(Gate::Robustness), &tickets)
-            .expect_err("the battery failed");
+        let err =
+            check(Checkpoint::Funnel(Gate::Robustness), &tickets).expect_err("the battery failed");
         let m = about(&err, "selection_bias_verdict");
         assert!(matches!(m, Missing::WrongVerdict { .. }));
         assert!(m.message().contains("answered `fails`"), "{m:?}");
@@ -477,8 +477,10 @@ mod tests {
         );
         // And nothing is declared twice for one checkpoint, which would make one
         // of the two silently redundant.
-        let mut pairs: Vec<(&str, Checkpoint)> =
-            REQUIREMENTS.iter().map(|r| (r.workflow, r.checkpoint)).collect();
+        let mut pairs: Vec<(&str, Checkpoint)> = REQUIREMENTS
+            .iter()
+            .map(|r| (r.workflow, r.checkpoint))
+            .collect();
         let before = pairs.len();
         pairs.sort_by_key(|(w, _)| *w);
         pairs.dedup();

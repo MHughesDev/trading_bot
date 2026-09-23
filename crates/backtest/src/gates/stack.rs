@@ -129,7 +129,10 @@ impl StackVerdict {
     /// [`ledger::capital::authorise`] reads.
     #[must_use]
     pub fn as_pairs(&self) -> Vec<(i32, bool)> {
-        self.outcomes.iter().map(|o| (o.gate_no, o.passed)).collect()
+        self.outcomes
+            .iter()
+            .map(|o| (o.gate_no, o.passed))
+            .collect()
     }
 
     /// The gates that could not be evaluated. Reported separately from the ones
@@ -155,11 +158,9 @@ pub fn evaluate_stack(
     // 1 — pre-registration. Structural: either the hypothesis was hash-locked
     // before the first backtest or it was not.
     outcomes.push(match (&evidence.prereg_hash, t.preregistration_required) {
-        (Some(h), _) => GateOutcome::structural_pass(
-            1,
-            "preregistration",
-            format!("hypothesis locked at {h}"),
-        ),
+        (Some(h), _) => {
+            GateOutcome::structural_pass(1, "preregistration", format!("hypothesis locked at {h}"))
+        }
         (None, true) => GateOutcome::inconclusive_pub(
             1,
             "preregistration",
@@ -205,28 +206,31 @@ pub fn evaluate_stack(
     ));
 
     // 6 — walk-forward, with the regime count Gate 11 measures.
-    outcomes.push(match (evidence.walk_forward_sharpe, evidence.walk_forward_regimes) {
-        (Some(sharpe), Some(regimes)) => {
-            let passed = sharpe > t.walk_forward_sharpe_gt && regimes >= t.walk_forward_min_regimes;
-            GateOutcome::decided_pub(
+    outcomes.push(
+        match (evidence.walk_forward_sharpe, evidence.walk_forward_regimes) {
+            (Some(sharpe), Some(regimes)) => {
+                let passed =
+                    sharpe > t.walk_forward_sharpe_gt && regimes >= t.walk_forward_min_regimes;
+                GateOutcome::decided_pub(
+                    6,
+                    "walk_forward",
+                    passed,
+                    sharpe,
+                    t.walk_forward_sharpe_gt,
+                    format!(
+                        "strictly-causal walk-forward Sharpe {sharpe:.2} over {regimes} regimes \
+                     (needs > {:.2} over ≥ {})",
+                        t.walk_forward_sharpe_gt, t.walk_forward_min_regimes
+                    ),
+                )
+            }
+            _ => GateOutcome::inconclusive_pub(
                 6,
                 "walk_forward",
-                passed,
-                sharpe,
-                t.walk_forward_sharpe_gt,
-                format!(
-                    "strictly-causal walk-forward Sharpe {sharpe:.2} over {regimes} regimes \
-                     (needs > {:.2} over ≥ {})",
-                    t.walk_forward_sharpe_gt, t.walk_forward_min_regimes
-                ),
-            )
-        }
-        _ => GateOutcome::inconclusive_pub(
-            6,
-            "walk_forward",
-            "no walk-forward result, or no regime count for it",
-        ),
-    });
+                "no walk-forward result, or no regime count for it",
+            ),
+        },
+    );
 
     // 7 — probability of backtest overfitting.
     outcomes.push(threshold_gate(
@@ -321,10 +325,17 @@ pub fn evaluate_stack(
     let so_far: Vec<(i32, bool)> = outcomes.iter().map(|o| (o.gate_no, o.passed)).collect();
     let mut with_16 = so_far.clone();
     with_16.push((16, true)); // 16 gates itself only on the other fifteen
-    outcomes.push(gate_16_capital_ramp(profile, evidence.capital_fraction, &with_16));
+    outcomes.push(gate_16_capital_ramp(
+        profile,
+        evidence.capital_fraction,
+        &with_16,
+    ));
 
     let blocked_at = outcomes.iter().find(|o| !o.passed).map(|o| o.gate_no);
-    StackVerdict { outcomes, blocked_at }
+    StackVerdict {
+        outcomes,
+        blocked_at,
+    }
 }
 
 /// Record every verdict, including the inconclusive ones.
@@ -480,7 +491,11 @@ mod tests {
     #[test]
     fn the_stack_is_always_sixteen_gates_long() {
         let checks = ["causal_access"];
-        let verdict = evaluate_stack(&GateProfile::strict_v1(), &empty_evidence(&checks), Utc::now());
+        let verdict = evaluate_stack(
+            &GateProfile::strict_v1(),
+            &empty_evidence(&checks),
+            Utc::now(),
+        );
         assert_eq!(verdict.outcomes.len(), GATE_COUNT);
         let numbers: Vec<i32> = verdict.outcomes.iter().map(|o| o.gate_no).collect();
         assert_eq!(numbers, (1..=16).collect::<Vec<_>>(), "in §12.3's order");
@@ -491,15 +506,27 @@ mod tests {
     #[test]
     fn no_evidence_passes_no_gate() {
         let checks = ["causal_access"];
-        let verdict = evaluate_stack(&GateProfile::strict_v1(), &empty_evidence(&checks), Utc::now());
+        let verdict = evaluate_stack(
+            &GateProfile::strict_v1(),
+            &empty_evidence(&checks),
+            Utc::now(),
+        );
         for o in &verdict.outcomes {
-            assert!(!o.passed, "gate {} passed on no evidence: {}", o.gate_no, o.detail);
+            assert!(
+                !o.passed,
+                "gate {} passed on no evidence: {}",
+                o.gate_no, o.detail
+            );
         }
         assert_eq!(verdict.blocked_at, Some(1));
         assert!(!verdict.passed());
         // And most of them say *why* they could not run, rather than reading as
         // a judgement about the candidate.
-        assert!(verdict.inconclusive().len() >= 10, "{:?}", verdict.inconclusive().len());
+        assert!(
+            verdict.inconclusive().len() >= 10,
+            "{:?}",
+            verdict.inconclusive().len()
+        );
     }
 
     /// Every verdict reaches the ledger, including the inconclusive ones, and
@@ -533,11 +560,19 @@ mod tests {
     #[test]
     fn gate_16_does_not_move_capital_on_a_failed_stack() {
         let checks = ["causal_access"];
-        let verdict = evaluate_stack(&GateProfile::strict_v1(), &empty_evidence(&checks), Utc::now());
+        let verdict = evaluate_stack(
+            &GateProfile::strict_v1(),
+            &empty_evidence(&checks),
+            Utc::now(),
+        );
         let sixteen = verdict.outcomes.last().expect("sixteen");
         assert_eq!(sixteen.gate_no, 16);
         assert!(!sixteen.passed);
-        assert!((sixteen.statistic.unwrap() - 0.0).abs() < f64::EPSILON, "{}", sixteen.detail);
+        assert!(
+            (sixteen.statistic.unwrap() - 0.0).abs() < f64::EPSILON,
+            "{}",
+            sixteen.detail
+        );
     }
 
     #[test]
@@ -546,13 +581,21 @@ mod tests {
         let mut evidence = empty_evidence(&checks);
         evidence.pbo = Some(0.05);
         let verdict = evaluate_stack(&GateProfile::strict_v1(), &evidence, Utc::now());
-        let seven = verdict.outcomes.iter().find(|o| o.gate_no == 7).expect("gate 7");
+        let seven = verdict
+            .outcomes
+            .iter()
+            .find(|o| o.gate_no == 7)
+            .expect("gate 7");
         assert!(seven.passed, "{}", seven.detail);
         assert!(!seven.inconclusive);
 
         evidence.pbo = Some(0.9);
         let failed = evaluate_stack(&GateProfile::strict_v1(), &evidence, Utc::now());
-        let seven = failed.outcomes.iter().find(|o| o.gate_no == 7).expect("gate 7");
+        let seven = failed
+            .outcomes
+            .iter()
+            .find(|o| o.gate_no == 7)
+            .expect("gate 7");
         assert!(!seven.passed && !seven.inconclusive, "{}", seven.detail);
     }
 
@@ -577,7 +620,11 @@ mod tests {
         let mut evidence = empty_evidence(&checks);
         evidence.leakage_run = Some(&old);
         let verdict = evaluate_stack(&GateProfile::strict_v1(), &evidence, Utc::now());
-        let two = verdict.outcomes.iter().find(|o| o.gate_no == 2).expect("gate 2");
+        let two = verdict
+            .outcomes
+            .iter()
+            .find(|o| o.gate_no == 2)
+            .expect("gate 2");
         assert!(two.inconclusive && !two.passed, "{}", two.detail);
     }
 }

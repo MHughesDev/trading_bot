@@ -133,8 +133,7 @@ pub async fn list_profiles(State(state): State<AppState>, token: BearerToken) ->
             let inv = inventory.get(&p.provider);
             // `None` at any level means "not asked" or "could not ask", and stays
             // null the whole way to the UI.
-            let installed =
-                inv.and_then(|i| i.installed.as_ref().map(|m| m.contains(&p.model_id)));
+            let installed = inv.and_then(|i| i.installed.as_ref().map(|m| m.contains(&p.model_id)));
             let resident = inv.and_then(|i| i.resident.as_ref().map(|m| m.contains(&p.model_id)));
             json!({
                 "model_id": p.model_id,
@@ -794,16 +793,29 @@ pub async fn record_trajectory_step(
     Json(step): Json<ledger::trajectory::TrajectoryStep>,
 ) -> Response {
     let ledger = ledger::pg::PgTrialLedger::new(state.pg.clone());
-    match ledger.record_trajectory_step_async(&token.user_id().to_string(), &step).await {
+    match ledger
+        .record_trajectory_step_async(&token.user_id().to_string(), &step)
+        .await
+    {
         Ok(()) => (StatusCode::CREATED, Json(json!({ "recorded": true }))).into_response(),
-        Err(ledger::LedgerError::Backend(e)) if e.contains("duplicate key") => {
-            (StatusCode::CONFLICT, Json(json!({ "error": "step_already_recorded" }))).into_response()
-        }
+        Err(ledger::LedgerError::Backend(e)) if e.contains("duplicate key") => (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "step_already_recorded" })),
+        )
+            .into_response(),
         Err(ledger::LedgerError::Backend(e)) => {
             tracing::warn!(error = %e, "trajectory step insert failed");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "ledger_unavailable" }))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "ledger_unavailable" })),
+            )
+                .into_response()
         }
-        Err(e) => (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": "invalid_step", "message": e.to_string() }))).into_response(),
+        Err(e) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "invalid_step", "message": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 

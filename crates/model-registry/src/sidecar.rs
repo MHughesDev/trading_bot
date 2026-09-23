@@ -278,7 +278,6 @@ impl PostHocResult {
     }
 }
 
-
 impl SidecarClient {
     pub fn from_env() -> Self {
         let trainer_url = std::env::var("MODEL_TRAINER_URL")

@@ -121,7 +121,11 @@ fn drive(inst: &mut StrategyInstance, events: &[WorldEvent]) -> Vec<Vec<domain::
         .iter()
         .map(|e| {
             let out = inst.process_event(e);
-            assert!(out.errors.is_empty(), "unexpected sizing error: {:?}", out.errors);
+            assert!(
+                out.errors.is_empty(),
+                "unexpected sizing error: {:?}",
+                out.errors
+            );
             out.intents
         })
         .collect()
@@ -145,7 +149,9 @@ fn exit_on(per_event: &[Vec<domain::OrderIntent>]) -> Option<usize> {
 /// an order that lost 2%.
 #[test]
 fn a_declared_stop_loss_fires_live_on_the_breaching_bar() {
-    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }])));
+    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss {
+        distance: ExitDistance::of_entry(dec!(0.02)),
+    }])));
 
     let per_event = drive(
         &mut inst,
@@ -191,7 +197,9 @@ fn a_declared_stop_loss_fires_live_on_the_breaching_bar() {
 /// nobody earned.
 #[test]
 fn a_declared_take_profit_fires_live_at_its_level() {
-    let mut inst = instance(long_with_exits(rules(vec![ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) }])));
+    let mut inst = instance(long_with_exits(rules(vec![ExitRule::TakeProfit {
+        distance: ExitDistance::of_entry(dec!(0.05)),
+    }])));
 
     let per_event = drive(
         &mut inst,
@@ -239,7 +247,11 @@ fn a_declared_time_exit_fires_live_on_the_declared_bar() {
     );
 
     assert!(per_event[1].is_empty(), "one bar held is not two");
-    assert_eq!(exit_on(&per_event), Some(2), "two bars held closes on bar 2");
+    assert_eq!(
+        exit_on(&per_event),
+        Some(2),
+        "two bars held closes on bar 2"
+    );
     assert!(
         per_event[3].is_empty(),
         "the position is already flat; nothing may be sent again"
@@ -258,18 +270,28 @@ fn a_declared_time_exit_fires_live_on_the_declared_bar() {
 #[test]
 fn a_bar_that_breached_both_books_the_stop_live_and_never_the_target() {
     let mut inst = instance(long_with_exits(rules(vec![
-        ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) },
-        ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) },
+        ExitRule::TakeProfit {
+            distance: ExitDistance::of_entry(dec!(0.05)),
+        },
+        ExitRule::StopLoss {
+            distance: ExitDistance::of_entry(dec!(0.02)),
+        },
     ])));
 
     let per_event = drive(
         &mut inst,
-        &[flat_bar(0, dec!(100)), bar_event(1, dec!(106), dec!(97), dec!(104))],
+        &[
+            flat_bar(0, dec!(100)),
+            bar_event(1, dec!(106), dec!(97), dec!(104)),
+        ],
     );
 
     assert_eq!(exit_on(&per_event), Some(1));
     let fired = inst.last_declared_exit().expect("an exit was recorded");
-    assert_eq!(fired.rule, "stop_loss", "the adverse extreme is probed first");
+    assert_eq!(
+        fired.rule, "stop_loss",
+        "the adverse extreme is probed first"
+    );
     assert_eq!(fired.price, dec!(98));
 }
 
@@ -278,7 +300,9 @@ fn a_bar_that_breached_both_books_the_stop_live_and_never_the_target() {
 /// close, however tempting the low looks.
 #[test]
 fn the_entry_bar_cannot_stop_out_a_position_opened_at_its_close() {
-    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }])));
+    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss {
+        distance: ExitDistance::of_entry(dec!(0.02)),
+    }])));
 
     let per_event = drive(
         &mut inst,
@@ -323,7 +347,12 @@ fn live_and_replay_fire_the_time_exit_on_the_same_bar() {
             .enumerate()
             .skip(1)
             .find_map(|(n, (h, l, c))| {
-                let probe = ExitBar { ts: ts(n as i64), high: *h, low: *l, close: *c };
+                let probe = ExitBar {
+                    ts: ts(n as i64),
+                    high: *h,
+                    low: *l,
+                    close: *c,
+                };
                 replay.on_bar(&probe, &[]).map(|_| n)
             })
             .expect("replay must fire");
@@ -404,7 +433,9 @@ fn a_tick_feed_counts_the_same_bars_as_a_bar_feed() {
 /// close is not the bound the strategy declared.
 #[test]
 fn a_live_stop_fires_on_the_tick_that_breaches_it() {
-    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }])));
+    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss {
+        distance: ExitDistance::of_entry(dec!(0.02)),
+    }])));
 
     let mut events = vec![tick_event(0, 0, dec!(100))];
     // Minute 1: drifts down, breaches 98 at the sixth tick, recovers.
@@ -473,7 +504,9 @@ fn risk_layer_only_closes_nothing_live() {
 /// stop then "closes" — which would send a sell for something not held.
 #[test]
 fn a_position_the_venue_reports_flat_releases_the_tracker() {
-    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }])));
+    let mut inst = instance(long_with_exits(rules(vec![ExitRule::StopLoss {
+        distance: ExitDistance::of_entry(dec!(0.02)),
+    }])));
 
     inst.process_event(&flat_bar(0, dec!(100)));
     assert_eq!(inst.exit_bars_held(), Some(0), "the entry was assumed");
@@ -499,7 +532,9 @@ fn a_position_the_venue_reports_flat_releases_the_tracker() {
 /// bar 2's retrace to 105 breaches it.
 #[test]
 fn a_trailing_stop_ratchets_live_across_bars() {
-    let mut inst = instance(long_with_exits(rules(vec![ExitRule::TrailingStop { distance: ExitDistance::of_entry(dec!(0.03)) }])));
+    let mut inst = instance(long_with_exits(rules(vec![ExitRule::TrailingStop {
+        distance: ExitDistance::of_entry(dec!(0.03)),
+    }])));
 
     let per_event = drive(
         &mut inst,
@@ -510,7 +545,10 @@ fn a_trailing_stop_ratchets_live_across_bars() {
         ],
     );
 
-    assert!(per_event[1].is_empty(), "108.5 is inside a 3% band from 110");
+    assert!(
+        per_event[1].is_empty(),
+        "108.5 is inside a 3% band from 110"
+    );
     assert_eq!(exit_on(&per_event), Some(2));
     let fired = inst.last_declared_exit().expect("an exit was recorded");
     assert_eq!(fired.rule, "trailing_stop");
@@ -566,8 +604,12 @@ fn the_exit_timestamp_comes_from_the_event_not_the_wall_clock() {
 fn live_and_replay_agree_bar_for_bar_on_a_mixed_policy() {
     let policy = || {
         vec![
-            ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.03)) },
-            ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.04)) },
+            ExitRule::StopLoss {
+                distance: ExitDistance::of_entry(dec!(0.03)),
+            },
+            ExitRule::TakeProfit {
+                distance: ExitDistance::of_entry(dec!(0.04)),
+            },
             ExitRule::MaxHoldingBars { bars: 5 },
         ]
     };
@@ -584,7 +626,12 @@ fn live_and_replay_agree_bar_for_bar_on_a_mixed_policy() {
     let mut replay = ExitTracker::new(ExitPolicy::Rules { rules: policy() });
     replay.opened_at_bar_close(PositionSide::Long, dec!(100));
     let replay_fired = walk.iter().enumerate().skip(1).find_map(|(n, (h, l, c))| {
-        let probe = ExitBar { ts: ts(n as i64), high: *h, low: *l, close: *c };
+        let probe = ExitBar {
+            ts: ts(n as i64),
+            high: *h,
+            low: *l,
+            close: *c,
+        };
         replay.on_bar(&probe, &[]).map(|t| (n, t))
     });
 

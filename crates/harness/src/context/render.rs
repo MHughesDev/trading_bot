@@ -238,19 +238,17 @@ fn render_at(store: &RunStore, sel: &Selection, level: Furniture) -> Rendered {
 
         let key = shape_key(&item.body, record);
         let body_text = match (&item.body, last_table.get(&key)) {
-            (Body::Table { .. }, Some((base, prev))) => {
-                match delta(prev, &item.body) {
-                    Some(Change::Identical) => {
-                        savings.push(format!("{} is identical to {base}", item.id));
-                        format!("identical to {base}")
-                    }
-                    Some(Change::Delta(d)) => {
-                        savings.push(format!("{} rendered as a delta on {base}", item.id));
-                        format!("as {base}, except {d}")
-                    }
-                    None => render_with_schema(&item.body, &mut schema_stated, key.clone(), item.id),
+            (Body::Table { .. }, Some((base, prev))) => match delta(prev, &item.body) {
+                Some(Change::Identical) => {
+                    savings.push(format!("{} is identical to {base}", item.id));
+                    format!("identical to {base}")
                 }
-            }
+                Some(Change::Delta(d)) => {
+                    savings.push(format!("{} rendered as a delta on {base}", item.id));
+                    format!("as {base}, except {d}")
+                }
+                None => render_with_schema(&item.body, &mut schema_stated, key.clone(), item.id),
+            },
             _ => render_with_schema(&item.body, &mut schema_stated, key.clone(), item.id),
         };
         if matches!(item.body, Body::Table { .. }) {
@@ -343,7 +341,12 @@ fn render_with_schema(
     key: String,
     id: RecordId,
 ) -> String {
-    let Body::Table { schema, rows, total_rows } = body else {
+    let Body::Table {
+        schema,
+        rows,
+        total_rows,
+    } = body
+    else {
         return body.render();
     };
     if key.is_empty() {
@@ -387,8 +390,18 @@ enum Change {
 }
 
 fn delta(base: &Body, now: &Body) -> Option<Change> {
-    let (Body::Table { schema: s0, rows: r0, .. }, Body::Table { schema: s1, rows: r1, .. }) =
-        (base, now)
+    let (
+        Body::Table {
+            schema: s0,
+            rows: r0,
+            ..
+        },
+        Body::Table {
+            schema: s1,
+            rows: r1,
+            ..
+        },
+    ) = (base, now)
     else {
         return None;
     };
@@ -520,8 +533,13 @@ mod tests {
     fn no_rendered_table_is_json() {
         let mut s = RunStore::new();
         s.insert(
-            Draft::new(1, RecordKind::ToolResult, "get_bars", bars_table(&[("t1", "100")]))
-                .with_subject(Subject::instrument("BTC-USD")),
+            Draft::new(
+                1,
+                RecordKind::ToolResult,
+                "get_bars",
+                bars_table(&[("t1", "100")]),
+            )
+            .with_subject(Subject::instrument("BTC-USD")),
         );
         let r = render_all(&s);
         assert!(r.text.contains("ts | close"), "{}", r.text);
@@ -611,9 +629,14 @@ mod tests {
     fn a_number_is_not_printed_past_its_error_bar() {
         let mut s = RunStore::new();
         s.insert(
-            Draft::new(1, RecordKind::Finding, "record_finding", Body::text("mean return"))
-                .with_subject(Subject::instrument("BTC-USD"))
-                .measuring(Measurement::new("mean_return", 0.023_487_162_9).with_se(0.004)),
+            Draft::new(
+                1,
+                RecordKind::Finding,
+                "record_finding",
+                Body::text("mean return"),
+            )
+            .with_subject(Subject::instrument("BTC-USD"))
+            .measuring(Measurement::new("mean_return", 0.023_487_162_9).with_se(0.004)),
         );
         let r = render_all(&s);
         assert!(
@@ -661,8 +684,13 @@ mod tests {
         // Many tiny records: furniture grows with count, content does not.
         for i in 0..40u32 {
             s.insert(
-                Draft::new(i, RecordKind::ToolResult, "a_tool_with_a_long_name", Body::text("1"))
-                    .with_subject(Subject::instrument(format!("SYM-{i}"))),
+                Draft::new(
+                    i,
+                    RecordKind::ToolResult,
+                    "a_tool_with_a_long_name",
+                    Body::text("1"),
+                )
+                .with_subject(Subject::instrument(format!("SYM-{i}"))),
             );
         }
         let p = ContextPolicy::v2();

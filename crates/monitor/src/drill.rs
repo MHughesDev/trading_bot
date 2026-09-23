@@ -80,11 +80,15 @@ pub struct DrillOutcome {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DrillRefusal {
     /// The scope was not a `drill:` scope, so the rehearsal would have been real.
-    NotADrillScope { scope: String },
+    NotADrillScope {
+        scope: String,
+    },
     /// The rehearsal refused a real order. That is an incident, not a drill, and
     /// recording it as a drill would file a production outage under "training".
     RefusedRealFlow,
-    AgentOperator { operator: String },
+    AgentOperator {
+        operator: String,
+    },
 }
 
 impl std::fmt::Display for DrillRefusal {
@@ -93,9 +97,9 @@ impl std::fmt::Display for DrillRefusal {
             Self::NotADrillScope { scope } => {
                 write!(f, "a drill must run against a drill: scope, not {scope}")
             }
-            Self::RefusedRealFlow => {
-                f.write_str("this rehearsal refused real order flow: it is an incident, not a drill")
-            }
+            Self::RefusedRealFlow => f.write_str(
+                "this rehearsal refused real order flow: it is an incident, not a drill",
+            ),
             Self::AgentOperator { operator } => write!(f, "{operator} may not run a drill"),
         }
     }
@@ -221,7 +225,11 @@ mod tests {
     fn a_rehearsal_against_a_real_scope_is_refused() {
         // The adversarial one. A "drill" against `global` would halt the book, and
         // the whole point of the mechanism is that it cannot.
-        for scope in [Scope::Global, Scope::venue("kraken"), Scope::strategy("s-1")] {
+        for scope in [
+            Scope::Global,
+            Scope::venue("kraken"),
+            Scope::strategy("s-1"),
+        ] {
             let err = DrillOutcome::record(
                 scope.clone(),
                 DrillTrigger::Manual,
@@ -234,7 +242,10 @@ mod tests {
                 "human:mason",
             )
             .expect_err("a real scope must be refused");
-            assert!(matches!(err, DrillRefusal::NotADrillScope { .. }), "{scope}");
+            assert!(
+                matches!(err, DrillRefusal::NotADrillScope { .. }),
+                "{scope}"
+            );
         }
     }
 

@@ -239,8 +239,14 @@ mod tests {
     /// committed to, which still hashes and still stamps every ticket.
     #[test]
     fn the_claim_is_never_filled() {
-        let s = for_run(&confirming(), &constraints(), Some("costs_v3"), "crypto_v2", Some(32))
-            .expect("a confirming tier gets one");
+        let s = for_run(
+            &confirming(),
+            &constraints(),
+            Some("costs_v3"),
+            "crypto_v2",
+            Some(32),
+        )
+        .expect("a confirming tier gets one");
         for field in NEVER_FILLED {
             assert!(
                 !s.filled.contains_key(*field),
@@ -260,8 +266,14 @@ mod tests {
     /// like something the platform computed.
     #[test]
     fn delta_practical_has_no_default_here_either() {
-        let s = for_run(&confirming(), &constraints(), Some("costs_v3"), "crypto_v2", Some(32))
-            .expect("a skeleton");
+        let s = for_run(
+            &confirming(),
+            &constraints(),
+            Some("costs_v3"),
+            "crypto_v2",
+            Some(32),
+        )
+        .expect("a skeleton");
         assert!(!s.filled.contains_key("delta_practical"));
         assert!(s.missing.contains(&"delta_practical"));
     }
@@ -269,16 +281,22 @@ mod tests {
     /// What the question fixed is transcribed; what it did not is left out.
     #[test]
     fn an_absent_constraint_is_absent_from_the_skeleton() {
-        let s = for_run(&confirming(), &constraints(), Some("costs_v3"), "crypto_v2", Some(32))
-            .expect("a skeleton");
+        let s = for_run(
+            &confirming(),
+            &constraints(),
+            Some("costs_v3"),
+            "crypto_v2",
+            Some(32),
+        )
+        .expect("a skeleton");
         assert_eq!(s.filled["window"]["start"], "2020-01-01");
         assert_eq!(s.filled["objective"]["instrument_id"], "BTC-USD");
         assert_eq!(s.filled["gate_profile"], "crypto_v2");
         assert_eq!(s.filled["trial_budget"], 32);
         // And when the caller has no budget to give, the hole is named rather
         // than filled.
-        let no_budget = for_run(&confirming(), &constraints(), None, "crypto_v2", None)
-            .expect("a skeleton");
+        let no_budget =
+            for_run(&confirming(), &constraints(), None, "crypto_v2", None).expect("a skeleton");
         assert!(!no_budget.filled.contains_key("trial_budget"));
         assert!(no_budget.missing.contains(&"trial_budget"));
         assert!(no_budget.missing.contains(&"cost_model_version"));
@@ -289,8 +307,14 @@ mod tests {
 
         // A run with no window pinned gets no window: inventing one would
         // pre-register over a period nobody chose.
-        let bare = for_run(&confirming(), &json!({}), Some("costs_v3"), "crypto_v2", Some(32))
-            .expect("a skeleton");
+        let bare = for_run(
+            &confirming(),
+            &json!({}),
+            Some("costs_v3"),
+            "crypto_v2",
+            Some(32),
+        )
+        .expect("a skeleton");
         assert!(!bare.filled.contains_key("window"));
         assert!(!bare.filled.contains_key("objective"));
         // What the platform owns is still filled, because it is the platform's
@@ -336,8 +360,14 @@ mod tests {
             "falsifier",
             "supersedes",
         ];
-        let s = for_run(&confirming(), &constraints(), Some("costs_v3"), "crypto_v2", Some(32))
-            .expect("a skeleton");
+        let s = for_run(
+            &confirming(),
+            &constraints(),
+            Some("costs_v3"),
+            "crypto_v2",
+            Some(32),
+        )
+        .expect("a skeleton");
         for key in s.filled.keys() {
             assert!(
                 ACCEPTED.contains(&key.as_str()),

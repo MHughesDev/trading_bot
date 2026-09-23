@@ -48,7 +48,12 @@ async fn a_skill_runs_and_returns_its_result() {
     );
 
     let done = run(&s, &json!({"values": [1.0, 2.0, 3.0, 4.0]}), &config()).await;
-    assert_eq!(done.record.outcome, Outcome::Ok, "{:?}", done.record.outcome);
+    assert_eq!(
+        done.record.outcome,
+        Outcome::Ok,
+        "{:?}",
+        done.record.outcome
+    );
     let result = done.result.expect("a result");
     assert!((result["mean"].as_f64().unwrap() - 2.5).abs() < 1e-9);
     assert_eq!(result["n"], 4);
@@ -148,7 +153,10 @@ async fn a_skill_that_never_returns_is_killed_by_the_parent() {
         "{:?}",
         done.record.outcome
     );
-    assert!(started.elapsed().as_secs() < 10, "the kill must not wait for the CPU limit");
+    assert!(
+        started.elapsed().as_secs() < 10,
+        "the kill must not wait for the CPU limit"
+    );
 }
 
 // ── failures are results, not errors ─────────────────────────────────────────

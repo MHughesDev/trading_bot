@@ -712,10 +712,7 @@ mod tests {
         let mut ctx = simple_ctx();
         ctx.daily_loss_usd = Measured::Yes(Decimal::from(1500));
         let err = gate.check(simple_intent("BTC-USD"), &ctx).unwrap_err();
-        assert!(matches!(
-            err,
-            RiskRejection::DailyLossLimitExceeded { .. }
-        ));
+        assert!(matches!(err, RiskRejection::DailyLossLimitExceeded { .. }));
     }
 
     #[test]
@@ -786,14 +783,18 @@ mod tests {
         let gate = gate();
         gate.poison_for_test();
 
-        let err = gate.check(simple_intent("BTC-USD"), &simple_ctx()).unwrap_err();
+        let err = gate
+            .check(simple_intent("BTC-USD"), &simple_ctx())
+            .unwrap_err();
         assert!(
             matches!(err, RiskRejection::GateUnavailable { .. }),
             "a poisoned gate must refuse, not panic and not approve: {err}"
         );
 
         // And it stays refused — a poisoned lock does not heal.
-        let err2 = gate.check(simple_intent("BTC-USD"), &simple_ctx()).unwrap_err();
+        let err2 = gate
+            .check(simple_intent("BTC-USD"), &simple_ctx())
+            .unwrap_err();
         assert!(matches!(err2, RiskRejection::GateUnavailable { .. }));
     }
 

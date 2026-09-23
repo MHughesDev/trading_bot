@@ -254,7 +254,8 @@ pub fn parse_vintages(series_id: &str, body: &str) -> Result<Vec<MacroObservatio
             value,
             knowledge: derived_knowledge(vintage_date),
         };
-        row.validate().map_err(|e| FredError::Parse(e.to_string()))?;
+        row.validate()
+            .map_err(|e| FredError::Parse(e.to_string()))?;
         out.push(row);
     }
     Ok(out)
@@ -352,10 +353,15 @@ mod tests {
         let from_env = Credential::from_env(Secret::new("abcdef0123456789"));
         assert!(matches!(
             AlfredClient::new(&from_env),
-            Err(FredError::BadCredentialOrigin(CredentialOrigin::Environment))
+            Err(FredError::BadCredentialOrigin(
+                CredentialOrigin::Environment
+            ))
         ));
         let empty = Credential::from_store(Secret::new(""));
-        assert!(matches!(AlfredClient::new(&empty), Err(FredError::EmptyKey)));
+        assert!(matches!(
+            AlfredClient::new(&empty),
+            Err(FredError::EmptyKey)
+        ));
     }
 
     #[test]

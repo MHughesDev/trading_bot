@@ -316,31 +316,29 @@ pub fn apply_move_with(
         )
     })?;
     let mut form = form::from_strategy_with(&ast, cat).map_err(|rs| {
-        rs.into_iter()
-            .next()
-            .map_or_else(
-                || {
-                    refuse(
-                        Code::NotInTheForm,
-                        "the clause grammar refused this definition and said nothing about why",
-                        "this is a defect in `strategy-lang::form`",
-                    )
-                },
-                |r| r.diagnostic,
-            )
+        rs.into_iter().next().map_or_else(
+            || {
+                refuse(
+                    Code::NotInTheForm,
+                    "the clause grammar refused this definition and said nothing about why",
+                    "this is a defect in `strategy-lang::form`",
+                )
+            },
+            |r| r.diagnostic,
+        )
     })?;
 
     edit.apply_to(&mut form)?;
 
-    let after = form
-        .compile()
-        .map_err(|ds| ds.into_iter().next().unwrap_or_else(|| {
+    let after = form.compile().map_err(|ds| {
+        ds.into_iter().next().unwrap_or_else(|| {
             refuse(
                 Code::NotInTheForm,
                 "the edited form did not compile and produced no diagnostic",
                 "this is a defect in `strategy-lang::form`",
             )
-        }))?;
+        })
+    })?;
 
     let d = diff_with(def, &after, cat)?;
     match d.n_moves() {
@@ -433,7 +431,9 @@ impl Edit {
             }
             Self::ReplaceExit { index, with } => {
                 let mut xs: Vec<Exit> = form.exits.iter().cloned().collect();
-                let slot = xs.get_mut(*index).ok_or_else(|| no_such_exit(*index, form))?;
+                let slot = xs
+                    .get_mut(*index)
+                    .ok_or_else(|| no_such_exit(*index, form))?;
                 *slot = with.clone();
                 form.exits = non_empty(xs, "exits")?;
                 Ok(())
@@ -653,7 +653,12 @@ exit time 48 bars
             serde_json::from_str::<ClausePath>(&wire).expect("reads back"),
             path
         );
-        for bad in ["\"entry.long.1\"", "\"entry.long[0]\"", "\"\"", "\"clause[1]\""] {
+        for bad in [
+            "\"entry.long.1\"",
+            "\"entry.long[0]\"",
+            "\"\"",
+            "\"clause[1]\"",
+        ] {
             assert!(
                 serde_json::from_str::<ClausePath>(bad).is_err(),
                 "{bad} was accepted as an address"

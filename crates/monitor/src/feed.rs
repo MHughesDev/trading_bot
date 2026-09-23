@@ -203,8 +203,8 @@ mod tests {
             Venue::named(" kraken ").expect("a venue"),
             Venue::named("kraken").expect("a venue")
         );
-        let padded = FeedKey::new(" BTC-USD ", Venue::named("kraken").expect("a venue"))
-            .expect("a feed");
+        let padded =
+            FeedKey::new(" BTC-USD ", Venue::named("kraken").expect("a venue")).expect("a feed");
         let plain =
             FeedKey::new("BTC-USD", Venue::named("kraken").expect("a venue")).expect("a feed");
         assert_eq!(padded, plain);
@@ -230,8 +230,14 @@ mod tests {
             .expect("this file has a production half");
         // Anti-vacuity first: if the split stopped finding the constructors,
         // every assertion below is true of an empty string.
-        assert!(production.contains("fn named("), "the guard is broken, not satisfied");
-        assert!(production.contains("fn new("), "the guard is broken, not satisfied");
+        assert!(
+            production.contains("fn named("),
+            "the guard is broken, not satisfied"
+        );
+        assert!(
+            production.contains("fn new("),
+            "the guard is broken, not satisfied"
+        );
         for door in [
             "impl From<&str>",
             "impl std::str::FromStr",

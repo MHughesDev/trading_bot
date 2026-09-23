@@ -461,10 +461,7 @@ mod tests {
         let task = tokio::spawn(async move { held.hold_at_boundary().await });
         tokio::time::sleep(Duration::from_millis(30)).await;
         c.cancel();
-        assert_eq!(
-            task.await.expect("join"),
-            Hold::Stop(StopReason::Cancelled)
-        );
+        assert_eq!(task.await.expect("join"), Hold::Stop(StopReason::Cancelled));
     }
 
     /// The deadline is enforced by the thing that is awaiting it, and this is
@@ -512,8 +509,17 @@ mod tests {
     fn an_expired_pause_lands_on_a_status_value_the_platform_already_knows() {
         // The `ended == "succeeded"` bug, guarded: a terminal word this column
         // never takes is a branch nobody reaches.
-        let known = ["queued", "running", "waiting_backtest", "awaiting_approval",
-                     "completed", "failed", "cancelled", "fenced", "refused"];
+        let known = [
+            "queued",
+            "running",
+            "waiting_backtest",
+            "awaiting_approval",
+            "completed",
+            "failed",
+            "cancelled",
+            "fenced",
+            "refused",
+        ];
         assert!(known.contains(&StopReason::PauseExpired.terminal_status()));
         assert!(known.contains(&StopReason::Cancelled.terminal_status()));
         assert!(StopReason::PauseExpired.error_text().is_some());

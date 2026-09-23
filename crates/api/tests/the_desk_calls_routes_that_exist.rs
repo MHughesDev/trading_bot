@@ -399,11 +399,23 @@ fn every_unbuilt_row_names_the_task_that_will_build_it() {
 
 #[test]
 fn the_normaliser_treats_every_parameter_spelling_alike() {
-    assert_eq!(normalise("/api/agent/runs/${runId}/state"), "/api/agent/runs/{}/state");
-    assert_eq!(normalise("/api/agent/runs/{id}/state"), "/api/agent/runs/{}/state");
-    assert_eq!(normalise("/api/agent/runs/:id/state"), "/api/agent/runs/{}/state");
+    assert_eq!(
+        normalise("/api/agent/runs/${runId}/state"),
+        "/api/agent/runs/{}/state"
+    );
+    assert_eq!(
+        normalise("/api/agent/runs/{id}/state"),
+        "/api/agent/runs/{}/state"
+    );
+    assert_eq!(
+        normalise("/api/agent/runs/:id/state"),
+        "/api/agent/runs/{}/state"
+    );
     assert_eq!(normalise("/api/catalogue"), "/api/catalogue");
     // Two parameters, and a trailing one.
-    assert_eq!(normalise("/api/dossiers/${t}/verify/${c}"), "/api/dossiers/{}/verify/{}");
+    assert_eq!(
+        normalise("/api/dossiers/${t}/verify/${c}"),
+        "/api/dossiers/{}/verify/{}"
+    );
     assert_eq!(normalise("/api/memory/{bucket}/{id}"), "/api/memory/{}/{}");
 }

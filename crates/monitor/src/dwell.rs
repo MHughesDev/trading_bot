@@ -204,7 +204,10 @@ mod tests {
                 actions += 1;
             }
         }
-        assert_eq!(actions, 0, "an alternating series produced {actions} state changes");
+        assert_eq!(
+            actions, 0,
+            "an alternating series produced {actions} state changes"
+        );
     }
 
     #[test]

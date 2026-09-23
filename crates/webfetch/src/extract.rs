@@ -28,9 +28,38 @@ const DROPPED: &[&str] = &[
 
 /// Tags that end a line of text.
 const BLOCK: &[&str] = &[
-    "p", "div", "br", "hr", "li", "tr", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6", "section",
-    "article", "header", "footer", "nav", "aside", "blockquote", "pre", "table", "ul", "ol", "dl",
-    "dt", "dd", "form", "figure", "figcaption", "main",
+    "p",
+    "div",
+    "br",
+    "hr",
+    "li",
+    "tr",
+    "td",
+    "th",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "section",
+    "article",
+    "header",
+    "footer",
+    "nav",
+    "aside",
+    "blockquote",
+    "pre",
+    "table",
+    "ul",
+    "ol",
+    "dl",
+    "dt",
+    "dd",
+    "form",
+    "figure",
+    "figcaption",
+    "main",
 ];
 
 /// The page title from `<title>`, if present.
@@ -164,7 +193,10 @@ fn decode_entities(s: &str) -> String {
                 Some(c) => out.push(c),
                 None => out.push_str(&tail[..=semi]),
             }
-        } else if let Some(dec) = body.strip_prefix('#').filter(|d| d.chars().all(|c| c.is_ascii_digit())) {
+        } else if let Some(dec) = body
+            .strip_prefix('#')
+            .filter(|d| d.chars().all(|c| c.is_ascii_digit()))
+        {
             match dec.parse::<u32>().ok().and_then(char::from_u32) {
                 Some(c) => out.push(c),
                 None => out.push_str(&tail[..=semi]),
@@ -222,7 +254,9 @@ pub fn links(html: &str, base: &str) -> Vec<String> {
     let mut i = 0;
     while let Some(rel) = lower[i..].find("<a ") {
         let start = i + rel;
-        let Some(close) = lower[start..].find('>') else { break };
+        let Some(close) = lower[start..].find('>') else {
+            break;
+        };
         let tag = &html[start..start + close];
         if let Some(href) = attr(tag, "href") {
             if let Ok(abs) = base_url.join(&href) {
@@ -349,7 +383,10 @@ mod tests {
     #[test]
     fn entities_are_decoded_after_tags_are_stripped() {
         let text = to_text("<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>");
-        assert_eq!(text, "<script>alert(1)</script>", "kept as text, never re-parsed");
+        assert_eq!(
+            text, "<script>alert(1)</script>",
+            "kept as text, never re-parsed"
+        );
     }
 
     #[test]
@@ -358,7 +395,11 @@ mod tests {
         assert_eq!(to_text("<p>5 &times; 3</p>"), "5 \u{d7} 3");
         assert_eq!(to_text("<p>&#963; = 7bp</p>"), "\u{3c3} = 7bp");
         assert_eq!(to_text("<p>&#x3c3;</p>"), "\u{3c3}");
-        assert_eq!(to_text("<p>&sigma;&radic;</p>"), "\u{3c3}&radic;", "unknown left alone");
+        assert_eq!(
+            to_text("<p>&sigma;&radic;</p>"),
+            "\u{3c3}&radic;",
+            "unknown left alone"
+        );
     }
 
     #[test]
@@ -399,7 +440,10 @@ mod tests {
     #[test]
     fn non_http_links_are_dropped_rather_than_surfaced() {
         let html = r#"<a href="javascript:void(0)">x</a><a href="mailto:a@b.c">y</a><a href="data:text/html,x">z</a><a href="/ok">ok</a>"#;
-        assert_eq!(links(html, "https://arxiv.org/"), vec!["https://arxiv.org/ok"]);
+        assert_eq!(
+            links(html, "https://arxiv.org/"),
+            vec!["https://arxiv.org/ok"]
+        );
     }
 
     #[test]
@@ -424,7 +468,10 @@ mod tests {
     /// `data-href` must not answer a request for `href`.
     #[test]
     fn an_attribute_name_must_not_match_as_a_suffix_of_another() {
-        assert_eq!(attr(r#"a data-href="wrong" href="right""#, "href"), Some("right".into()));
+        assert_eq!(
+            attr(r#"a data-href="wrong" href="right""#, "href"),
+            Some("right".into())
+        );
         assert_eq!(attr(r#"a data-href="only""#, "href"), None);
     }
 
@@ -453,7 +500,10 @@ mod tests {
         assert_eq!(title(html).as_deref(), Some("Fee Schedule"));
         assert!(text.contains("Advanced Trade Fees"));
         assert!(text.contains("0.40%") && text.contains("0.60%"));
-        assert!(text.contains("quote currency"), "nbsp became a space: {text}");
+        assert!(
+            text.contains("quote currency"),
+            "nbsp became a space: {text}"
+        );
         assert!(!text.contains("analytics") && !text.contains("display:none"));
     }
 }

@@ -35,7 +35,11 @@ impl Contract {
     /// [`ContractError`] when a key name is unusable or the output list is
     /// empty — a skill that promises nothing cannot be checked, and a skill that
     /// cannot be checked cannot accumulate a record.
-    pub fn new<I, O>(inputs: I, outputs: O, summary: impl Into<String>) -> Result<Self, ContractError>
+    pub fn new<I, O>(
+        inputs: I,
+        outputs: O,
+        summary: impl Into<String>,
+    ) -> Result<Self, ContractError>
     where
         I: IntoIterator,
         I::Item: Into<String>,
@@ -181,7 +185,9 @@ mod tests {
 
     #[test]
     fn a_matching_payload_passes_both_sides() {
-        assert!(c().check_input(&json!({"returns": [1], "window": 20})).is_ok());
+        assert!(c()
+            .check_input(&json!({"returns": [1], "window": 20}))
+            .is_ok());
         assert!(c().check_output(&json!({"sharpe": 1.2})).is_ok());
     }
 
@@ -212,8 +218,14 @@ mod tests {
     /// caller's bad payload looks unreliable and is not.
     #[test]
     fn a_violation_says_whose_fault_it_is() {
-        assert_eq!(c().check_input(&json!({})).unwrap_err().blames(), Side::Input);
-        assert_eq!(c().check_output(&json!({})).unwrap_err().blames(), Side::Output);
+        assert_eq!(
+            c().check_input(&json!({})).unwrap_err().blames(),
+            Side::Input
+        );
+        assert_eq!(
+            c().check_output(&json!({})).unwrap_err().blames(),
+            Side::Output
+        );
 
         let input_err = c().check_input(&json!({})).unwrap_err().to_string();
         assert!(input_err.contains("caller's error"), "{input_err}");

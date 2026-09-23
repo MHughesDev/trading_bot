@@ -46,12 +46,21 @@ pub enum Envelope {
 
 impl Envelope {
     /// Every envelope, matching `mlops.audit_event`'s CHECK.
-    pub const ALL: [Self; 5] =
-        [Self::None, Self::Spend, Self::Promotion, Self::SealedHoldout, Self::Tier3Memory];
+    pub const ALL: [Self; 5] = [
+        Self::None,
+        Self::Spend,
+        Self::Promotion,
+        Self::SealedHoldout,
+        Self::Tier3Memory,
+    ];
 
     /// The four that require approval.
-    pub const GATED: [Self; 4] =
-        [Self::Spend, Self::Promotion, Self::SealedHoldout, Self::Tier3Memory];
+    pub const GATED: [Self; 4] = [
+        Self::Spend,
+        Self::Promotion,
+        Self::SealedHoldout,
+        Self::Tier3Memory,
+    ];
 
     #[must_use]
     pub fn as_str(self) -> &'static str {
@@ -141,8 +150,11 @@ pub const PROMOTION_ACTIONS: &[&str] = &[
 /// not name it is a tool whose declaration says a human sees the call and whose
 /// gate says otherwise. `every_tool_envelope_matches_the_ledger` caught exactly
 /// that on the run this line was added in.
-pub const SEALED_HOLDOUT_ACTIONS: &[&str] =
-    &["evaluate_sealed_holdout", "open_vault", "spend_holdout_look"];
+pub const SEALED_HOLDOUT_ACTIONS: &[&str] = &[
+    "evaluate_sealed_holdout",
+    "open_vault",
+    "spend_holdout_look",
+];
 
 /// Durable memory later decisions will read (§13, AGENT-003).
 pub const TIER3_MEMORY_ACTIONS: &[&str] = &["write_insight", "record_insight", "update_playbook"];
@@ -238,10 +250,19 @@ impl AuditRequest {
     /// Classify and record an action in one step, so a caller cannot pass an
     /// envelope that disagrees with the action's name.
     #[must_use]
-    pub fn new(action: impl Into<String>, principal: Principal, request: serde_json::Value) -> Self {
+    pub fn new(
+        action: impl Into<String>,
+        principal: Principal,
+        request: serde_json::Value,
+    ) -> Self {
         let action = action.into();
         let envelope = Envelope::for_action(&action);
-        Self { action, envelope, principal, request }
+        Self {
+            action,
+            envelope,
+            principal,
+            request,
+        }
     }
 }
 
@@ -269,7 +290,16 @@ mod tests {
     #[test]
     fn the_envelopes_are_exactly_the_database_check() {
         let codes: Vec<&str> = Envelope::ALL.iter().map(|e| e.as_str()).collect();
-        assert_eq!(codes, vec!["none", "spend", "promotion", "sealed_holdout", "tier3_memory"]);
+        assert_eq!(
+            codes,
+            vec![
+                "none",
+                "spend",
+                "promotion",
+                "sealed_holdout",
+                "tier3_memory"
+            ]
+        );
         for e in Envelope::ALL {
             assert_eq!(Envelope::from_code(e.as_str()), Some(e));
         }
@@ -281,7 +311,14 @@ mod tests {
         let codes: Vec<&str> = AuditVerdict::ALL.iter().map(|v| v.as_str()).collect();
         assert_eq!(
             codes,
-            vec!["allowed", "denied", "pending_approval", "approved", "executed", "failed"]
+            vec![
+                "allowed",
+                "denied",
+                "pending_approval",
+                "approved",
+                "executed",
+                "failed"
+            ]
         );
     }
 
@@ -350,7 +387,12 @@ mod tests {
     fn the_verdicts_that_leave_no_other_trace_are_named() {
         assert!(AuditVerdict::Denied.prevented());
         assert!(AuditVerdict::PendingApproval.prevented());
-        for v in [AuditVerdict::Allowed, AuditVerdict::Approved, AuditVerdict::Executed, AuditVerdict::Failed] {
+        for v in [
+            AuditVerdict::Allowed,
+            AuditVerdict::Approved,
+            AuditVerdict::Executed,
+            AuditVerdict::Failed,
+        ] {
             assert!(!v.prevented(), "{v:?}");
         }
     }

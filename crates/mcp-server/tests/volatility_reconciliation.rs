@@ -358,7 +358,11 @@ async fn the_realised_measures_differ_only_by_their_term_count() {
     let returns = result["detail"]["n_bars"]
         .as_u64()
         .expect("the template reports its return count") as usize;
-    assert_eq!(returns + 1, rows.len(), "the two are reading different windows");
+    assert_eq!(
+        returns + 1,
+        rows.len(),
+        "the two are reading different windows"
+    );
 
     const TOL: f64 = 1e-9;
 

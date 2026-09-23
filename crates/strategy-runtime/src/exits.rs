@@ -116,7 +116,11 @@ impl ExitTracker {
     /// A tracker for `policy`, resolving intrabar ambiguity pessimistically.
     #[must_use]
     pub fn new(policy: ExitPolicy) -> Self {
-        Self { policy, intrabar: IntrabarPolicy::WorstFirst, open: None }
+        Self {
+            policy,
+            intrabar: IntrabarPolicy::WorstFirst,
+            open: None,
+        }
     }
 
     /// Choose the intrabar policy explicitly. See [`IntrabarPolicy`] for why
@@ -402,7 +406,13 @@ impl BarAggregator {
                 false
             }
             _ => {
-                self.open = Some(Running { bucket, ts, high, low, close });
+                self.open = Some(Running {
+                    bucket,
+                    ts,
+                    high,
+                    low,
+                    close,
+                });
                 // The very first bar of a position opens no *previous* bar, and
                 // `ExitTracker::bar_closed` is a no-op while flat in any case.
                 true
@@ -410,7 +420,12 @@ impl BarAggregator {
         };
         let run = self.open.as_ref().expect("just set");
         Observed {
-            bar: Bar { ts: run.ts, high: run.high, low: run.low, close: run.close },
+            bar: Bar {
+                ts: run.ts,
+                high: run.high,
+                low: run.low,
+                close: run.close,
+            },
             opened_new_bar,
         }
     }
@@ -476,7 +491,11 @@ impl NetPosition {
         }
         match *pos {
             None => {
-                *pos = Some(Self { side, qty, entry: fill });
+                *pos = Some(Self {
+                    side,
+                    qty,
+                    entry: fill,
+                });
                 NetEffect::Reopened { side, entry: fill }
             }
             Some(mut open) if open.side == side => {
@@ -484,7 +503,10 @@ impl NetPosition {
                 open.entry = (open.entry * open.qty + fill * qty) / total;
                 open.qty = total;
                 *pos = Some(open);
-                NetEffect::Reopened { side, entry: open.entry }
+                NetEffect::Reopened {
+                    side,
+                    entry: open.entry,
+                }
             }
             Some(mut open) => match qty.cmp(&open.qty) {
                 std::cmp::Ordering::Less => {
@@ -499,7 +521,11 @@ impl NetPosition {
                 // A reversal is an exit and a new entry, and the new position's
                 // stop is measured from the new entry.
                 std::cmp::Ordering::Greater => {
-                    *pos = Some(Self { side, qty: qty - open.qty, entry: fill });
+                    *pos = Some(Self {
+                        side,
+                        qty: qty - open.qty,
+                        entry: fill,
+                    });
                     NetEffect::Reopened { side, entry: fill }
                 }
             },
@@ -581,7 +607,12 @@ mod tests {
     }
 
     fn bar(n: i64, high: Decimal, low: Decimal, close: Decimal) -> Bar {
-        Bar { ts: ts(n), high, low, close }
+        Bar {
+            ts: ts(n),
+            high,
+            low,
+            close,
+        }
     }
 
     fn policy(rules: Vec<ExitRule>) -> ExitPolicy {
@@ -595,15 +626,28 @@ mod tests {
     #[test]
     fn a_bar_that_breaches_both_the_stop_and_the_target_resolves_to_the_stop() {
         let mut t = ExitTracker::new(policy(vec![
-            ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) },
-            ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) },
+            ExitRule::TakeProfit {
+                distance: ExitDistance::of_entry(dec!(0.05)),
+            },
+            ExitRule::StopLoss {
+                distance: ExitDistance::of_entry(dec!(0.02)),
+            },
         ]));
         t.opened(PositionSide::Long, dec!(100));
 
         // High 106 clears the 105 target; low 97 breaches the 98 stop.
-        let fired = t.on_bar(&bar(1, dec!(106), dec!(97), dec!(104)), &[]).unwrap();
-        assert_eq!(fired.rule, "stop_loss", "the adverse extreme is probed first");
-        assert_eq!(fired.price, dec!(98), "fills at the stop level, not the bar low");
+        let fired = t
+            .on_bar(&bar(1, dec!(106), dec!(97), dec!(104)), &[])
+            .unwrap();
+        assert_eq!(
+            fired.rule, "stop_loss",
+            "the adverse extreme is probed first"
+        );
+        assert_eq!(
+            fired.price,
+            dec!(98),
+            "fills at the stop level, not the bar low"
+        );
     }
 
     /// Order within the policy does not rescue the optimist: even with the
@@ -612,17 +656,27 @@ mod tests {
     fn declaration_order_cannot_defeat_worst_first() {
         for rules in [
             vec![
-                ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) },
-                ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) },
+                ExitRule::TakeProfit {
+                    distance: ExitDistance::of_entry(dec!(0.05)),
+                },
+                ExitRule::StopLoss {
+                    distance: ExitDistance::of_entry(dec!(0.02)),
+                },
             ],
             vec![
-                ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) },
-                ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) },
+                ExitRule::StopLoss {
+                    distance: ExitDistance::of_entry(dec!(0.02)),
+                },
+                ExitRule::TakeProfit {
+                    distance: ExitDistance::of_entry(dec!(0.05)),
+                },
             ],
         ] {
             let mut t = ExitTracker::new(policy(rules));
             t.opened(PositionSide::Long, dec!(100));
-            let fired = t.on_bar(&bar(1, dec!(106), dec!(97), dec!(104)), &[]).unwrap();
+            let fired = t
+                .on_bar(&bar(1, dec!(106), dec!(97), dec!(104)), &[])
+                .unwrap();
             assert_eq!(fired.rule, "stop_loss");
         }
     }
@@ -630,12 +684,18 @@ mod tests {
     #[test]
     fn a_short_resolves_its_adverse_extreme_first_too() {
         let mut t = ExitTracker::new(policy(vec![
-            ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) },
-            ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) },
+            ExitRule::TakeProfit {
+                distance: ExitDistance::of_entry(dec!(0.05)),
+            },
+            ExitRule::StopLoss {
+                distance: ExitDistance::of_entry(dec!(0.02)),
+            },
         ]));
         t.opened(PositionSide::Short, dec!(100));
         // Adverse for a short is the high: 103 breaches the 102 stop.
-        let fired = t.on_bar(&bar(1, dec!(103), dec!(94), dec!(96)), &[]).unwrap();
+        let fired = t
+            .on_bar(&bar(1, dec!(103), dec!(94), dec!(96)), &[])
+            .unwrap();
         assert_eq!(fired.rule, "stop_loss");
         assert_eq!(fired.price, dec!(102));
     }
@@ -644,14 +704,22 @@ mod tests {
     /// evidence-grade policy.
     #[test]
     fn close_only_misses_a_stop_the_bar_traded_through() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]))
-            .with_intrabar(IntrabarPolicy::CloseOnly);
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss {
+            distance: ExitDistance::of_entry(dec!(0.02)),
+        }]))
+        .with_intrabar(IntrabarPolicy::CloseOnly);
         t.opened(PositionSide::Long, dec!(100));
-        assert!(t.on_bar(&bar(1, dec!(101), dec!(95), dec!(100)), &[]).is_none());
+        assert!(t
+            .on_bar(&bar(1, dec!(101), dec!(95), dec!(100)), &[])
+            .is_none());
 
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss {
+            distance: ExitDistance::of_entry(dec!(0.02)),
+        }]));
         t.opened(PositionSide::Long, dec!(100));
-        assert!(t.on_bar(&bar(1, dec!(101), dec!(95), dec!(100)), &[]).is_some());
+        assert!(t
+            .on_bar(&bar(1, dec!(101), dec!(95), dec!(100)), &[])
+            .is_some());
     }
 
     // ── fill levels ──────────────────────────────────────────────────────────
@@ -659,9 +727,13 @@ mod tests {
     /// A resting stop fills where it rested, not at the bar's extreme.
     #[test]
     fn a_stop_fills_at_its_level_when_the_bar_traded_through_it() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss {
+            distance: ExitDistance::of_entry(dec!(0.02)),
+        }]));
         t.opened(PositionSide::Long, dec!(100));
-        let fired = t.on_bar(&bar(1, dec!(100), dec!(90), dec!(91)), &[]).unwrap();
+        let fired = t
+            .on_bar(&bar(1, dec!(100), dec!(90), dec!(91)), &[])
+            .unwrap();
         assert_eq!(fired.price, dec!(98));
     }
 
@@ -669,18 +741,30 @@ mod tests {
     /// level would invent liquidity that was not there.
     #[test]
     fn a_gap_through_the_stop_fills_at_the_gap_not_at_the_level() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss {
+            distance: ExitDistance::of_entry(dec!(0.02)),
+        }]));
         t.opened(PositionSide::Long, dec!(100));
         // The whole bar is below the 98 stop: high 95.
-        let fired = t.on_bar(&bar(1, dec!(95), dec!(93), dec!(94)), &[]).unwrap();
-        assert_eq!(fired.price, dec!(95), "the best price the bar actually traded");
+        let fired = t
+            .on_bar(&bar(1, dec!(95), dec!(93), dec!(94)), &[])
+            .unwrap();
+        assert_eq!(
+            fired.price,
+            dec!(95),
+            "the best price the bar actually traded"
+        );
     }
 
     #[test]
     fn a_target_fills_at_its_level_rather_than_the_bar_high() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::TakeProfit {
+            distance: ExitDistance::of_entry(dec!(0.05)),
+        }]));
         t.opened(PositionSide::Long, dec!(100));
-        let fired = t.on_bar(&bar(1, dec!(120), dec!(100), dec!(118)), &[]).unwrap();
+        let fired = t
+            .on_bar(&bar(1, dec!(120), dec!(100), dec!(118)), &[])
+            .unwrap();
         assert_eq!(fired.price, dec!(105), "no windfall from the bar's extreme");
     }
 
@@ -688,31 +772,50 @@ mod tests {
 
     #[test]
     fn the_trailing_stop_follows_the_running_high_and_fires_on_the_retrace() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::TrailingStop { distance: ExitDistance::of_entry(dec!(0.03)) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::TrailingStop {
+            distance: ExitDistance::of_entry(dec!(0.03)),
+        }]));
         t.opened(PositionSide::Long, dec!(100));
 
         // Each bar's own low must stay inside the 3% band, or the ratchet fires
         // within the bar that set the new high — which is correct, and not what
         // this test is measuring.
-        assert!(t.on_bar(&bar(1, dec!(105), dec!(103), dec!(104)), &[]).is_none());
-        assert!(t.on_bar(&bar(2, dec!(110), dec!(108.5), dec!(109)), &[]).is_none());
+        assert!(t
+            .on_bar(&bar(1, dec!(105), dec!(103), dec!(104)), &[])
+            .is_none());
+        assert!(t
+            .on_bar(&bar(2, dec!(110), dec!(108.5), dec!(109)), &[])
+            .is_none());
 
         // Extreme is now 110; the stop sits at 106.7.
-        let fired = t.on_bar(&bar(3, dec!(109), dec!(105), dec!(106)), &[]).unwrap();
+        let fired = t
+            .on_bar(&bar(3, dec!(109), dec!(105), dec!(106)), &[])
+            .unwrap();
         assert_eq!(fired.rule, "trailing_stop");
-        assert!(fired.price > dec!(106) && fired.price < dec!(107), "got {}", fired.price);
+        assert!(
+            fired.price > dec!(106) && fired.price < dec!(107),
+            "got {}",
+            fired.price
+        );
     }
 
     /// The trailing stop never loosens, even after a deep retrace that did not
     /// fire. A ratchet that un-ratchets is not a trailing stop.
     #[test]
     fn the_extreme_never_moves_backwards() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::TrailingStop { distance: ExitDistance::of_entry(dec!(0.50)) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::TrailingStop {
+            distance: ExitDistance::of_entry(dec!(0.50)),
+        }]));
         t.opened(PositionSide::Long, dec!(100));
         t.on_bar(&bar(1, dec!(200), dec!(100), dec!(150)), &[]);
         // A much lower bar must not reset the extreme to 150.
-        let fired = t.on_bar(&bar(2, dec!(150), dec!(99), dec!(100)), &[]).unwrap();
-        assert_eq!(fired.rule, "trailing_stop", "measured from 200, not from 150");
+        let fired = t
+            .on_bar(&bar(2, dec!(150), dec!(99), dec!(100)), &[])
+            .unwrap();
+        assert_eq!(
+            fired.rule, "trailing_stop",
+            "measured from 200, not from 150"
+        );
     }
 
     // ── time ─────────────────────────────────────────────────────────────────
@@ -736,9 +839,13 @@ mod tests {
     /// adverse movement to every strategy on the platform.
     #[test]
     fn a_stop_can_fire_on_the_entry_bar() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss {
+            distance: ExitDistance::of_entry(dec!(0.02)),
+        }]));
         t.opened(PositionSide::Long, dec!(100));
-        let fired = t.on_bar(&bar(1, dec!(100), dec!(90), dec!(95)), &[]).unwrap();
+        let fired = t
+            .on_bar(&bar(1, dec!(100), dec!(90), dec!(95)), &[])
+            .unwrap();
         assert_eq!(fired.bars_held, 0);
     }
 
@@ -751,7 +858,9 @@ mod tests {
         t.opened_at_bar_close(PositionSide::Long, dec!(100));
         let flat = |n| bar(n, dec!(100), dec!(100), dec!(100));
 
-        let fired = t.on_bar(&flat(1), &[]).expect("one bar held is one bar held");
+        let fired = t
+            .on_bar(&flat(1), &[])
+            .expect("one bar held is one bar held");
         assert_eq!(fired.rule, "max_holding_bars");
         assert_eq!(fired.bars_held, 1);
     }
@@ -760,9 +869,13 @@ mod tests {
     /// the first bar it is exposed for can stop it out.
     #[test]
     fn a_close_fill_is_still_stoppable_on_its_first_exposed_bar() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss {
+            distance: ExitDistance::of_entry(dec!(0.02)),
+        }]));
         t.opened_at_bar_close(PositionSide::Long, dec!(100));
-        let fired = t.on_bar(&bar(1, dec!(100), dec!(90), dec!(95)), &[]).unwrap();
+        let fired = t
+            .on_bar(&bar(1, dec!(100), dec!(90), dec!(95)), &[])
+            .unwrap();
         assert_eq!(fired.rule, "stop_loss");
         assert_eq!(fired.price, dec!(98));
     }
@@ -789,7 +902,9 @@ mod tests {
 
     #[test]
     fn the_signal_exit_fires_on_a_matching_emit() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::OnSignal { emit: "flat".into() }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::OnSignal {
+            emit: "flat".into(),
+        }]));
         t.opened(PositionSide::Long, dec!(100));
         let b = bar(1, dec!(101), dec!(99), dec!(100));
         assert!(t.on_bar(&b, &["long".into()]).is_none());
@@ -798,7 +913,9 @@ mod tests {
 
     #[test]
     fn a_flat_tracker_reports_nothing() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss {
+            distance: ExitDistance::of_entry(dec!(0.02)),
+        }]));
         assert!(!t.is_open());
         assert_eq!(t.bars_held(), None);
         assert!(t.on_bar(&bar(1, dec!(1), dec!(1), dec!(1)), &[]).is_none());
@@ -808,28 +925,38 @@ mod tests {
     fn risk_layer_only_never_fires() {
         let mut t = ExitTracker::new(ExitPolicy::RiskLayerOnly);
         t.opened(PositionSide::Long, dec!(100));
-        assert!(t.on_bar(&bar(1, dec!(1000), dec!(1), dec!(1)), &["flat".into()]).is_none());
+        assert!(t
+            .on_bar(&bar(1, dec!(1000), dec!(1), dec!(1)), &["flat".into()])
+            .is_none());
     }
 
     /// A reversal resets the reference. A stop measured from the *previous*
     /// entry would fire immediately on the new position.
     #[test]
     fn reopening_resets_the_entry_and_the_extreme() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss {
+            distance: ExitDistance::of_entry(dec!(0.02)),
+        }]));
         t.opened(PositionSide::Long, dec!(100));
         t.on_bar(&bar(1, dec!(120), dec!(100), dec!(119)), &[]);
         t.opened(PositionSide::Long, dec!(120));
         assert_eq!(t.bars_held(), Some(0));
-        assert!(t.on_bar(&bar(2, dec!(121), dec!(119), dec!(120)), &[]).is_none());
+        assert!(t
+            .on_bar(&bar(2, dec!(121), dec!(119), dec!(120)), &[])
+            .is_none());
     }
 
     /// The tracker reports; the caller fills. A tracker that closed itself would
     /// mark a position flat that the venue had not yet closed.
     #[test]
     fn a_trigger_does_not_close_the_position_by_itself() {
-        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) }]));
+        let mut t = ExitTracker::new(policy(vec![ExitRule::StopLoss {
+            distance: ExitDistance::of_entry(dec!(0.02)),
+        }]));
         t.opened(PositionSide::Long, dec!(100));
-        assert!(t.on_bar(&bar(1, dec!(100), dec!(90), dec!(91)), &[]).is_some());
+        assert!(t
+            .on_bar(&bar(1, dec!(100), dec!(90), dec!(91)), &[])
+            .is_some());
         assert!(t.is_open(), "the caller owns the fill");
         t.closed();
         assert!(!t.is_open());
@@ -854,7 +981,9 @@ mod tests {
         let rules = || {
             policy(vec![
                 ExitRule::MaxHoldingBars { bars: 3 },
-                ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.05)) },
+                ExitRule::StopLoss {
+                    distance: ExitDistance::of_entry(dec!(0.05)),
+                },
             ])
         };
 
@@ -882,13 +1011,17 @@ mod tests {
 
         // Twenty ticks inside bar one; none of them is a second bar.
         for _ in 0..20 {
-            assert!(t.on_bar_update(&bar(1, dec!(100), dec!(100), dec!(100)), &[]).is_none());
+            assert!(t
+                .on_bar_update(&bar(1, dec!(100), dec!(100), dec!(100)), &[])
+                .is_none());
         }
         assert_eq!(t.bars_held(), Some(0));
         t.bar_closed();
 
         for _ in 0..20 {
-            assert!(t.on_bar_update(&bar(2, dec!(100), dec!(100), dec!(100)), &[]).is_none());
+            assert!(t
+                .on_bar_update(&bar(2, dec!(100), dec!(100), dec!(100)), &[])
+                .is_none());
         }
         t.bar_closed();
 
@@ -904,8 +1037,12 @@ mod tests {
     #[test]
     fn a_running_bar_that_breached_both_still_resolves_to_the_stop() {
         let mut t = ExitTracker::new(policy(vec![
-            ExitRule::TakeProfit { distance: ExitDistance::of_entry(dec!(0.05)) },
-            ExitRule::StopLoss { distance: ExitDistance::of_entry(dec!(0.02)) },
+            ExitRule::TakeProfit {
+                distance: ExitDistance::of_entry(dec!(0.05)),
+            },
+            ExitRule::StopLoss {
+                distance: ExitDistance::of_entry(dec!(0.02)),
+            },
         ]));
         t.opened(PositionSide::Long, dec!(100));
         let fired = t
@@ -926,14 +1063,24 @@ mod tests {
         let base = DateTime::from_timestamp(1_699_999_980, 0).unwrap();
         let mut opened = 0;
         for s in 0..60 {
-            let o = agg.observe(base + chrono::Duration::seconds(s), dec!(100), dec!(100), dec!(100));
+            let o = agg.observe(
+                base + chrono::Duration::seconds(s),
+                dec!(100),
+                dec!(100),
+                dec!(100),
+            );
             if o.opened_new_bar {
                 opened += 1;
             }
         }
         assert_eq!(opened, 1, "one minute is one bar, not sixty");
 
-        let o = agg.observe(base + chrono::Duration::seconds(60), dec!(100), dec!(100), dec!(100));
+        let o = agg.observe(
+            base + chrono::Duration::seconds(60),
+            dec!(100),
+            dec!(100),
+            dec!(100),
+        );
         assert!(o.opened_new_bar, "the next minute is the next bar");
     }
 
@@ -944,8 +1091,18 @@ mod tests {
         let mut agg = BarAggregator::new(Timeframe::Minutes1);
         let base = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
         agg.observe(base, dec!(100), dec!(100), dec!(100));
-        agg.observe(base + chrono::Duration::seconds(10), dec!(95), dec!(95), dec!(95));
-        let o = agg.observe(base + chrono::Duration::seconds(20), dec!(103), dec!(103), dec!(103));
+        agg.observe(
+            base + chrono::Duration::seconds(10),
+            dec!(95),
+            dec!(95),
+            dec!(95),
+        );
+        let o = agg.observe(
+            base + chrono::Duration::seconds(20),
+            dec!(103),
+            dec!(103),
+            dec!(103),
+        );
         assert_eq!(o.bar.high, dec!(103));
         assert_eq!(o.bar.low, dec!(95));
         assert_eq!(o.bar.close, dec!(103));
@@ -978,7 +1135,12 @@ mod tests {
         let base = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
         agg.observe(base, dec!(90), dec!(90), dec!(90));
         agg.restart_at(dec!(100));
-        let o = agg.observe(base + chrono::Duration::seconds(5), dec!(101), dec!(101), dec!(101));
+        let o = agg.observe(
+            base + chrono::Duration::seconds(5),
+            dec!(101),
+            dec!(101),
+            dec!(101),
+        );
         assert!(!o.opened_new_bar, "still the same minute");
         assert_eq!(o.bar.low, dec!(100), "the 90 happened before the position");
         assert_eq!(o.bar.high, dec!(101));

@@ -67,7 +67,9 @@ fn repair(name: &str) -> Option<String> {
         return None;
     }
     let candidate = format!("{}_{}", &name[..split], &name[split..]);
-    features::resolve_feature(&candidate).is_some().then_some(candidate)
+    features::resolve_feature(&candidate)
+        .is_some()
+        .then_some(candidate)
 }
 
 /// The closest resolvable name, when one is close enough to be worth naming.
@@ -164,7 +166,9 @@ mod tests {
     /// Names the engine really resolves pass, including ones with no parameter.
     #[test]
     fn resolvable_names_pass() {
-        let errors = check(&def_with(r#"["ema_10", "rsi_14", "atr_14", "obv", "hour_sin"]"#));
+        let errors = check(&def_with(
+            r#"["ema_10", "rsi_14", "atr_14", "obv", "hour_sin"]"#,
+        ));
         assert!(errors.is_empty(), "these all resolve: {errors:?}");
     }
 

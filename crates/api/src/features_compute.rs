@@ -35,9 +35,19 @@ pub struct ServeContext<'a> {
 ///
 /// # Errors
 /// An unknown feature name, or a failure writing the serving log.
-pub async fn serve_vector(ctx: &ServeContext<'_>, bars: &[LoadedBar], names: &[String]) -> anyhow::Result<Map<String, Value>> {
+pub async fn serve_vector(
+    ctx: &ServeContext<'_>,
+    bars: &[LoadedBar],
+    names: &[String],
+) -> anyhow::Result<Map<String, Value>> {
     let step_ns = i64::from(ctx.period_secs) * 1_000_000_000;
-    let clock = features::densify_bars(&bars.iter().map(backtest::warmup::bar_obs).collect::<Vec<_>>(), step_ns);
+    let clock = features::densify_bars(
+        &bars
+            .iter()
+            .map(backtest::warmup::bar_obs)
+            .collect::<Vec<_>>(),
+        step_ns,
+    );
     let rows = clock.rows.clone();
     let mut out: Map<String, Value> = Map::new();
     for n in names {
@@ -46,7 +56,9 @@ pub async fn serve_vector(ctx: &ServeContext<'_>, bars: &[LoadedBar], names: &[S
         out.insert(age, Value::Null);
         out.insert(quality, Value::Null);
     }
-    let Some(last) = bars.last() else { return Ok(out) };
+    let Some(last) = bars.last() else {
+        return Ok(out);
+    };
     if rows.is_empty() {
         return Ok(out);
     }
@@ -74,10 +86,26 @@ pub async fn serve_vector(ctx: &ServeContext<'_>, bars: &[LoadedBar], names: &[S
     let runtime = features::FeatureRuntime::new(ctx.feature_set_id, available, log.clone())?;
     let event_time = chrono::DateTime::from_timestamp_nanos(last.open_ns);
     // The serve can only know what every row it read was knowable by.
-    let knowledge_time = chrono::DateTime::from_timestamp_nanos(bars.iter().map(|b| b.knowledge_ns).max().unwrap_or(last.knowledge_ns));
-    let values = runtime.serve_live(ctx.tenant, ctx.instrument_id, &rows, event_time, knowledge_time)?;
+    let knowledge_time = chrono::DateTime::from_timestamp_nanos(
+        bars.iter()
+            .map(|b| b.knowledge_ns)
+            .max()
+            .unwrap_or(last.knowledge_ns),
+    );
+    let values = runtime.serve_live(
+        ctx.tenant,
+        ctx.instrument_id,
+        &rows,
+        event_time,
+        knowledge_time,
+    )?;
 
-    let records = std::mem::take(&mut *log.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+    let records = std::mem::take(
+        &mut *log
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
     let mut tx = ledger::pg::tenant_tx(ctx.pg, ctx.tenant).await?;
     // Every served feature is registered (§3.2): its definition row exists before
     // any value it produced is logged.

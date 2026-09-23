@@ -38,9 +38,8 @@ use crate::context::estimate_tokens;
 use crate::drive::{Effect, Loop, Note, Outcome};
 use crate::hardware::ToolCalling;
 use crate::profile::{
-    ExposureScope,
-    Archetype, Budgets, CodeExecution, ContextBudget, Mode, Orchestration, OutputPolicy, Profile,
-    Routing, SchemaStyle, Tier, ToolPolicy, Trifecta,
+    Archetype, Budgets, CodeExecution, ContextBudget, ExposureScope, Mode, Orchestration,
+    OutputPolicy, Profile, Routing, SchemaStyle, Tier, ToolPolicy, Trifecta,
 };
 use crate::registry::{Risk, ToolDef, ToolRegistry};
 use crate::state::Workflow;
@@ -220,7 +219,10 @@ pub fn frontier() -> Profile {
             max_wall_clock_s: 0,
             ask_above_usd: None,
         },
-        workflows: crate::lifecycle::workflows::ALL.iter().map(|s| s.workflow).collect(),
+        workflows: crate::lifecycle::workflows::ALL
+            .iter()
+            .map(|s| s.workflow)
+            .collect(),
         prereg_authoring: crate::profile::PreregAuthoring::Free,
         max_prereg_amendments: 3,
         notes: "eval fixture".into(),
@@ -344,20 +346,41 @@ pub fn lookup_fixture() -> (Profile, ToolRegistry, TapeTask, Tape) {
 #[serde(tag = "expect", rename_all = "snake_case")]
 pub enum Expect {
     /// The tool is in the exposed set on the step with this index.
-    ExposedAtStep { step: usize, tool: String },
+    ExposedAtStep {
+        step: usize,
+        tool: String,
+    },
     /// It is not. `read_bars` retired the moment it was tried is the 0/10 bug.
-    NotExposedAtStep { step: usize, tool: String },
-    Executed { tool: String },
-    NotExecuted { tool: String },
-    ExecutedAtMost { tool: String, times: usize },
+    NotExposedAtStep {
+        step: usize,
+        tool: String,
+    },
+    Executed {
+        tool: String,
+    },
+    NotExecuted {
+        tool: String,
+    },
+    ExecutedAtMost {
+        tool: String,
+        times: usize,
+    },
     /// `finished | refused | escalated | fenced | cancelled`.
-    Outcome { tag: String },
+    Outcome {
+        tag: String,
+    },
     /// The loop did not fence. Half the cases here are about a healthy session
     /// being fenced.
     NotFenced,
-    Fenced { degradation: String },
-    RejectedWith { code: String },
-    NotRejectedWith { code: String },
+    Fenced {
+        degradation: String,
+    },
+    RejectedWith {
+        code: String,
+    },
+    NotRejectedWith {
+        code: String,
+    },
     /// The model was actually told this, in a note or in the next prompt.
     ///
     /// Both, deliberately. Half of what the harness tells a model does not travel
@@ -368,11 +391,15 @@ pub enum Expect {
     /// failure that fenced a healthy session (LOCAL_TIER_FINDINGS §8, "one that
     /// is not a bug"). Error text is model-facing UX and is asserted like any
     /// other behaviour.
-    ModelIsTold { needle: String },
+    ModelIsTold {
+        needle: String,
+    },
     /// AGENT-005 §2.2 on every model call: system + prompt + reserve ≤ num_ctx.
     BudgetArithmeticHolds,
     /// The whole run took no more than this many steps.
-    StepsAtMost { steps: u32 },
+    StepsAtMost {
+        steps: u32,
+    },
 }
 
 /// Which AGENT-009 §3 suite a case belongs to.
@@ -628,16 +655,13 @@ pub fn truncation_is_not_a_grammar_violation() -> Case {
         task: task("summarise the coverage", &["instrument"], false),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("summarise the coverage", "finish_task")]),
+            TapeEntry::plan(&[("summarise the coverage", "finish_task")]),
             TapeEntry::select("finish_task"),
             TapeEntry::ModelTruncated {
                 raw: "{\"result\":\"the platform holds BTC-USD 1m bars from 2026-03-01 and".into(),
             },
         ],
-        expect: vec![
-            Expect::NotFenced,
-            Expect::BudgetArithmeticHolds,
-        ],
+        expect: vec![Expect::NotFenced, Expect::BudgetArithmeticHolds],
     }
 }
 
@@ -646,7 +670,11 @@ pub fn truncation_is_not_a_grammar_violation() -> Case {
 /// one last turn with exactly one tool exposed.
 #[must_use]
 pub fn finish_task_ate_the_only_step() -> Case {
-    let mut p_task = task("which instruments do you have data for", &["instrument"], false);
+    let mut p_task = task(
+        "which instruments do you have data for",
+        &["instrument"],
+        false,
+    );
     p_task.charter.push_str(" Answer in one sentence.");
     Case {
         id: "stopping/spent_budget_buys_the_report_turn".into(),
@@ -657,7 +685,7 @@ pub fn finish_task_ate_the_only_step() -> Case {
         task: p_task,
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("list the instruments with coverage", "list_instruments")]),
+            TapeEntry::plan(&[("list the instruments with coverage", "list_instruments")]),
             TapeEntry::select("list_instruments"),
             TapeEntry::fill(&json!({})),
             TapeEntry::ToolResult {
@@ -702,7 +730,7 @@ pub fn alphabetical_truncation_hid_the_searched_tool() -> Case {
         ),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("design a trading strategy", "search_tools")]),
+            TapeEntry::plan(&[("design a trading strategy", "search_tools")]),
             TapeEntry::select("search_tools"),
             TapeEntry::fill(&json!({"query": "list instruments coverage"})),
         ],
@@ -733,7 +761,11 @@ pub fn the_planner_namespace_is_not_trusted_over_the_catalogue() -> Case {
         profile: ProfileKind::Degraded7b,
         rung: Rung::Routing,
         // The goal names the tool; the *task's* namespace list is the wrong one.
-        task: task("list_instruments for the coverage table", &["strategy"], false),
+        task: task(
+            "list_instruments for the coverage table",
+            &["strategy"],
+            false,
+        ),
         tape: vec![
             TapeEntry::Admit,
             // LOCAL_TIER_FINDINGS 8.4 had two halves. The half where the planner
@@ -743,7 +775,10 @@ pub fn the_planner_namespace_is_not_trusted_over_the_catalogue() -> Case {
             // caught. This case now guards the half that remains — the task
             // arrives pointed at `strategy`, and routing must still expose the
             // tool the step named rather than the namespace it was handed.
-            TapeEntry::plan(&[("list_instruments for the coverage table", "list_instruments")]),
+            TapeEntry::plan(&[(
+                "list_instruments for the coverage table",
+                "list_instruments",
+            )]),
         ],
         expect: vec![Expect::ExposedAtStep {
             step: 0,
@@ -766,7 +801,7 @@ pub fn an_opaque_tool_error_is_information_not_the_end() -> Case {
         task: task("describe BTC-USD", &["instrument"], true),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("describe BTC-USD", "list_instruments")]),
+            TapeEntry::plan(&[("describe BTC-USD", "list_instruments")]),
             TapeEntry::select("list_instruments"),
             TapeEntry::fill(&json!({})),
             TapeEntry::ToolError {
@@ -797,10 +832,14 @@ pub fn the_evidence_correction_names_what_the_session_produced() -> Case {
         origin: "LOCAL_TIER_FINDINGS §8, 'one that is not a bug'".into(),
         profile: ProfileKind::Degraded7b,
         rung: Rung::Validation,
-        task: task("which instruments do you have data for", &["instrument"], false),
+        task: task(
+            "which instruments do you have data for",
+            &["instrument"],
+            false,
+        ),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("list the instruments with coverage", "list_instruments")]),
+            TapeEntry::plan(&[("list the instruments with coverage", "list_instruments")]),
             TapeEntry::select("list_instruments"),
             TapeEntry::fill(&json!({})),
             TapeEntry::ToolResult {
@@ -849,7 +888,7 @@ pub fn eval_bug_0_of_10() -> Case {
         ),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("read bars for BTC-USD", "read_bars")]),
+            TapeEntry::plan(&[("read bars for BTC-USD", "read_bars")]),
             TapeEntry::select("read_bars"),
             TapeEntry::fill(&json!({"instrument": "BTC-USD", "limit": 5000})),
             // The injected error. This is where the old eval retired the tool.
@@ -891,7 +930,7 @@ pub fn a_flat_tier_is_graded_against_the_schema_it_was_sent() -> Case {
         task: task("compare the two backtests", &["backtest"], true),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("compare the two backtests", "compare_backtests")]),
+            TapeEntry::plan(&[("compare the two backtests", "compare_backtests")]),
             TapeEntry::select("compare_backtests"),
             // What a flat-schema model actually emits for an array field.
             TapeEntry::fill(&json!({"backtest_ids": "[\"bt_11112222\", \"bt_33334444\"]"})),
@@ -945,7 +984,11 @@ pub fn an_unread_idempotent_flag_costs_eleven_steps() -> Case {
         origin: "LOCAL_TIER_FINDINGS §9, bug 2".into(),
         profile: ProfileKind::Degraded7b,
         rung: Rung::Tool,
-        task: task("which instruments do you have data for", &["instrument"], false),
+        task: task(
+            "which instruments do you have data for",
+            &["instrument"],
+            false,
+        ),
         tape,
         expect: vec![
             // Dispatched once. The repeats are answered from what the session
@@ -979,7 +1022,7 @@ pub fn a_fake_id_in_finish_task_is_refused() -> Case {
         task: task("does BTC-USD momentum survive costs", &["data"], true),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("read bars for BTC-USD", "read_bars")]),
+            TapeEntry::plan(&[("read bars for BTC-USD", "read_bars")]),
             TapeEntry::select("read_bars"),
             TapeEntry::fill(&json!({"instrument": "BTC-USD"})),
             TapeEntry::ToolResult {
@@ -1024,7 +1067,7 @@ pub fn a_planted_oracle_is_killed_not_rewarded() -> Case {
         ),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("run the oracle test on the candidate", "run_oracle_test")]),
+            TapeEntry::plan(&[("run the oracle test on the candidate", "run_oracle_test")]),
             TapeEntry::select("run_oracle_test"),
             TapeEntry::fill(&json!({"candidate_id": "cand_77778888"})),
             TapeEntry::ToolResult {
@@ -1091,7 +1134,7 @@ pub fn a_suggestive_finding_is_never_reported_established() -> Case {
         task: task("does BTC-USD momentum survive costs", &["data"], true),
         tape: vec![
             TapeEntry::Admit,
-        TapeEntry::plan(&[("read bars for BTC-USD", "read_bars")]),
+            TapeEntry::plan(&[("read bars for BTC-USD", "read_bars")]),
             TapeEntry::select("read_bars"),
             TapeEntry::fill(&json!({"instrument": "BTC-USD"})),
             TapeEntry::ToolResult {

@@ -253,6 +253,9 @@ mod tests {
     fn a_single_case_suite_seals_nothing_rather_than_sealing_everything() {
         let one = vec![("solo".to_string(), "solo/only".to_string())];
         let h = Holdout::draw(&one, draw());
-        assert!(h.sealed.is_empty(), "sealing the only case leaves no open set");
+        assert!(
+            h.sealed.is_empty(),
+            "sealing the only case leaves no open set"
+        );
     }
 }

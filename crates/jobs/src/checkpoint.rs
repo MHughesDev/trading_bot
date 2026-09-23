@@ -168,8 +168,8 @@ impl CheckpointManifest {
             }
         }
 
-        let manifest: Self = serde_json::from_value(value.clone())
-            .map_err(|_| CheckpointError::NotAnObject)?;
+        let manifest: Self =
+            serde_json::from_value(value.clone()).map_err(|_| CheckpointError::NotAnObject)?;
         manifest.validate()?;
         Ok(manifest)
     }
@@ -185,7 +185,9 @@ impl CheckpointManifest {
             }
         }
         if self.dataset_id.trim().is_empty() {
-            return Err(CheckpointError::Empty { field: "dataset_id" });
+            return Err(CheckpointError::Empty {
+                field: "dataset_id",
+            });
         }
         for (name, value) in [
             ("python", &self.rng_state.python),
@@ -247,7 +249,11 @@ fn leak(field: &str) -> &'static str {
         "torch_cuda",
         "boosting",
     ];
-    NAMES.iter().copied().find(|n| *n == field).unwrap_or("unknown_field")
+    NAMES
+        .iter()
+        .copied()
+        .find(|n| *n == field)
+        .unwrap_or("unknown_field")
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -267,10 +273,7 @@ fn leak(field: &str) -> &'static str {
 /// is in a config file.
 #[must_use]
 pub fn checkpoint_interval_seconds(checkpoint_cost_s: f64, mtbf_s: f64) -> Option<f64> {
-    (checkpoint_cost_s.is_finite()
-        && mtbf_s.is_finite()
-        && checkpoint_cost_s > 0.0
-        && mtbf_s > 0.0)
+    (checkpoint_cost_s.is_finite() && mtbf_s.is_finite() && checkpoint_cost_s > 0.0 && mtbf_s > 0.0)
         .then(|| (2.0 * checkpoint_cost_s * mtbf_s).sqrt())
 }
 
@@ -466,8 +469,14 @@ mod tests {
     /// default.
     #[test]
     fn freeze_thaw_stays_off_until_it_is_measured_to_be_cheap() {
-        assert!(!freeze_thaw_worthwhile(0.0, 600.0), "unmeasured is not cheap");
-        assert!(!freeze_thaw_worthwhile(120.0, 600.0), "20 % of the rung is too much");
+        assert!(
+            !freeze_thaw_worthwhile(0.0, 600.0),
+            "unmeasured is not cheap"
+        );
+        assert!(
+            !freeze_thaw_worthwhile(120.0, 600.0),
+            "20 % of the rung is too much"
+        );
         assert!(freeze_thaw_worthwhile(60.0, 600.0), "10 % is worth it");
         assert!(!freeze_thaw_worthwhile(60.0, 0.0));
     }
@@ -545,9 +554,10 @@ pub fn plan_resume(
 
     if !manifest.resumable() {
         return ResumePlan::Restart {
-            reason: "this framework's resume is not bit-identical (checkpoint_resume: unsupported); \
+            reason:
+                "this framework's resume is not bit-identical (checkpoint_resume: unsupported); \
                      restarting from step 0 under the same trial"
-                .into(),
+                    .into(),
         };
     }
 
@@ -581,7 +591,10 @@ mod resume_tests {
     fn a_matching_resumable_checkpoint_is_resumed_from() {
         assert_eq!(
             plan_resume(Some(&manifest()), "sha256:code", "sha256:image", "ds:abc"),
-            ResumePlan::Resume { step: 900, from: "art_opt".into() }
+            ResumePlan::Resume {
+                step: 900,
+                from: "art_opt".into()
+            }
         );
     }
 
@@ -616,7 +629,9 @@ mod resume_tests {
         let mut m = manifest();
         m["resume_support"] = json!("unsupported");
         match plan_resume(Some(&m), "sha256:code", "sha256:image", "ds:abc") {
-            ResumePlan::Restart { reason } => assert!(reason.contains("not bit-identical"), "{reason}"),
+            ResumePlan::Restart { reason } => {
+                assert!(reason.contains("not bit-identical"), "{reason}")
+            }
             other => panic!("{other:?}"),
         }
     }
@@ -652,7 +667,9 @@ mod resume_tests {
             assert!(
                 matches!(
                     p,
-                    ResumePlan::Resume { .. } | ResumePlan::Restart { .. } | ResumePlan::Abandon { .. }
+                    ResumePlan::Resume { .. }
+                        | ResumePlan::Restart { .. }
+                        | ResumePlan::Abandon { .. }
                 ),
                 "the three outcomes are the whole vocabulary"
             );

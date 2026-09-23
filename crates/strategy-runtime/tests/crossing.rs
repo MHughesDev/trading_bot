@@ -121,12 +121,7 @@ struct BarOutcome {
 
 /// Feed one minute: the bar, then that minute's feature values, in the order
 /// the live pipeline publishes them.
-fn feed_minute(
-    instance: &mut StrategyInstance,
-    minute: i64,
-    fast: f64,
-    slow: f64,
-) -> BarOutcome {
+fn feed_minute(instance: &mut StrategyInstance, minute: i64, fast: f64, slow: f64) -> BarOutcome {
     let at = epoch() + Duration::minutes(minute);
     let mut out = BarOutcome::default();
     for event in [
@@ -239,7 +234,10 @@ fn a_window_opening_mid_trend_is_not_a_crossing() {
     }
 
     assert_eq!(cross_orders, 0, "nothing crossed inside this window");
-    assert_eq!(level_orders, 1, "the level test enters on the standing state");
+    assert_eq!(
+        level_orders, 1,
+        "the level test enters on the standing state"
+    );
 }
 
 /// The live feed publishes one `WorldEvent::Bar` per *trade tick*. A cross must
@@ -382,12 +380,22 @@ fn the_graph_evaluator_separates_unknown_from_false() {
     let mut ev = SignalEvaluator::with_nodes(&nodes);
     assert_eq!(ev.warmup_bars(), 1);
 
-    let first = ev.evaluate(&nodes, &features(&[("fast", 9.0), ("slow", 10.0)]), &bars, 0);
+    let first = ev.evaluate(
+        &nodes,
+        &features(&[("fast", 9.0), ("slow", 10.0)]),
+        &bars,
+        0,
+    );
     assert!(first.fired.is_empty());
     assert_eq!(first.unresolved.len(), 1, "the first bar has no answer");
     assert!(!first.is_settled());
 
-    let second = ev.evaluate(&nodes, &features(&[("fast", 9.5), ("slow", 10.0)]), &bars, 1);
+    let second = ev.evaluate(
+        &nodes,
+        &features(&[("fast", 9.5), ("slow", 10.0)]),
+        &bars,
+        1,
+    );
     assert!(second.fired.is_empty());
     assert!(second.is_settled(), "a real no, and reported as settled");
 
@@ -444,8 +452,18 @@ fn a_backwards_bar_invalidates_history_rather_than_reading_the_future() {
     let bars = std::collections::HashMap::new();
     let mut ev = SignalEvaluator::with_nodes(&nodes);
 
-    ev.evaluate(&nodes, &features(&[("fast", 9.0), ("slow", 10.0)]), &bars, 5);
-    ev.evaluate(&nodes, &features(&[("fast", 9.5), ("slow", 10.0)]), &bars, 6);
+    ev.evaluate(
+        &nodes,
+        &features(&[("fast", 9.0), ("slow", 10.0)]),
+        &bars,
+        5,
+    );
+    ev.evaluate(
+        &nodes,
+        &features(&[("fast", 9.5), ("slow", 10.0)]),
+        &bars,
+        6,
+    );
 
     let back = ev.evaluate(
         &nodes,
@@ -490,9 +508,20 @@ fn the_headline_example_compiles_and_runs() {
 
     let f = |ema7: f64, rsi: f64| features(&[("ema_7", ema7), ("ema_21", 10.0), ("rsi_14", rsi)]);
 
-    assert!(ev.evaluate(&nodes, &f(9.0, 50.0), &bars, 0).unresolved.len() == 1);
-    assert_eq!(ev.evaluate(&nodes, &f(11.0, 50.0), &bars, 1).fired, ["long"]);
-    assert!(ev.evaluate(&nodes, &f(9.0, 50.0), &bars, 2).fired.is_empty());
+    assert!(
+        ev.evaluate(&nodes, &f(9.0, 50.0), &bars, 0)
+            .unresolved
+            .len()
+            == 1
+    );
+    assert_eq!(
+        ev.evaluate(&nodes, &f(11.0, 50.0), &bars, 1).fired,
+        ["long"]
+    );
+    assert!(ev
+        .evaluate(&nodes, &f(9.0, 50.0), &bars, 2)
+        .fired
+        .is_empty());
     assert!(
         ev.evaluate(&nodes, &f(11.0, 70.0), &bars, 3)
             .fired

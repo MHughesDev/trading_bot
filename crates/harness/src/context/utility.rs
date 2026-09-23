@@ -134,12 +134,12 @@ pub fn attribute(store: &RunStore, renders: &[Render], actions: &[Action]) -> At
         // The same tool called again with arguments derived from this record —
         // §19 counts that as used, because the second `get_bars` call wanting
         // the first one's shape is exactly what "used" means for a shape.
-        let derived = later
-            .iter()
-            .any(|a| a.tool == record.source && !record.subject.is_empty() && {
+        let derived = later.iter().any(|a| {
+            a.tool == record.source && !record.subject.is_empty() && {
                 let label = record.subject.label();
                 a.mentions.iter().any(|m| label.contains(m.as_str()))
-            });
+            }
+        });
 
         let verdict = if cited || derived {
             Utility::Used
@@ -219,19 +219,34 @@ mod tests {
     fn store() -> (RunStore, RecordId, RecordId, RecordId) {
         let mut s = RunStore::new();
         let cited = s.insert(
-            Draft::new(1, RecordKind::ToolResult, "run_backtest", Body::text("x".repeat(400)))
-                .with_subject(Subject::instrument("BTC-USD"))
-                .with_id("experiment_id", "exp_7"),
+            Draft::new(
+                1,
+                RecordKind::ToolResult,
+                "run_backtest",
+                Body::text("x".repeat(400)),
+            )
+            .with_subject(Subject::instrument("BTC-USD"))
+            .with_id("experiment_id", "exp_7"),
         );
         let nearby = s.insert(
-            Draft::new(1, RecordKind::ToolResult, "get_bars", Body::text("y".repeat(400)))
-                .with_subject(Subject::instrument("BTC-USD"))
-                .with_id("window", "w1"),
+            Draft::new(
+                1,
+                RecordKind::ToolResult,
+                "get_bars",
+                Body::text("y".repeat(400)),
+            )
+            .with_subject(Subject::instrument("BTC-USD"))
+            .with_id("window", "w1"),
         );
         let elsewhere = s.insert(
-            Draft::new(1, RecordKind::ToolResult, "get_bars", Body::text("z".repeat(400)))
-                .with_subject(Subject::instrument("DOGE-USD"))
-                .with_id("window", "w2"),
+            Draft::new(
+                1,
+                RecordKind::ToolResult,
+                "get_bars",
+                Body::text("z".repeat(400)),
+            )
+            .with_subject(Subject::instrument("DOGE-USD"))
+            .with_id("window", "w2"),
         );
         (s, cited, nearby, elsewhere)
     }

@@ -143,7 +143,12 @@ async fn a_live_serve_is_logged_and_the_nightly_diff_recomputes_it() {
         .expect("the seeded symbol has a surrogate id");
 
     let loaded = store
-        .load_bars(&symbol, tf, start - Duration::minutes(1), start + Duration::minutes(301))
+        .load_bars(
+            &symbol,
+            tf,
+            start - Duration::minutes(1),
+            start + Duration::minutes(301),
+        )
         .await
         .expect("load_bars");
     assert_eq!(loaded.len(), 300, "every seeded bar reads back");
@@ -214,7 +219,10 @@ async fn a_live_serve_is_logged_and_the_nightly_diff_recomputes_it() {
         "every served feature could be recomputed"
     );
     assert_eq!(report.diffs, names.len(), "one diff row per served feature");
-    assert_eq!(report.code_drift, 0, "the same code produced the same values");
+    assert_eq!(
+        report.code_drift, 0,
+        "the same code produced the same values"
+    );
     assert!(
         report.p99_relative_diff < 1e-9,
         "p99 relative diff {} breaches the SLO",
@@ -241,8 +249,10 @@ async fn a_live_serve_is_logged_and_the_nightly_diff_recomputes_it() {
         );
         assert!(r.get::<f64, _>("abs_diff") < 1e-9);
         assert!(
-            r.try_get::<chrono::DateTime<Utc>, _>("served_knowledge_time").is_ok()
-                && r.try_get::<chrono::DateTime<Utc>, _>("recomputed_knowledge_time").is_ok(),
+            r.try_get::<chrono::DateTime<Utc>, _>("served_knowledge_time")
+                .is_ok()
+                && r.try_get::<chrono::DateTime<Utc>, _>("recomputed_knowledge_time")
+                    .is_ok(),
             "both knowledge times are recorded"
         );
     }

@@ -214,7 +214,10 @@ mod tests {
         let out = get_venue_constraints(&json!({}));
         let detail = &out["detail"];
         assert_eq!(detail["verified_at"], VERIFIED_AT);
-        assert!(detail["age_days"].as_i64().is_some(), "the age is computable");
+        assert!(
+            detail["age_days"].as_i64().is_some(),
+            "the age is computable"
+        );
         assert_eq!(detail["stale_after_days"], STALE_AFTER_DAYS);
         // And the staleness reaches the *summary*, not only the detail — a
         // flat-tier model reads the summary and may never open the detail.

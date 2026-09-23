@@ -71,18 +71,26 @@ pub const ANALYTIC_COST_BAND: f64 = 3.0;
 /// [`CostEstimate::interval`] reports honestly rather than dividing by zero.
 #[must_use]
 #[allow(clippy::cast_precision_loss)]
-pub fn estimate_cost(
-    inputs: CostInputs,
-    completed_runs_in_class: i64,
-) -> Answer<CostEstimate> {
+pub fn estimate_cost(inputs: CostInputs, completed_runs_in_class: i64) -> Answer<CostEstimate> {
     let (rung, evidence) = choose_rung("M1", completed_runs_in_class, None, false, false);
     let work = inputs.rows as f64 * f64::from(inputs.features) * f64::from(inputs.steps);
-    let seconds = if inputs.throughput > 0.0 { work / inputs.throughput } else { f64::INFINITY };
+    let seconds = if inputs.throughput > 0.0 {
+        work / inputs.throughput
+    } else {
+        f64::INFINITY
+    };
     Answer {
-        value: CostEstimate { seconds, band: ANALYTIC_COST_BAND },
+        value: CostEstimate {
+            seconds,
+            band: ANALYTIC_COST_BAND,
+        },
         // The closed form is `analytic`, one rung below a tuned rule table: it
         // has no numbers in it that anyone chose.
-        rung: if rung == Rung::Rule { Rung::Analytic } else { rung },
+        rung: if rung == Rung::Rule {
+            Rung::Analytic
+        } else {
+            rung
+        },
         evidence,
     }
 }
@@ -148,7 +156,11 @@ pub fn predict_failure(
 ) -> Answer<PredictedFailure> {
     let (rung, evidence) = choose_rung("M2", runs_observed, per_class, false, false);
     let budget = inputs.device_bytes as f64 * DEVICE_HEADROOM;
-    let lr_max = if inputs.adaptive_optimiser { ADAPTIVE_LR_MAX } else { SGD_LR_MAX };
+    let lr_max = if inputs.adaptive_optimiser {
+        ADAPTIVE_LR_MAX
+    } else {
+        SGD_LR_MAX
+    };
 
     let value = if inputs.device_bytes > 0 && inputs.working_set_bytes as f64 > budget {
         PredictedFailure::OutOfMemory
@@ -160,7 +172,11 @@ pub fn predict_failure(
     } else {
         PredictedFailure::NothingPredictable
     };
-    Answer { value, rung: if rung == Rung::Rule { Rung::Rule } else { rung }, evidence }
+    Answer {
+        value,
+        rung: if rung == Rung::Rule { Rung::Rule } else { rung },
+        evidence,
+    }
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -229,7 +245,11 @@ pub const FLAT_TOLERANCE: f64 = 1e-9;
 pub fn detect_anomaly(curve: &[f64], curves_observed: i64) -> Answer<Anomaly> {
     let (rung, evidence) = choose_rung("M11", curves_observed, None, false, false);
     let value = classify_curve(curve);
-    Answer { value, rung, evidence }
+    Answer {
+        value,
+        rung,
+        evidence,
+    }
 }
 
 fn classify_curve(curve: &[f64]) -> Anomaly {
@@ -243,7 +263,10 @@ fn classify_curve(curve: &[f64]) -> Anomaly {
     }
     let first = curve[0];
     let scale = curve.iter().fold(0.0_f64, |a, b| a.max(b.abs())).max(1.0);
-    if curve.iter().all(|v| (v - first).abs() < FLAT_TOLERANCE * scale) {
+    if curve
+        .iter()
+        .all(|v| (v - first).abs() < FLAT_TOLERANCE * scale)
+    {
         return Anomaly::Flat;
     }
 
@@ -359,7 +382,12 @@ mod tests {
     #[test]
     fn the_cost_estimate_is_a_band_and_says_so() {
         let a = estimate_cost(
-            CostInputs { rows: 1_000_000, features: 50, steps: 10, throughput: 1e8 },
+            CostInputs {
+                rows: 1_000_000,
+                features: 50,
+                steps: 10,
+                throughput: 1e8,
+            },
             0,
         );
         assert_eq!(a.rung, Rung::Analytic);
@@ -367,16 +395,42 @@ mod tests {
         assert!((a.value.seconds - 5.0).abs() < 1e-9, "{:?}", a.value);
         let (low, high) = a.value.interval();
         assert!(low < a.value.seconds && a.value.seconds < high);
-        assert!((high / low - 9.0).abs() < 1e-9, "a factor of three either way");
+        assert!(
+            (high / low - 9.0).abs() < 1e-9,
+            "a factor of three either way"
+        );
     }
 
     #[test]
     fn cost_scales_with_every_input_it_claims_to_read() {
-        let base = CostInputs { rows: 1_000, features: 10, steps: 2, throughput: 1.0 };
+        let base = CostInputs {
+            rows: 1_000,
+            features: 10,
+            steps: 2,
+            throughput: 1.0,
+        };
         let one = estimate_cost(base, 0).value.seconds;
-        let more_rows = estimate_cost(CostInputs { rows: 2_000, ..base }, 0).value.seconds;
-        let more_steps = estimate_cost(CostInputs { steps: 4, ..base }, 0).value.seconds;
-        let faster = estimate_cost(CostInputs { throughput: 2.0, ..base }, 0).value.seconds;
+        let more_rows = estimate_cost(
+            CostInputs {
+                rows: 2_000,
+                ..base
+            },
+            0,
+        )
+        .value
+        .seconds;
+        let more_steps = estimate_cost(CostInputs { steps: 4, ..base }, 0)
+            .value
+            .seconds;
+        let faster = estimate_cost(
+            CostInputs {
+                throughput: 2.0,
+                ..base
+            },
+            0,
+        )
+        .value
+        .seconds;
         assert!((more_rows / one - 2.0).abs() < 1e-9);
         assert!((more_steps / one - 2.0).abs() < 1e-9);
         assert!((faster / one - 0.5).abs() < 1e-9);
@@ -387,7 +441,12 @@ mod tests {
     #[test]
     fn an_unknown_hardware_class_does_not_produce_a_number() {
         let a = estimate_cost(
-            CostInputs { rows: 10, features: 1, steps: 1, throughput: 0.0 },
+            CostInputs {
+                rows: 10,
+                features: 1,
+                steps: 1,
+                throughput: 0.0,
+            },
             0,
         );
         assert!(a.value.seconds.is_infinite());
@@ -395,8 +454,16 @@ mod tests {
 
     #[test]
     fn m1_stays_analytic_until_its_trigger_is_met_and_a_model_exists() {
-        let one = CostInputs { rows: 1, features: 1, steps: 1, throughput: 1.0 };
-        assert!(!estimate_cost(one, 199).evidence.met(), "199 runs is not 200");
+        let one = CostInputs {
+            rows: 1,
+            features: 1,
+            steps: 1,
+            throughput: 1.0,
+        };
+        assert!(
+            !estimate_cost(one, 199).evidence.met(),
+            "199 runs is not 200"
+        );
         assert!(estimate_cost(one, 200).evidence.met());
         // Met or not, nothing is fitted, so the answer is still analytic.
         assert_eq!(estimate_cost(one, 5_000).rung, Rung::Analytic);
@@ -416,12 +483,19 @@ mod tests {
     #[test]
     fn a_working_set_that_does_not_fit_is_predicted_oom() {
         let a = predict_failure(
-            PreflightInputs { working_set_bytes: 10 << 30, ..preflight() },
+            PreflightInputs {
+                working_set_bytes: 10 << 30,
+                ..preflight()
+            },
             0,
             None,
         );
         assert_eq!(a.value, PredictedFailure::OutOfMemory);
-        assert_eq!(a.value.as_str(), "oom", "the prediction names the TerminalReason it expects");
+        assert_eq!(
+            a.value.as_str(),
+            "oom",
+            "the prediction names the TerminalReason it expects"
+        );
     }
 
     /// Eighty per cent, not a hundred: a run planned to fill the card fails at a
@@ -431,7 +505,10 @@ mod tests {
         let just_over = (11u64 << 30) as f64 * DEVICE_HEADROOM + 1.0;
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let a = predict_failure(
-            PreflightInputs { working_set_bytes: just_over as u64, ..preflight() },
+            PreflightInputs {
+                working_set_bytes: just_over as u64,
+                ..preflight()
+            },
             0,
             None,
         );
@@ -441,13 +518,21 @@ mod tests {
     #[test]
     fn the_learning_rate_envelope_depends_on_the_optimiser() {
         let adam = predict_failure(
-            PreflightInputs { learning_rate: 0.5, adaptive_optimiser: true, ..preflight() },
+            PreflightInputs {
+                learning_rate: 0.5,
+                adaptive_optimiser: true,
+                ..preflight()
+            },
             0,
             None,
         );
         assert_eq!(adam.value, PredictedFailure::Divergence);
         let sgd = predict_failure(
-            PreflightInputs { learning_rate: 0.5, adaptive_optimiser: false, ..preflight() },
+            PreflightInputs {
+                learning_rate: 0.5,
+                adaptive_optimiser: false,
+                ..preflight()
+            },
             0,
             None,
         );
@@ -479,7 +564,10 @@ mod tests {
     fn a_curve_that_never_moves_is_flat() {
         let a = detect_anomaly(&[0.693; 40], 0);
         assert_eq!(a.value, Anomaly::Flat);
-        assert!(!a.value.is_terminal(), "flat is worth stopping for, not a crash");
+        assert!(
+            !a.value.is_terminal(),
+            "flat is worth stopping for, not a crash"
+        );
     }
 
     #[test]
@@ -507,7 +595,11 @@ mod tests {
             })
             .collect();
         let a = detect_anomaly(&curve, 0);
-        assert!(matches!(a.value, Anomaly::Drift | Anomaly::Spike), "{:?}", a.value);
+        assert!(
+            matches!(a.value, Anomaly::Drift | Anomaly::Spike),
+            "{:?}",
+            a.value
+        );
     }
 
     #[test]

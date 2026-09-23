@@ -25,7 +25,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use dataplane::backfill::{BackfillBar, BackfillPage, BackfillSource, FetchError, PageRequest, RateLimit};
+use dataplane::backfill::{
+    BackfillBar, BackfillPage, BackfillSource, FetchError, PageRequest, RateLimit,
+};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::BTreeMap;
@@ -42,7 +44,11 @@ pub const MAX_BARS: i64 = 10_000;
 /// Published free-plan limit is 200 requests/minute; the platform declares 190.
 #[must_use]
 pub const fn declared_rate_limit() -> RateLimit {
-    RateLimit { per_window: 190, window_ms: 60_000, burst: 20 }
+    RateLimit {
+        per_window: 190,
+        window_ms: 60_000,
+        burst: 20,
+    }
 }
 
 /// Alpaca's `timeframe` parameter.
@@ -57,7 +63,11 @@ pub fn timeframe_param(period_secs: u32) -> Result<String, FetchError> {
         3_600 => "1Hour".into(),
         14_400 => "4Hour".into(),
         86_400 => "1Day".into(),
-        other => return Err(FetchError::Integrity(format!("no Alpaca timeframe for {other} s bars"))),
+        other => {
+            return Err(FetchError::Integrity(format!(
+                "no Alpaca timeframe for {other} s bars"
+            )))
+        }
     })
 }
 
@@ -134,7 +144,10 @@ pub fn parse_bars(body: &[u8], period_secs: u32) -> Result<ParsedBars, FetchErro
         }
     }
     out.sort_by_key(|b| b.close_time);
-    Ok(ParsedBars { bars: out, next_page_token: env.next_page_token })
+    Ok(ParsedBars {
+        bars: out,
+        next_page_token: env.next_page_token,
+    })
 }
 
 /// Alpaca uses `BTC/USD`, the platform uses `BTC-USD`.
@@ -144,7 +157,13 @@ pub fn venue_symbol(platform_symbol: &str) -> String {
 }
 
 #[must_use]
-pub fn crypto_bars_url(symbol: &str, timeframe: &str, open_start: DateTime<Utc>, open_end: DateTime<Utc>, token: Option<&str>) -> String {
+pub fn crypto_bars_url(
+    symbol: &str,
+    timeframe: &str,
+    open_start: DateTime<Utc>,
+    open_end: DateTime<Utc>,
+    token: Option<&str>,
+) -> String {
     let mut url = format!(
         "{CRYPTO_API}?symbols={}&timeframe={timeframe}&start={}&end={}&limit={MAX_BARS}&sort=asc",
         urlencode(&venue_symbol(symbol)),
@@ -164,7 +183,9 @@ fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -180,7 +201,10 @@ pub struct AlpacaBackfill {
 impl AlpacaBackfill {
     #[must_use]
     pub fn new(http: Arc<dyn HttpGet>) -> Self {
-        Self { http, limiter: Limited::new(declared_rate_limit()) }
+        Self {
+            http,
+            limiter: Limited::new(declared_rate_limit()),
+        }
     }
 
     #[must_use]
@@ -203,18 +227,31 @@ impl BackfillSource for AlpacaBackfill {
         let tf = timeframe_param(req.period_secs)?;
         let period = chrono::Duration::seconds(i64::from(req.period_secs));
         let span = Self::page_span_secs(req.period_secs);
-        let page_end: DateTime<Utc> = std::cmp::min(req.end, req.start + chrono::Duration::seconds(span));
+        let page_end: DateTime<Utc> =
+            std::cmp::min(req.end, req.start + chrono::Duration::seconds(span));
         if page_end <= req.start {
             return Ok(BackfillPage::end_of_window());
         }
 
         self.limiter.permit().await;
-        let url = crypto_bars_url(&req.symbol, &tf, req.start - period, page_end - period, None);
+        let url = crypto_bars_url(
+            &req.symbol,
+            &tf,
+            req.start - period,
+            page_end - period,
+            None,
+        );
         let body = self.http.get(&url).await?.ok_body(VENUE)?;
         let parsed = parse_bars(&body, req.period_secs)?;
-        let bars: Vec<_> =
-            parsed.bars.into_iter().filter(|b| b.close_time >= req.start && b.close_time < page_end).collect();
-        Ok(BackfillPage { bars, covered_to: Some(page_end) })
+        let bars: Vec<_> = parsed
+            .bars
+            .into_iter()
+            .filter(|b| b.close_time >= req.start && b.close_time < page_end)
+            .collect();
+        Ok(BackfillPage {
+            bars,
+            covered_to: Some(page_end),
+        })
     }
 }
 
@@ -232,7 +269,10 @@ mod tests {
     fn bars_parse_with_the_open_shifted_to_a_close() {
         let p = parse_bars(BODY, 60).unwrap();
         assert_eq!(p.bars.len(), 2);
-        assert_eq!(p.bars[0].close_time, Utc.with_ymd_and_hms(2023, 11, 14, 22, 14, 0).unwrap());
+        assert_eq!(
+            p.bars[0].close_time,
+            Utc.with_ymd_and_hms(2023, 11, 14, 22, 14, 0).unwrap()
+        );
         assert_eq!(p.bars[1].close, "73961.99");
         assert_eq!(p.bars[1].trade_count, 3);
         assert_eq!(p.next_page_token.as_deref(), Some("abc"));
@@ -257,7 +297,10 @@ mod tests {
         let body = br#"{"message":"subscription does not permit querying recent SIP data"}"#;
         let e = parse_bars(body, 60).expect_err("expected a refusal");
         assert!(matches!(e, FetchError::Terms(_)), "{e:?}");
-        assert!(!e.is_pause(), "a plan restriction is not something to wait out");
+        assert!(
+            !e.is_pause(),
+            "a plan restriction is not something to wait out"
+        );
     }
 
     #[test]
@@ -272,8 +315,14 @@ mod tests {
     fn the_declared_limit_sits_under_the_published_free_plan_limit() {
         let l = declared_rate_limit();
         assert_eq!(l.window_ms, 60_000);
-        assert!(l.per_window <= 200, "Alpaca's free plan publishes 200 requests/minute");
-        assert!(l.per_window >= 100, "and declaring 1/min would make a three-year backfill take months");
+        assert!(
+            l.per_window <= 200,
+            "Alpaca's free plan publishes 200 requests/minute"
+        );
+        assert!(
+            l.per_window >= 100,
+            "and declaring 1/min would make a three-year backfill take months"
+        );
     }
 
     #[test]

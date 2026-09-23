@@ -56,7 +56,10 @@ pub enum Decision {
     ///
     /// The caller must pin the connection to one of these rather than resolving
     /// the host again. Re-resolving reopens the rebinding window this closes.
-    Allow { host: String, addrs: Vec<SocketAddr> },
+    Allow {
+        host: String,
+        addrs: Vec<SocketAddr>,
+    },
     /// Refused, with a reason the agent can read and act on.
     Deny { reason: String },
 }
@@ -271,7 +274,10 @@ pub fn check(url: &str, policy: &Policy, resolved: &[SocketAddr]) -> Decision {
 
     // Denylist first, so no later rule can undo it.
     if policy.denied_hosts.iter().any(|d| host_matches(&host, d)) {
-        return deny(DenyReason::DeniedHost, format!("{host} is on the deny list"));
+        return deny(
+            DenyReason::DeniedHost,
+            format!("{host} is on the deny list"),
+        );
     }
 
     match &policy.hosts {
@@ -545,15 +551,36 @@ mod tests {
 
     #[test]
     fn public_v4_addresses_are_allowed() {
-        for ip in ["93.184.216.34", "1.1.1.1", "8.8.8.8", "172.32.0.1", "172.15.255.254"] {
-            assert!(blocked_ip(ip.parse().unwrap()).is_none(), "{ip} should be fine");
+        for ip in [
+            "93.184.216.34",
+            "1.1.1.1",
+            "8.8.8.8",
+            "172.32.0.1",
+            "172.15.255.254",
+        ] {
+            assert!(
+                blocked_ip(ip.parse().unwrap()).is_none(),
+                "{ip} should be fine"
+            );
         }
     }
 
     #[test]
     fn every_private_and_local_v6_range_is_blocked() {
-        for ip in ["::", "::1", "fc00::1", "fd00::1", "fe80::1", "ff02::1", "2001:db8::1", "64:ff9b::1"] {
-            assert!(blocked_ip(ip.parse().unwrap()).is_some(), "{ip} must be blocked");
+        for ip in [
+            "::",
+            "::1",
+            "fc00::1",
+            "fd00::1",
+            "fe80::1",
+            "ff02::1",
+            "2001:db8::1",
+            "64:ff9b::1",
+        ] {
+            assert!(
+                blocked_ip(ip.parse().unwrap()).is_some(),
+                "{ip} must be blocked"
+            );
         }
     }
 
@@ -561,7 +588,11 @@ mod tests {
     /// the v6 rules against it is a standard bypass.
     #[test]
     fn ipv4_mapped_addresses_are_checked_as_ipv4() {
-        for ip in ["::ffff:127.0.0.1", "::ffff:169.254.169.254", "::ffff:10.0.0.1"] {
+        for ip in [
+            "::ffff:127.0.0.1",
+            "::ffff:169.254.169.254",
+            "::ffff:10.0.0.1",
+        ] {
             assert!(
                 blocked_ip(ip.parse().unwrap()).is_some(),
                 "{ip} must be blocked through its mapped v4 address"
@@ -637,7 +668,10 @@ mod tests {
             denied_hosts: vec!["arxiv.org".into()],
             ..Policy::default()
         };
-        assert_eq!(reason_of("https://arxiv.org/", &p, &public()), DenyReason::DeniedHost);
+        assert_eq!(
+            reason_of("https://arxiv.org/", &p, &public()),
+            DenyReason::DeniedHost
+        );
     }
 
     /// "Any host" still never means the private network.
@@ -673,7 +707,11 @@ mod tests {
             "gopher://arxiv.org/x",
             "jar:https://arxiv.org/!/x",
         ] {
-            assert_eq!(reason_of(url, &open_policy(), &public()), DenyReason::Scheme, "{url}");
+            assert_eq!(
+                reason_of(url, &open_policy(), &public()),
+                DenyReason::Scheme,
+                "{url}"
+            );
         }
     }
 
@@ -683,7 +721,10 @@ mod tests {
             reason_of("http://arxiv.org/", &Policy::default(), &public()),
             DenyReason::Scheme
         );
-        let p = Policy { allow_plaintext: true, ..Policy::default() };
+        let p = Policy {
+            allow_plaintext: true,
+            ..Policy::default()
+        };
         assert!(check("http://arxiv.org/", &p, &public()).is_allowed());
     }
 
@@ -692,7 +733,11 @@ mod tests {
     #[test]
     fn credentials_in_a_url_are_refused_not_stripped() {
         assert_eq!(
-            reason_of("https://user:token@arxiv.org/", &Policy::default(), &public()),
+            reason_of(
+                "https://user:token@arxiv.org/",
+                &Policy::default(),
+                &public()
+            ),
             DenyReason::Userinfo
         );
         assert_eq!(
@@ -705,7 +750,10 @@ mod tests {
     fn non_web_ports_are_refused_because_that_is_a_port_scanner() {
         for port in [22, 25, 3306, 5432, 6379, 9200, 11211] {
             let url = format!("https://arxiv.org:{port}/");
-            assert_eq!(reason_of(&url, &Policy::default(), &public()), DenyReason::Port);
+            assert_eq!(
+                reason_of(&url, &Policy::default(), &public()),
+                DenyReason::Port
+            );
         }
         assert!(check("https://arxiv.org:443/", &Policy::default(), &public()).is_allowed());
         assert!(check("https://arxiv.org:8443/", &Policy::default(), &public()).is_allowed());
@@ -715,7 +763,10 @@ mod tests {
     fn a_literal_private_ip_in_the_url_is_refused_even_before_dns() {
         let p = open_policy();
         // Resolution is irrelevant here: the host *is* the address.
-        assert_eq!(reason_of("https://127.0.0.1/", &p, &public()), DenyReason::PrivateAddress);
+        assert_eq!(
+            reason_of("https://127.0.0.1/", &p, &public()),
+            DenyReason::PrivateAddress
+        );
         assert_eq!(
             reason_of("https://[::1]/", &p, &public()),
             DenyReason::PrivateAddress
@@ -724,7 +775,10 @@ mod tests {
 
     #[test]
     fn a_malformed_url_is_refused() {
-        assert_eq!(reason_of("not a url", &open_policy(), &public()), DenyReason::BadUrl);
+        assert_eq!(
+            reason_of("not a url", &open_policy(), &public()),
+            DenyReason::BadUrl
+        );
         assert_eq!(reason_of("", &open_policy(), &public()), DenyReason::BadUrl);
     }
 

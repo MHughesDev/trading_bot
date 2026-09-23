@@ -272,10 +272,9 @@ impl std::fmt::Display for ChangeRefusal {
                 "type {expected:?} to confirm this change; received {typed:?}"
             ),
             Self::ReasonMissing => f.write_str("a limit change during a breach requires a reason"),
-            Self::AgentAuthor { changed_by } => write!(
-                f,
-                "{changed_by} may not declare or change a control limit"
-            ),
+            Self::AgentAuthor { changed_by } => {
+                write!(f, "{changed_by} may not declare or change a control limit")
+            }
         }
     }
 }
@@ -439,6 +438,9 @@ mod tests {
     fn an_agent_cannot_widen_the_limit_it_is_measured_against() {
         let mut c = change();
         c.changed_by = "agent:run-9".to_owned();
-        assert!(matches!(c.validate(), Err(ChangeRefusal::AgentAuthor { .. })));
+        assert!(matches!(
+            c.validate(),
+            Err(ChangeRefusal::AgentAuthor { .. })
+        ));
     }
 }

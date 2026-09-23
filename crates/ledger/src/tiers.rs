@@ -78,7 +78,12 @@ pub enum Prescreen {
 /// kept. With no observed distribution it is `-inf`: nothing is screened out,
 /// because a screen calibrated on nothing screens on nothing.
 #[must_use]
-pub fn prescreen(margin: Option<f64>, calibration_cut: Option<f64>, gated_seen: i64, passes_seen: i64) -> Answer<Prescreen> {
+pub fn prescreen(
+    margin: Option<f64>,
+    calibration_cut: Option<f64>,
+    gated_seen: i64,
+    passes_seen: i64,
+) -> Answer<Prescreen> {
     let (rung, evidence) = choose_rung("M5", gated_seen, Some(passes_seen), false, false);
     let value = match (margin, calibration_cut) {
         (Some(m), Some(cut)) if m.is_finite() && cut.is_finite() => {
@@ -93,7 +98,11 @@ pub fn prescreen(margin: Option<f64>, calibration_cut: Option<f64>, gated_seen: 
         (_, None) => Prescreen::Proceed,
         _ => Prescreen::Unknown,
     };
-    Answer { value, rung, evidence }
+    Answer {
+        value,
+        rung,
+        evidence,
+    }
 }
 
 /// The margin cut that keeps [`PRESCREEN_RECALL`] of observed passers.
@@ -102,9 +111,17 @@ pub fn prescreen(margin: Option<f64>, calibration_cut: Option<f64>, gated_seen: 
 /// on to pass. `None` below thirty observed passers — a quantile from fewer is
 /// a number, not an operating point.
 #[must_use]
-#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 pub fn calibrate_prescreen(passer_margins: &[f64]) -> Option<f64> {
-    let mut v: Vec<f64> = passer_margins.iter().copied().filter(|m| m.is_finite()).collect();
+    let mut v: Vec<f64> = passer_margins
+        .iter()
+        .copied()
+        .filter(|m| m.is_finite())
+        .collect();
     if v.len() < 30 {
         return None;
     }
@@ -162,7 +179,10 @@ pub fn recommend_families(
     records: &[FamilyRecord],
     tasks_seen: i64,
 ) -> Answer<Vec<String>> {
-    debug_assert!(!tenant_id.is_empty(), "M8 is per-tenant; an empty tenant is a pooled read");
+    debug_assert!(
+        !tenant_id.is_empty(),
+        "M8 is per-tenant; an empty tenant is a pooled read"
+    );
     let (rung, evidence) = choose_rung("M8", tasks_seen, None, false, false);
     let mut ranked: Vec<&FamilyRecord> = records.iter().collect();
     ranked.sort_by(|a, b| b.lower_bound().total_cmp(&a.lower_bound()));
@@ -201,10 +221,18 @@ pub struct Proposal {
 /// of what the acquisition is for, and it would look like a ranking to everyone
 /// downstream.
 #[must_use]
-pub fn rank_proposals(proposals: &[Proposal], ranked_items_seen: i64, groups_seen: i64) -> Answer<Option<Vec<String>>> {
+pub fn rank_proposals(
+    proposals: &[Proposal],
+    ranked_items_seen: i64,
+    groups_seen: i64,
+) -> Answer<Option<Vec<String>>> {
     let (rung, evidence) = choose_rung("M9", ranked_items_seen, Some(groups_seen), false, false);
     if proposals.iter().any(|p| p.sigma.is_none()) {
-        return Answer { value: None, rung, evidence };
+        return Answer {
+            value: None,
+            rung,
+            evidence,
+        };
     }
     let mut scored: Vec<(&Proposal, f64)> = proposals
         .iter()
@@ -258,7 +286,11 @@ pub fn critique_step(
     } else {
         StepVerdict::Fine
     };
-    Answer { value, rung, evidence }
+    Answer {
+        value,
+        rung,
+        evidence,
+    }
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -415,7 +447,10 @@ mod tests {
     }
 
     fn healthy_entropy() -> EntropyFloor {
-        EntropyFloor { observed: 2.0, mean_candidates: 20.0 }
+        EntropyFloor {
+            observed: 2.0,
+            mean_candidates: 20.0,
+        }
     }
 
     // ── M5 ──────────────────────────────────────────────────────────────────
@@ -432,14 +467,26 @@ mod tests {
     #[test]
     fn a_calibrated_prescreen_is_monotone_in_the_margin() {
         let cut = Some(-0.1);
-        assert_eq!(prescreen(Some(0.5), cut, 900, 150).value, Prescreen::Proceed);
-        assert_eq!(prescreen(Some(-0.1), cut, 900, 150).value, Prescreen::Proceed);
-        assert_eq!(prescreen(Some(-0.2), cut, 900, 150).value, Prescreen::LikelyFails);
+        assert_eq!(
+            prescreen(Some(0.5), cut, 900, 150).value,
+            Prescreen::Proceed
+        );
+        assert_eq!(
+            prescreen(Some(-0.1), cut, 900, 150).value,
+            Prescreen::Proceed
+        );
+        assert_eq!(
+            prescreen(Some(-0.2), cut, 900, 150).value,
+            Prescreen::LikelyFails
+        );
     }
 
     #[test]
     fn a_missing_margin_against_a_calibration_is_unknown_not_a_pass() {
-        assert_eq!(prescreen(None, Some(-0.1), 900, 150).value, Prescreen::Unknown);
+        assert_eq!(
+            prescreen(None, Some(-0.1), 900, 150).value,
+            Prescreen::Unknown
+        );
     }
 
     /// A quantile from a handful of passers is a number, not an operating point.
@@ -467,8 +514,16 @@ mod tests {
     /// something.
     #[test]
     fn families_rank_on_a_lower_bound_not_a_raw_rate() {
-        let lucky = FamilyRecord { family: "lucky".into(), attempts: 1, passes: 1 };
-        let proven = FamilyRecord { family: "proven".into(), attempts: 20, passes: 19 };
+        let lucky = FamilyRecord {
+            family: "lucky".into(),
+            attempts: 1,
+            passes: 1,
+        };
+        let proven = FamilyRecord {
+            family: "proven".into(),
+            attempts: 20,
+            passes: 19,
+        };
         assert!(proven.lower_bound() > lucky.lower_bound());
 
         let r = recommend_families("tenant-a", &[lucky, proven], 10);
@@ -478,8 +533,16 @@ mod tests {
 
     #[test]
     fn a_family_nobody_has_tried_ranks_last_rather_than_first() {
-        let untried = FamilyRecord { family: "untried".into(), attempts: 0, passes: 0 };
-        let tried = FamilyRecord { family: "tried".into(), attempts: 10, passes: 3 };
+        let untried = FamilyRecord {
+            family: "untried".into(),
+            attempts: 0,
+            passes: 0,
+        };
+        let tried = FamilyRecord {
+            family: "tried".into(),
+            attempts: 10,
+            passes: 3,
+        };
         assert!((untried.lower_bound() - 0.0).abs() < f64::EPSILON);
         let r = recommend_families("t", &[untried, tried], 10);
         assert_eq!(r.value.first().unwrap(), "tried");
@@ -490,8 +553,16 @@ mod tests {
     #[test]
     fn proposals_rank_on_mean_plus_kappa_sigma() {
         let p = vec![
-            Proposal { id: "safe".into(), mean: 1.0, sigma: Some(0.0) },
-            Proposal { id: "wild".into(), mean: 0.5, sigma: Some(0.5) },
+            Proposal {
+                id: "safe".into(),
+                mean: 1.0,
+                sigma: Some(0.0),
+            },
+            Proposal {
+                id: "wild".into(),
+                mean: 0.5,
+                sigma: Some(0.5),
+            },
         ];
         let r = rank_proposals(&p, 100, 10).value.expect("ranked");
         // 0.5 + 2·0.5 = 1.5 beats 1.0 + 0: the acquisition buys information.
@@ -503,8 +574,16 @@ mod tests {
     #[test]
     fn without_a_surrogate_there_is_no_ranking_rather_than_a_mean_ranking() {
         let p = vec![
-            Proposal { id: "a".into(), mean: 1.0, sigma: None },
-            Proposal { id: "b".into(), mean: 0.5, sigma: Some(0.2) },
+            Proposal {
+                id: "a".into(),
+                mean: 1.0,
+                sigma: None,
+            },
+            Proposal {
+                id: "b".into(),
+                mean: 0.5,
+                sigma: Some(0.2),
+            },
         ];
         assert_eq!(rank_proposals(&p, 100, 10).value, None);
     }
@@ -513,12 +592,27 @@ mod tests {
 
     #[test]
     fn the_hard_rules_fire_before_any_triage() {
-        assert_eq!(critique_step(true, true, false, 0).value, StepVerdict::RuleViolation);
-        assert_eq!(critique_step(false, false, false, 0).value, StepVerdict::RuleViolation);
-        assert_eq!(critique_step(false, true, true, 0).value, StepVerdict::NeedsJudge);
-        assert_eq!(critique_step(false, true, false, 0).value, StepVerdict::Fine);
+        assert_eq!(
+            critique_step(true, true, false, 0).value,
+            StepVerdict::RuleViolation
+        );
+        assert_eq!(
+            critique_step(false, false, false, 0).value,
+            StepVerdict::RuleViolation
+        );
+        assert_eq!(
+            critique_step(false, true, true, 0).value,
+            StepVerdict::NeedsJudge
+        );
+        assert_eq!(
+            critique_step(false, true, false, 0).value,
+            StepVerdict::Fine
+        );
         // A repeated step is a loop whether or not it looks unusual.
-        assert_eq!(critique_step(true, true, true, 0).value, StepVerdict::RuleViolation);
+        assert_eq!(
+            critique_step(true, true, true, 0).value,
+            StepVerdict::RuleViolation
+        );
     }
 
     // ── 4.11 ────────────────────────────────────────────────────────────────
@@ -563,13 +657,29 @@ mod tests {
     #[test]
     fn a_win_off_the_frozen_holdout_is_not_a_win() {
         assert_eq!(
-            authorise_promotion(ModelTier::A, None, &frozen_holdout(), false, true, healthy_entropy(), None)
-                .unwrap_err(),
+            authorise_promotion(
+                ModelTier::A,
+                None,
+                &frozen_holdout(),
+                false,
+                true,
+                healthy_entropy(),
+                None
+            )
+            .unwrap_err(),
             PromotionRefusal::NotOnHoldout
         );
         assert_eq!(
-            authorise_promotion(ModelTier::A, None, &SeedHoldout::unfrozen(), true, true, healthy_entropy(), None)
-                .unwrap_err(),
+            authorise_promotion(
+                ModelTier::A,
+                None,
+                &SeedHoldout::unfrozen(),
+                true,
+                true,
+                healthy_entropy(),
+                None
+            )
+            .unwrap_err(),
             PromotionRefusal::NotOnHoldout
         );
     }
@@ -577,7 +687,13 @@ mod tests {
     #[test]
     fn a_frozen_platform_promotes_nothing() {
         let err = authorise_promotion(
-            ModelTier::A, Some("incident 4"), &frozen_holdout(), true, true, healthy_entropy(), None,
+            ModelTier::A,
+            Some("incident 4"),
+            &frozen_holdout(),
+            true,
+            true,
+            healthy_entropy(),
+            None,
         )
         .unwrap_err();
         assert!(matches!(err, PromotionRefusal::Frozen(r) if r == "incident 4"));
@@ -587,18 +703,43 @@ mod tests {
     /// was chosen from the narrow slate the old one produced.
     #[test]
     fn a_tier_b_promotion_needs_the_entropy_floor_and_an_approver() {
-        let collapsed = EntropyFloor { observed: 0.1, mean_candidates: 20.0 };
+        let collapsed = EntropyFloor {
+            observed: 0.1,
+            mean_candidates: 20.0,
+        };
         assert!(matches!(
-            authorise_promotion(ModelTier::B, None, &frozen_holdout(), true, true, collapsed, Some("mason")),
+            authorise_promotion(
+                ModelTier::B,
+                None,
+                &frozen_holdout(),
+                true,
+                true,
+                collapsed,
+                Some("mason")
+            ),
             Err(PromotionRefusal::EntropyFloor(_))
         ));
         assert_eq!(
-            authorise_promotion(ModelTier::B, None, &frozen_holdout(), true, true, healthy_entropy(), None)
-                .unwrap_err(),
+            authorise_promotion(
+                ModelTier::B,
+                None,
+                &frozen_holdout(),
+                true,
+                true,
+                healthy_entropy(),
+                None
+            )
+            .unwrap_err(),
             PromotionRefusal::NoApprover
         );
         let ok = authorise_promotion(
-            ModelTier::B, None, &frozen_holdout(), true, true, healthy_entropy(), Some("mason"),
+            ModelTier::B,
+            None,
+            &frozen_holdout(),
+            true,
+            true,
+            healthy_entropy(),
+            Some("mason"),
         )
         .expect("approved");
         assert_eq!(ok.approver(), Some("mason"));

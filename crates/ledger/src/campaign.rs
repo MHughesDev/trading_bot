@@ -257,7 +257,11 @@ pub struct CampaignHandle {
 
 impl CampaignHandle {
     /// Crate-internal: the ledger mints these and nothing else does.
-    pub(crate) fn seal(campaign_id: Uuid, tenant_id: String, definition: CampaignDefinition) -> Self {
+    pub(crate) fn seal(
+        campaign_id: Uuid,
+        tenant_id: String,
+        definition: CampaignDefinition,
+    ) -> Self {
         let define_hash = definition.define_hash();
         Self {
             campaign_id,
@@ -295,7 +299,11 @@ impl CampaignHandle {
     /// A dispatch context scoped to this campaign, carrying the declared effect
     /// size. The caller cannot supply a different one.
     #[must_use]
-    pub fn dispatch_context(&self, actor: crate::ActorKind, actor_id: impl Into<String>) -> DispatchContext {
+    pub fn dispatch_context(
+        &self,
+        actor: crate::ActorKind,
+        actor_id: impl Into<String>,
+    ) -> DispatchContext {
         let actor_id = actor_id.into();
         DispatchContext {
             tenant_id: self.tenant_id.clone(),
@@ -433,7 +441,13 @@ fn softmax(preference: &[f64], n: usize) -> Vec<f64> {
     const MIN_WEIGHT: f64 = 1e-3;
 
     let scores: Vec<f64> = (0..n)
-        .map(|i| preference.get(i).copied().filter(|x| x.is_finite()).unwrap_or(0.0))
+        .map(|i| {
+            preference
+                .get(i)
+                .copied()
+                .filter(|x| x.is_finite())
+                .unwrap_or(0.0)
+        })
         .collect();
     let max = scores.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let exp: Vec<f64> = scores.iter().map(|s| (s - max).exp()).collect();
@@ -524,7 +538,10 @@ mod tests {
         for bad in [0.0, -0.1, f64::NAN] {
             let mut d = definition();
             d.delta_practical = bad;
-            assert!(d.validate().is_err(), "delta_practical = {bad} was accepted");
+            assert!(
+                d.validate().is_err(),
+                "delta_practical = {bad} was accepted"
+            );
         }
         assert!(definition().validate().is_ok());
     }
@@ -544,7 +561,10 @@ mod tests {
 
         let mut unconstrained = definition();
         unconstrained.objective = serde_json::json!({ "maximize": ["sharpe_net"] });
-        assert!(unconstrained.validate().is_err(), "constraints are required");
+        assert!(
+            unconstrained.validate().is_err(),
+            "constraints are required"
+        );
 
         let mut no_budget = definition();
         no_budget.budget.max_trials = 0;
@@ -594,12 +614,20 @@ mod tests {
         let led = InMemoryLedger::new();
         let c = handle();
         let d = Dispatcher::new(&c, &led);
-        let candidates: Vec<serde_json::Value> = (0..4).map(|i| serde_json::json!({ "i": i })).collect();
+        let candidates: Vec<serde_json::Value> =
+            (0..4).map(|i| serde_json::json!({ "i": i })).collect();
         // The policy is certain candidate 0 is best; the achieved fraction is 0.
         let preference = vec![100.0, 0.0, 0.0, 0.0];
         let mut rng = rng_over(vec![0.99, 0.80]);
         let draw = d
-            .draw(DecisionKind::Select, &candidates, &preference, 0.0, &mut rng, None)
+            .draw(
+                DecisionKind::Select,
+                &candidates,
+                &preference,
+                0.0,
+                &mut rng,
+                None,
+            )
             .expect("draw");
         assert!(draw.exploration_flag);
         assert!(
@@ -607,7 +635,10 @@ mod tests {
             "a uniform draw over 4 candidates has propensity 0.25, got {}",
             draw.propensity
         );
-        assert_eq!(draw.chosen_index, 3, "the policy's favourite was not forced");
+        assert_eq!(
+            draw.chosen_index, 3,
+            "the policy's favourite was not forced"
+        );
         assert!(d.below_floor(0.0));
     }
 
@@ -618,14 +649,26 @@ mod tests {
         let led = InMemoryLedger::new();
         let c = handle();
         let d = Dispatcher::new(&c, &led);
-        let candidates: Vec<serde_json::Value> = (0..3).map(|i| serde_json::json!({ "i": i })).collect();
+        let candidates: Vec<serde_json::Value> =
+            (0..3).map(|i| serde_json::json!({ "i": i })).collect();
         let preference = vec![10.0, 0.0, 0.0];
         let mut rng = rng_over(vec![0.99, 0.0]);
         let draw = d
-            .draw(DecisionKind::Select, &candidates, &preference, 0.50, &mut rng, None)
+            .draw(
+                DecisionKind::Select,
+                &candidates,
+                &preference,
+                0.50,
+                &mut rng,
+                None,
+            )
             .expect("draw");
         assert!(!draw.exploration_flag);
-        assert!(draw.propensity > 0.0 && draw.propensity < 1.0, "{}", draw.propensity);
+        assert!(
+            draw.propensity > 0.0 && draw.propensity < 1.0,
+            "{}",
+            draw.propensity
+        );
         assert!(!d.below_floor(0.50));
 
         // Every candidate keeps a reachable weight.
@@ -641,11 +684,19 @@ mod tests {
         let led = InMemoryLedger::new();
         let c = handle();
         let d = Dispatcher::new(&c, &led);
-        let candidates: Vec<serde_json::Value> = (0..4).map(|i| serde_json::json!({ "i": i })).collect();
+        let candidates: Vec<serde_json::Value> =
+            (0..4).map(|i| serde_json::json!({ "i": i })).collect();
         // u = 0.01 < floor 0.05 ⇒ this draw is an exploration draw.
         let mut rng = rng_over(vec![0.01, 0.5]);
         let draw = d
-            .draw(DecisionKind::Select, &candidates, &[9.0, 0.0, 0.0, 0.0], 0.90, &mut rng, None)
+            .draw(
+                DecisionKind::Select,
+                &candidates,
+                &[9.0, 0.0, 0.0, 0.0],
+                0.90,
+                &mut rng,
+                None,
+            )
             .expect("draw");
         assert!(draw.exploration_flag);
     }
@@ -668,7 +719,8 @@ mod tests {
         let led = InMemoryLedger::new();
         let c = handle();
         let d = Dispatcher::new(&c, &led);
-        let candidates: Vec<serde_json::Value> = (0..3).map(|i| serde_json::json!({ "i": i })).collect();
+        let candidates: Vec<serde_json::Value> =
+            (0..3).map(|i| serde_json::json!({ "i": i })).collect();
         let mut rng = rng_over(vec![0.9, 0.1]);
         let draw = d
             .draw(
@@ -765,7 +817,8 @@ mod tests {
         // And the fields a registration has no room for are the caller's.
         assert_eq!(def.slug, "momentum-4h");
         assert_eq!(def.approval_spend_usd, 5.0);
-        def.validate().expect("a definition derived from a sealed registration is valid");
+        def.validate()
+            .expect("a definition derived from a sealed registration is valid");
     }
 
     /// The two hashes cover different bytes, and that is stated rather than
@@ -785,7 +838,10 @@ mod tests {
                 objective: serde_json::json!({ "maximize": ["sharpe"], "subject_to": {} }),
                 benchmark: serde_json::json!({ "family": "buy_and_hold" }),
                 delta_practical: 0.1,
-                window: Window { start: "2020-01-01".into(), end: "2024-12-31".into() },
+                window: Window {
+                    start: "2020-01-01".into(),
+                    end: "2024-12-31".into(),
+                },
                 cost_model_version: "costs_v3".into(),
                 null_family: "block_bootstrap".into(),
                 trial_budget: 32,
@@ -803,12 +859,24 @@ mod tests {
         .expect("seals");
 
         let a = CampaignDefinition::from_preregistration(
-            &prereg, "a".into(), 5.0, 2.0, 25.0, 48.0,
-            ExplorationFloor::default_floor(), serde_json::json!({}),
+            &prereg,
+            "a".into(),
+            5.0,
+            2.0,
+            25.0,
+            48.0,
+            ExplorationFloor::default_floor(),
+            serde_json::json!({}),
         );
         let b = CampaignDefinition::from_preregistration(
-            &prereg, "b".into(), 5.0, 2.0, 25.0, 48.0,
-            ExplorationFloor::default_floor(), serde_json::json!({}),
+            &prereg,
+            "b".into(),
+            5.0,
+            2.0,
+            25.0,
+            48.0,
+            ExplorationFloor::default_floor(),
+            serde_json::json!({}),
         );
         assert_ne!(
             a.define_hash(),

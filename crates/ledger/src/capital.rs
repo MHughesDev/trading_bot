@@ -71,7 +71,9 @@ impl AllowedFraction {
     /// that costs money.
     #[must_use]
     pub fn from_value(v: f64) -> Option<Self> {
-        Self::LADDER.into_iter().find(|f| (f.value() - v).abs() < 1e-9)
+        Self::LADDER
+            .into_iter()
+            .find(|f| (f.value() - v).abs() < 1e-9)
     }
 
     fn index(self) -> usize {
@@ -183,12 +185,21 @@ pub fn authorise(
     }
     let covered = seen.iter().filter(|s| **s).count();
     if covered < GATE_COUNT {
-        return Err(RampRefusal::Incomplete { profile: profile_id.to_string(), seen: covered });
+        return Err(RampRefusal::Incomplete {
+            profile: profile_id.to_string(),
+            seen: covered,
+        });
     }
     if failed > 0 {
-        return Err(RampRefusal::GatesFailed { profile: profile_id.to_string(), failed });
+        return Err(RampRefusal::GatesFailed {
+            profile: profile_id.to_string(),
+            failed,
+        });
     }
-    Ok(RampAuthority { profile_id: profile_id.to_string(), gates_passed: covered })
+    Ok(RampAuthority {
+        profile_id: profile_id.to_string(),
+        gates_passed: covered,
+    })
 }
 
 #[cfg(test)]
@@ -236,7 +247,10 @@ mod tests {
         let mut partial = all_pass();
         partial.pop();
         let err = authorise("strict_v1", true, &partial).unwrap_err();
-        assert!(matches!(err, RampRefusal::Incomplete { seen: 15, .. }), "{err}");
+        assert!(
+            matches!(err, RampRefusal::Incomplete { seen: 15, .. }),
+            "{err}"
+        );
     }
 
     #[test]
@@ -244,7 +258,10 @@ mod tests {
         let mut one_bad = all_pass();
         one_bad[7] = (8, false);
         let err = authorise("strict_v1", true, &one_bad).unwrap_err();
-        assert!(matches!(err, RampRefusal::GatesFailed { failed: 1, .. }), "{err}");
+        assert!(
+            matches!(err, RampRefusal::GatesFailed { failed: 1, .. }),
+            "{err}"
+        );
     }
 
     #[test]

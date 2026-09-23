@@ -338,20 +338,33 @@ mod tests {
     /// A question with no stated stakes never gets prioritised.
     #[test]
     fn a_question_must_say_why_it_matters() {
-        let err = open("q1", "BTC-USD", "is it zero?", "  ", false, QuestionValue::Curious, "run_1")
-            .expect_err("refused");
+        let err = open(
+            "q1",
+            "BTC-USD",
+            "is it zero?",
+            "  ",
+            false,
+            QuestionValue::Curious,
+            "run_1",
+        )
+        .expect_err("refused");
         assert_eq!(err, QuestionError::NoStakes);
-        assert!(
-            err.to_string().contains("nobody will prioritise"),
-            "{err}"
-        );
+        assert!(err.to_string().contains("nobody will prioritise"), "{err}");
     }
 
     /// And a subject, so the run that could answer it is told.
     #[test]
     fn a_question_without_a_subject_reaches_nobody() {
         assert_eq!(
-            open("q1", " ", "is it zero?", "it matters", false, QuestionValue::Curious, "r"),
+            open(
+                "q1",
+                " ",
+                "is it zero?",
+                "it matters",
+                false,
+                QuestionValue::Curious,
+                "r"
+            ),
             Err(QuestionError::NoSubject)
         );
     }
@@ -485,7 +498,12 @@ mod tests {
             "run_1",
         )
         .expect("a complete question");
-        let in_passing = noticed("question-0", "BTC-USD", "something odd in the tail", "run_1");
+        let in_passing = noticed(
+            "question-0",
+            "BTC-USD",
+            "something odd in the tail",
+            "run_1",
+        );
 
         for q in [&deliberate, &in_passing] {
             let extra = q.extra();
@@ -523,7 +541,12 @@ mod tests {
             "run_1",
         )
         .expect("a complete question");
-        let noticed_one = noticed("question-0", "BTC-USD", "something odd in the tail", "run_1");
+        let noticed_one = noticed(
+            "question-0",
+            "BTC-USD",
+            "something odd in the tail",
+            "run_1",
+        );
 
         assert!(asked.stakes_were_stated());
         assert!(!noticed_one.stakes_were_stated());

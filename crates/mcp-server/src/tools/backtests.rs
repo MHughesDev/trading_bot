@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-
 use crate::{ApiClient, ProgressUpdate};
 
 /// Array length above which summary detail truncates (equity curves, trade

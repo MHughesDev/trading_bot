@@ -31,7 +31,14 @@ pub enum IdentityError {
 
 /// `(instrument_id, venue_id, symbol, valid_from, valid_to, knowledge_time)` as read
 /// from `dataplane.instrument_symbol`.
-type SymbolFactRow = (i64, i32, String, DateTime<Utc>, Option<DateTime<Utc>>, DateTime<Utc>);
+type SymbolFactRow = (
+    i64,
+    i32,
+    String,
+    DateTime<Utc>,
+    Option<DateTime<Utc>>,
+    DateTime<Utc>,
+);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceInfo {
@@ -45,7 +52,13 @@ pub struct SourceInfo {
 pub trait IdentityResolver: Send + Sync {
     /// The surrogate id for `(venue, symbol)` at `at`, allocating one if the pair has
     /// never been seen.
-    async fn ensure_instrument(&self, venue: &str, symbol: &str, asset_class: AssetClass, at: DateTime<Utc>) -> Result<(InstrumentKey, VenueKey), IdentityError>;
+    async fn ensure_instrument(
+        &self,
+        venue: &str,
+        symbol: &str,
+        asset_class: AssetClass,
+        at: DateTime<Utc>,
+    ) -> Result<(InstrumentKey, VenueKey), IdentityError>;
 
     async fn source(&self, name: &str) -> Result<SourceInfo, IdentityError>;
 }
@@ -93,15 +106,22 @@ fn ns(t: DateTime<Utc>) -> i64 {
 impl PgIdentityService {
     #[must_use]
     pub fn new(pg: PgPool, ch_url: impl Into<String>) -> Arc<Self> {
-        Arc::new(Self { pg, ch_url: ch_url.into(), cache: RwLock::new(HashMap::new()), sources: RwLock::new(HashMap::new()) })
+        Arc::new(Self {
+            pg,
+            ch_url: ch_url.into(),
+            cache: RwLock::new(HashMap::new()),
+            sources: RwLock::new(HashMap::new()),
+        })
     }
 
     async fn venue_id(&self, venue: &str) -> Result<VenueKey, IdentityError> {
-        let id: Option<i32> = sqlx::query_scalar("SELECT venue_id FROM dataplane.venue WHERE name = $1")
-            .bind(venue)
-            .fetch_optional(&self.pg)
-            .await?;
-        id.map(VenueKey).ok_or_else(|| IdentityError::UnknownVenue(venue.to_string()))
+        let id: Option<i32> =
+            sqlx::query_scalar("SELECT venue_id FROM dataplane.venue WHERE name = $1")
+                .bind(venue)
+                .fetch_optional(&self.pg)
+                .await?;
+        id.map(VenueKey)
+            .ok_or_else(|| IdentityError::UnknownVenue(venue.to_string()))
     }
 
     /// Replicate identity dimensions to ClickHouse. Idempotent.
@@ -114,39 +134,79 @@ impl PgIdentityService {
         )
         .fetch_all(&self.pg)
         .await?;
-        let venues: Vec<(i32, String, i16)> = sqlx::query_as("SELECT venue_id, name, quality_tier FROM dataplane.venue").fetch_all(&self.pg).await?;
-        let ch = crate::clickhouse::connect(&self.ch_url);
-        let mut ins = ch.insert("venue_dim").map_err(|e| IdentityError::Ch(e.to_string()))?;
-        for (venue_id, name, tier) in venues {
-            ins.write(&VenueDimRow { venue_id, name, quality_tier: u8::try_from(tier).unwrap_or(3) }).await.map_err(|e| IdentityError::Ch(e.to_string()))?;
-        }
-        ins.end().await.map_err(|e| IdentityError::Ch(e.to_string()))?;
-        let sources: Vec<(i32, String, String, i64)> =
-            sqlx::query_as("SELECT source_id, name, kind, declared_vendor_lag_ms FROM dataplane.source")
+        let venues: Vec<(i32, String, i16)> =
+            sqlx::query_as("SELECT venue_id, name, quality_tier FROM dataplane.venue")
                 .fetch_all(&self.pg)
                 .await?;
-        let mut ins = ch.insert("source_dim").map_err(|e| IdentityError::Ch(e.to_string()))?;
+        let ch = crate::clickhouse::connect(&self.ch_url);
+        let mut ins = ch
+            .insert("venue_dim")
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
+        for (venue_id, name, tier) in venues {
+            ins.write(&VenueDimRow {
+                venue_id,
+                name,
+                quality_tier: u8::try_from(tier).unwrap_or(3),
+            })
+            .await
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
+        }
+        ins.end()
+            .await
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
+        let sources: Vec<(i32, String, String, i64)> = sqlx::query_as(
+            "SELECT source_id, name, kind, declared_vendor_lag_ms FROM dataplane.source",
+        )
+        .fetch_all(&self.pg)
+        .await?;
+        let mut ins = ch
+            .insert("source_dim")
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
         for (source_id, name, kind, declared_vendor_lag_ms) in sources {
-            ins.write(&SourceDimRow { source_id, name, kind, declared_vendor_lag_ms })
-                .await
-                .map_err(|e| IdentityError::Ch(e.to_string()))?;
+            ins.write(&SourceDimRow {
+                source_id,
+                name,
+                kind,
+                declared_vendor_lag_ms,
+            })
+            .await
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
         }
-        ins.end().await.map_err(|e| IdentityError::Ch(e.to_string()))?;
+        ins.end()
+            .await
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
         let n = symbols.len();
-        let mut ins = ch.insert("instrument_symbol_dim").map_err(|e| IdentityError::Ch(e.to_string()))?;
+        let mut ins = ch
+            .insert("instrument_symbol_dim")
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
         for (instrument_id, venue_id, symbol, from, to, kt) in symbols {
-            ins.write(&SymbolDimRow { instrument_id, venue_id, symbol, valid_from: ns(from), valid_to: to.map(ns), knowledge_time: ns(kt) })
-                .await
-                .map_err(|e| IdentityError::Ch(e.to_string()))?;
+            ins.write(&SymbolDimRow {
+                instrument_id,
+                venue_id,
+                symbol,
+                valid_from: ns(from),
+                valid_to: to.map(ns),
+                knowledge_time: ns(kt),
+            })
+            .await
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
         }
-        ins.end().await.map_err(|e| IdentityError::Ch(e.to_string()))?;
+        ins.end()
+            .await
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
         Ok(n)
     }
 }
 
 #[async_trait::async_trait]
 impl IdentityResolver for PgIdentityService {
-    async fn ensure_instrument(&self, venue: &str, symbol: &str, asset_class: AssetClass, at: DateTime<Utc>) -> Result<(InstrumentKey, VenueKey), IdentityError> {
+    async fn ensure_instrument(
+        &self,
+        venue: &str,
+        symbol: &str,
+        asset_class: AssetClass,
+        at: DateTime<Utc>,
+    ) -> Result<(InstrumentKey, VenueKey), IdentityError> {
         let key = (venue.to_string(), symbol.to_string());
         if let Some(hit) = self.cache.read().await.get(&key) {
             return Ok(*hit);
@@ -159,12 +219,14 @@ impl IdentityResolver for PgIdentityService {
             .bind(symbol)
             .execute(&mut *tx)
             .await?;
-        let existing: Option<i64> = sqlx::query_scalar("SELECT dataplane.resolve_symbol($1, $2, $3, 'infinity'::timestamptz)")
-            .bind(venue_id.0)
-            .bind(symbol)
-            .bind(at)
-            .fetch_one(&mut *tx)
-            .await?;
+        let existing: Option<i64> = sqlx::query_scalar(
+            "SELECT dataplane.resolve_symbol($1, $2, $3, 'infinity'::timestamptz)",
+        )
+        .bind(venue_id.0)
+        .bind(symbol)
+        .bind(at)
+        .fetch_one(&mut *tx)
+        .await?;
         let (id, created) = if let Some(id) = existing {
             (id, false)
         } else {
@@ -204,18 +266,23 @@ impl IdentityResolver for PgIdentityService {
         if let Some(s) = self.sources.read().await.get(name) {
             return Ok(s.clone());
         }
-        let row: Option<(i32, i64, String)> =
-            sqlx::query_as("SELECT source_id, declared_vendor_lag_ms, kind FROM dataplane.source WHERE name = $1")
-                .bind(name)
-                .fetch_optional(&self.pg)
-                .await?;
-        let (source_id, lag_ms, kind) = row.ok_or_else(|| IdentityError::UnknownSource(name.to_string()))?;
+        let row: Option<(i32, i64, String)> = sqlx::query_as(
+            "SELECT source_id, declared_vendor_lag_ms, kind FROM dataplane.source WHERE name = $1",
+        )
+        .bind(name)
+        .fetch_optional(&self.pg)
+        .await?;
+        let (source_id, lag_ms, kind) =
+            row.ok_or_else(|| IdentityError::UnknownSource(name.to_string()))?;
         let info = SourceInfo {
             source_id,
             declared_vendor_lag: std::time::Duration::from_millis(lag_ms.max(0) as u64),
             live: kind == "live_stream",
         };
-        self.sources.write().await.insert(name.to_string(), info.clone());
+        self.sources
+            .write()
+            .await
+            .insert(name.to_string(), info.clone());
         Ok(info)
     }
 }
@@ -232,11 +299,17 @@ pub struct MemoryIdentity {
 impl MemoryIdentity {
     #[must_use]
     pub fn new() -> Self {
-        Self { next: std::sync::atomic::AtomicI64::new(1000), ..Self::default() }
+        Self {
+            next: std::sync::atomic::AtomicI64::new(1000),
+            ..Self::default()
+        }
     }
 
     pub fn add_source(&self, name: &str, info: SourceInfo) {
-        self.sources.lock().expect("poisoned").insert(name.into(), info);
+        self.sources
+            .lock()
+            .expect("poisoned")
+            .insert(name.into(), info);
     }
 
     /// Write this resolver's mappings to a (scratch) ClickHouse database's identity
@@ -246,40 +319,91 @@ impl MemoryIdentity {
     /// Backend failures.
     pub async fn sync_dims(&self, ch_url: &str) -> Result<(), IdentityError> {
         let ch = crate::clickhouse::connect(ch_url);
-        let venues: Vec<(String, VenueKey)> = self.venues.lock().expect("poisoned").iter().map(|(k, v)| (k.clone(), *v)).collect();
-        let mut ins = ch.insert("venue_dim").map_err(|e| IdentityError::Ch(e.to_string()))?;
+        let venues: Vec<(String, VenueKey)> = self
+            .venues
+            .lock()
+            .expect("poisoned")
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+        let mut ins = ch
+            .insert("venue_dim")
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
         for (name, v) in venues {
-            ins.write(&VenueDimRow { venue_id: v.0, quality_tier: u8::try_from(v.0.min(3)).unwrap_or(3), name }).await.map_err(|e| IdentityError::Ch(e.to_string()))?;
+            ins.write(&VenueDimRow {
+                venue_id: v.0,
+                quality_tier: u8::try_from(v.0.min(3)).unwrap_or(3),
+                name,
+            })
+            .await
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
         }
-        ins.end().await.map_err(|e| IdentityError::Ch(e.to_string()))?;
-        let sentinel = ns(DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z").expect("sentinel").with_timezone(&Utc));
-        let pairs: Vec<((String, String), (InstrumentKey, VenueKey))> = self.map.lock().expect("poisoned").iter().map(|(k, v)| (k.clone(), *v)).collect();
-        let mut ins = ch.insert("instrument_symbol_dim").map_err(|e| IdentityError::Ch(e.to_string()))?;
+        ins.end()
+            .await
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
+        let sentinel = ns(DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z")
+            .expect("sentinel")
+            .with_timezone(&Utc));
+        let pairs: Vec<((String, String), (InstrumentKey, VenueKey))> = self
+            .map
+            .lock()
+            .expect("poisoned")
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+        let mut ins = ch
+            .insert("instrument_symbol_dim")
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
         for ((_, symbol), (i, v)) in pairs {
-            ins.write(&SymbolDimRow { instrument_id: i.0, venue_id: v.0, symbol, valid_from: sentinel, valid_to: None, knowledge_time: sentinel })
-                .await
-                .map_err(|e| IdentityError::Ch(e.to_string()))?;
+            ins.write(&SymbolDimRow {
+                instrument_id: i.0,
+                venue_id: v.0,
+                symbol,
+                valid_from: sentinel,
+                valid_to: None,
+                knowledge_time: sentinel,
+            })
+            .await
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
         }
-        ins.end().await.map_err(|e| IdentityError::Ch(e.to_string()))?;
+        ins.end()
+            .await
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
         Ok(())
     }
 }
 
 #[async_trait::async_trait]
 impl IdentityResolver for MemoryIdentity {
-    async fn ensure_instrument(&self, venue: &str, symbol: &str, _asset_class: AssetClass, _at: DateTime<Utc>) -> Result<(InstrumentKey, VenueKey), IdentityError> {
+    async fn ensure_instrument(
+        &self,
+        venue: &str,
+        symbol: &str,
+        _asset_class: AssetClass,
+        _at: DateTime<Utc>,
+    ) -> Result<(InstrumentKey, VenueKey), IdentityError> {
         let mut venues = self.venues.lock().expect("poisoned");
         let n = venues.len() as i32 + 1;
         let v = *venues.entry(venue.into()).or_insert(VenueKey(n));
         let mut map = self.map.lock().expect("poisoned");
         let next = &self.next;
-        Ok(*map
-            .entry((venue.into(), symbol.into()))
-            .or_insert_with(|| (InstrumentKey(next.fetch_add(1, std::sync::atomic::Ordering::SeqCst)), v)))
+        Ok(
+            *map.entry((venue.into(), symbol.into())).or_insert_with(|| {
+                (
+                    InstrumentKey(next.fetch_add(1, std::sync::atomic::Ordering::SeqCst)),
+                    v,
+                )
+            }),
+        )
     }
 
     async fn source(&self, name: &str) -> Result<SourceInfo, IdentityError> {
-        self.sources.lock().expect("poisoned").get(name).cloned().ok_or_else(|| IdentityError::UnknownSource(name.into()))
+        self.sources
+            .lock()
+            .expect("poisoned")
+            .get(name)
+            .cloned()
+            .ok_or_else(|| IdentityError::UnknownSource(name.into()))
     }
 }
 

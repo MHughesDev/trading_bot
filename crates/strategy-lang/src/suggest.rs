@@ -659,8 +659,7 @@ fn blocked(entry: &EntryProfile, clause: usize, sole_blocker_share: f64, out: &m
             proposal: Proposal::DropClause { clause: frag },
             why,
             expected_effect:
-                "this clause has no threshold to move, and it is what emptied the condition"
-                    .into(),
+                "this clause has no threshold to move, and it is what emptied the condition".into(),
         }),
     }
 }
@@ -721,11 +720,9 @@ fn fires_too_often(entry: &EntryProfile, share: f64, out: &mut Suggestions) {
                 },
                 direction,
             )),
-            Movable::Param { param, direction } => Some((
-                c,
-                Proposal::WidenParamRange { param, direction },
-                direction,
-            )),
+            Movable::Param { param, direction } => {
+                Some((c, Proposal::WidenParamRange { param, direction }, direction))
+            }
         }
     });
     match found {
@@ -811,8 +808,10 @@ fn exits(def: &StrategyDefinition, findings: &Findings, out: &mut Suggestions) {
         let Some(literal) = Fragment::new(literal) else {
             continue;
         };
-        let Some(clause) = Fragment::new(format!("exit {} {literal}", path.trim_start_matches("exit.")))
-        else {
+        let Some(clause) = Fragment::new(format!(
+            "exit {} {literal}",
+            path.trim_start_matches("exit.")
+        )) else {
             continue;
         };
         out.moves.push(Suggestion {
@@ -925,7 +924,12 @@ exit time 24 bars
         crate::compile(&ast).unwrap_or_else(|e| panic!("compile: {e:#?}"))
     }
 
-    fn profile(d: &StrategyDefinition, bars: u64, all_true: u64, per: &[(u64, u64)]) -> BlockingProfile {
+    fn profile(
+        d: &StrategyDefinition,
+        bars: u64,
+        all_true: u64,
+        per: &[(u64, u64)],
+    ) -> BlockingProfile {
         let counts = EntryCounts::new(
             "entry.long[0]",
             bars,
@@ -1197,8 +1201,14 @@ exit time 24 bars
                 objective: -0.4,
                 share_of_window: 0.3,
                 gate: Some(
-                    Predicate::new("variance_ratio", vec![64, 4], Cmp::Lt, "1", &Catalogue::engine())
-                        .expect("a real family"),
+                    Predicate::new(
+                        "variance_ratio",
+                        vec![64, 4],
+                        Cmp::Lt,
+                        "1",
+                        &Catalogue::engine(),
+                    )
+                    .expect("a real family"),
                 ),
             }],
         };

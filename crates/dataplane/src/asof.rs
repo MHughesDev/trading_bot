@@ -10,8 +10,15 @@
 ///
 /// `right_keys` must be sorted ascending.
 #[must_use]
-pub fn asof_backward(left_keys: &[i64], right_keys: &[i64], tolerance: Option<i64>) -> Vec<Option<usize>> {
-    debug_assert!(right_keys.windows(2).all(|w| w[0] <= w[1]), "right_keys must be sorted");
+pub fn asof_backward(
+    left_keys: &[i64],
+    right_keys: &[i64],
+    tolerance: Option<i64>,
+) -> Vec<Option<usize>> {
+    debug_assert!(
+        right_keys.windows(2).all(|w| w[0] <= w[1]),
+        "right_keys must be sorted"
+    );
     left_keys
         .iter()
         .map(|&t| {
@@ -52,7 +59,10 @@ mod tests {
     fn never_matches_the_future() {
         let left = [5, 10, 15, 20];
         let right = [0, 9, 16];
-        assert_eq!(asof_backward(&left, &right, None), vec![Some(0), Some(1), Some(1), Some(2)]);
+        assert_eq!(
+            asof_backward(&left, &right, None),
+            vec![Some(0), Some(1), Some(1), Some(2)]
+        );
         // 15 is closer to 16 than 9, but 16 is in its future.
         assert_eq!(asof_backward(&[15], &right, None), vec![Some(1)]);
     }

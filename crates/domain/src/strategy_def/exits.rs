@@ -311,9 +311,7 @@ impl ExitDistance {
             DistanceUnit::FractionOfEntry => {
                 self.magnitude > Decimal::ZERO && self.magnitude <= Decimal::ONE
             }
-            DistanceUnit::Atr { .. } | DistanceUnit::Sigma { .. } => {
-                self.magnitude > Decimal::ZERO
-            }
+            DistanceUnit::Atr { .. } | DistanceUnit::Sigma { .. } => self.magnitude > Decimal::ZERO,
         }
     }
 }
@@ -884,7 +882,9 @@ mod tests {
 
     #[test]
     fn the_signal_exit_matches_by_name() {
-        let r = ExitRule::OnSignal { emit: "flat".into() };
+        let r = ExitRule::OnSignal {
+            emit: "flat".into(),
+        };
         let mut s = long_at(100.0, 100.0);
         assert!(!fired(&r, &s));
         s.signals = vec!["long".into()];
@@ -965,7 +965,9 @@ mod tests {
                 stop(dec!(0.02)),
                 trail(dec!(0.03)),
                 ExitRule::MaxHoldingBars { bars: 240 },
-                ExitRule::OnSignal { emit: "flat".into() },
+                ExitRule::OnSignal {
+                    emit: "flat".into(),
+                },
             ],
         };
         let s = serde_json::to_string(&p).unwrap();

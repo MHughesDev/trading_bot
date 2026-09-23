@@ -104,7 +104,10 @@ fn no_identifier_offers_a_way_to_continue_on_divergence() {
     let mut violations: Vec<String> = Vec::new();
 
     let mut targets = files_under(&root.join("crates/risk/src"), &["rs"]);
-    targets.extend(files_under(&root.join("crates/reconciliation/src"), &["rs"]));
+    targets.extend(files_under(
+        &root.join("crates/reconciliation/src"),
+        &["rs"],
+    ));
     // A config key is the likeliest shape this would take, so the platform's
     // configuration is scanned too — read-only; nothing here edits it.
     targets.extend(files_under(&root.join("crates/config/src"), &["rs"]));

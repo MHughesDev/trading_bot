@@ -143,7 +143,13 @@ fn result(
 ) -> CheckResult {
     let mut offending = offending;
     offending.truncate(MAX_OFFENDING);
-    CheckResult { kind, outcome, detail: detail.into(), offending, metric }
+    CheckResult {
+        kind,
+        outcome,
+        detail: detail.into(),
+        offending,
+        metric,
+    }
 }
 
 // ── 1. coverage ──────────────────────────────────────────────────────────────
@@ -227,7 +233,11 @@ pub fn revisions(bars: &[QcBar]) -> CheckResult {
         // rate means, and it means different things at different grades.
         Outcome::Pass,
         Some(share),
-        format!("{} of {} bars revised since first publication", idx.len(), bars.len()),
+        format!(
+            "{} of {} bars revised since first publication",
+            idx.len(),
+            bars.len()
+        ),
         idx,
     )
 }
@@ -296,7 +306,11 @@ pub fn bad_ticks(bars: &[QcBar], cfg: &QcConfig) -> CheckResult {
 
     result(
         CheckKind::BadTicks,
-        if total == 0 { Outcome::Pass } else { Outcome::Fail },
+        if total == 0 {
+            Outcome::Pass
+        } else {
+            Outcome::Fail
+        },
         Some(total as f64),
         format!(
             "{structural} structurally impossible bar(s), {reversing} spike(s) beyond \
@@ -348,7 +362,11 @@ pub fn stale_runs(bars: &[QcBar], cfg: &QcConfig, timeframe: &str) -> CheckResul
 
     result(
         CheckKind::StaleRuns,
-        if runs == 0 { Outcome::Pass } else { Outcome::Fail },
+        if runs == 0 {
+            Outcome::Pass
+        } else {
+            Outcome::Fail
+        },
         Some(longest as f64),
         format!(
             "{runs} run(s) of ≥ {threshold} identical closes on zero volume; longest {longest} bars"
@@ -491,7 +509,11 @@ pub fn timestamps(bars: &[QcBar]) -> CheckResult {
 
     result(
         CheckKind::Timestamps,
-        if total == 0 { Outcome::Pass } else { Outcome::Fail },
+        if total == 0 {
+            Outcome::Pass
+        } else {
+            Outcome::Fail
+        },
         Some(total as f64),
         format!(
             "{before_event} bar(s) with knowledge_time before event_time, {out_of_order} \
@@ -549,7 +571,11 @@ mod tests {
         let names: std::collections::BTreeSet<_> =
             CheckKind::ALL.iter().map(|k| k.as_str()).collect();
         assert_eq!(names.len(), CheckKind::ALL.len());
-        assert_eq!(CheckKind::ALL.len(), 8, "DATA-005 §7 specifies eight checks");
+        assert_eq!(
+            CheckKind::ALL.len(),
+            8,
+            "DATA-005 §7 specifies eight checks"
+        );
     }
 
     // ── each check fires on its own fixture and is silent on a clean one ─────
@@ -594,7 +620,11 @@ mod tests {
             b.revised = true;
         }
         let r = revisions(&bars);
-        assert_eq!(r.outcome, Outcome::Pass, "a revision is reported, never failed on");
+        assert_eq!(
+            r.outcome,
+            Outcome::Pass,
+            "a revision is reported, never failed on"
+        );
         assert!((r.metric.unwrap() - 0.07).abs() < 1e-9);
         assert_eq!(r.offending.len(), 7);
     }
@@ -606,7 +636,11 @@ mod tests {
         let r = bad_ticks(&bars, &cfg());
         assert_eq!(r.outcome, Outcome::Fail);
         assert!(r.offending.contains(&30), "{:?}", r.offending);
-        assert!(r.detail.contains("1 structurally impossible"), "{}", r.detail);
+        assert!(
+            r.detail.contains("1 structurally impossible"),
+            "{}",
+            r.detail
+        );
     }
 
     #[test]
@@ -643,7 +677,11 @@ mod tests {
             b.close += 40.0;
         }
         let r = bad_ticks(&persistent, &cfg());
-        assert!(r.detail.contains("0 spike"), "a sustained move is not a print: {}", r.detail);
+        assert!(
+            r.detail.contains("0 spike"),
+            "a sustained move is not a print: {}",
+            r.detail
+        );
     }
 
     #[test]
@@ -672,7 +710,11 @@ mod tests {
         }
         let r = stale_runs(&republished, &cfg(), "1m");
         assert_eq!(r.outcome, Outcome::Fail, "{}", r.detail);
-        assert!(r.metric.unwrap() >= 30.0, "the 1m threshold is 30 bars: {}", r.detail);
+        assert!(
+            r.metric.unwrap() >= 30.0,
+            "the 1m threshold is 30 bars: {}",
+            r.detail
+        );
     }
 
     #[test]
@@ -723,7 +765,11 @@ mod tests {
         bars[20].knowledge_ns = bars[20].event_ns - 1;
         let r = timestamps(&bars);
         assert_eq!(r.outcome, Outcome::Fail);
-        assert!(r.detail.contains("1 bar(s) with knowledge_time before"), "{}", r.detail);
+        assert!(
+            r.detail.contains("1 bar(s) with knowledge_time before"),
+            "{}",
+            r.detail
+        );
         assert_eq!(r.offending, vec![20]);
     }
 
@@ -817,7 +863,11 @@ mod tests {
         }
         let r = timestamps(&bars);
         assert_eq!(r.offending.len(), MAX_OFFENDING);
-        assert!(r.detail.contains("500 bar(s)"), "the count is still honest: {}", r.detail);
+        assert!(
+            r.detail.contains("500 bar(s)"),
+            "the count is still honest: {}",
+            r.detail
+        );
     }
 
     /// A grade with no reasons is unreviewable and unappealable.

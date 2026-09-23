@@ -80,9 +80,7 @@ impl Turn {
                         .map(|c| estimate_tokens(&c.arguments) + estimate_tokens(&c.name))
                         .sum::<u32>()
             }
-            Turn::ToolResult { body, name, .. } => {
-                estimate_tokens(body) + estimate_tokens(name)
-            }
+            Turn::ToolResult { body, name, .. } => estimate_tokens(body) + estimate_tokens(name),
         }
     }
 
@@ -209,7 +207,9 @@ impl Transcript {
 
         // Rule 2: tool results before assistant prose. A result is reproducible —
         // call it again — and the assistant's reasoning is not.
-        let mut order: Vec<usize> = (0..protected_from).filter(|i| self.turns[*i].is_result()).collect();
+        let mut order: Vec<usize> = (0..protected_from)
+            .filter(|i| self.turns[*i].is_result())
+            .collect();
         order.extend((0..protected_from).filter(|i| !self.turns[*i].is_result()));
 
         let mut total: u32 = self.turns.iter().map(Turn::tokens).sum();
@@ -225,9 +225,9 @@ impl Transcript {
                     }
                     // Rule 4: a handle, always. `[elided — was N bytes]` is a
                     // permanent hole the model cannot tell from an empty result.
-                    let where_to_read = handle.clone().unwrap_or_else(|| {
-                        format!("work/transcript-turn-{i}.txt")
-                    });
+                    let where_to_read = handle
+                        .clone()
+                        .unwrap_or_else(|| format!("work/transcript-turn-{i}.txt"));
                     *body = format!(
                         "{}\n\n[the rest of this result is at {where_to_read}]",
                         truncate_middle(body, ELIDED_BODY_BYTES)
@@ -242,7 +242,9 @@ impl Transcript {
                     if text.as_deref().map_or(0, str::len) <= ELIDED_BODY_BYTES {
                         continue;
                     }
-                    *text = text.as_deref().map(|t| truncate_middle(t, ELIDED_BODY_BYTES));
+                    *text = text
+                        .as_deref()
+                        .map(|t| truncate_middle(t, ELIDED_BODY_BYTES));
                     report.truncated += 1;
                 }
             }
@@ -299,7 +301,10 @@ mod tests {
         let p = profile();
         let mut t = Transcript::new("find whether BTC-USD has momentum at 1h");
         for i in 0..200 {
-            t.push_assistant(Some("Let me read the bars for this window.".repeat(20)), vec![call(i)]);
+            t.push_assistant(
+                Some("Let me read the bars for this window.".repeat(20)),
+                vec![call(i)],
+            );
             t.push_result(
                 format!("call_{i}"),
                 "get_bars",
@@ -312,7 +317,10 @@ mod tests {
         let report = t.compact(&p, 2_000);
         let after = t.tokens();
 
-        assert!(after < before, "compaction did something: {before} -> {after}");
+        assert!(
+            after < before,
+            "compaction did something: {before} -> {after}"
+        );
         assert!(
             after <= p.input_budget_tokens(),
             "a 200-step transcript must fit the window: {after} > {}",
@@ -361,7 +369,15 @@ mod tests {
         let elided_results = t
             .turns()
             .iter()
-            .filter(|x| matches!(x, Turn::ToolResult { handle: Some(_), .. }))
+            .filter(|x| {
+                matches!(
+                    x,
+                    Turn::ToolResult {
+                        handle: Some(_),
+                        ..
+                    }
+                )
+            })
             .count();
         assert!(
             elided_results > 0,
@@ -435,7 +451,13 @@ mod tests {
         let mut t = Transcript::new("goal");
         for i in 0..30 {
             t.push_assistant(Some("P".repeat(4_000)), vec![call(i)]);
-            t.push_result(format!("call_{i}"), "get_bars", "q".repeat(4_000), false, None);
+            t.push_result(
+                format!("call_{i}"),
+                "get_bars",
+                "q".repeat(4_000),
+                false,
+                None,
+            );
         }
         t.compact(&p, 0);
 
@@ -449,7 +471,11 @@ mod tests {
             .collect();
         assert_eq!(calls.len(), 30, "every call survives");
         for (i, c) in calls.iter().enumerate() {
-            assert_eq!(c.id, format!("call_{i}"), "and keeps its id, so the result matches");
+            assert_eq!(
+                c.id,
+                format!("call_{i}"),
+                "and keeps its id, so the result matches"
+            );
         }
     }
 

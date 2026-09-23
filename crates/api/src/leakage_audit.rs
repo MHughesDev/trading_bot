@@ -606,8 +606,16 @@ async fn record(
     .bind(checks_run)
     .bind(blocking)
     .bind(flags.max(0))
-    .bind(random_label.map(|r| r.permuted_max_abs_t).filter(|t| t.is_finite()))
-    .bind(random_label.map(|r| r.real_sharpe).filter(|s| s.is_finite()))
+    .bind(
+        random_label
+            .map(|r| r.permuted_max_abs_t)
+            .filter(|t| t.is_finite()),
+    )
+    .bind(
+        random_label
+            .map(|r| r.real_sharpe)
+            .filter(|s| s.is_finite()),
+    )
     .bind(started_at)
     .execute(&mut *tx)
     .await?;

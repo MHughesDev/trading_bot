@@ -59,9 +59,10 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let pool = PgPool::connect(&url).await?;
-    let rows = sqlx::query("SELECT version, checksum FROM public._sqlx_migrations ORDER BY version")
-        .fetch_all(&pool)
-        .await?;
+    let rows =
+        sqlx::query("SELECT version, checksum FROM public._sqlx_migrations ORDER BY version")
+            .fetch_all(&pool)
+            .await?;
 
     let (mut ok, mut fixed, mut refused, mut missing) = (0usize, 0usize, 0usize, 0usize);
 
@@ -96,7 +97,9 @@ async fn main() -> anyhow::Result<()> {
 
         let was = if stored == as_lf { "LF" } else { "CRLF" };
         if dry_run {
-            println!("  ~  {version}: recorded under {was}, file is now the other. Would re-record.");
+            println!(
+                "  ~  {version}: recorded under {was}, file is now the other. Would re-record."
+            );
         } else {
             sqlx::query("UPDATE public._sqlx_migrations SET checksum = $1 WHERE version = $2")
                 .bind(&current)

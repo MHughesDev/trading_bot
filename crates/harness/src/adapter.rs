@@ -191,7 +191,10 @@ pub fn verify(adapter: &dyn ModelAdapter, profile: &Profile) -> Result<(), Adapt
     if caps.max_context < wanted {
         return Err(missing(
             "max_context",
-            format!("the profile asks for {wanted} tokens and the backend accepts {}", caps.max_context),
+            format!(
+                "the profile asks for {wanted} tokens and the backend accepts {}",
+                caps.max_context
+            ),
         ));
     }
     // And a window the backend cannot be TOLD is one it will use its own default
@@ -344,7 +347,6 @@ impl ModelAdapter for LocalExecutor {
         }
     }
 
-
     fn uses_native_template(&self) -> bool {
         // Both local backends apply the model's own chat template from its Modelfile
         // or its tokenizer config; neither invents a format.
@@ -409,7 +411,10 @@ mod tests {
             matches!(
                 err,
                 AdapterError::NoConstrainedDecoding { .. }
-                    | AdapterError::MissingCapability { field: "grammar", .. }
+                    | AdapterError::MissingCapability {
+                        field: "grammar",
+                        ..
+                    }
             ),
             "a local profile on a backend with no grammar must be refused: {err}"
         );
@@ -467,7 +472,13 @@ mod tests {
         let mut p = frontier_fixture();
         p.output.constrained_decoding = true;
         // The SDK executor has `native_tools` and no `grammar`.
-        let err = verify(&SdkExecutor { model: "claude".into() }, &p).unwrap_err();
+        let err = verify(
+            &SdkExecutor {
+                model: "claude".into(),
+            },
+            &p,
+        )
+        .unwrap_err();
         let AdapterError::MissingCapability { field, .. } = err else {
             panic!("expected a named capability refusal, got {err:?}");
         };
@@ -525,7 +536,10 @@ mod tests {
             panic!("expected a named capability refusal, got {err:?}");
         };
         assert_eq!(field, "max_context");
-        assert!(detail.contains("200000") && detail.contains("32768"), "{detail}");
+        assert!(
+            detail.contains("200000") && detail.contains("32768"),
+            "{detail}"
+        );
     }
 
     /// An adapter that has not declared anything refuses every profile.
@@ -565,7 +579,10 @@ mod tests {
             matches!(
                 err,
                 AdapterError::NoConstrainedDecoding { .. }
-                    | AdapterError::MissingCapability { field: "grammar", .. }
+                    | AdapterError::MissingCapability {
+                        field: "grammar",
+                        ..
+                    }
             ),
             "a backend measured ignoring the grammar must not claim to support it: {err}"
         );

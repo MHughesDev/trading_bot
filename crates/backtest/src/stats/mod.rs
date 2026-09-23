@@ -326,7 +326,12 @@ pub fn bhy_adjusted_within(p: f64, others: &[f64], m_total: usize) -> f64 {
 pub fn sr_expected(backtest_sr: f64, n_eff: f64, sharpe_variance_across_trials: f64) -> f64 {
     #[allow(clippy::cast_possible_truncation)]
     let trials = n_eff.ceil().max(1.0) as i64;
-    let sr0 = sharpe_variance_across_trials.max(0.0).sqrt() * if trials <= 1 { 0.0 } else { expected_max_standard_gaussian(trials) };
+    let sr0 = sharpe_variance_across_trials.max(0.0).sqrt()
+        * if trials <= 1 {
+            0.0
+        } else {
+            expected_max_standard_gaussian(trials)
+        };
     (backtest_sr - sr0).min(0.5 * backtest_sr)
 }
 
@@ -339,7 +344,10 @@ mod tests {
         let adj = bhy_adjusted(&p);
         assert!(adj.iter().all(|a| (0.0..=1.0).contains(a)));
         for w in adj.windows(2) {
-            assert!(w[0] <= w[1] + 1e-15, "adjusted p must preserve order: {adj:?}");
+            assert!(
+                w[0] <= w[1] + 1e-15,
+                "adjusted p must preserve order: {adj:?}"
+            );
         }
         // BH alone would give 0.001·8/1 = 0.008; BHY multiplies by c(8) ≈ 2.718.
         assert!((adj[0] - 0.008 * (1..=8).map(|i| 1.0 / f64::from(i)).sum::<f64>()).abs() < 1e-12);
@@ -352,7 +360,10 @@ mod tests {
         let weak = sr_expected(0.3, 500.0, 0.01);
         assert!(weak < 0.15, "SR 0.3 must lose > 50%: {weak}");
         let strong = sr_expected(2.0, 500.0, 0.01);
-        assert!((strong - 1.0).abs() < 1e-12, "SR 2.0 is capped at half: {strong}");
+        assert!(
+            (strong - 1.0).abs() < 1e-12,
+            "SR 2.0 is capped at half: {strong}"
+        );
         assert_eq!(sr_expected(1.0, 1.0, 0.01), 0.5);
     }
 
@@ -378,7 +389,10 @@ mod tests {
         let p3000 = bhy_adjusted_within(raw, &[], 3000);
         assert!(p3 > raw);
         assert!(p3000 > p3);
-        assert!((p3000 - 1.0).abs() < 1e-12, "3000 effective trials make a raw p=0.001 meaningless");
+        assert!(
+            (p3000 - 1.0).abs() < 1e-12,
+            "3000 effective trials make a raw p=0.001 meaningless"
+        );
         assert!(p3 < 0.01, "3 effective trials keep it significant");
     }
 
@@ -400,7 +414,10 @@ mod tests {
     fn a_weaker_sharpe_needs_a_longer_track_record() {
         let strong = min_track_record_length(0.15, 0.0, 0.0, 3.0, 0.95).expect("positive");
         let weak = min_track_record_length(0.05, 0.0, 0.0, 3.0, 0.95).expect("positive");
-        assert!(weak > strong, "weak {weak} should need longer than strong {strong}");
+        assert!(
+            weak > strong,
+            "weak {weak} should need longer than strong {strong}"
+        );
 
         // Not a large number — nothing at all. A very large number reads as
         // "keep going", and the truth is that this never establishes anything.

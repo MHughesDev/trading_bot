@@ -100,7 +100,12 @@ mod tests {
         let cfg = RunConfigBuilder::new("s", "v", s, "c", "z", "snap")
             .seed(seed)
             .build();
-        let mut r = RunResult::failed(&cfg, ledger::TerminalReason::DependencyFailure, "x", "engine@test");
+        let mut r = RunResult::failed(
+            &cfg,
+            ledger::TerminalReason::DependencyFailure,
+            "x",
+            "engine@test",
+        );
         r.status = status;
         r
     }
@@ -123,7 +128,10 @@ mod tests {
     #[test]
     fn failed_and_rejected_runs_are_stored() {
         let store = InMemoryRunStore::new();
-        store.put(result(1, RunStatus::Failed(ledger::TerminalReason::DependencyFailure)));
+        store.put(result(
+            1,
+            RunStatus::Failed(ledger::TerminalReason::DependencyFailure),
+        ));
         store.put(result(2, RunStatus::RejectedIntegrity));
         assert_eq!(store.len(), 2);
     }

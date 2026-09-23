@@ -364,7 +364,10 @@ mod tests {
             )],
             &mut agenda,
         );
-        assert_eq!(agenda[1].workflow, "diagnose", "§4.5: resolution is research");
+        assert_eq!(
+            agenda[1].workflow, "diagnose",
+            "§4.5: resolution is research"
+        );
         assert_eq!(
             agenda[1].source_refs,
             vec!["f_47c".to_string(), "f_31a".to_string()],
@@ -436,7 +439,11 @@ mod tests {
         // one swallows every later one from any source.
         let charter = charter_over(&["btc"]);
         let mut agenda = seeded(session());
-        let out = open_questions(&charter, &[QuestionRow::new("q_1", "   ", "btc")], &mut agenda);
+        let out = open_questions(
+            &charter,
+            &[QuestionRow::new("q_1", "   ", "btc")],
+            &mut agenda,
+        );
         assert_eq!(agenda.len(), 1);
         assert_eq!(out.skipped[0].why, crate::harvest::SkipReason::Blank);
     }

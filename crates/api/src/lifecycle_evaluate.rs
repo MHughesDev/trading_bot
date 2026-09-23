@@ -200,9 +200,8 @@ pub async fn decide_run(
     .fetch_one(pg)
     .await
     .unwrap_or(0);
-    let protocol_unstable = amendments >= i32::try_from(ledger::prereg::MAX_PREREG_AMENDMENTS)
-        .unwrap_or(i32::MAX)
-        - 1;
+    let protocol_unstable =
+        amendments >= i32::try_from(ledger::prereg::MAX_PREREG_AMENDMENTS).unwrap_or(i32::MAX) - 1;
 
     let mut decided = Vec::new();
     let mut undecidable = Vec::new();
@@ -341,9 +340,21 @@ mod tests {
         measurements.insert(
             "sharpe".to_string(),
             vec![
-                Measurement { value: -0.2, ticket_id: "t1".into(), se: None },
-                Measurement { value: 0.1, ticket_id: "t2".into(), se: None },
-                Measurement { value: 0.3, ticket_id: "t3".into(), se: None },
+                Measurement {
+                    value: -0.2,
+                    ticket_id: "t1".into(),
+                    se: None,
+                },
+                Measurement {
+                    value: 0.1,
+                    ticket_id: "t2".into(),
+                    se: None,
+                },
+                Measurement {
+                    value: 0.3,
+                    ticket_id: "t3".into(),
+                    se: None,
+                },
             ],
         );
         let evidence = Evidence {
@@ -383,9 +394,21 @@ mod tests {
         measurements.insert(
             "sharpe".to_string(),
             vec![
-                Measurement { value: 1.1, ticket_id: "t1".into(), se: None },
-                Measurement { value: 1.4, ticket_id: "t2".into(), se: None },
-                Measurement { value: 0.9, ticket_id: "t3".into(), se: None },
+                Measurement {
+                    value: 1.1,
+                    ticket_id: "t1".into(),
+                    se: None,
+                },
+                Measurement {
+                    value: 1.4,
+                    ticket_id: "t2".into(),
+                    se: None,
+                },
+                Measurement {
+                    value: 0.9,
+                    ticket_id: "t3".into(),
+                    se: None,
+                },
             ],
         );
         let evidence = Evidence {
@@ -424,7 +447,13 @@ mod tests {
             missing: vec!["a benchmark ticket"],
             metric: "sharpe".into(),
         };
-        let j = as_json(&[d], &[(Uuid::nil(), Undecidable::Unparseable("no comparator".into()))]);
+        let j = as_json(
+            &[d],
+            &[(
+                Uuid::nil(),
+                Undecidable::Unparseable("no comparator".into()),
+            )],
+        );
         assert_eq!(j["decided"][0]["status"], "inconclusive");
         assert_eq!(j["decided"][0]["why"], "evidence_incomplete");
         assert_eq!(j["decided"][0]["missing"][0], "a benchmark ticket");

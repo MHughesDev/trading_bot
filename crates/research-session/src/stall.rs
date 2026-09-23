@@ -649,10 +649,7 @@ fn circling(window: &[FinishedRun]) -> Option<Tripped> {
         let Some(family) = r.family.clone() else {
             continue;
         };
-        groups
-            .entry((family, class))
-            .or_default()
-            .push(r.item);
+        groups.entry((family, class)).or_default().push(r.item);
     }
 
     let ((family, class), items) = groups

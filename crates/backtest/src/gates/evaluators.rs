@@ -329,7 +329,11 @@ pub fn gate_11_regime_coverage(
     strategy: &[(DateTime<Utc>, f64)],
 ) -> GateOutcome {
     let labelled_from_strategy = market.is_empty();
-    let source = if labelled_from_strategy { strategy } else { market };
+    let source = if labelled_from_strategy {
+        strategy
+    } else {
+        market
+    };
     if source.len() != strategy.len() {
         return GateOutcome::inconclusive(
             11,
@@ -343,7 +347,13 @@ pub fn gate_11_regime_coverage(
         );
     }
     let labels = vol_tercile_regimes(source, 21);
-    gate_11_with_labels(profile, asset_class, &labels, strategy, labelled_from_strategy)
+    gate_11_with_labels(
+        profile,
+        asset_class,
+        &labels,
+        strategy,
+        labelled_from_strategy,
+    )
 }
 
 /// Gate 11 over labels somebody else produced.
@@ -388,7 +398,10 @@ pub fn gate_11_with_labels(
         return GateOutcome::inconclusive(
             11,
             NAME,
-            format!("{} out-of-sample days is too few to label regimes", strategy.len()),
+            format!(
+                "{} out-of-sample days is too few to label regimes",
+                strategy.len()
+            ),
         );
     }
     if labels.len() != strategy.len() {
@@ -680,7 +693,11 @@ pub fn gate_12_perturbation(profile: &GateProfile, i: &PerturbationInputs<'_>) -
     let n_instruments = i.per_instrument_pnl.len();
     let mut concentration = 0.0;
     let mut concentrated_in = String::new();
-    let universe_floor = if n_instruments > 0 { 1.0 / n_instruments as f64 } else { 1.0 };
+    let universe_floor = if n_instruments > 0 {
+        1.0 / n_instruments as f64
+    } else {
+        1.0
+    };
     let effective_cap = t.max_single_instrument_pnl_share.max(universe_floor);
     if n_instruments > 1 && total > 0.0 {
         for (name, pnl) in i.per_instrument_pnl {
@@ -777,8 +794,12 @@ pub fn gate_14_romano_wolf(
 ) -> GateOutcome {
     const NAME: &str = "romano_wolf";
     let t = profile.thresholds();
-    match bootstrap::romano_wolf(family, t.romano_wolf_p_lt, bootstrap::MIN_STEPDOWN_RESAMPLES, seed)
-    {
+    match bootstrap::romano_wolf(
+        family,
+        t.romano_wolf_p_lt,
+        bootstrap::MIN_STEPDOWN_RESAMPLES,
+        seed,
+    ) {
         Ok(sd) => match sd.for_index(candidate_index) {
             Some(v) => GateOutcome::decided(
                 14,
@@ -871,7 +892,11 @@ pub fn gate_2_leakage_suite(
     }
 
     let ran: BTreeSet<&str> = run.checks_run.iter().map(String::as_str).collect();
-    let missing: Vec<&str> = required_checks.iter().copied().filter(|c| !ran.contains(c)).collect();
+    let missing: Vec<&str> = required_checks
+        .iter()
+        .copied()
+        .filter(|c| !ran.contains(c))
+        .collect();
     if !missing.is_empty() {
         return GateOutcome::inconclusive(
             2,
@@ -949,7 +974,11 @@ pub fn breakeven_multiple(ladder: &[CostRung]) -> Option<f64> {
         let (lo, hi) = (pair[0], pair[1]);
         if lo.net_metric > 0.0 && hi.net_metric <= 0.0 {
             let span = lo.net_metric - hi.net_metric;
-            let t = if span.abs() < 1e-12 { 0.0 } else { lo.net_metric / span };
+            let t = if span.abs() < 1e-12 {
+                0.0
+            } else {
+                lo.net_metric / span
+            };
             return Some(lo.multiple + t * (hi.multiple - lo.multiple));
         }
     }
@@ -1061,7 +1090,11 @@ pub fn square_root_impact(quantity_usd: f64, adv_usd: f64, daily_vol: f64) -> Op
 /// about behaviour outside the measured range is not evidence.
 #[must_use]
 pub fn capacity_at_half_sharpe(curve: &[(f64, f64)]) -> Option<f64> {
-    let mut points: Vec<(f64, f64)> = curve.iter().copied().filter(|(a, s)| a.is_finite() && s.is_finite() && *a > 0.0).collect();
+    let mut points: Vec<(f64, f64)> = curve
+        .iter()
+        .copied()
+        .filter(|(a, s)| a.is_finite() && s.is_finite() && *a > 0.0)
+        .collect();
     if points.len() < 2 {
         return None;
     }
@@ -1076,7 +1109,11 @@ pub fn capacity_at_half_sharpe(curve: &[(f64, f64)]) -> Option<f64> {
         let (a1, s1) = pair[1];
         if s0 > target && s1 <= target {
             let span = s0 - s1;
-            let t = if span.abs() < 1e-12 { 0.0 } else { (s0 - target) / span };
+            let t = if span.abs() < 1e-12 {
+                0.0
+            } else {
+                (s0 - target) / span
+            };
             return Some(a0 + t * (a1 - a0));
         }
     }
@@ -1154,7 +1191,11 @@ pub fn gate_4_capacity(profile: &GateProfile, i: &CapacityInputs<'_>) -> GateOut
             ),
         );
     };
-    let fraction = if capacity > 0.0 { i.base_aum_usd / capacity } else { f64::INFINITY };
+    let fraction = if capacity > 0.0 {
+        i.base_aum_usd / capacity
+    } else {
+        f64::INFINITY
+    };
 
     let impact = i
         .peak_daily_notional
@@ -1164,7 +1205,10 @@ pub fn gate_4_capacity(profile: &GateProfile, i: &CapacityInputs<'_>) -> GateOut
             let vol = i.daily_vol.get(&worst_name)?;
             square_root_impact(*q, *adv, *vol)
         })
-        .map_or_else(|| "unmodelled".to_string(), |x| format!("{:.1} bp", x * 10_000.0));
+        .map_or_else(
+            || "unmodelled".to_string(),
+            |x| format!("{:.1} bp", x * 10_000.0),
+        );
 
     let soft = if worst_share > t.adv_soft {
         format!(
@@ -1277,15 +1321,23 @@ pub fn newey_west_fit(y: &[f64], factors: &BTreeMap<String, Vec<f64>>) -> Option
         }
     }
     let xtx_inv = invert(&xtx)?;
-    let beta: Vec<f64> = (0..k).map(|a| (0..k).map(|b| xtx_inv[a][b] * xty[b]).sum()).collect();
+    let beta: Vec<f64> = (0..k)
+        .map(|a| (0..k).map(|b| xtx_inv[a][b] * xty[b]).sum())
+        .collect();
 
     // Residuals and R².
-    let fitted: Vec<f64> = (0..n).map(|r| (0..k).map(|a| x[r][a] * beta[a]).sum()).collect();
+    let fitted: Vec<f64> = (0..n)
+        .map(|r| (0..k).map(|a| x[r][a] * beta[a]).sum())
+        .collect();
     let resid: Vec<f64> = (0..n).map(|r| y[r] - fitted[r]).collect();
     let ybar = y.iter().sum::<f64>() / n as f64;
     let ss_tot: f64 = y.iter().map(|v| (v - ybar).powi(2)).sum();
     let ss_res: f64 = resid.iter().map(|e| e * e).sum();
-    let r_squared = if ss_tot > 0.0 { 1.0 - ss_res / ss_tot } else { 0.0 };
+    let r_squared = if ss_tot > 0.0 {
+        1.0 - ss_res / ss_tot
+    } else {
+        0.0
+    };
 
     // Newey–West meat matrix with a Bartlett kernel.
     let lags = (4.0 * (n as f64 / 100.0).powf(2.0 / 9.0)).floor().max(0.0) as usize;
@@ -1302,7 +1354,8 @@ pub fn newey_west_fit(y: &[f64], factors: &BTreeMap<String, Vec<f64>>) -> Option
         for r in l..n {
             for a in 0..k {
                 for b in 0..k {
-                    let cross = resid[r] * resid[r - l] * (x[r][a] * x[r - l][b] + x[r - l][a] * x[r][b]);
+                    let cross =
+                        resid[r] * resid[r - l] * (x[r][a] * x[r - l][b] + x[r - l][a] * x[r][b]);
                     meat[a][b] += w * cross;
                 }
             }
@@ -1311,14 +1364,22 @@ pub fn newey_west_fit(y: &[f64], factors: &BTreeMap<String, Vec<f64>>) -> Option
 
     // Sandwich: (X'X)⁻¹ · meat · (X'X)⁻¹, alpha's variance is element (0, 0).
     let mid: Vec<Vec<f64>> = (0..k)
-        .map(|a| (0..k).map(|b| (0..k).map(|c| xtx_inv[a][c] * meat[c][b]).sum()).collect())
+        .map(|a| {
+            (0..k)
+                .map(|b| (0..k).map(|c| xtx_inv[a][c] * meat[c][b]).sum())
+                .collect()
+        })
         .collect();
     let var_alpha: f64 = (0..k).map(|c| mid[0][c] * xtx_inv[c][0]).sum();
     if !(var_alpha.is_finite() && var_alpha > 0.0) {
         return None;
     }
 
-    let betas = names.iter().enumerate().map(|(idx, name)| ((*name).clone(), beta[idx + 1])).collect();
+    let betas = names
+        .iter()
+        .enumerate()
+        .map(|(idx, name)| ((*name).clone(), beta[idx + 1]))
+        .collect();
     Some(FactorFit {
         alpha: beta[0],
         alpha_t: beta[0] / var_alpha.sqrt(),
@@ -1449,7 +1510,10 @@ pub fn gate_10_factor_attribution(
             return GateOutcome::inconclusive(
                 10,
                 NAME,
-                format!("the strategy claims market neutrality but `{}` is not in the battery", i.market_factor),
+                format!(
+                    "the strategy claims market neutrality but `{}` is not in the battery",
+                    i.market_factor
+                ),
             );
         }
         if beta.abs() > MAX_NEUTRAL_MARKET_BETA {
@@ -1470,7 +1534,11 @@ pub fn gate_10_factor_attribution(
         failures.is_empty(),
         fit.alpha_t,
         t.alpha_t_stat_gte,
-        if failures.is_empty() { summary } else { format!("{summary}; {}", failures.join("; ")) },
+        if failures.is_empty() {
+            summary
+        } else {
+            format!("{summary}; {}", failures.join("; "))
+        },
     )
 }
 
@@ -1617,7 +1685,11 @@ pub fn gate_15_paper_shadow(profile: &GateProfile, i: PaperInputs) -> GateOutcom
         failures.is_empty(),
         i.signal_match,
         t.paper_signal_match_gte,
-        if failures.is_empty() { summary } else { format!("{summary}; {}", failures.join("; ")) },
+        if failures.is_empty() {
+            summary
+        } else {
+            format!("{summary}; {}", failures.join("; "))
+        },
     )
 }
 
@@ -1697,7 +1769,11 @@ mod tests {
 
     /// Daily returns from `start`, with a per-day closure so a test can plant a
     /// volatility regime or a concentrated P&L window.
-    fn daily(start: NaiveDate, n: usize, mut f: impl FnMut(usize) -> f64) -> Vec<(DateTime<Utc>, f64)> {
+    fn daily(
+        start: NaiveDate,
+        n: usize,
+        mut f: impl FnMut(usize) -> f64,
+    ) -> Vec<(DateTime<Utc>, f64)> {
         (0..n)
             .map(|i| {
                 let d = start + chrono::Duration::days(i as i64);
@@ -1718,7 +1794,12 @@ mod tests {
         let p = GateProfile::strict_v1();
         let out = gate_9_min_length(
             &p,
-            LengthInputs { sharpe: 1.9, n_eff: 10_000.0, years: 5.0, independent_events: 500 },
+            LengthInputs {
+                sharpe: 1.9,
+                n_eff: 10_000.0,
+                years: 5.0,
+                independent_events: 500,
+            },
         );
         assert!(!out.passed, "{}", out.detail);
         assert!(out.detail.contains("noise"));
@@ -1729,7 +1810,12 @@ mod tests {
         let p = GateProfile::strict_v1();
         let out = gate_9_min_length(
             &p,
-            LengthInputs { sharpe: 2.5, n_eff: 12.0, years: 8.0, independent_events: 900 },
+            LengthInputs {
+                sharpe: 2.5,
+                n_eff: 12.0,
+                years: 8.0,
+                independent_events: 900,
+            },
         );
         assert!(out.passed, "{}", out.detail);
     }
@@ -1742,7 +1828,12 @@ mod tests {
     /// That is the point — `paper_v1` is a different purpose, not a softer bar.
     #[test]
     fn paper_v1_drops_only_the_calendar_floor_at_gate_9() {
-        let short = LengthInputs { sharpe: 4.0, n_eff: 12.0, years: 0.8, independent_events: 400 };
+        let short = LengthInputs {
+            sharpe: 4.0,
+            n_eff: 12.0,
+            years: 0.8,
+            independent_events: 400,
+        };
         let strict = gate_9_min_length(&GateProfile::strict_v1(), short);
         assert!(!strict.passed, "a 10-month sample cannot pass strict_v1");
         assert!(strict.detail.contains("5.0y floor"));
@@ -1752,13 +1843,19 @@ mod tests {
 
         // The noise boundary still binds under paper_v1, and binds harder on a
         // short sample than it would on a long one.
-        let weak = LengthInputs { sharpe: 2.5, ..short };
+        let weak = LengthInputs {
+            sharpe: 2.5,
+            ..short
+        };
         let out = gate_9_min_length(&GateProfile::paper_v1(), weak);
         assert!(!out.passed, "paper_v1 does not relax the noise boundary");
         assert!(out.detail.contains("noise"));
 
         // And so does the event floor.
-        let thin = LengthInputs { independent_events: 50, ..short };
+        let thin = LengthInputs {
+            independent_events: 50,
+            ..short
+        };
         assert!(!gate_9_min_length(&GateProfile::paper_v1(), thin).passed);
     }
 
@@ -1766,7 +1863,12 @@ mod tests {
     fn gate_9_without_a_span_is_inconclusive_not_a_pass() {
         let out = gate_9_min_length(
             &GateProfile::strict_v1(),
-            LengthInputs { sharpe: 3.0, n_eff: 5.0, years: 0.0, independent_events: 9999 },
+            LengthInputs {
+                sharpe: 3.0,
+                n_eff: 5.0,
+                years: 0.0,
+                independent_events: 9999,
+            },
         );
         assert!(out.inconclusive);
         assert!(!out.passed, "an un-runnable gate is never a pass");
@@ -1778,7 +1880,11 @@ mod tests {
     fn vol_terciles_find_a_planted_volatility_regime() {
         let r = daily(NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(), 300, |i| {
             let amp = if (100..200).contains(&i) { 0.05 } else { 0.002 };
-            if i % 2 == 0 { amp } else { -amp }
+            if i % 2 == 0 {
+                amp
+            } else {
+                -amp
+            }
         });
         let labels = vol_tercile_regimes(&r, 21);
         assert_eq!(labels.len(), 300);
@@ -1800,7 +1906,11 @@ mod tests {
     fn gate_11_counts_the_labels_it_is_given() {
         let p = profile_with_crises();
         let r = daily(NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(), 400, |i| {
-            if (180..220).contains(&i) { 0.05 } else { 0.00001 }
+            if (180..220).contains(&i) {
+                0.05
+            } else {
+                0.00001
+            }
         });
         // Every day in one regime: the platform's labeller says the whole sample
         // was one kind of market, whatever the strategy's own returns did.
@@ -1823,7 +1933,11 @@ mod tests {
         let short = vec![VolRegime::Mid; r.len() - 1];
         let out = gate_11_with_labels(&p, "crypto", &short, &r, false);
         assert!(!out.passed);
-        assert!(out.detail.contains("regime labels against"), "{}", out.detail);
+        assert!(
+            out.detail.contains("regime labels against"),
+            "{}",
+            out.detail
+        );
     }
 
     /// The check that catches the most self-deception: all the money made in one
@@ -1833,12 +1947,24 @@ mod tests {
         let p = profile_with_crises();
         // The market cycles through three volatility regimes.
         let market = daily(NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(), 400, |i| {
-            let amp = match (i / 40) % 3 { 0 => 0.004, 1 => 0.012, _ => 0.030 };
-            if i % 2 == 0 { amp } else { -amp }
+            let amp = match (i / 40) % 3 {
+                0 => 0.004,
+                1 => 0.012,
+                _ => 0.030,
+            };
+            if i % 2 == 0 {
+                amp
+            } else {
+                -amp
+            }
         });
         let r = daily(NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(), 400, |i| {
             // Flat everywhere except a violent, profitable 40-day window.
-            if (180..220).contains(&i) { 0.05 } else { 0.00001 }
+            if (180..220).contains(&i) {
+                0.05
+            } else {
+                0.00001
+            }
         });
         let out = gate_11_regime_coverage(&p, "crypto", &market, &r);
         assert!(!out.passed, "{}", out.detail);
@@ -1856,14 +1982,26 @@ mod tests {
         // Nov 2019 → ~Mar 2023: spans both the covid and FTX windows.
         // The *market* cycles through three volatility regimes every 120 days.
         let market = daily(NaiveDate::from_ymd_opt(2019, 11, 1).unwrap(), 1_250, |i| {
-            let amp = match (i / 120) % 3 { 0 => 0.004, 1 => 0.012, _ => 0.028 };
-            if i % 2 == 0 { amp } else { -amp }
+            let amp = match (i / 120) % 3 {
+                0 => 0.004,
+                1 => 0.012,
+                _ => 0.028,
+            };
+            if i % 2 == 0 {
+                amp
+            } else {
+                -amp
+            }
         });
         // A volatility-targeted strategy: the same modest edge in every regime,
         // which is exactly the shape that looks like one regime if you label from
         // the strategy's own returns.
         let r = daily(NaiveDate::from_ymd_opt(2019, 11, 1).unwrap(), 1_250, |i| {
-            if i % 7 < 4 { 0.006 } else { -0.0055 }
+            if i % 7 < 4 {
+                0.006
+            } else {
+                -0.0055
+            }
         });
         let out = gate_11_regime_coverage(&p, "crypto", &market, &r);
         assert!(out.passed, "{}", out.detail);
@@ -1877,11 +2015,23 @@ mod tests {
     fn gate_11_says_when_a_crisis_window_is_outside_the_sample() {
         let p = profile_with_crises();
         let market = daily(NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(), 300, |i| {
-            let amp = match (i / 40) % 3 { 0 => 0.004, 1 => 0.012, _ => 0.030 };
-            if i % 2 == 0 { amp } else { -amp }
+            let amp = match (i / 40) % 3 {
+                0 => 0.004,
+                1 => 0.012,
+                _ => 0.030,
+            };
+            if i % 2 == 0 {
+                amp
+            } else {
+                -amp
+            }
         });
         let r = daily(NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(), 300, |i| {
-            if i % 5 == 0 { -0.004 } else { 0.002 }
+            if i % 5 == 0 {
+                -0.004
+            } else {
+                0.002
+            }
         });
         let out = gate_11_regime_coverage(&p, "crypto", &market, &r);
         assert!(out.detail.contains("predate this sample"), "{}", out.detail);
@@ -1905,7 +2055,11 @@ mod tests {
     fn labelling_regimes_from_the_strategy_understates_variety_and_says_so() {
         let p = profile_with_crises();
         let flat = daily(NaiveDate::from_ymd_opt(2019, 11, 1).unwrap(), 1_250, |i| {
-            if i % 7 < 4 { 0.006 } else { -0.0055 }
+            if i % 7 < 4 {
+                0.006
+            } else {
+                -0.0055
+            }
         });
         let out = gate_11_regime_coverage(&p, "crypto", &[], &flat);
         assert!(
@@ -1930,7 +2084,13 @@ mod tests {
     #[test]
     fn gate_12_rejects_a_parameter_spike() {
         let p = GateProfile::strict_v1();
-        let nbhd = [(8.0, 0.1), (9.0, 0.1), (10.0, 2.0), (11.0, 0.1), (12.0, 0.1)];
+        let nbhd = [
+            (8.0, 0.1),
+            (9.0, 0.1),
+            (10.0, 2.0),
+            (11.0, 0.1),
+            (12.0, 0.1),
+        ];
         let out = gate_12_perturbation(
             &p,
             &PerturbationInputs {
@@ -1951,7 +2111,13 @@ mod tests {
     #[test]
     fn gate_12_relaxes_the_concentration_cap_to_what_the_universe_allows() {
         let p = GateProfile::strict_v1();
-        let nbhd = [(8.0, 1.8), (9.0, 1.9), (10.0, 2.0), (11.0, 1.95), (12.0, 1.85)];
+        let nbhd = [
+            (8.0, 1.8),
+            (9.0, 1.9),
+            (10.0, 2.0),
+            (11.0, 1.95),
+            (12.0, 1.85),
+        ];
         let out = gate_12_perturbation(
             &p,
             &PerturbationInputs {
@@ -1980,7 +2146,13 @@ mod tests {
     #[test]
     fn gate_12_accepts_a_plateau() {
         let p = GateProfile::strict_v1();
-        let nbhd = [(8.0, 1.8), (9.0, 1.9), (10.0, 2.0), (11.0, 1.95), (12.0, 1.85)];
+        let nbhd = [
+            (8.0, 1.8),
+            (9.0, 1.9),
+            (10.0, 2.0),
+            (11.0, 1.95),
+            (12.0, 1.85),
+        ];
         let out = gate_12_perturbation(
             &p,
             &PerturbationInputs {
@@ -1998,13 +2170,22 @@ mod tests {
             },
         );
         assert!(out.passed, "{}", out.detail);
-        assert!(!out.detail.contains("cannot go below"), "the profile cap binds here");
+        assert!(
+            !out.detail.contains("cannot go below"),
+            "the profile cap binds here"
+        );
     }
 
     #[test]
     fn gate_12_rejects_a_result_carried_by_one_instrument() {
         let p = GateProfile::strict_v1();
-        let nbhd = [(8.0, 1.8), (9.0, 1.9), (10.0, 2.0), (11.0, 1.95), (12.0, 1.85)];
+        let nbhd = [
+            (8.0, 1.8),
+            (9.0, 1.9),
+            (10.0, 2.0),
+            (11.0, 1.95),
+            (12.0, 1.85),
+        ];
         let out = gate_12_perturbation(
             &p,
             &PerturbationInputs {
@@ -2027,7 +2208,13 @@ mod tests {
     #[test]
     fn a_single_instrument_strategy_is_told_the_check_did_not_apply() {
         let p = GateProfile::strict_v1();
-        let nbhd = [(8.0, 1.8), (9.0, 1.9), (10.0, 2.0), (11.0, 1.95), (12.0, 1.85)];
+        let nbhd = [
+            (8.0, 1.8),
+            (9.0, 1.9),
+            (10.0, 2.0),
+            (11.0, 1.95),
+            (12.0, 1.85),
+        ];
         let out = gate_12_perturbation(
             &p,
             &PerturbationInputs {
@@ -2049,7 +2236,13 @@ mod tests {
     #[test]
     fn gate_12_refuses_a_cross_section_that_spans_two_numeraires() {
         let p = GateProfile::strict_v1();
-        let nbhd = [(8.0, 1.8), (9.0, 1.9), (10.0, 2.0), (11.0, 1.95), (12.0, 1.85)];
+        let nbhd = [
+            (8.0, 1.8),
+            (9.0, 1.9),
+            (10.0, 2.0),
+            (11.0, 1.95),
+            (12.0, 1.85),
+        ];
         let out = gate_12_perturbation(
             &p,
             &PerturbationInputs {
@@ -2084,7 +2277,10 @@ mod tests {
         let p = GateProfile::strict_v1();
         let flat: Vec<CostRung> = [1.0, 2.0, 3.0, 4.0]
             .into_iter()
-            .map(|multiple| CostRung { multiple, net_metric: 0.10 })
+            .map(|multiple| CostRung {
+                multiple,
+                net_metric: 0.10,
+            })
             .collect();
         let out = gate_3_cost_sensitivity(&p, &flat);
         assert!(
@@ -2108,7 +2304,10 @@ mod tests {
     fn gate_3_refuses_a_one_rung_ladder() {
         let out = gate_3_cost_sensitivity(
             &GateProfile::strict_v1(),
-            &[CostRung { multiple: 1.0, net_metric: 0.1 }],
+            &[CostRung {
+                multiple: 1.0,
+                net_metric: 0.1,
+            }],
         );
         assert!(out.inconclusive && !out.passed, "{}", out.detail);
     }
@@ -2119,9 +2318,18 @@ mod tests {
     #[test]
     fn gate_3_fails_an_edge_that_dies_under_its_own_cost_model() {
         let ladder = [
-            CostRung { multiple: 0.5, net_metric: 0.02 },
-            CostRung { multiple: 1.0, net_metric: -0.01 },
-            CostRung { multiple: 2.0, net_metric: -0.06 },
+            CostRung {
+                multiple: 0.5,
+                net_metric: 0.02,
+            },
+            CostRung {
+                multiple: 1.0,
+                net_metric: -0.01,
+            },
+            CostRung {
+                multiple: 2.0,
+                net_metric: -0.06,
+            },
         ];
         let out = gate_3_cost_sensitivity(&GateProfile::strict_v1(), &ladder);
         assert!(!out.passed && !out.inconclusive, "{}", out.detail);
@@ -2187,7 +2395,11 @@ mod tests {
             },
         );
         assert!(out.inconclusive && !out.passed, "{}", out.detail);
-        assert!(out.detail.contains("beyond the measured range"), "{}", out.detail);
+        assert!(
+            out.detail.contains("beyond the measured range"),
+            "{}",
+            out.detail
+        );
     }
 
     /// An instrument that was traded but has no measured ADV makes the gate
@@ -2237,7 +2449,11 @@ mod tests {
             },
         );
         assert!(out.inconclusive && !out.passed, "{}", out.detail);
-        assert!(out.detail.contains("declares no factor battery"), "{}", out.detail);
+        assert!(
+            out.detail.contains("declares no factor battery"),
+            "{}",
+            out.detail
+        );
     }
 
     /// The placeholder that would otherwise sail through: a battery whose names
@@ -2258,7 +2474,9 @@ mod tests {
         let mut factors = BTreeMap::new();
         factors.insert("cmkt".to_string(), vec![0.0; 200]);
         factors.insert("csmb".to_string(), vec![0.0; 200]);
-        let strategy: Vec<f64> = (0..200).map(|i| if i % 2 == 0 { 0.01 } else { -0.002 }).collect();
+        let strategy: Vec<f64> = (0..200)
+            .map(|i| if i % 2 == 0 { 0.01 } else { -0.002 })
+            .collect();
         let out = gate_10_factor_attribution(
             &profile,
             "crypto",
@@ -2332,8 +2550,14 @@ mod tests {
     fn square_root_impact_scales_with_the_root_of_participation() {
         let a = square_root_impact(1_000_000.0, 100_000_000.0, 0.02).unwrap();
         let b = square_root_impact(4_000_000.0, 100_000_000.0, 0.02).unwrap();
-        assert!((b / a - 2.0).abs() < 1e-9, "four times the size is twice the impact");
-        assert!(square_root_impact(1.0, 0.0, 0.02).is_none(), "no ADV, no model");
+        assert!(
+            (b / a - 2.0).abs() < 1e-9,
+            "four times the size is twice the impact"
+        );
+        assert!(
+            square_root_impact(1.0, 0.0, 0.02).is_none(),
+            "no ADV, no model"
+        );
     }
 
     #[test]
@@ -2343,7 +2567,10 @@ mod tests {
         assert!(half > 1e7 && half < 4e7, "got {half}");
 
         // A curve that never halves does not get extrapolated into one that does.
-        assert_eq!(capacity_at_half_sharpe(&[(1e6, 2.0), (2e6, 1.9), (4e6, 1.8)]), None);
+        assert_eq!(
+            capacity_at_half_sharpe(&[(1e6, 2.0), (2e6, 1.9), (4e6, 1.8)]),
+            None
+        );
         assert_eq!(capacity_at_half_sharpe(&[(1e6, 2.0)]), None);
     }
 
@@ -2388,7 +2615,11 @@ mod tests {
             },
         );
         assert!(out.passed, "{}", out.detail);
-        assert!(out.detail.contains("single-venue"), "the caveat must survive: {}", out.detail);
+        assert!(
+            out.detail.contains("single-venue"),
+            "the caveat must survive: {}",
+            out.detail
+        );
     }
 
     #[test]
@@ -2438,7 +2669,10 @@ mod tests {
         GateProfile::strict_v1().with_asset_class(
             "crypto",
             super::super::profile::AssetClassGates {
-                factor_battery: ["CMKT", "CSMB", "CMOM"].iter().map(ToString::to_string).collect(),
+                factor_battery: ["CMKT", "CSMB", "CMOM"]
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
                 crisis_windows: Vec::new(),
             },
         )
@@ -2543,8 +2777,9 @@ mod tests {
         // idiosyncratic return that the battery does not explain most of the
         // variance — otherwise the R² check fires first and this test would be
         // checking the wrong thing.
-        let strategy: Vec<f64> =
-            (0..600).map(|i| 0.0015 + 0.5 * f["CMKT"][i] + 0.6 * noise[i]).collect();
+        let strategy: Vec<f64> = (0..600)
+            .map(|i| 0.0015 + 0.5 * f["CMKT"][i] + 0.6 * noise[i])
+            .collect();
 
         let claimed = gate_10_factor_attribution(
             &p,
@@ -2556,8 +2791,16 @@ mod tests {
                 neutral_claim: true,
             },
         );
-        assert!(!claimed.passed, "a neutral claim with β=0.5 must fail: {}", claimed.detail);
-        assert!(claimed.detail.contains("market-neutral"), "{}", claimed.detail);
+        assert!(
+            !claimed.passed,
+            "a neutral claim with β=0.5 must fail: {}",
+            claimed.detail
+        );
+        assert!(
+            claimed.detail.contains("market-neutral"),
+            "{}",
+            claimed.detail
+        );
 
         // The same strategy making no such claim is judged on alpha alone.
         let unclaimed = gate_10_factor_attribution(
@@ -2586,7 +2829,10 @@ mod tests {
         }
         let strategy: Vec<f64> = (0..n).map(|i| 0.0005 + 0.01 * persistent[i]).collect();
         let fit = newey_west_fit(&strategy, &f).expect("estimable");
-        assert!(fit.hac_lags > 0, "the automatic lag rule must pick a positive lag at n={n}");
+        assert!(
+            fit.hac_lags > 0,
+            "the automatic lag rule must pick a positive lag at n={n}"
+        );
     }
 
     // ── Gate 15 — paper / shadow ────────────────────────────────────────────
@@ -2617,17 +2863,42 @@ mod tests {
     /// one that passed on a quarter's worth of trading.
     #[test]
     fn gate_15_states_its_observation_count_and_window_on_the_verdict() {
-        let thin = PaperInputs { observations: 4, observed_days: 2, window_days: 3, ..good_paper() };
-        let thick =
-            PaperInputs { observations: 400, observed_days: 120, window_days: 180, ..good_paper() };
+        let thin = PaperInputs {
+            observations: 4,
+            observed_days: 2,
+            window_days: 3,
+            ..good_paper()
+        };
+        let thick = PaperInputs {
+            observations: 400,
+            observed_days: 120,
+            window_days: 180,
+            ..good_paper()
+        };
 
         let thin_out = gate_15_paper_shadow(&GateProfile::strict_v1(), thin);
         let thick_out = gate_15_paper_shadow(&GateProfile::strict_v1(), thick);
 
-        assert!(thin_out.detail.contains("4 observations"), "{}", thin_out.detail);
-        assert!(thin_out.detail.contains("over 3 days"), "{}", thin_out.detail);
-        assert!(thick_out.detail.contains("400 observations"), "{}", thick_out.detail);
-        assert!(thick_out.detail.contains("over 180 days"), "{}", thick_out.detail);
+        assert!(
+            thin_out.detail.contains("4 observations"),
+            "{}",
+            thin_out.detail
+        );
+        assert!(
+            thin_out.detail.contains("over 3 days"),
+            "{}",
+            thin_out.detail
+        );
+        assert!(
+            thick_out.detail.contains("400 observations"),
+            "{}",
+            thick_out.detail
+        );
+        assert!(
+            thick_out.detail.contains("over 180 days"),
+            "{}",
+            thick_out.detail
+        );
         assert_ne!(
             thin_out.detail, thick_out.detail,
             "two verdicts resting on very different evidence must not read the same"
@@ -2668,7 +2939,12 @@ mod tests {
         // And with no evidence to build inputs from, the gate says so.
         let out = gate_15_paper_shadow(
             &GateProfile::strict_v1(),
-            PaperInputs { observations: 0, observed_days: 0, window_days: 0, ..good_paper() },
+            PaperInputs {
+                observations: 0,
+                observed_days: 0,
+                window_days: 0,
+                ..good_paper()
+            },
         );
         assert!(out.inconclusive && !out.passed, "{}", out.detail);
         assert!(out.detail.contains("backfilled"), "{}", out.detail);
@@ -2712,7 +2988,10 @@ mod tests {
     fn gate_15_will_not_produce_a_verdict_without_pre_registered_kill_criteria() {
         let out = gate_15_paper_shadow(
             &GateProfile::strict_v1(),
-            PaperInputs { kill_criteria_registered: false, ..good_paper() },
+            PaperInputs {
+                kill_criteria_registered: false,
+                ..good_paper()
+            },
         );
         assert!(out.inconclusive && !out.passed, "{}", out.detail);
         assert!(out.detail.contains("kill criteria"), "{}", out.detail);
@@ -2722,15 +3001,34 @@ mod tests {
     fn gate_15_fails_each_way_a_live_system_can_diverge() {
         let p = GateProfile::strict_v1();
         let cases = [
-            PaperInputs { signal_match: 0.90, ..good_paper() },
-            PaperInputs { slippage_ratio: 3.0, ..good_paper() },
-            PaperInputs { turnover_ratio: 1.8, ..good_paper() },
-            PaperInputs { turnover_ratio: 0.2, ..good_paper() },
-            PaperInputs { model_attributable_rejects: 9, ..good_paper() },
+            PaperInputs {
+                signal_match: 0.90,
+                ..good_paper()
+            },
+            PaperInputs {
+                slippage_ratio: 3.0,
+                ..good_paper()
+            },
+            PaperInputs {
+                turnover_ratio: 1.8,
+                ..good_paper()
+            },
+            PaperInputs {
+                turnover_ratio: 0.2,
+                ..good_paper()
+            },
+            PaperInputs {
+                model_attributable_rejects: 9,
+                ..good_paper()
+            },
         ];
         for case in cases {
             let out = gate_15_paper_shadow(&p, case);
-            assert!(!out.passed && !out.inconclusive, "{case:?} → {}", out.detail);
+            assert!(
+                !out.passed && !out.inconclusive,
+                "{case:?} → {}",
+                out.detail
+            );
         }
     }
 
@@ -2738,7 +3036,12 @@ mod tests {
     fn gate_15_has_nothing_to_say_before_the_first_day() {
         let out = gate_15_paper_shadow(
             &GateProfile::strict_v1(),
-            PaperInputs { observed_days: 0, observations: 0, window_days: 0, ..good_paper() },
+            PaperInputs {
+                observed_days: 0,
+                observations: 0,
+                window_days: 0,
+                ..good_paper()
+            },
         );
         assert!(out.inconclusive && !out.passed, "{}", out.detail);
     }
@@ -2758,7 +3061,11 @@ mod tests {
             &sixteen_passes(),
         );
         assert!(!out.passed, "{}", out.detail);
-        assert!(out.detail.contains("does not authorise capital"), "{}", out.detail);
+        assert!(
+            out.detail.contains("does not authorise capital"),
+            "{}",
+            out.detail
+        );
         assert!((out.statistic.unwrap() - 0.0).abs() < f64::EPSILON);
 
         // The same evidence under strict_v1 moves exactly one rung.
@@ -2768,7 +3075,11 @@ mod tests {
             &sixteen_passes(),
         );
         assert!(strict.passed, "{}", strict.detail);
-        assert!((strict.statistic.unwrap() - 0.10).abs() < 1e-12, "{}", strict.detail);
+        assert!(
+            (strict.statistic.unwrap() - 0.10).abs() < 1e-12,
+            "{}",
+            strict.detail
+        );
     }
 
     #[test]
@@ -2781,7 +3092,10 @@ mod tests {
             &partial,
         );
         assert!(!out.passed, "{}", out.detail);
-        assert!((out.statistic.unwrap() - 0.10).abs() < 1e-12, "it stays where it was");
+        assert!(
+            (out.statistic.unwrap() - 0.10).abs() < 1e-12,
+            "it stays where it was"
+        );
     }
 
     #[test]
@@ -2881,7 +3195,13 @@ mod tests {
     // ── Gate 3 — cost sensitivity ───────────────────────────────────────────
 
     fn ladder(points: &[(f64, f64)]) -> Vec<CostRung> {
-        points.iter().map(|(m, v)| CostRung { multiple: *m, net_metric: *v }).collect()
+        points
+            .iter()
+            .map(|(m, v)| CostRung {
+                multiple: *m,
+                net_metric: *v,
+            })
+            .collect()
     }
 
     #[test]
@@ -2894,7 +3214,10 @@ mod tests {
         assert!((d - 1.0).abs() < 1e-12);
 
         // Never crosses: not extrapolated into a breakeven.
-        assert_eq!(breakeven_multiple(&ladder(&[(1.0, 0.2), (2.0, 0.19)])), None);
+        assert_eq!(
+            breakeven_multiple(&ladder(&[(1.0, 0.2), (2.0, 0.19)])),
+            None
+        );
         assert_eq!(breakeven_multiple(&ladder(&[(1.0, 0.2)])), None);
     }
 
@@ -2936,7 +3259,11 @@ mod tests {
             &ladder(&[(1.0, 0.30), (3.0, 0.20), (5.0, 0.11)]),
         );
         assert!(far.passed, "{}", far.detail);
-        assert!(far.detail.contains("beyond the measured range"), "{}", far.detail);
+        assert!(
+            far.detail.contains("beyond the measured range"),
+            "{}",
+            far.detail
+        );
     }
 
     #[test]

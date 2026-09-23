@@ -57,8 +57,8 @@ pub use collect::CollectorPlan;
 /// The Trial Ledger lives in its own crate; re-exported so dispatch sites have one import.
 pub use ledger;
 pub use ledger::{
-    ActorKind, Censoring, DispatchContext, InMemoryLedger, LedgerError, Registration, TrialEvent, TrialLedger,
-    TrialState, TrialTicket,
+    ActorKind, Censoring, DispatchContext, InMemoryLedger, LedgerError, Registration, TrialEvent,
+    TrialLedger, TrialState, TrialTicket,
 };
 pub use manager::BacktestManager;
 pub use store::{BarCoverage, BarStore, CollectedBar};

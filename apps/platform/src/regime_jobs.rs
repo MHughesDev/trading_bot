@@ -108,7 +108,10 @@ async fn run_once(pg: &PgPool, clickhouse_url: &str, config_scopes: &[String]) {
         match daily_returns(clickhouse_url, scope).await {
             Ok(returns) if returns.len() > VOL_WINDOW => {
                 let store = RegimeStore::new(pg.clone());
-                match store.write_rule_tier(&scope.market_scope, &returns, VOL_WINDOW).await {
+                match store
+                    .write_rule_tier(&scope.market_scope, &returns, VOL_WINDOW)
+                    .await
+                {
                     Ok(n) => {
                         info!(scope = %scope.market_scope, days = n, "regime labels written");
                         separation(pg, scope).await;
@@ -139,7 +142,10 @@ async fn run_once(pg: &PgPool, clickhouse_url: &str, config_scopes: &[String]) {
 /// decorative, and a job that only records validations would make the platform
 /// unable to discover that about itself.
 async fn separation(pg: &PgPool, scope: &RegimeScope) {
-    match SeparationJob::new(pg.clone()).run(TENANT, scope, RULE_MODEL_VERSION).await {
+    match SeparationJob::new(pg.clone())
+        .run(TENANT, scope, RULE_MODEL_VERSION)
+        .await
+    {
         Ok(run) => info!(
             scope = %scope.market_scope,
             model_version = RULE_MODEL_VERSION,
@@ -179,12 +185,17 @@ async fn daily_returns(
         3_600 => Timeframe::Hours1,
         14_400 => Timeframe::Hours4,
         86_400 => Timeframe::Daily,
-        other => anyhow::bail!("scope {} reads a {other}s bar nobody stores", scope.market_scope),
+        other => anyhow::bail!(
+            "scope {} reads a {other}s bar nobody stores",
+            scope.market_scope
+        ),
     };
     let store = BarStore::connect(clickhouse_url);
     let bucket = u32::try_from(scope.series_period_secs).unwrap_or(86_400);
     let bars = if scope.series_base_period_secs == scope.series_period_secs {
-        store.load_bars(&scope.series_symbol, base, start, end).await?
+        store
+            .load_bars(&scope.series_symbol, base, start, end)
+            .await?
     } else {
         store
             .load_bars_bucketed(&scope.series_symbol, base, bucket, start, end)

@@ -11,12 +11,17 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 
 fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("workspace root")
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("workspace root")
 }
 
 fn files(dirs: &[&str], ext: &[&str]) -> Vec<(String, String)> {
     fn walk(dir: &Path, ext: &[&str], out: &mut Vec<PathBuf>) {
-        let Ok(entries) = fs::read_dir(dir) else { return };
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
         for e in entries.flatten() {
             let p = e.path();
             let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
@@ -24,7 +29,11 @@ fn files(dirs: &[&str], ext: &[&str]) -> Vec<(String, String)> {
                 if !matches!(name, "target" | "node_modules" | ".git" | "docs" | "dist") {
                     walk(&p, ext, out);
                 }
-            } else if p.extension().and_then(|x| x.to_str()).is_some_and(|x| ext.contains(&x)) {
+            } else if p
+                .extension()
+                .and_then(|x| x.to_str())
+                .is_some_and(|x| ext.contains(&x))
+            {
                 out.push(p);
             }
         }
@@ -37,7 +46,11 @@ fn files(dirs: &[&str], ext: &[&str]) -> Vec<(String, String)> {
     paths
         .into_iter()
         .filter_map(|p| {
-            let rel = p.strip_prefix(&r).ok()?.to_string_lossy().replace('\\', "/");
+            let rel = p
+                .strip_prefix(&r)
+                .ok()?
+                .to_string_lossy()
+                .replace('\\', "/");
             Some((rel, fs::read_to_string(&p).ok()?))
         })
         .collect()
@@ -55,7 +68,8 @@ fn strip_comments(src: &str) -> String {
     // the modules that implement the alternative do.
     let block = Regex::new(r"(?s)/\*.*?\*/").unwrap();
     let line = Regex::new(r"(?m)//.*$").unwrap();
-    line.replace_all(&block.replace_all(src, ""), "").into_owned()
+    line.replace_all(&block.replace_all(src, ""), "")
+        .into_owned()
 }
 
 /// AT-01 ⛔ · No non-PIT read path: only the reader (and migration machinery) may
@@ -86,7 +100,10 @@ fn at01_only_the_pit_reader_touches_raw_bar_tables() {
             violations.push(path);
         }
     }
-    assert!(violations.is_empty(), "raw bar tables read outside the PIT reader: {violations:?}");
+    assert!(
+        violations.is_empty(),
+        "raw bar tables read outside the PIT reader: {violations:?}"
+    );
 }
 
 fn ddl() -> Vec<(String, String)> {
@@ -99,8 +116,15 @@ fn ddl() -> Vec<(String, String)> {
 #[test]
 fn at03_no_adjusted_price_columns() {
     let bad = Regex::new(r"(?i)\b(adj_\w+|\w+_adjusted|split_adjusted\w*|adjusted_close)\b\s+(numeric|decimal|double|float|real|int)").unwrap();
-    let hits: Vec<String> = ddl().into_iter().filter(|(_, s)| bad.is_match(s)).map(|(p, _)| p).collect();
-    assert!(hits.is_empty(), "adjusted price columns are forbidden (INV-03): {hits:?}");
+    let hits: Vec<String> = ddl()
+        .into_iter()
+        .filter(|(_, s)| bad.is_match(s))
+        .map(|(p, _)| p)
+        .collect();
+    assert!(
+        hits.is_empty(),
+        "adjusted price columns are forbidden (INV-03): {hits:?}"
+    );
 }
 
 /// AT-04 ⛔ · Price columns in the ML data plane are DECIMAL(38,18), never float.
@@ -127,7 +151,10 @@ fn at04_price_columns_are_decimal_38_18() {
             }
         }
     }
-    assert!(bad.is_empty(), "prices must be DECIMAL(38,18) (INV-05): {bad:?}");
+    assert!(
+        bad.is_empty(),
+        "prices must be DECIMAL(38,18) (INV-05): {bad:?}"
+    );
 }
 
 /// AT-05 ⛔ · `symbol` appears in no primary key in the ML data plane.
@@ -150,27 +177,41 @@ fn at05_symbol_is_never_a_key() {
             for c in order_by.captures_iter(&src) {
                 let cols = c[1].to_ascii_lowercase();
                 // The symbol dimension is the one table whose job is to look symbols up.
-                if cols.contains("symbol") && !src[..c.get(0).unwrap().start()].trim_end().ends_with("ReplacingMergeTree") {
+                if cols.contains("symbol")
+                    && !src[..c.get(0).unwrap().start()]
+                        .trim_end()
+                        .ends_with("ReplacingMergeTree")
+                {
                     bad.push(format!("{path}: ORDER BY ({})", &c[1]));
                 }
             }
         }
     }
-    assert!(bad.is_empty(), "symbol is a bitemporal attribute, never a key (INV-04): {bad:?}");
+    assert!(
+        bad.is_empty(),
+        "symbol is a bitemporal attribute, never a key (INV-04): {bad:?}"
+    );
 }
 
 /// AT-08 · No greek column exists in any options table.
 #[test]
 fn at08_no_greek_columns() {
     let greek = Regex::new(r"(?im)^\s*(delta|gamma|vega|theta|rho|vanna|volga|charm)\s+(numeric|decimal|double|float|real|nullable)").unwrap();
-    let hits: Vec<String> = ddl().into_iter().filter(|(_, s)| greek.is_match(s)).map(|(p, _)| p).collect();
+    let hits: Vec<String> = ddl()
+        .into_iter()
+        .filter(|(_, s)| greek.is_match(s))
+        .map(|(p, _)| p)
+        .collect();
     assert!(hits.is_empty(), "store IV, never greeks (INV-07): {hits:?}");
 }
 
 /// AT-10 ⛔ · No as-of join other than the backward-only wrapper.
 #[test]
 fn at10_asof_nearest_is_unreachable() {
-    let asof = Regex::new(r#"(?i)(ASOF\s+(LEFT\s+)?JOIN|join_asof|strategy\s*[:=]\s*"nearest"|"nearest"\s*=>)"#).unwrap();
+    let asof = Regex::new(
+        r#"(?i)(ASOF\s+(LEFT\s+)?JOIN|join_asof|strategy\s*[:=]\s*"nearest"|"nearest"\s*=>)"#,
+    )
+    .unwrap();
     let mut bad = Vec::new();
     for (path, src) in rust_files() {
         if path == "crates/dataplane/src/asof.rs" || path.starts_with("crates/invariants/") {
@@ -180,7 +221,10 @@ fn at10_asof_nearest_is_unreachable() {
             bad.push(path);
         }
     }
-    assert!(bad.is_empty(), "as-of joins must go through dataplane::asof (INV-10): {bad:?}");
+    assert!(
+        bad.is_empty(),
+        "as-of joins must go through dataplane::asof (INV-10): {bad:?}"
+    );
 }
 
 /// AT-15 ⛔ · One implementation per feature: no second EMA/RSI anywhere.
@@ -196,7 +240,10 @@ fn at15_one_feature_implementation() {
     defs.sort();
     assert_eq!(
         defs,
-        vec!["Ema@crates/features/src/ema.rs".to_string(), "Rsi@crates/features/src/rsi.rs".to_string()],
+        vec![
+            "Ema@crates/features/src/ema.rs".to_string(),
+            "Rsi@crates/features/src/rsi.rs".to_string()
+        ],
         "features have exactly one implementation (INV-14)"
     );
 }
@@ -214,12 +261,24 @@ fn at19_trial_tickets_are_only_minted_by_the_ledger() {
             bad.push(path);
         }
     }
-    assert!(bad.is_empty(), "TrialTicket constructed outside the ledger (INV-16): {bad:?}");
+    assert!(
+        bad.is_empty(),
+        "TrialTicket constructed outside the ledger (INV-16): {bad:?}"
+    );
     let lib = fs::read_to_string(root().join("crates/ledger/src/lib.rs")).unwrap();
-    assert!(!Regex::new(r"pub\s+fn\s+mint").unwrap().is_match(&lib), "mint must stay private");
-    assert!(!Regex::new(r"pub\s+(trial_id|tenant_id|config_hash|state)\s*:").unwrap().is_match(
-        &lib[lib.find("pub struct TrialTicket").unwrap()..lib.find("impl TrialTicket").unwrap()]
-    ), "TrialTicket fields must stay private");
+    assert!(
+        !Regex::new(r"pub\s+fn\s+mint").unwrap().is_match(&lib),
+        "mint must stay private"
+    );
+    assert!(
+        !Regex::new(r"pub\s+(trial_id|tenant_id|config_hash|state)\s*:")
+            .unwrap()
+            .is_match(
+                &lib[lib.find("pub struct TrialTicket").unwrap()
+                    ..lib.find("impl TrialTicket").unwrap()]
+            ),
+        "TrialTicket fields must stay private"
+    );
 }
 
 /// S-2 · Tenant context is only ever transaction-local.
@@ -235,7 +294,10 @@ fn s2_no_session_level_tenant_set() {
             bad.push(path);
         }
     }
-    assert!(bad.is_empty(), "bare SET leaks tenant context across pooled connections: {bad:?}");
+    assert!(
+        bad.is_empty(),
+        "bare SET leaks tenant context across pooled connections: {bad:?}"
+    );
 }
 
 fn tool_properties() -> Vec<(String, Vec<String>)> {
@@ -245,7 +307,10 @@ fn tool_properties() -> Vec<(String, Vec<String>)> {
         .iter()
         .map(|t| {
             let name = t["name"].as_str().unwrap_or_default().to_string();
-            let props = t["inputSchema"]["properties"].as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
+            let props = t["inputSchema"]["properties"]
+                .as_object()
+                .map(|o| o.keys().cloned().collect())
+                .unwrap_or_default();
             (name, props)
         })
         .collect()
@@ -256,7 +321,10 @@ fn tool_properties() -> Vec<(String, Vec<String>)> {
 fn at24_exploration_floor_is_not_in_any_tool_schema() {
     for (tool, props) in tool_properties() {
         for p in props {
-            assert!(!p.contains("exploration"), "tool {tool} exposes {p} (INV-21)");
+            assert!(
+                !p.contains("exploration"),
+                "tool {tool} exposes {p} (INV-21)"
+            );
         }
     }
 }
@@ -264,10 +332,16 @@ fn at24_exploration_floor_is_not_in_any_tool_schema() {
 /// AT-27 ⛔ · No tool accepts a trial count or N_eff.
 #[test]
 fn at27_no_tool_accepts_a_trial_count() {
-    let forbidden = Regex::new(r"(?i)^(n_eff|neff|trial_count|num_trials|n_trials|effective_trials|trials_run)$").unwrap();
+    let forbidden = Regex::new(
+        r"(?i)^(n_eff|neff|trial_count|num_trials|n_trials|effective_trials|trials_run)$",
+    )
+    .unwrap();
     for (tool, props) in tool_properties() {
         for p in props {
-            assert!(!forbidden.is_match(&p), "tool {tool} accepts {p}: N_eff is platform-computed only (INV-22)");
+            assert!(
+                !forbidden.is_match(&p),
+                "tool {tool} accepts {p}: N_eff is platform-computed only (INV-22)"
+            );
         }
     }
 }
@@ -279,7 +353,10 @@ fn inv23_no_governance_fields_in_tool_schemas() {
     let forbidden = Regex::new(r"(?i)(threshold|gate_profile_thresholds|deflation|smoothed|viterbi|regime_research|sealed_holdout_result)").unwrap();
     for (tool, props) in tool_properties() {
         for p in props {
-            assert!(!forbidden.is_match(&p), "tool {tool} exposes governance field {p}");
+            assert!(
+                !forbidden.is_match(&p),
+                "tool {tool} exposes governance field {p}"
+            );
         }
     }
 }
@@ -289,7 +366,10 @@ fn inv23_no_governance_fields_in_tool_schemas() {
 #[test]
 fn every_tool_dispatch_is_trajectory_logged() {
     let lib = fs::read_to_string(root().join("crates/mcp-server/src/lib.rs")).unwrap();
-    assert!(!lib.contains("pub async fn dispatch_untraced"), "the untraced dispatcher must stay private");
+    assert!(
+        !lib.contains("pub async fn dispatch_untraced"),
+        "the untraced dispatcher must stay private"
+    );
     let calls = Regex::new(r"dispatch_untraced\(").unwrap();
     let mut total = 0;
     for (path, src) in rust_files() {
@@ -301,17 +381,26 @@ fn every_tool_dispatch_is_trajectory_logged() {
         // has to name `dispatch_untraced(ctx` to do so. Counting the test's own
         // mentions would make the stronger check the reason the weaker one
         // fails — the same shape as AT-42.
-        let n = calls.find_iter(&strip_comments(production_only(&src))).count();
+        let n = calls
+            .find_iter(&strip_comments(production_only(&src)))
+            .count();
         if n > 0 {
-            assert_eq!(path, "crates/mcp-server/src/lib.rs", "dispatch_untraced referenced outside the MCP library");
+            assert_eq!(
+                path, "crates/mcp-server/src/lib.rs",
+                "dispatch_untraced referenced outside the MCP library"
+            );
         }
         total += n;
     }
     assert_eq!(total, 2, "one definition and one call, from dispatch_under");
     // The slice spans both public entry points: `dispatch_tool`, which opens the
     // audit envelope, and `dispatch_under`, which does the recording for both.
-    let wrapper = &lib[lib.find("pub async fn dispatch_tool(").unwrap()..lib.find("async fn dispatch_untraced(").unwrap()];
-    assert!(wrapper.contains("record_step"), "the dispatch path must record the step");
+    let wrapper = &lib[lib.find("pub async fn dispatch_tool(").unwrap()
+        ..lib.find("async fn dispatch_untraced(").unwrap()];
+    assert!(
+        wrapper.contains("record_step"),
+        "the dispatch path must record the step"
+    );
 }
 
 /// AT-62 ⛔ · No critical-difference renderer exists (SPEC §11.5, ADR-P2-13).
@@ -420,7 +509,12 @@ fn at35_the_decision_threshold_performs_no_search() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let code = code.split("\"\"\"").enumerate().filter(|(i, _)| i % 2 == 0).map(|(_, s)| s).collect::<String>();
+    let code = code
+        .split("\"\"\"")
+        .enumerate()
+        .filter(|(i, _)| i % 2 == 0)
+        .map(|(_, s)| s)
+        .collect::<String>();
 
     if let Some(m) = search.find(&code) {
         panic!(
@@ -432,7 +526,7 @@ fn at35_the_decision_threshold_performs_no_search() {
 
     // And the pipeline has no way to reorder or skip its steps.
     let run = src.find("def run_posthoc(").expect("the pipeline exists");
-    let head = &src[run..run + src[run..].find("-> PostHocReport:").expect("signature") ];
+    let head = &src[run..run + src[run..].find("-> PostHocReport:").expect("signature")];
     for forbidden in ["order", "steps", "skip", "reorder", "enable"] {
         assert!(
             !head.contains(&format!("{forbidden}:")),
@@ -460,7 +554,10 @@ fn at63_no_api_type_carries_the_platform_seed() {
         "crates/api/tests/pg_self_monitor.rs",
     ];
     let mut hits = Vec::new();
-    for (path, src) in files(&["crates", "apps", "frontend", "web", "ui"], &["rs", "ts", "tsx"]) {
+    for (path, src) in files(
+        &["crates", "apps", "frontend", "web", "ui"],
+        &["rs", "ts", "tsx"],
+    ) {
         if allowed.contains(&path.as_str()) {
             continue;
         }
@@ -505,14 +602,24 @@ fn at64_no_dispatch_path_can_skip_the_audit_trail() {
     let src = strip_comments(&lib);
 
     // ── 1. The order, inside the one function every door goes through ────────
-    let start = src.find("pub async fn dispatch_tool(").expect("dispatch_tool exists");
+    let start = src
+        .find("pub async fn dispatch_tool(")
+        .expect("dispatch_tool exists");
     let body = &src[start..];
-    let end = body.find("pub async fn dispatch_under(").unwrap_or(body.len());
+    let end = body
+        .find("pub async fn dispatch_under(")
+        .unwrap_or(body.len());
     let body = &body[..end];
 
-    let open = body.find(".open(").expect("dispatch_tool must open an audit record");
-    let dispatch = body.find("dispatch_under(").expect("dispatch_tool must dispatch");
-    let close = body.find(".close(").expect("dispatch_tool must close the record");
+    let open = body
+        .find(".open(")
+        .expect("dispatch_tool must open an audit record");
+    let dispatch = body
+        .find("dispatch_under(")
+        .expect("dispatch_tool must dispatch");
+    let close = body
+        .find(".close(")
+        .expect("dispatch_tool must close the record");
     assert!(
         open < dispatch,
         "the audit pre-record must be opened BEFORE the dispatch: a denial that is not \
@@ -546,7 +653,9 @@ fn at64_no_dispatch_path_can_skip_the_audit_trail() {
         // The type's own declaration is not a construction of it.
         .filter(|i| *i != declaration + "pub struct ".len())
         .collect();
-    let sink_open = src.find("pub async fn open(").expect("AuditSink::open exists");
+    let sink_open = src
+        .find("pub async fn open(")
+        .expect("AuditSink::open exists");
     let sink_open_end = src[sink_open..]
         .find("pub async fn close(")
         .map_or(src.len(), |o| sink_open + o);
@@ -606,8 +715,16 @@ fn at64_no_dispatch_path_can_skip_the_audit_trail() {
     );
     // And there is no second way to build one — no disabled, no-op or defaulted
     // sink for tests, which is how this kind of seal is usually undone.
-    for hatch in ["AuditSink::none", "AuditSink::noop", "AuditSink::disabled", "impl Default for AuditSink"] {
-        assert!(!src.contains(hatch), "{hatch} is an escape hatch from the audit trail");
+    for hatch in [
+        "AuditSink::none",
+        "AuditSink::noop",
+        "AuditSink::disabled",
+        "impl Default for AuditSink",
+    ] {
+        assert!(
+            !src.contains(hatch),
+            "{hatch} is an escape hatch from the audit trail"
+        );
     }
 
     // ── 5. The record is written by the platform, not by the caller ──────────
@@ -620,7 +737,9 @@ fn at64_no_dispatch_path_can_skip_the_audit_trail() {
         let at = src.find("impl AuditSink {").expect("the sink exists");
         // Comments are stripped, so the section banner is gone; the next item
         // in the file is the context struct.
-        &src[at..src[at..].find("pub struct McpContext").map_or(src.len(), |o| at + o)]
+        &src[at..src[at..]
+            .find("pub struct McpContext")
+            .map_or(src.len(), |o| at + o)]
     };
     assert!(
         sink.contains("self.api.post(\"/api/agent/audit\""),
@@ -645,7 +764,9 @@ fn at64_no_dispatch_path_can_skip_the_audit_trail() {
             continue;
         }
         let clean = strip_comments(&file);
-        let Some(at) = clean.find("dispatch_under(") else { continue };
+        let Some(at) = clean.find("dispatch_under(") else {
+            continue;
+        };
         let opened = clean.find(".open(").unwrap_or(usize::MAX);
         let closed = clean.rfind(".close(").unwrap_or(0);
         assert!(
@@ -666,7 +787,8 @@ fn at64_no_dispatch_path_can_skip_the_audit_trail() {
     // is not the behaviour anybody wants to discover in production.
     let routes = fs::read_to_string(root().join("crates/api/src/routes/mod.rs")).unwrap();
     assert!(
-        routes.contains("\"/api/agent/audit\"") && routes.contains("\"/api/agent/audit/{audit_id}\""),
+        routes.contains("\"/api/agent/audit\"")
+            && routes.contains("\"/api/agent/audit/{audit_id}\""),
         "the audit trail's two halves must be routed on the platform"
     );
 }
@@ -765,7 +887,9 @@ fn spec_15_tool_surface_conformance() {
     // running rather than starting more of it, and that is a resume handle.
     let resume_handles = [("run_sweep", "sweep_id"), ("get_backtest", "backtest_id")];
     for (tool, handle) in resume_handles {
-        let schema = props.get(tool).unwrap_or_else(|| panic!("{tool} is in the catalogue"));
+        let schema = props
+            .get(tool)
+            .unwrap_or_else(|| panic!("{tool} is in the catalogue"));
         assert!(
             schema.contains(handle),
             "{tool} has no `{handle}`: a retry would start a second one rather than rejoin the first"
@@ -802,7 +926,9 @@ fn spec_15_tool_surface_conformance() {
     // Exempted by name rather than by loosening the pattern, so a second tool
     // that starts asking for `delta_practical` still fails here.
     const DEFINE_TOOLS: &[&str] = &["preregister"];
-    let forbidden = Regex::new(r"(?i)(n_eff|deflat|threshold|gate_profile|delta_practical|regime_research)").unwrap();
+    let forbidden =
+        Regex::new(r"(?i)(n_eff|deflat|threshold|gate_profile|delta_practical|regime_research)")
+            .unwrap();
     for (tool, schema) in &props {
         if DEFINE_TOOLS.contains(&tool.as_str()) {
             continue;
@@ -850,7 +976,8 @@ fn at68_the_feature_runtime_cannot_resolve_an_embedding_dimension() {
     // The feature runtime's resolver must not mention the knowledge plane at all.
     let runtime = fs::read_to_string(root().join("crates/features/src/runtime.rs"))
         .expect("the feature runtime exists");
-    let knowledge = Regex::new(r"(?i)(asset_embedding|retrieval_vec|tier1|tier2|tier3|fingerprint)").unwrap();
+    let knowledge =
+        Regex::new(r"(?i)(asset_embedding|retrieval_vec|tier1|tier2|tier3|fingerprint)").unwrap();
     if let Some(m) = knowledge.find(&strip_comments(&runtime)) {
         panic!(
             "crates/features/src/runtime.rs names `{}` — a fingerprint dimension must not be \
@@ -866,7 +993,13 @@ fn at68_the_feature_runtime_cannot_resolve_an_embedding_dimension() {
             continue;
         }
         let code = strip_comments(&src);
-        for pattern in ["\"tier1_", "\"tier2_", "\"tier3_", "\"retrieval_vec", "\"embedding_dim"] {
+        for pattern in [
+            "\"tier1_",
+            "\"tier2_",
+            "\"tier3_",
+            "\"retrieval_vec",
+            "\"embedding_dim",
+        ] {
             assert!(
                 !code.contains(pattern),
                 "{path} registers {pattern} as a feature name (AT-68)"
@@ -931,7 +1064,10 @@ fn no_public_benchmark_gates_a_release() {
     )
     .unwrap();
     let mut hits = Vec::new();
-    for (path, src) in files(&["crates", "apps", "evals"], &["rs", "py", "yaml", "yml", "json"]) {
+    for (path, src) in files(
+        &["crates", "apps", "evals"],
+        &["rs", "py", "yaml", "yml", "json"],
+    ) {
         if path.starts_with("crates/invariants/") {
             continue;
         }
@@ -1002,12 +1138,24 @@ fn no_check_requires_a_non_empty_array_with_array_length() {
 /// naming a real tool and writing down why there isn't one — and so that a typo
 /// in a tool name cannot hide among them.
 const NON_TOOL_GATED_ACTIONS: &[(&str, &str)] = &[
-    ("place_order", "execution route /api/orders; no MCP tool places orders"),
+    (
+        "place_order",
+        "execution route /api/orders; no MCP tool places orders",
+    ),
     ("submit_job", "job service admission, crates/jobs"),
-    ("promote_strategy", "capital path; no tool exists yet (Set T)"),
+    (
+        "promote_strategy",
+        "capital path; no tool exists yet (Set T)",
+    ),
     ("raise_capital_fraction", "ramp mechanics; Set T phase 3"),
-    ("evaluate_sealed_holdout", "holdout path, crates/ledger; Set S phase 3 tool pending"),
-    ("open_vault", "holdout path, crates/ledger; Set S phase 3 tool pending"),
+    (
+        "evaluate_sealed_holdout",
+        "holdout path, crates/ledger; Set S phase 3 tool pending",
+    ),
+    (
+        "open_vault",
+        "holdout path, crates/ledger; Set S phase 3 tool pending",
+    ),
     ("write_insight", "tier-3 memory writer; Set S phase 4"),
     ("record_insight", "tier-3 memory writer; Set S phase 4"),
     ("update_playbook", "tier-3 memory writer; Set S phase 4"),
@@ -1052,7 +1200,10 @@ fn catalogue_names() -> BTreeSet<String> {
         .iter()
         .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(str::to_owned))
         .collect();
-    assert!(!names.is_empty(), "the catalogue is empty; the check would pass vacuously");
+    assert!(
+        !names.is_empty(),
+        "the catalogue is empty; the check would pass vacuously"
+    );
     names
 }
 
@@ -1069,18 +1220,31 @@ fn every_envelope_entry_is_a_real_action() {
 /// returns an empty vector and nobody would know.
 #[test]
 fn the_envelope_name_check_rejects_a_name_no_tool_answers_to() {
-    let catalogue: BTreeSet<String> =
-        ["promote_model_version", "arm_automation"].into_iter().map(str::to_owned).collect();
+    let catalogue: BTreeSet<String> = ["promote_model_version", "arm_automation"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
 
     // 1. The exact defect that was live: a plausible-looking name, misspelled.
     let problems = envelope_name_problems(&["promote_model"], &catalogue, &[]);
-    assert_eq!(problems.len(), 1, "a name no tool answers to must be rejected: {problems:?}");
+    assert_eq!(
+        problems.len(),
+        1,
+        "a name no tool answers to must be rejected: {problems:?}"
+    );
     assert!(problems[0].contains("promote_model"));
 
     // 2. A stale exemption: the tool now exists, so the "not a tool" claim is a lie.
-    let problems =
-        envelope_name_problems(&["arm_automation"], &catalogue, &[("arm_automation", "stale")]);
-    assert_eq!(problems.len(), 1, "a stale exemption must be rejected: {problems:?}");
+    let problems = envelope_name_problems(
+        &["arm_automation"],
+        &catalogue,
+        &[("arm_automation", "stale")],
+    );
+    assert_eq!(
+        problems.len(),
+        1,
+        "a stale exemption must be rejected: {problems:?}"
+    );
     assert!(problems[0].contains("must be removed"));
 
     // 3. And it passes what it should: a real tool, and a declared non-tool.
@@ -1180,7 +1344,10 @@ fn the_old_promotion_spelling_matches_no_envelope() {
         "`promote_model` must match nothing: it is not a tool, and keeping it would \
          restore the illusion the real tool is gated"
     );
-    assert_eq!(Envelope::for_action("promote_model_version"), Envelope::Promotion);
+    assert_eq!(
+        Envelope::for_action("promote_model_version"),
+        Envelope::Promotion
+    );
     assert!(Envelope::for_action("promote_model_version").requires_approval());
 }
 
@@ -1335,13 +1502,20 @@ fn a_regime_scope_cannot_be_configured_without_its_reasoning() {
         .map(|(_, s)| s)
         .expect("migration 0117 exists");
     let code = strip_comments(&ddl);
-    assert!(code.contains("rationale              TEXT NOT NULL"), "rationale must be NOT NULL");
     assert!(
-        Regex::new(r"(?is)CHECK\s*\(\s*length\s*\(\s*btrim\s*\(\s*rationale").unwrap().is_match(&code),
+        code.contains("rationale              TEXT NOT NULL"),
+        "rationale must be NOT NULL"
+    );
+    assert!(
+        Regex::new(r"(?is)CHECK\s*\(\s*length\s*\(\s*btrim\s*\(\s*rationale")
+            .unwrap()
+            .is_match(&code),
         "an empty rationale must be refused by the database, not by review"
     );
     assert!(
-        !Regex::new(r"(?i)rationale[^,]*DEFAULT").unwrap().is_match(&code),
+        !Regex::new(r"(?i)rationale[^,]*DEFAULT")
+            .unwrap()
+            .is_match(&code),
         "a default rationale is the default ADR-P3-07 refused, wearing a different hat"
     );
 }
@@ -1552,4 +1726,3 @@ fn every_promotion_action_that_is_a_tool_reaches_ring_two() {
         );
     }
 }
-

@@ -35,14 +35,31 @@ impl LedgerFixation {
         let seed = std::env::var("PLATFORM_LEDGER_SIGNING_KEY")
             .context("PLATFORM_LEDGER_SIGNING_KEY is REQUIRED (ed25519 seed, 64 hex chars): ledger anchors must be signed")?;
         let signer = AnchorSigner::from_hex_seed(&seed).context("PLATFORM_LEDGER_SIGNING_KEY")?;
-        let worm_dir = std::env::var("PLATFORM_WORM_DIR")
-            .context("PLATFORM_WORM_DIR is REQUIRED: ledger anchors are written to a write-once store")?;
+        let worm_dir = std::env::var("PLATFORM_WORM_DIR").context(
+            "PLATFORM_WORM_DIR is REQUIRED: ledger anchors are written to a write-once store",
+        )?;
         let mut keys = vec![signer.verifying_key()];
-        for k in std::env::var("PLATFORM_LEDGER_RETIRED_KEYS").unwrap_or_default().split(',').map(str::trim).filter(|k| !k.is_empty()) {
-            let bytes: [u8; 32] = hex::decode(k).ok().and_then(|b| b.try_into().ok()).context("PLATFORM_LEDGER_RETIRED_KEYS: 64 hex chars each")?;
-            keys.push(ed25519_dalek::VerifyingKey::from_bytes(&bytes).context("PLATFORM_LEDGER_RETIRED_KEYS: invalid public key")?);
+        for k in std::env::var("PLATFORM_LEDGER_RETIRED_KEYS")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+        {
+            let bytes: [u8; 32] = hex::decode(k)
+                .ok()
+                .and_then(|b| b.try_into().ok())
+                .context("PLATFORM_LEDGER_RETIRED_KEYS: 64 hex chars each")?;
+            keys.push(
+                ed25519_dalek::VerifyingKey::from_bytes(&bytes)
+                    .context("PLATFORM_LEDGER_RETIRED_KEYS: invalid public key")?,
+            );
         }
-        Ok(Self { ledger: PgTrialLedger::new(pool), signer, keys, worm: Arc::new(FsWorm::new(worm_dir)) })
+        Ok(Self {
+            ledger: PgTrialLedger::new(pool),
+            signer,
+            keys,
+            worm: Arc::new(FsWorm::new(worm_dir)),
+        })
     }
 
     /// Anchor every tenant for every day up to yesterday that is not yet anchored.
@@ -54,8 +71,14 @@ impl LedgerFixation {
             Err(e) => return warn!(error = %e, "ledger anchor: could not list tenants"),
         };
         for tenant in tenants {
-            match self.ledger.write_anchor_async(&tenant, yesterday, &self.signer, self.worm.as_ref()).await {
-                Ok(Some(id)) => info!(%tenant, date = %yesterday, anchor_id = %id, key_id = self.signer.key_id(), "ledger anchored"),
+            match self
+                .ledger
+                .write_anchor_async(&tenant, yesterday, &self.signer, self.worm.as_ref())
+                .await
+            {
+                Ok(Some(id)) => {
+                    info!(%tenant, date = %yesterday, anchor_id = %id, key_id = self.signer.key_id(), "ledger anchored")
+                }
                 Ok(None) => {}
                 Err(ledger::anchor::AnchorError::Broken(b)) => {
                     error!(%tenant, date = %yesterday, chain_break = %b, "LEDGER CHAIN BROKEN — refusing to anchor");
@@ -71,8 +94,14 @@ impl LedgerFixation {
             Err(e) => return warn!(error = %e, "ledger verify: could not list tenants"),
         };
         for tenant in tenants {
-            match self.ledger.verify_and_record_async(&tenant, &self.keys, Some(self.worm.as_ref())).await {
-                Ok(r) if r.ok() => info!(%tenant, trials = r.trials, events = r.events, decisions = r.decisions, anchors = r.anchors, "ledger verified"),
+            match self
+                .ledger
+                .verify_and_record_async(&tenant, &self.keys, Some(self.worm.as_ref()))
+                .await
+            {
+                Ok(r) if r.ok() => {
+                    info!(%tenant, trials = r.trials, events = r.events, decisions = r.decisions, anchors = r.anchors, "ledger verified")
+                }
                 Ok(r) => error!(%tenant, failures = ?r.failures, "LEDGER VERIFICATION FAILED"),
                 Err(e) => warn!(%tenant, error = %e, "ledger verification could not run"),
             }

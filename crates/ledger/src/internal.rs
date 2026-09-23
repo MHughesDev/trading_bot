@@ -179,16 +179,66 @@ pub struct Trigger {
 /// §13.1's triggers, from the reference. One row per model that has a learned
 /// tier at all.
 pub const TRIGGERS: &[Trigger] = &[
-    Trigger { model: "M1", observations: 200, groups: None, group_label: "flow family × hw class" },
-    Trigger { model: "M2", observations: 300, groups: Some(50), group_label: "per failure class" },
-    Trigger { model: "M3", observations: 1_000, groups: None, group_label: "curves" },
-    Trigger { model: "M4", observations: 1_500, groups: Some(30), group_label: "tasks" },
-    Trigger { model: "M5", observations: 500, groups: Some(100), group_label: "passes" },
-    Trigger { model: "M8", observations: 100, groups: None, group_label: "tasks" },
-    Trigger { model: "M9", observations: 3_000, groups: Some(100), group_label: "groups" },
-    Trigger { model: "M10", observations: 1_000, groups: None, group_label: "planted cases" },
-    Trigger { model: "M11", observations: 300, groups: None, group_label: "curves" },
-    Trigger { model: "M13", observations: 3_000, groups: None, group_label: "labelled steps" },
+    Trigger {
+        model: "M1",
+        observations: 200,
+        groups: None,
+        group_label: "flow family × hw class",
+    },
+    Trigger {
+        model: "M2",
+        observations: 300,
+        groups: Some(50),
+        group_label: "per failure class",
+    },
+    Trigger {
+        model: "M3",
+        observations: 1_000,
+        groups: None,
+        group_label: "curves",
+    },
+    Trigger {
+        model: "M4",
+        observations: 1_500,
+        groups: Some(30),
+        group_label: "tasks",
+    },
+    Trigger {
+        model: "M5",
+        observations: 500,
+        groups: Some(100),
+        group_label: "passes",
+    },
+    Trigger {
+        model: "M8",
+        observations: 100,
+        groups: None,
+        group_label: "tasks",
+    },
+    Trigger {
+        model: "M9",
+        observations: 3_000,
+        groups: Some(100),
+        group_label: "groups",
+    },
+    Trigger {
+        model: "M10",
+        observations: 1_000,
+        groups: None,
+        group_label: "planted cases",
+    },
+    Trigger {
+        model: "M11",
+        observations: 300,
+        groups: None,
+        group_label: "curves",
+    },
+    Trigger {
+        model: "M13",
+        observations: 3_000,
+        groups: None,
+        group_label: "labelled steps",
+    },
 ];
 
 /// The trigger for a model, if it has one.
@@ -339,7 +389,10 @@ impl TrainingSet {
         if trials.is_empty() {
             return Err(TrainingRefusal::Empty);
         }
-        let overlap = trials.iter().filter(|(id, _)| holdout.contains(*id)).count();
+        let overlap = trials
+            .iter()
+            .filter(|(id, _)| holdout.contains(*id))
+            .count();
         if overlap > 0 {
             return Err(TrainingRefusal::HoldoutOverlap { overlap });
         }
@@ -405,7 +458,9 @@ impl SeedHoldout {
     /// Already frozen.
     pub fn freeze(&mut self, ordered: &[Uuid]) -> Result<usize, TrainingRefusal> {
         if !self.trial_ids.is_empty() {
-            return Err(TrainingRefusal::HoldoutAlreadyFrozen { existing: self.trial_ids.len() });
+            return Err(TrainingRefusal::HoldoutAlreadyFrozen {
+                existing: self.trial_ids.len(),
+            });
         }
         self.trial_ids = ordered.iter().take(SEED_HOLDOUT_SIZE).copied().collect();
         Ok(self.trial_ids.len())
@@ -515,7 +570,11 @@ mod tests {
         let (rung, evidence) = choose_rung("M4", 1_400, Some(40), true, false);
         assert!(!evidence.met(), "{}", evidence.describe());
         assert_eq!(rung, Rung::Rule);
-        assert!(evidence.describe().contains("1400 of 1500"), "{}", evidence.describe());
+        assert!(
+            evidence.describe().contains("1400 of 1500"),
+            "{}",
+            evidence.describe()
+        );
     }
 
     /// M5's second condition is *passes*, not gated candidates: five hundred
@@ -524,7 +583,11 @@ mod tests {
     #[test]
     fn a_trigger_with_an_uncounted_secondary_condition_is_unmet() {
         let (rung, _) = choose_rung("M5", 900, None, true, true);
-        assert_eq!(rung, Rung::Shrunk, "an uncounted condition must not read as satisfied");
+        assert_eq!(
+            rung,
+            Rung::Shrunk,
+            "an uncounted condition must not read as satisfied"
+        );
         let (rung, _) = choose_rung("M5", 900, Some(120), true, true);
         assert_eq!(rung, Rung::Learned);
     }
@@ -550,8 +613,9 @@ mod tests {
     #[test]
     fn a_set_with_no_paper_or_live_outcome_is_refused() {
         let range = TrainingRange::up_to(10).unwrap();
-        let only_backtests: Vec<(Uuid, OutcomeSource)> =
-            (0..50).map(|_| (Uuid::new_v4(), OutcomeSource::Backtest)).collect();
+        let only_backtests: Vec<(Uuid, OutcomeSource)> = (0..50)
+            .map(|_| (Uuid::new_v4(), OutcomeSource::Backtest))
+            .collect();
         assert_eq!(
             TrainingSet::build(range, &only_backtests, &holdout(), None),
             Err(TrainingRefusal::NoGroundTruth)
@@ -584,7 +648,9 @@ mod tests {
         // A second freeze is a re-draw, which is what freezing prevents.
         assert!(matches!(
             h.freeze(&all).unwrap_err(),
-            TrainingRefusal::HoldoutAlreadyFrozen { existing: SEED_HOLDOUT_SIZE }
+            TrainingRefusal::HoldoutAlreadyFrozen {
+                existing: SEED_HOLDOUT_SIZE
+            }
         ));
     }
 
@@ -605,8 +671,10 @@ mod tests {
         h.freeze(&all).unwrap();
 
         let range = TrainingRange::up_to(10).unwrap();
-        let mut trials: Vec<(Uuid, OutcomeSource)> =
-            all[250..].iter().map(|id| (*id, OutcomeSource::Live)).collect();
+        let mut trials: Vec<(Uuid, OutcomeSource)> = all[250..]
+            .iter()
+            .map(|id| (*id, OutcomeSource::Live))
+            .collect();
         TrainingSet::build(range, &trials, &h, None).expect("the tail is not the holdout");
 
         trials.push((all[3], OutcomeSource::Backtest));
@@ -618,32 +686,52 @@ mod tests {
 
     #[test]
     fn the_entropy_floor_scales_with_the_slate() {
-        let wide = EntropyFloor { observed: 1.5, mean_candidates: 20.0 };
+        let wide = EntropyFloor {
+            observed: 1.5,
+            mean_candidates: 20.0,
+        };
         assert!((wide.floor().unwrap() - 0.5 * 20.0_f64.ln()).abs() < 1e-12);
         assert!(wide.permits_promotion(), "{}", wide.describe());
 
         // The same entropy over a small slate is near-maximal; over a large one
         // it is collapse. An absolute floor could not tell them apart.
-        let collapsed = EntropyFloor { observed: 0.2, mean_candidates: 20.0 };
+        let collapsed = EntropyFloor {
+            observed: 0.2,
+            mean_candidates: 20.0,
+        };
         assert!(!collapsed.permits_promotion(), "{}", collapsed.describe());
-        let small = EntropyFloor { observed: 0.6, mean_candidates: 2.0 };
+        let small = EntropyFloor {
+            observed: 0.6,
+            mean_candidates: 2.0,
+        };
         assert!(small.permits_promotion(), "{}", small.describe());
     }
 
     /// Not being able to measure the entropy is not a pass.
     #[test]
     fn an_unmeasurable_floor_blocks_promotion() {
-        let degenerate = EntropyFloor { observed: 0.0, mean_candidates: 1.0 };
+        let degenerate = EntropyFloor {
+            observed: 0.0,
+            mean_candidates: 1.0,
+        };
         assert_eq!(degenerate.floor(), None);
         assert!(!degenerate.permits_promotion());
-        assert!(degenerate.describe().contains("not measurable"), "{}", degenerate.describe());
+        assert!(
+            degenerate.describe().contains("not measurable"),
+            "{}",
+            degenerate.describe()
+        );
     }
 
     #[test]
     fn every_trigger_names_what_its_groups_count() {
         for t in TRIGGERS {
             assert!(t.observations > 0, "{}", t.model);
-            assert!(!t.group_label.is_empty(), "{} does not say what a group is", t.model);
+            assert!(
+                !t.group_label.is_empty(),
+                "{} does not say what a group is",
+                t.model
+            );
         }
         // M5's is passes, not candidates — the distinction the reference calls
         // load-bearing.

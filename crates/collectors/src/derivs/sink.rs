@@ -71,7 +71,10 @@ impl SourceIds {
     /// [`SinkError::UnknownSource`] if the catalogue does not hold it. There is no
     /// default id, because every default here is a lie about where a row came from.
     pub fn get(&self, name: &str) -> Result<i32, SinkError> {
-        self.0.get(name).copied().ok_or_else(|| SinkError::UnknownSource(name.to_string()))
+        self.0
+            .get(name)
+            .copied()
+            .ok_or_else(|| SinkError::UnknownSource(name.to_string()))
     }
 }
 
@@ -139,7 +142,10 @@ impl ClickHouseForwardSink {
     /// previous investigation concluded these tables did not exist.
     #[must_use]
     pub fn new(url: impl Into<String>, sources: SourceIds) -> Self {
-        Self { url: url.into(), sources }
+        Self {
+            url: url.into(),
+            sources,
+        }
     }
 }
 
@@ -166,7 +172,9 @@ impl ForwardSink for ClickHouseForwardSink {
                 source_id: self.sources.get(o.source)?,
             });
         }
-        store::write_funding(&self.url, &out).await.map_err(|e| SinkError::Store(e.to_string()))
+        store::write_funding(&self.url, &out)
+            .await
+            .map_err(|e| SinkError::Store(e.to_string()))
     }
 
     async fn open_interest(&self, rows: &[OpenInterestObservation]) -> Result<usize, SinkError> {
@@ -187,7 +195,9 @@ impl ForwardSink for ClickHouseForwardSink {
                 source_id: self.sources.get(o.source)?,
             });
         }
-        store::write_open_interest(&self.url, &out).await.map_err(|e| SinkError::Store(e.to_string()))
+        store::write_open_interest(&self.url, &out)
+            .await
+            .map_err(|e| SinkError::Store(e.to_string()))
     }
 
     async fn heartbeat(&self, beats: &[Beat]) -> Result<usize, SinkError> {
@@ -204,7 +214,9 @@ impl ForwardSink for ClickHouseForwardSink {
                 rows_written: b.rows,
             })
             .collect();
-        store::write_heartbeats(&self.url, &rows).await.map_err(|e| SinkError::Store(e.to_string()))
+        store::write_heartbeats(&self.url, &rows)
+            .await
+            .map_err(|e| SinkError::Store(e.to_string()))
     }
 }
 
@@ -272,8 +284,14 @@ mod tests {
     #[test]
     fn the_two_funding_kinds_map_across_without_collapsing() {
         assert_eq!(kind_of(FundingKind::Realized), store::FundingKind::Realized);
-        assert_eq!(kind_of(FundingKind::Predicted), store::FundingKind::Predicted);
-        assert_ne!(kind_of(FundingKind::Realized), kind_of(FundingKind::Predicted));
+        assert_eq!(
+            kind_of(FundingKind::Predicted),
+            store::FundingKind::Predicted
+        );
+        assert_ne!(
+            kind_of(FundingKind::Realized),
+            kind_of(FundingKind::Predicted)
+        );
     }
 
     /// An empty batch writes nothing and says so, rather than opening an insert

@@ -249,16 +249,15 @@ pub async fn advance_funnel(
     // engine writes. Nothing in this request can put a row there, which is the
     // property that makes "a persuasive argument with no ticket is refused"
     // true rather than aspirational.
-    let tickets = match ledger::tickets_for(&state.pg, &token.user_id().to_string(), &id.to_string())
-        .await
-    {
-        Ok(t) => t,
-        Err(e) => {
-            // A lookup that failed is not a lookup that found tickets. The
-            // refusal direction is the only safe one: a gate advanced because
-            // the ticket table was unreachable is a gate advanced on no
-            // evidence.
-            return (
+    let tickets =
+        match ledger::tickets_for(&state.pg, &token.user_id().to_string(), &id.to_string()).await {
+            Ok(t) => t,
+            Err(e) => {
+                // A lookup that failed is not a lookup that found tickets. The
+                // refusal direction is the only safe one: a gate advanced because
+                // the ticket table was unreachable is a gate advanced on no
+                // evidence.
+                return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(json!({
                     "error": "tickets_unreadable",
@@ -267,8 +266,8 @@ pub async fn advance_funnel(
                 })),
             )
                 .into_response();
-        }
-    };
+            }
+        };
     for checkpoint in [
         Checkpoint::Funnel(Gate::Robustness),
         Checkpoint::Funnel(Gate::Significance),

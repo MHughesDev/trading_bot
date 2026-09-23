@@ -201,7 +201,10 @@ pub async fn list_strategies(
     _token: BearerToken,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, Response> {
-    let rows = store(&state).strategy_states().await.map_err(server_error)?;
+    let rows = store(&state)
+        .strategy_states()
+        .await
+        .map_err(server_error)?;
     let env = order_environments(&state).await?;
     Ok(Json(json!({
         "strategies": rows.into_iter().map(|(id, state, scale_pct)| json!({
@@ -220,20 +223,18 @@ pub async fn get_precision(
     State(state): State<AppState>,
     Query(q): Query<PrecisionQuery>,
 ) -> Result<Json<serde_json::Value>, Response> {
-    let month = q
-        .month
-        .unwrap_or_else(|| {
-            // `Datelike::with_day` needs the trait in scope; spelled out here
-            // instead, because the first of the current month is what is meant
-            // and `from_ymd_opt` says so without an import.
-            let today = chrono::Utc::now().date_naive();
-            chrono::NaiveDate::from_ymd_opt(
-                chrono::Datelike::year(&today),
-                chrono::Datelike::month(&today),
-                1,
-            )
-            .unwrap_or(today)
-        });
+    let month = q.month.unwrap_or_else(|| {
+        // `Datelike::with_day` needs the trait in scope; spelled out here
+        // instead, because the first of the current month is what is meant
+        // and `from_ymd_opt` says so without an import.
+        let today = chrono::Utc::now().date_naive();
+        chrono::NaiveDate::from_ymd_opt(
+            chrono::Datelike::year(&today),
+            chrono::Datelike::month(&today),
+            1,
+        )
+        .unwrap_or(today)
+    });
     let rows = store(&state)
         .compute_precision(month)
         .await
@@ -279,22 +280,22 @@ pub async fn trip(
         return Err(bad_request("a trip requires a reason"));
     }
 
-    let mut event = MonitorEvent::new(
-        scope.clone(),
-        Family::Platform,
-        EventKind::Tripped,
-        &actor,
-    )
-    .map_err(bad_request)?
-    .with_reason(body.reason.clone());
+    let mut event = MonitorEvent::new(scope.clone(), Family::Platform, EventKind::Tripped, &actor)
+        .map_err(bad_request)?
+        .with_reason(body.reason.clone());
     event.metric = body.metric;
 
-    store(&state).trip(&event, &body.reason).await.map_err(server_error)?;
+    store(&state)
+        .trip(&event, &body.reason)
+        .await
+        .map_err(server_error)?;
     // The mirror is refreshed from the table rather than set directly, so the
     // in-memory view can never say something the durable record does not.
     state.kill_switch.trip_scope(&scope);
 
-    Ok(Json(json!({ "scope": scope.to_string(), "state": "halted" })))
+    Ok(Json(
+        json!({ "scope": scope.to_string(), "state": "halted" }),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -333,7 +334,9 @@ pub async fn reset(
     match s.reset(&request).await {
         Ok(()) => {
             state.kill_switch.reset_scope(&scope);
-            Ok(Json(json!({ "scope": scope.to_string(), "state": "armed" })))
+            Ok(Json(
+                json!({ "scope": scope.to_string(), "state": "armed" }),
+            ))
         }
         Err(monitor::store::StoreError::Reset(refusal)) => Err((
             StatusCode::CONFLICT,
@@ -372,7 +375,9 @@ pub async fn strategy_action(
 
     match action.as_str() {
         "scale" => {
-            let pct = body.scale_pct.ok_or_else(|| bad_request("scale_pct is required"))?;
+            let pct = body
+                .scale_pct
+                .ok_or_else(|| bad_request("scale_pct is required"))?;
             if pct == 0 || pct > 100 {
                 return Err(bad_request("scale_pct must be in 1..=100"));
             }
@@ -380,11 +385,17 @@ pub async fn strategy_action(
                 .map_err(bad_request)?
                 .with_reason(body.reason.unwrap_or_else(|| "manual scale".to_owned()));
             s.record_event(&event).await.map_err(server_error)?;
-            s.set_strategy_state(&strategy_id, StrategyState::ScaledDown.as_str(), i16::from(pct))
-                .await
-                .map_err(server_error)?;
+            s.set_strategy_state(
+                &strategy_id,
+                StrategyState::ScaledDown.as_str(),
+                i16::from(pct),
+            )
+            .await
+            .map_err(server_error)?;
             state.kill_switch.scale_strategy(&strategy_id, pct);
-            Ok(Json(json!({ "strategy_id": strategy_id, "scale_pct": pct })))
+            Ok(Json(
+                json!({ "strategy_id": strategy_id, "scale_pct": pct }),
+            ))
         }
         "halt" => {
             let reason = body
@@ -412,9 +423,7 @@ pub async fn strategy_action(
         "resume" => {
             let request = ResetRequest {
                 scope: scope.clone(),
-                typed_confirmation: body
-                    .confirm_scope
-                    .unwrap_or_default(),
+                typed_confirmation: body.confirm_scope.unwrap_or_default(),
                 reason: body.reason.unwrap_or_default(),
                 actor,
                 all_venues_reconciled: true,
@@ -426,7 +435,9 @@ pub async fn strategy_action(
                         .await
                         .map_err(server_error)?;
                     state.kill_switch.scale_strategy(&strategy_id, 100);
-                    Ok(Json(json!({ "strategy_id": strategy_id, "state": "nominal" })))
+                    Ok(Json(
+                        json!({ "strategy_id": strategy_id, "state": "nominal" }),
+                    ))
                 }
                 Err(monitor::store::StoreError::Reset(refusal)) => Err((
                     StatusCode::CONFLICT,
@@ -502,8 +513,13 @@ pub async fn declare_limit(
         declared_at: chrono::Utc::now(),
         declared_by: actor,
     };
-    store(&state).declare_limit(&limit).await.map_err(server_error)?;
-    Ok(Json(json!({ "strategy_id": strategy_id, "version": limit.version })))
+    store(&state)
+        .declare_limit(&limit)
+        .await
+        .map_err(server_error)?;
+    Ok(Json(
+        json!({ "strategy_id": strategy_id, "version": limit.version }),
+    ))
 }
 
 /// `GET /api/monitor/limits/{strategy_id}/promotion-gate`
@@ -518,7 +534,9 @@ pub async fn promotion_gate(
 ) -> Result<Json<serde_json::Value>, Response> {
     let book = store(&state).load_limits().await.map_err(server_error)?;
     match book.may_promote_to_live(&strategy_id) {
-        Ok(()) => Ok(Json(json!({ "strategy_id": strategy_id, "may_promote": true }))),
+        Ok(()) => Ok(Json(
+            json!({ "strategy_id": strategy_id, "may_promote": true }),
+        )),
         Err(refusal) => Ok(Json(json!({
             "strategy_id": strategy_id,
             "may_promote": false,
@@ -565,7 +583,10 @@ pub async fn record_drill(
     )
     .map_err(bad_request)?;
 
-    store(&state).record_drill(&outcome).await.map_err(server_error)?;
+    store(&state)
+        .record_drill(&outcome)
+        .await
+        .map_err(server_error)?;
     Ok(Json(json!({
         "drill_id": outcome.drill_id,
         "passed": outcome.passed(),
@@ -592,11 +613,15 @@ pub async fn open_window(
     let window = MaintenanceWindow::open(
         &actor,
         &body.reason,
-        body.minutes.unwrap_or(monitor::window::DEFAULT_WINDOW_MINUTES),
+        body.minutes
+            .unwrap_or(monitor::window::DEFAULT_WINDOW_MINUTES),
         chrono::Utc::now(),
     )
     .map_err(bad_request)?;
-    store(&state).open_window(&window).await.map_err(server_error)?;
+    store(&state)
+        .open_window(&window)
+        .await
+        .map_err(server_error)?;
     Ok(Json(json!({
         "window_id": window.window_id,
         "expires_at": window.expires_at.to_rfc3339(),
@@ -611,7 +636,10 @@ pub async fn close_window(
     Path(window_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, Response> {
     require_control(&token)?;
-    store(&state).close_window(window_id).await.map_err(server_error)?;
+    store(&state)
+        .close_window(window_id)
+        .await
+        .map_err(server_error)?;
     Ok(Json(json!({ "window_id": window_id, "closed": true })))
 }
 
@@ -641,7 +669,9 @@ pub async fn label_breach(
         .label_breach(event_id, family, label, &actor, body.note.as_deref())
         .await
         .map_err(server_error)?;
-    Ok(Json(json!({ "event_id": event_id, "label": label.as_str() })))
+    Ok(Json(
+        json!({ "event_id": event_id, "label": label.as_str() }),
+    ))
 }
 
 #[cfg(test)]

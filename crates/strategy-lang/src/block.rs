@@ -145,7 +145,9 @@ pub fn entry_clauses_with(
             ));
         }
         let Some((_, source)) = conditions.iter().find(|(id, _)| *id == when.as_str()) else {
-            return Err(defect("an entry signal watches a node that is not a condition"));
+            return Err(defect(
+                "an entry signal watches a node that is not a condition",
+            ));
         };
         let parsed = crate::parse::expr_from_str(source).map_err(|d| {
             Diagnostic::semantic(
@@ -409,11 +411,7 @@ impl EntryProfile {
                         pct(c.sole_blocker_share)
                     )
                 });
-                format!(
-                    "`{}` fired on {} of bars{extra}",
-                    self.path,
-                    pct(*share)
-                )
+                format!("`{}` fired on {} of bars{extra}", self.path, pct(*share))
             }
             Verdict::Blocked {
                 clause,
@@ -740,7 +738,10 @@ exit time 24 bars
         assert!(words.contains("rsi(close, 14) < 30"), "{words}");
         assert!(words.contains("0.4% of bars"), "{words}");
         assert!(words.contains("59.6% of the rest"), "{words}");
-        assert_eq!(e.binding_clause().map(|c| c.path.as_str()), Some("entry.long[0].clause[1]"));
+        assert_eq!(
+            e.binding_clause().map(|c| c.path.as_str()),
+            Some("entry.long[0].clause[1]")
+        );
     }
 
     #[test]
@@ -749,7 +750,9 @@ exit time 24 bars
         let c = counts("entry.long[0]", 1000, 0, &[(300, 200), (300, 200)]);
         let p = blocking_profile(&d, &[c]).expect("profile");
         assert_eq!(p.entries[0].verdict, Verdict::NoSingleBlocker);
-        assert!(p.entries[0].words().contains("no one clause is responsible"));
+        assert!(p.entries[0]
+            .words()
+            .contains("no one clause is responsible"));
     }
 
     #[test]
@@ -812,8 +815,7 @@ exit time 24 bars
             ),
         ];
         for (label, clauses, bars, all_true) in cases {
-            let err = EntryCounts::new("entry.long[0]", bars, all_true, clauses)
-                .expect_err(label);
+            let err = EntryCounts::new("entry.long[0]", bars, all_true, clauses).expect_err(label);
             assert_eq!(err.code, Code::ImpossibleTally, "{label}");
             assert!(err.fix.is_some(), "{label}");
         }

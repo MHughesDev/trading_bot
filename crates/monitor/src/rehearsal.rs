@@ -124,11 +124,7 @@ impl Rehearsal {
     /// # Errors
     /// Refuses an `agent:` operator here as well as in [`DrillOutcome::record`],
     /// so a rehearsal an agent asked for cannot even start.
-    pub fn new(
-        store: MonitorStore,
-        cadence_ms: i64,
-        operator: &str,
-    ) -> Result<Self, DrillRefusal> {
+    pub fn new(store: MonitorStore, cadence_ms: i64, operator: &str) -> Result<Self, DrillRefusal> {
         if operator.starts_with("agent:") {
             return Err(DrillRefusal::AgentOperator {
                 operator: operator.to_owned(),
@@ -194,12 +190,17 @@ impl Rehearsal {
         // 1. Detection: the breach to the state change. The trip writes the event
         //    and the switch row in one transaction, record first (§8.5), so the
         //    moment it commits is the moment the platform's answer changed.
-        let event = MonitorEvent::new(scope.clone(), Family::Platform, EventKind::Drill, MONITOR_ACTOR)
-            .map_err(|e| StoreError::Invalid(e.to_string()))?
-            .with_reason(format!(
-                "drill ({}) — rehearsing the trip path against {scope}",
-                trigger.as_str()
-            ));
+        let event = MonitorEvent::new(
+            scope.clone(),
+            Family::Platform,
+            EventKind::Drill,
+            MONITOR_ACTOR,
+        )
+        .map_err(|e| StoreError::Invalid(e.to_string()))?
+        .with_reason(format!(
+            "drill ({}) — rehearsing the trip path against {scope}",
+            trigger.as_str()
+        ));
         self.store.trip(&event, "drill rehearsal").await?;
         let detection_ms = elapsed_ms(clock);
 
@@ -348,7 +349,10 @@ mod tests {
                 rehearsal.deadline_ms(),
                 terms.renew_interval_ms()
             );
-            assert!(rehearsal.deadline_ms() >= 1, "a deadline of zero never measures anything");
+            assert!(
+                rehearsal.deadline_ms() >= 1,
+                "a deadline of zero never measures anything"
+            );
         }
     }
 

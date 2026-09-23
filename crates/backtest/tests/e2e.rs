@@ -79,15 +79,33 @@ async fn seeded_clickhouse_insert_load_and_simulate() {
 
     // A throwaway database: test identities must never collide with real ones.
     let admin = storage::clickhouse::connect(&base);
-    admin.query("DROP DATABASE IF EXISTS backtest_e2e").execute().await.unwrap();
-    admin.query("CREATE DATABASE backtest_e2e").execute().await.unwrap();
+    admin
+        .query("DROP DATABASE IF EXISTS backtest_e2e")
+        .execute()
+        .await
+        .unwrap();
+    admin
+        .query("CREATE DATABASE backtest_e2e")
+        .execute()
+        .await
+        .unwrap();
     let (scheme, rest) = base.split_once("://").unwrap();
-    let url = format!("{scheme}://{}/backtest_e2e", rest.split('/').next().unwrap());
+    let url = format!(
+        "{scheme}://{}/backtest_e2e",
+        rest.split('/').next().unwrap()
+    );
     storage::clickhouse::migrate::run_migrations(&url)
         .await
         .expect("apply clickhouse schema");
     let identity = std::sync::Arc::new(storage::identity::MemoryIdentity::new());
-    identity.add_source("e2e_test", storage::identity::SourceInfo { source_id: 16, declared_vendor_lag: std::time::Duration::ZERO, live: false });
+    identity.add_source(
+        "e2e_test",
+        storage::identity::SourceInfo {
+            source_id: 16,
+            declared_vendor_lag: std::time::Duration::ZERO,
+            live: false,
+        },
+    );
     storage::identity::install(identity.clone());
 
     let store = BarStore::connect(&url);

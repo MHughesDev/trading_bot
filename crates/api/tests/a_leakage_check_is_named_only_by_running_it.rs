@@ -338,7 +338,10 @@ fn the_audits_own_fold_geometry_fits_the_frame_it_was_sized_from() {
         assert_eq!(folds.len(), spec.folds as usize);
         let rebuilt = features::walk_forward_folds(frame.row_count(), &spec, &pipeline)
             .expect("the returned spec must be one that builds");
-        assert_eq!(rebuilt, folds, "the spec and the folds it returned disagree");
+        assert_eq!(
+            rebuilt, folds,
+            "the spec and the folds it returned disagree"
+        );
 
         for f in &folds {
             assert!(

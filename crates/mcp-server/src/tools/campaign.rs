@@ -32,8 +32,8 @@
 
 use serde_json::{json, Value};
 
-use crate::spec::ToolSpec;
 use crate::spec::Envelope;
+use crate::spec::ToolSpec;
 use crate::taxonomy::Risk;
 
 fn missing(field: &str, why: &str) -> Value {
@@ -41,7 +41,10 @@ fn missing(field: &str, why: &str) -> Value {
 }
 
 fn number(params: &Value, key: &str) -> Option<f64> {
-    params.get(key).and_then(Value::as_f64).filter(|v| v.is_finite())
+    params
+        .get(key)
+        .and_then(Value::as_f64)
+        .filter(|v| v.is_finite())
 }
 
 /// Pre-flight on a campaign definition.
@@ -167,10 +170,7 @@ pub async fn define_campaign(api: &crate::ApiClient, params: &Value) -> Value {
 /// `get_campaign` — where a campaign is, and what it has produced.
 pub async fn get_campaign(api: &crate::ApiClient, params: &Value) -> Value {
     let Some(id) = params.get("campaign_id").and_then(Value::as_str) else {
-        return missing(
-            "campaign_id",
-            "the campaign `define_campaign` returned",
-        );
+        return missing("campaign_id", "the campaign `define_campaign` returned");
     };
     match api.get(&format!("/api/lifecycle/campaigns/{id}")).await {
         Ok(v) => v,

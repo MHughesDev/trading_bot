@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use chrono::{DateTime, Datelike, Utc};
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::run::{MetricSet, RunResult, RunStatus, Side, Trade};
@@ -204,12 +204,8 @@ fn trade_stats(trades: &[Trade], metrics: &MetricSet) -> TradeStats {
         return TradeStats::default();
     }
     let (mut wins, mut losses) = (0usize, 0usize);
-    let (mut gain, mut loss, mut pnl_total, mut costs) = (
-        Decimal::ZERO,
-        Decimal::ZERO,
-        Decimal::ZERO,
-        Decimal::ZERO,
-    );
+    let (mut gain, mut loss, mut pnl_total, mut costs) =
+        (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
     let (mut streak, mut longest) = (0usize, 0usize);
     for t in trades {
         let p = t.pnl;
@@ -767,7 +763,9 @@ mod tests {
             serde_json::from_str::<RegimeAttribution>(&b).unwrap(),
             qualified_none
         );
-        assert!(qualified_none.slices().is_some_and(<[RegimeSlice]>::is_empty));
+        assert!(qualified_none
+            .slices()
+            .is_some_and(<[RegimeSlice]>::is_empty));
         assert!(unmeasured.slices().is_none());
     }
 
@@ -778,7 +776,10 @@ mod tests {
         let cfg = RunConfigBuilder::new("s", "v", slice, "c", "z", "snap").build();
         let r = RunResult::failed(&cfg, ledger::TerminalReason::DataError, "nope", "test");
         let b = DiagnosticBundle::from_result(&r, &[]);
-        assert_eq!(b.status, RunStatus::Failed(ledger::TerminalReason::DataError));
+        assert_eq!(
+            b.status,
+            RunStatus::Failed(ledger::TerminalReason::DataError)
+        );
         assert!(b.longest_drawdown.is_none());
         assert!(b.by_month.is_empty());
         assert_eq!(

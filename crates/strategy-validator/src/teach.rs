@@ -320,7 +320,12 @@ mod tests {
     #[test]
     fn every_example_parses_as_part_of_a_definition() {
         for path in [
-            "exits", "nodes", "actions", "inputs", "parameters", "risk_overrides",
+            "exits",
+            "nodes",
+            "actions",
+            "inputs",
+            "parameters",
+            "risk_overrides",
         ] {
             let ex = example_for_path(path).expect("a declared clause has an example");
             let wrapped = format!("{{{ex}}}");

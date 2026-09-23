@@ -143,11 +143,7 @@ pub fn prospect(chain: &[Refinement], incumbent: f64, delta_practical: f64) -> P
     let improvements: Vec<f64> = scored.iter().map(|v| v - incumbent).collect();
     let n = improvements.len() as f64;
     let mean = improvements.iter().sum::<f64>() / n;
-    let var = improvements
-        .iter()
-        .map(|d| (d - mean).powi(2))
-        .sum::<f64>()
-        / (n - 1.0);
+    let var = improvements.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / (n - 1.0);
     let sd = var.sqrt();
     if sd <= f64::EPSILON {
         // Every link scored the same. Either it is above the bar or it never
@@ -392,7 +388,11 @@ mod tests {
                 class: FailureClass::CostsDominate
             })
         );
-        assert!(v.stop.unwrap().detail().contains("expecting a different number"));
+        assert!(v
+            .stop
+            .unwrap()
+            .detail()
+            .contains("expecting a different number"));
     }
 
     /// Twice in the chain is not twice in a row.

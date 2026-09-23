@@ -12,8 +12,8 @@ pub mod tracing_setup;
 pub use correctness::CorrectnessMetrics;
 pub use metrics::Metrics;
 pub use silence::{
-    emit, evaluate, Arrival, Census, FeedExpectation, FeedKey, Heartbeat, RegistryRow, Roster, Severity,
-    SilenceReport, Verdict,
+    emit, evaluate, Arrival, Census, FeedExpectation, FeedKey, Heartbeat, RegistryRow, Roster,
+    Severity, SilenceReport, Verdict,
 };
 
 /// Initialize tracing for a service using the default (non-JSON) format.

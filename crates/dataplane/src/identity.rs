@@ -121,8 +121,10 @@ pub fn resolve_symbol(
 /// with the greatest `knowledge_time ≤ as_of`. A correction supersedes the
 /// version it restates rather than coexisting with it.
 fn current_versions(facts: &[SymbolFact], as_of: DateTime<Utc>) -> Vec<&SymbolFact> {
-    let mut latest: std::collections::HashMap<(InstrumentKey, VenueKey, &str, DateTime<Utc>), &SymbolFact> =
-        std::collections::HashMap::new();
+    let mut latest: std::collections::HashMap<
+        (InstrumentKey, VenueKey, &str, DateTime<Utc>),
+        &SymbolFact,
+    > = std::collections::HashMap::new();
     for f in facts.iter().filter(|f| f.knowledge_time <= as_of) {
         let key = (f.instrument_id, f.venue_id, f.symbol.as_str(), f.valid_from);
         latest
@@ -161,7 +163,13 @@ mod tests {
         Utc.with_ymd_and_hms(y, m, d, 0, 0, 0).unwrap()
     }
 
-    fn fact(inst: i64, sym: &str, from: DateTime<Utc>, to: Option<DateTime<Utc>>, k: DateTime<Utc>) -> SymbolFact {
+    fn fact(
+        inst: i64,
+        sym: &str,
+        from: DateTime<Utc>,
+        to: Option<DateTime<Utc>>,
+        k: DateTime<Utc>,
+    ) -> SymbolFact {
         SymbolFact {
             instrument_id: InstrumentKey(inst),
             venue_id: VenueKey(1),
@@ -179,16 +187,31 @@ mod tests {
             fact(2, "ABC", t(2018, 1, 1), None, t(2018, 1, 1)),
         ];
         let now = t(2026, 1, 1);
-        assert_eq!(resolve_symbol(&facts, VenueKey(1), "ABC", t(2012, 6, 1), now), Some(InstrumentKey(1)));
-        assert_eq!(resolve_symbol(&facts, VenueKey(1), "ABC", t(2020, 6, 1), now), Some(InstrumentKey(2)));
-        assert_eq!(resolve_symbol(&facts, VenueKey(1), "ABC", t(2016, 6, 1), now), None);
+        assert_eq!(
+            resolve_symbol(&facts, VenueKey(1), "ABC", t(2012, 6, 1), now),
+            Some(InstrumentKey(1))
+        );
+        assert_eq!(
+            resolve_symbol(&facts, VenueKey(1), "ABC", t(2020, 6, 1), now),
+            Some(InstrumentKey(2))
+        );
+        assert_eq!(
+            resolve_symbol(&facts, VenueKey(1), "ABC", t(2016, 6, 1), now),
+            None
+        );
     }
 
     #[test]
     fn a_fact_is_invisible_before_its_knowledge_time() {
         let facts = vec![fact(2, "ABC", t(2018, 1, 1), None, t(2018, 3, 1))];
-        assert_eq!(resolve_symbol(&facts, VenueKey(1), "ABC", t(2018, 2, 1), t(2018, 2, 1)), None);
-        assert_eq!(resolve_symbol(&facts, VenueKey(1), "ABC", t(2018, 2, 1), t(2018, 4, 1)), Some(InstrumentKey(2)));
+        assert_eq!(
+            resolve_symbol(&facts, VenueKey(1), "ABC", t(2018, 2, 1), t(2018, 2, 1)),
+            None
+        );
+        assert_eq!(
+            resolve_symbol(&facts, VenueKey(1), "ABC", t(2018, 2, 1), t(2018, 4, 1)),
+            Some(InstrumentKey(2))
+        );
     }
 
     #[test]
@@ -198,14 +221,26 @@ mod tests {
             fact(1, "XYZ", t(2010, 1, 1), None, t(2010, 1, 1)),
             fact(1, "XYZ", t(2010, 1, 1), Some(t(2019, 1, 1)), t(2020, 1, 1)),
         ];
-        assert_eq!(resolve_symbol(&facts, VenueKey(1), "XYZ", t(2019, 6, 1), t(2019, 12, 1)), Some(InstrumentKey(1)));
-        assert_eq!(resolve_symbol(&facts, VenueKey(1), "XYZ", t(2019, 6, 1), t(2021, 1, 1)), None);
+        assert_eq!(
+            resolve_symbol(&facts, VenueKey(1), "XYZ", t(2019, 6, 1), t(2019, 12, 1)),
+            Some(InstrumentKey(1))
+        );
+        assert_eq!(
+            resolve_symbol(&facts, VenueKey(1), "XYZ", t(2019, 6, 1), t(2021, 1, 1)),
+            None
+        );
     }
 
     #[test]
     fn platform_asset_class_mapping() {
-        assert_eq!(AssetClass::from_platform("crypto_spot_cex"), Some(AssetClass::Crypto));
-        assert_eq!(AssetClass::from_platform("futures_expiring"), Some(AssetClass::Future));
+        assert_eq!(
+            AssetClass::from_platform("crypto_spot_cex"),
+            Some(AssetClass::Crypto)
+        );
+        assert_eq!(
+            AssetClass::from_platform("futures_expiring"),
+            Some(AssetClass::Future)
+        );
         assert_eq!(AssetClass::from_platform("nft"), None);
     }
 }

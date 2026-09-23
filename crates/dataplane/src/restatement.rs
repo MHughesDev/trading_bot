@@ -49,7 +49,9 @@ impl RestatementIndex {
         let mut versions: HashMap<(InstrumentKey, DateTime<Utc>), u32> = HashMap::new();
         let mut max_k: HashMap<RestatementKey, DateTime<Utc>> = HashMap::new();
         for r in rows {
-            *versions.entry((r.instrument(), r.event_time())).or_default() += 1;
+            *versions
+                .entry((r.instrument(), r.event_time()))
+                .or_default() += 1;
             let key = RestatementKey {
                 instrument_id: r.instrument(),
                 event_date: r.event_time().date_naive(),
@@ -138,7 +140,9 @@ pub fn resolve_pit<R: Versioned + Clone>(
             for r in cells {
                 best.entry(r.event_time())
                     .and_modify(|cur| {
-                        if (r.knowledge_time(), r.revision()) > (cur.knowledge_time(), cur.revision()) {
+                        if (r.knowledge_time(), r.revision())
+                            > (cur.knowledge_time(), cur.revision())
+                        {
                             *cur = r;
                         }
                     })
@@ -200,8 +204,20 @@ mod tests {
     fn restated_cell_resolves_by_as_of() {
         let et = day(2, 10);
         let rows = vec![
-            Row { inst: 1, et, kt: et + Duration::minutes(1), rev: 0, close: 100 },
-            Row { inst: 1, et, kt: et + Duration::hours(5), rev: 1, close: 101 },
+            Row {
+                inst: 1,
+                et,
+                kt: et + Duration::minutes(1),
+                rev: 0,
+                close: 100,
+            },
+            Row {
+                inst: 1,
+                et,
+                kt: et + Duration::hours(5),
+                rev: 1,
+                close: 101,
+            },
         ];
         let idx = RestatementIndex::build(&rows);
         assert!(idx.contains(InstrumentKey(1), et.date_naive()));
@@ -220,11 +236,23 @@ mod tests {
         for d in 1..=10 {
             for m in 0..60 {
                 let et = day(d, m);
-                rows.push(Row { inst: 1, et, kt: et + Duration::minutes(1), rev: 0, close: m });
+                rows.push(Row {
+                    inst: 1,
+                    et,
+                    kt: et + Duration::minutes(1),
+                    rev: 0,
+                    close: m,
+                });
             }
         }
         let restated = day(4, 30);
-        rows.push(Row { inst: 1, et: restated, kt: restated + Duration::days(1), rev: 1, close: -1 });
+        rows.push(Row {
+            inst: 1,
+            et: restated,
+            kt: restated + Duration::days(1),
+            rev: 1,
+            close: -1,
+        });
         let idx = RestatementIndex::build(&rows);
         let (out, stats) = resolve_pit(&rows, &idx, day(28, 0));
         assert_eq!(stats.resolved_partitions, 1);
@@ -235,7 +263,13 @@ mod tests {
     #[test]
     fn fast_path_still_hides_the_future() {
         let et = day(2, 0);
-        let rows = vec![Row { inst: 1, et, kt: et + Duration::hours(2), rev: 0, close: 1 }];
+        let rows = vec![Row {
+            inst: 1,
+            et,
+            kt: et + Duration::hours(2),
+            rev: 0,
+            close: 1,
+        }];
         let idx = RestatementIndex::build(&rows);
         let (out, stats) = resolve_pit(&rows, &idx, et + Duration::hours(1));
         assert!(out.is_empty());

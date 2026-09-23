@@ -41,7 +41,8 @@ impl DatasetSpec {
     pub fn normalized(mut self) -> Self {
         self.instrument_ids.sort();
         self.instrument_ids.dedup();
-        self.calendar_versions.sort_by(|a, b| (&a.calendar_id, &a.version).cmp(&(&b.calendar_id, &b.version)));
+        self.calendar_versions
+            .sort_by(|a, b| (&a.calendar_id, &a.version).cmp(&(&b.calendar_id, &b.version)));
         self.calendar_versions.dedup();
         self.opted_in_non_reproducible_sources.sort_unstable();
         self.opted_in_non_reproducible_sources.dedup();
@@ -60,15 +61,24 @@ impl DatasetSpec {
     /// Propagates into every trial that uses the dataset (INV-08).
     #[must_use]
     pub fn non_reproducible(&self) -> bool {
-        self.continuous_method.is_some_and(ContinuousMethod::non_reproducible) || !self.opted_in_non_reproducible_sources.is_empty()
+        self.continuous_method
+            .is_some_and(ContinuousMethod::non_reproducible)
+            || !self.opted_in_non_reproducible_sources.is_empty()
     }
 
     /// Flags a dataset spanning backfilled knowledge times. Flagged, not blocked
     /// (CLAUDE.md §6, OQ-01).
     #[must_use]
-    pub fn uses_backfilled_knowledge(&self, row_flags: impl IntoIterator<Item = QualityFlags>) -> bool {
-        !self.quality_exclusion_mask.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME)
-            && row_flags.into_iter().any(|f| f.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME))
+    pub fn uses_backfilled_knowledge(
+        &self,
+        row_flags: impl IntoIterator<Item = QualityFlags>,
+    ) -> bool {
+        !self
+            .quality_exclusion_mask
+            .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME)
+            && row_flags
+                .into_iter()
+                .any(|f| f.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME))
     }
 }
 
@@ -81,7 +91,10 @@ mod tests {
         DatasetSpec {
             universe_spec_id: "u".into(),
             instrument_ids: vec![InstrumentKey(3), InstrumentKey(1)],
-            date_range: (Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(), Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()),
+            date_range: (
+                Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
+                Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            ),
             frequency: "1m".into(),
             feature_set_id: "fs".into(),
             label_spec_id: "l".into(),

@@ -229,6 +229,23 @@ const JSON_CODEC_ITEMS: &[&str] = &[
 /// exemption nobody had to justify is an exemption nobody reviews.
 const BOUNDARY_MARKER: &str = "json-at-boundary:";
 
+/// How many code lines a standalone marker stays open over before it is reported as
+/// covering nothing.
+///
+/// A marker covers the *statement* below it, not the line below it, because `cargo fmt`
+/// decides which of those two the call lands on. The cap is what stops "the statement
+/// below" degrading into "the rest of the function" when a file is malformed or a
+/// statement never terminates: a marker cannot silently acquire a call the author never
+/// looked at.
+const MARKER_SPAN_LINES: u32 = 8;
+
+/// A standalone marker that has not yet found the call it covers.
+#[derive(Clone, Copy)]
+struct OpenMarker {
+    line: usize,
+    lines_left: u32,
+}
+
 /// Crates that carry `EventEnvelope` payloads on the market-data hot path.
 const JSON_HOTPATH_CRATES: &[&str] = &[
     "crates/collectors",
@@ -330,8 +347,11 @@ fn scan_json_hotpath(root: Option<&std::path::Path>) -> Result<(Vec<String>, usi
 
     let mut violations: Vec<String> = vec![];
     let mut files_scanned = 0usize;
+    // During an unresolved merge `git ls-files` prints a conflicted path once per stage,
+    // so without this every violation in a conflicted file is reported three times.
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
 
-    for file in file_list.lines() {
+    for file in file_list.lines().filter(|f| seen.insert(f)) {
         if file.contains("target/") || file.contains("/tests/") {
             continue;
         }
@@ -365,8 +385,8 @@ fn scan_json_hotpath_file(file: &str, content: &str) -> Vec<String> {
     let mut violations: Vec<String> = vec![];
     let mut in_test_depth: i32 = 0;
     let mut brace_depth: i32 = 0;
-    // A marker standing on its own line, waiting for the line it covers.
-    let mut pending: Option<usize> = None;
+    // A marker standing on its own line, still open over the statement below it.
+    let mut pending: Option<OpenMarker> = None;
 
     let at = |lineno: usize, line: &str, msg: &str| {
         format!("{}:{}: {}\n  {}", file, lineno + 1, msg, line.trim())
@@ -453,8 +473,21 @@ fn scan_json_hotpath_file(file: &str, content: &str) -> Vec<String> {
                 ));
             }
             (None, marker) => {
-                if let Some(orphan) = pending.take() {
-                    violations.push(stale(orphan));
+                // The marker stays open across the rest of its statement. Closing it at
+                // the next line would make it rustfmt-dependent: `cargo fmt` breaks
+                // `let env: T = serde_json::from_str(body).map_err(…)?;` after the `=`
+                // when the line is over 100 columns, which puts the call one line
+                // further down than the author left it. That is not a decision about
+                // whether the decode is legal, and a check that changes its answer when
+                // the formatter runs is a check nobody can keep green.
+                if let Some(open) = pending.as_mut() {
+                    if !code.trim().is_empty() {
+                        open.lines_left = open.lines_left.saturating_sub(1);
+                        if open.lines_left == 0 || ends_statement(code) {
+                            violations.push(stale(open.line));
+                            pending = None;
+                        }
+                    }
                 }
                 match marker {
                     Some("") => violations.push(at(
@@ -462,7 +495,14 @@ fn scan_json_hotpath_file(file: &str, content: &str) -> Vec<String> {
                         line,
                         &format!("`{BOUNDARY_MARKER}` needs a reason after the colon"),
                     )),
-                    Some(_) if comment_only => pending = Some(lineno),
+                    Some(_) if comment_only => {
+                        if let Some(orphan) = pending.replace(OpenMarker {
+                            line: lineno,
+                            lines_left: MARKER_SPAN_LINES,
+                        }) {
+                            violations.push(stale(orphan.line));
+                        }
+                    }
                     Some(_) => violations.push(stale(lineno)),
                     None => {}
                 }
@@ -471,10 +511,22 @@ fn scan_json_hotpath_file(file: &str, content: &str) -> Vec<String> {
     }
 
     if let Some(orphan) = pending {
-        violations.push(stale(orphan));
+        violations.push(stale(orphan.line));
     }
 
     violations
+}
+
+/// True when this line of code closes a statement or opens a block, so an open marker
+/// above it has run out of statement to cover.
+///
+/// A line ending in `=`, `(`, `,`, `.` or an operator is a continuation — which is
+/// exactly what `cargo fmt` produces when it breaks a long `let` after the `=`.
+fn ends_statement(code: &str) -> bool {
+    matches!(
+        code.trim_end().chars().next_back(),
+        Some(';') | Some('{') | Some('}')
+    )
 }
 
 /// The part of `line` before its `//` comment, with `//` inside a string literal left
@@ -859,8 +911,8 @@ fn scan_v2_writers(root: Option<&std::path::Path>) -> Result<(Vec<String>, Vec<S
         return Err("git ls-files failed".into());
     }
 
-    let file_list =
-        String::from_utf8(output.stdout).map_err(|_| "invalid utf8 from git ls-files".to_string())?;
+    let file_list = String::from_utf8(output.stdout)
+        .map_err(|_| "invalid utf8 from git ls-files".to_string())?;
     let mut violations: Vec<String> = vec![];
     let mut allowed_seen: Vec<(&str, usize)> =
         V2_PRE_FREEZE_WRITERS.iter().map(|(p, _)| (*p, 0)).collect();
@@ -1167,6 +1219,46 @@ mod tests {
         assert!(v[1].contains("payloads are rkyv"), "{v:?}");
     }
 
+    /// A marker covers the *statement* below it, not the line below it.
+    ///
+    /// This is not a convenience. `cargo fmt` breaks a `let` after the `=` when the line
+    /// is over 100 columns, which moves the call one line further down than the author
+    /// left it — and the workspace-wide `cargo fmt --all` of 2026-09-22 did exactly that
+    /// to both `serde_json::from_str` calls in `derivs/funding.rs`. Under a next-line
+    /// rule each one became two violations, a stale marker and an unmarked call, from a
+    /// commit that changed no code. A check whose answer depends on whether the
+    /// formatter has run is a check nobody can keep green.
+    #[test]
+    fn a_marker_survives_rustfmt_breaking_the_line() {
+        let formatted = "fn f() {\n    // json-at-boundary: venue REST body\n    let env: TickersEnvelope =\n        serde_json::from_str(body).map_err(|e| E::Http(e.to_string()))?;\n}\n";
+        assert!(
+            super::scan_json_hotpath_file("f.rs", formatted).is_empty(),
+            "{:?}",
+            super::scan_json_hotpath_file("f.rs", formatted)
+        );
+    }
+
+    /// The bound on the rule above: "the statement below" must not decay into "the rest
+    /// of the function", or a marker quietly acquires a call nobody reviewed.
+    #[test]
+    fn a_marker_does_not_reach_past_its_own_statement() {
+        let src = "fn f() {\n    // json-at-boundary: venue REST body\n    let x = 1;\n    serde_json::to_vec(&envelope);\n}\n";
+        let v = super::scan_json_hotpath_file("f.rs", src);
+        assert_eq!(v.len(), 2, "{v:?}");
+        assert!(v[0].contains("covers no serde_json use"), "{v:?}");
+        assert!(v[1].contains("payloads are rkyv"), "{v:?}");
+    }
+
+    #[test]
+    fn a_continuation_line_does_not_close_a_statement() {
+        assert!(!super::ends_statement("    let env: TickersEnvelope ="));
+        assert!(!super::ends_statement("        .map_err(|e| E::Http(e))"));
+        assert!(super::ends_statement("    let x = 1;"));
+        assert!(super::ends_statement(
+            "    match serde_json::from_slice(&raw) {"
+        ));
+    }
+
     /// The rot the old allowlist died of, made loud. When the call a marker covered is
     /// deleted or moved, the marker is reported instead of silently widening.
     #[test]
@@ -1217,8 +1309,12 @@ mod tests {
 
     #[test]
     fn plain_inserts_are_writes() {
-        assert!(line_writes_v2(r#"    .query("INSERT INTO market_bars_v2 (a) VALUES (1)")"#));
-        assert!(line_writes_v2(r#"    .query("INSERT INTO market_bars_v2(a) VALUES (1)")"#));
+        assert!(line_writes_v2(
+            r#"    .query("INSERT INTO market_bars_v2 (a) VALUES (1)")"#
+        ));
+        assert!(line_writes_v2(
+            r#"    .query("INSERT INTO market_bars_v2(a) VALUES (1)")"#
+        ));
         assert!(line_writes_v2(r#"    .insert("market_bars_v2")"#));
     }
 
@@ -1276,12 +1372,16 @@ mod tests {
         assert!(line_writes_v2(
             r#"    .query("ALTER TABLE market_bars_v2 UPDATE revision = 1 WHERE 1")"#
         ));
-        assert!(line_writes_v2(r#"    .query("TRUNCATE TABLE market_bars_v2")"#));
+        assert!(line_writes_v2(
+            r#"    .query("TRUNCATE TABLE market_bars_v2")"#
+        ));
         assert!(line_writes_v2(r#"    .query("DROP TABLE market_bars_v2")"#));
         assert!(line_writes_v2(
             r#"    .query("DROP TABLE IF EXISTS market_bars_v2")"#
         ));
-        assert!(line_writes_v2(r#"    .query("DETACH TABLE market_bars_v2")"#));
+        assert!(line_writes_v2(
+            r#"    .query("DETACH TABLE market_bars_v2")"#
+        ));
     }
 
     /// Lower-case SQL is the same SQL. A guard that only knows one casing documents
@@ -1317,19 +1417,27 @@ mod tests {
     /// draining, and a check that forbade that would forbid the fix.
     #[test]
     fn reads_and_prose_are_not_writes() {
-        assert!(!line_writes_v2(r#"    .query("SELECT count() FROM market_bars_v2")"#));
+        assert!(!line_writes_v2(
+            r#"    .query("SELECT count() FROM market_bars_v2")"#
+        ));
         assert!(!line_writes_v2(
             r#"    .query("SELECT * FROM trading.market_bars_v2 FINAL")"#
         ));
-        assert!(!line_writes_v2(r#"    .query("INSERT INTO market_bar (a) VALUES (1)")"#));
+        assert!(!line_writes_v2(
+            r#"    .query("INSERT INTO market_bar (a) VALUES (1)")"#
+        ));
         assert!(!line_writes_v2(
             r#"    .query(&format!("CREATE TABLE {staging} AS market_bars_v2"))"#
         ));
         assert!(!line_writes_v2(
             r#"    .query("INSERT INTO {staging} SELECT DISTINCT * FROM market_bars_v2")"#
         ));
-        assert!(!line_writes_v2("// INSERT INTO market_bars_v2 is forbidden"));
-        assert!(!line_writes_v2("//! writes its bars to `market_bars_v2` with"));
+        assert!(!line_writes_v2(
+            "// INSERT INTO market_bars_v2 is forbidden"
+        ));
+        assert!(!line_writes_v2(
+            "//! writes its bars to `market_bars_v2` with"
+        ));
         assert!(!line_writes_v2(" * INSERT INTO market_bars_v2"));
     }
 

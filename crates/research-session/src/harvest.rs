@@ -797,8 +797,7 @@ mod tests {
             "the two wordings have to actually key the same for this to be testing layer one"
         );
         assert_eq!(h.added().count(), 0);
-        let merged: Vec<(Uuid, Source)> =
-            h.merged().map(|(i, src, _)| (i, src)).collect();
+        let merged: Vec<(Uuid, Source)> = h.merged().map(|(i, src, _)| (i, src)).collect();
         assert_eq!(merged, vec![(wanted.id, Source::OpenQuestion)]);
         assert_eq!(agenda.len(), 2, "no second row");
         assert_eq!(

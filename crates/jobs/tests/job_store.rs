@@ -26,7 +26,9 @@ use uuid::Uuid;
 async fn pool() -> Option<PgPool> {
     let url = std::env::var("JOBS_TEST_DATABASE_URL").ok()?;
     let pool = PgPool::connect(&url).await.expect("connect");
-    storage::postgres::run_migrations(&pool).await.expect("migrations");
+    storage::postgres::run_migrations(&pool)
+        .await
+        .expect("migrations");
     Some(pool)
 }
 
@@ -49,11 +51,13 @@ impl TrialCounter for RecordingCounter {
         if self.fail {
             return Err(JobStoreError::Invalid("counter refused".into()));
         }
-        let id = jobs::PgTrialCounter.register_trial(tx, submission, job_id).await?;
-        self.calls
-            .lock()
-            .unwrap()
-            .push((submission.experiment_id.clone().unwrap_or_default(), job_id.to_string()));
+        let id = jobs::PgTrialCounter
+            .register_trial(tx, submission, job_id)
+            .await?;
+        self.calls.lock().unwrap().push((
+            submission.experiment_id.clone().unwrap_or_default(),
+            job_id.to_string(),
+        ));
         Ok(id)
     }
 }
@@ -418,7 +422,11 @@ async fn logic_failures_do_not_retry() {
     let state = store
         .fail(
             &submitted.job_id,
-            JobError::logic(ledger::TerminalReason::IntegrityRejected, "bad_strategy", "fix the expression"),
+            JobError::logic(
+                ledger::TerminalReason::IntegrityRejected,
+                "bad_strategy",
+                "fix the expression",
+            ),
         )
         .await
         .expect("fail");
@@ -608,7 +616,9 @@ async fn exploration_is_logged_and_never_counted() {
 // ---------------------------------------------------------------------------
 
 async fn ledger_trials(pool: &PgPool, user: Uuid, config_hash: &str) -> Vec<(Uuid, String)> {
-    let mut tx = ledger::pg::tenant_tx(pool, &user.to_string()).await.unwrap();
+    let mut tx = ledger::pg::tenant_tx(pool, &user.to_string())
+        .await
+        .unwrap();
     let rows: Vec<(Uuid, String)> = sqlx::query_as(
         "SELECT trial_id, state FROM mlops.trial_state WHERE tenant_id = $1 AND config_hash = $2 ORDER BY registered_at",
     )
@@ -640,7 +650,11 @@ async fn a_counted_job_registers_and_a_duplicate_is_a_second_look() {
     let again = store.submit(sub).await.expect("resubmit");
     assert!(again.deduplicated);
     let trials = ledger_trials(&pool, user, &hash).await;
-    assert_eq!(trials.len(), 2, "asking the same question twice is two looks");
+    assert_eq!(
+        trials.len(),
+        2,
+        "asking the same question twice is two looks"
+    );
     assert_eq!(trials[0].1, "queued");
     assert_eq!(trials[1].1, "deduplicated");
 
@@ -657,7 +671,11 @@ async fn job_lifecycle_settles_the_trial() {
 
     // Trainer-class work declares its own GPU ceiling; there is no default
     // (SPEC §8, AT-66).
-    let mut sub = submission(project, JobKind::Train, json!({"s": 101, "max_gpu_hours": 1.0}));
+    let mut sub = submission(
+        project,
+        JobKind::Train,
+        json!({"s": 101, "max_gpu_hours": 1.0}),
+    );
     sub.experiment_id = Some("exp_ledger".into());
     let user = sub.user_id;
     let hash = sub.manifest_hash();
@@ -665,7 +683,9 @@ async fn job_lifecycle_settles_the_trial() {
     let claimed = loop {
         match store.claim(WorkerClass::Trainer, "w1").await.unwrap() {
             Some(j) if j.job_id == submitted.job_id => break j,
-            Some(other) => { store.cancel(&other.job_id).await.ok(); }
+            Some(other) => {
+                store.cancel(&other.job_id).await.ok();
+            }
             None => panic!("job not claimable"),
         }
     };
@@ -682,9 +702,16 @@ async fn job_lifecycle_settles_the_trial() {
         .unwrap();
     let trials = ledger_trials(&pool, user, &hash).await;
     assert_eq!(trials[0].1, "failed");
-    let mut tx = ledger::pg::tenant_tx(&pool, &user.to_string()).await.unwrap();
-    let (cens, reason): (String, Option<String>) = sqlx::query_as("SELECT censoring, terminal_reason FROM mlops.trial_state WHERE trial_id=$1")
-        .bind(trials[0].0).fetch_one(&mut *tx).await.unwrap();
+    let mut tx = ledger::pg::tenant_tx(&pool, &user.to_string())
+        .await
+        .unwrap();
+    let (cens, reason): (String, Option<String>) = sqlx::query_as(
+        "SELECT censoring, terminal_reason FROM mlops.trial_state WHERE trial_id=$1",
+    )
+    .bind(trials[0].0)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
     tx.commit().await.unwrap();
     assert_eq!(cens, "failed");
     assert_eq!(reason.as_deref(), Some("oom"));
@@ -697,7 +724,13 @@ async fn job_lifecycle_settles_the_trial() {
 async fn a_refused_registration_leaves_no_job() {
     let Some(pool) = pool().await else { return };
     let project = Uuid::new_v4();
-    let store = JobStore::new(pool.clone(), Arc::new(RecordingCounter { fail: true, ..Default::default() }));
+    let store = JobStore::new(
+        pool.clone(),
+        Arc::new(RecordingCounter {
+            fail: true,
+            ..Default::default()
+        }),
+    );
 
     let mut sub = submission(project, JobKind::Backtest, json!({"s": 102}));
     sub.experiment_id = Some("exp_x".into());

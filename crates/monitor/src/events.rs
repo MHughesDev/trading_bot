@@ -190,8 +190,13 @@ mod tests {
     #[test]
     fn an_agent_cannot_author_an_event() {
         // COMP-007 §8.6, at the type level as well as in the CHECK constraint.
-        let err = MonitorEvent::new(Scope::Global, Family::Pnl, EventKind::Tripped, "agent:run-9")
-            .expect_err("an agent actor must be refused");
+        let err = MonitorEvent::new(
+            Scope::Global,
+            Family::Pnl,
+            EventKind::Tripped,
+            "agent:run-9",
+        )
+        .expect_err("an agent actor must be refused");
         assert_eq!(err.0, "agent:run-9");
     }
 
@@ -200,15 +205,25 @@ mod tests {
         // So that a rehearsal cannot be recorded as a real trip by forgetting a
         // flag — which is how a drill ends up in the precision numerator and in
         // the incident review.
-        let e = MonitorEvent::new(Scope::drill("global"), Family::Platform, EventKind::Drill, "human:mason")
-            .expect("human");
+        let e = MonitorEvent::new(
+            Scope::drill("global"),
+            Family::Platform,
+            EventKind::Drill,
+            "human:mason",
+        )
+        .expect("human");
         assert!(e.is_drill);
     }
 
     #[test]
     fn a_real_scope_is_never_marked_a_drill() {
-        let e = MonitorEvent::new(Scope::Global, Family::Platform, EventKind::Tripped, "monitor")
-            .expect("monitor");
+        let e = MonitorEvent::new(
+            Scope::Global,
+            Family::Platform,
+            EventKind::Tripped,
+            "monitor",
+        )
+        .expect("monitor");
         assert!(!e.is_drill);
     }
 

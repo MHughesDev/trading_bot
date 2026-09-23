@@ -188,20 +188,44 @@ async fn the_store_refuses_what_entry_validate_refuses() {
         // S-4.3's acceptance, stated exactly: no provenance, no row.
         ("no_run", &[("prov_run_id", "NULL")], "prov_run_id"),
         ("no_tool", &[("prov_tool", "NULL")], "prov_tool"),
-        ("no_ver", &[("prov_tool_version", "NULL")], "prov_tool_version"),
-        ("no_hash", &[("prov_template_hash", "NULL")], "prov_template_hash"),
+        (
+            "no_ver",
+            &[("prov_tool_version", "NULL")],
+            "prov_tool_version",
+        ),
+        (
+            "no_hash",
+            &[("prov_template_hash", "NULL")],
+            "prov_template_hash",
+        ),
         // All four, because `Provenance::is_complete` requires all four: a run
         // id with no tool is not provenance.
-        ("blank_tool", &[("prov_tool", "'   '")], "entry_prov_tool_check"),
-        ("blank_run", &[("prov_run_id", "''")], "entry_prov_run_id_check"),
+        (
+            "blank_tool",
+            &[("prov_tool", "'   '")],
+            "entry_prov_tool_check",
+        ),
+        (
+            "blank_run",
+            &[("prov_run_id", "''")],
+            "entry_prov_run_id_check",
+        ),
         // `EntryError::ClaimTooLong` / `EmptyClaim`.
-        ("long_claim", &[("claim", "repeat('x',301)")], "entry_claim_check"),
+        (
+            "long_claim",
+            &[("claim", "repeat('x',301)")],
+            "entry_claim_check",
+        ),
         ("blank_claim", &[("claim", "'  '")], "entry_claim_check"),
         // `EntryError::EmptySubject`.
         ("blank_subj", &[("subject", "''")], "entry_subject_check"),
         // The closed vocabularies.
         ("bad_kind", &[("kind", "'hunch'")], "entry_kind_check"),
-        ("bad_conf", &[("confidence", "'certain'")], "entry_confidence_check"),
+        (
+            "bad_conf",
+            &[("confidence", "'certain'")],
+            "entry_confidence_check",
+        ),
         (
             "bad_class",
             &[("evidence_class", "'vibes'")],
@@ -216,7 +240,10 @@ async fn the_store_refuses_what_entry_validate_refuses() {
         // A window that runs backwards is not a window.
         (
             "back_window",
-            &[("window_start", "'2026-06-30'"), ("window_end", "'2026-04-01'")],
+            &[
+                ("window_start", "'2026-06-30'"),
+                ("window_end", "'2026-04-01'"),
+            ],
             "the_window_runs_forwards",
         ),
     ];

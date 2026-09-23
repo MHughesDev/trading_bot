@@ -849,11 +849,10 @@ impl StrategyInstance {
                 NodeKind::ModelForecast { .. } => {
                     // A forecast that has not been fetched is not a forecast of
                     // "no": it is the absence of one.
-                    let verdict = self
-                        .model_forecast_results
-                        .get(&node.id)
-                        .copied()
-                        .map_or(Verdict::Unknown(Unknown::FeatureNotReady), Verdict::from_bool);
+                    let verdict = self.model_forecast_results.get(&node.id).copied().map_or(
+                        Verdict::Unknown(Unknown::FeatureNotReady),
+                        Verdict::from_bool,
+                    );
                     conditions.insert(&node.id, verdict);
                 }
                 NodeKind::Inference { condition, .. } => {
@@ -1175,7 +1174,11 @@ mod tests {
         // and fixed that mistake in three other crates. So the assertion is
         // now the honest one: no *order* intent was placed, and the manager
         // surfaced exactly one unresolved signal rather than nothing at all.
-        assert_eq!(results.len(), 1, "the unresolved condition must be surfaced");
+        assert_eq!(
+            results.len(),
+            1,
+            "the unresolved condition must be surfaced"
+        );
         let (_, outcome) = &results[0];
         assert!(
             outcome.intents.is_empty(),

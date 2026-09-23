@@ -116,11 +116,14 @@ pub struct Translated {
 pub fn translate(form: &DeskCharter) -> Result<Translated, Refusal> {
     let delta = match form.delta_practical.as_deref().map(str::trim) {
         None | Some("") => None,
-        Some(raw) => Some(raw.parse::<f64>().map_err(|_| Refusal {
-            message: format!("`{raw}` is not a number, and delta_practical is an effect size"),
-            fix: "write it as a decimal, for example 0.25 — or leave it blank and let each run \
+        Some(raw) => Some(raw.parse::<f64>().map_err(|_| {
+            Refusal {
+                message: format!("`{raw}` is not a number, and delta_practical is an effect size"),
+                fix:
+                    "write it as a decimal, for example 0.25 — or leave it blank and let each run \
                   seal its own. Dropping what you typed would make the suggestion mean nothing."
-                .into(),
+                        .into(),
+            }
         })?),
     };
     if let Some(d) = delta {
@@ -358,13 +361,18 @@ mod tests {
     #[test]
     fn a_block_running_to_midnight_ends_at_twenty_four() {
         let w = windows_from_grid(&grid(6, 22..24), "UTC").expect("a valid grid");
-        assert_eq!(w[0].end, "24:00", "00:00 would read as ending before it starts");
+        assert_eq!(
+            w[0].end, "24:00",
+            "00:00 would read as ending before it starts"
+        );
         assert_eq!(w[0].days, vec![7]);
     }
 
     #[test]
     fn an_empty_grid_is_always_open_and_a_wrong_sized_one_is_refused() {
-        assert!(windows_from_grid(&[], "UTC").expect("empty is fine").is_empty());
+        assert!(windows_from_grid(&[], "UTC")
+            .expect("empty is fine")
+            .is_empty());
         assert!(windows_from_grid(&vec![vec![false; 24]; 5], "UTC").is_err());
         assert!(windows_from_grid(&vec![vec![false; 23]; 7], "UTC").is_err());
     }
@@ -389,7 +397,10 @@ mod tests {
             ..DeskCharter::default()
         };
         assert_eq!(
-            translate(&blank).expect("blank is not stated").charter.delta_practical_default,
+            translate(&blank)
+                .expect("blank is not stated")
+                .charter
+                .delta_practical_default,
             None
         );
     }

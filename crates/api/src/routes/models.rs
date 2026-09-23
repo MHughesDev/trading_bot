@@ -635,7 +635,11 @@ pub async fn feature_vector(
             let resolved = match store.resolve_instrument(inst).await {
                 Ok(r) => r,
                 Err(e) => {
-                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response();
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": e.to_string() })),
+                    )
+                        .into_response();
                 }
             };
             let loaded = match resolved {
@@ -653,7 +657,9 @@ pub async fn feature_vector(
                         period_secs: u32::try_from(tf.seconds()).unwrap_or(u32::MAX),
                         feature_set_id: &fs_ref,
                     };
-                    let feats = match crate::features_compute::serve_vector(&ctx, &bars, &names).await {
+                    let feats = match crate::features_compute::serve_vector(&ctx, &bars, &names)
+                        .await
+                    {
                         Ok(f) => f,
                         Err(e) => {
                             return (
@@ -855,8 +861,13 @@ pub async fn data_windows(
     let horizon_bars =
         features::label_horizon_bars(&req.horizon_token, &req.timeframe).unwrap_or(60);
 
-    let fs_ref = req.feature_set_ref.clone().unwrap_or_else(|| "fs_core_ohlcv_v3".to_string());
-    let names = features::resolve_feature_set(&fs_ref).map(|s| s.features.clone()).unwrap_or_default();
+    let fs_ref = req
+        .feature_set_ref
+        .clone()
+        .unwrap_or_else(|| "fs_core_ohlcv_v3".to_string());
+    let names = features::resolve_feature_set(&fs_ref)
+        .map(|s| s.features.clone())
+        .unwrap_or_default();
     let pipeline = features::walk_forward::embargo_inputs(&names, horizon_bars);
 
     match walk_forward_folds(req.row_count as usize, &req.spec, &pipeline) {

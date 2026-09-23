@@ -18,7 +18,9 @@ fn manifest() -> String {
 
 fn sources() -> Vec<(String, String)> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-        let Ok(entries) = fs::read_dir(dir) else { return };
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
         for e in entries.flatten() {
             let p = e.path();
             if p.is_dir() {
@@ -34,7 +36,11 @@ fn sources() -> Vec<(String, String)> {
     paths
         .into_iter()
         .filter_map(|p| {
-            let name = p.strip_prefix(&src).ok()?.to_string_lossy().replace('\\', "/");
+            let name = p
+                .strip_prefix(&src)
+                .ok()?
+                .to_string_lossy()
+                .replace('\\', "/");
             Some((name, fs::read_to_string(&p).ok()?))
         })
         .collect()
@@ -114,7 +120,10 @@ fn the_monitor_ships_its_own_binary() {
     // A library alone would satisfy every other test here and would only ever run
     // inside somebody else's process.
     let toml = manifest();
-    assert!(toml.contains("[[bin]]"), "crates/monitor must build a binary");
+    assert!(
+        toml.contains("[[bin]]"),
+        "crates/monitor must build a binary"
+    );
     assert!(
         toml.contains("name = \"tbot-monitor\""),
         "the service is named tbot-monitor in the spec, the compose file and the drill"
@@ -130,7 +139,10 @@ fn the_monitor_binary_opens_its_own_database_connection() {
     // Not "is given one by the platform". Its own pool, from its own environment,
     // so that nothing about the API's lifecycle can take it away.
     let main = fs::read_to_string(crate_root().join("src/bin/tbot-monitor.rs")).expect("main");
-    assert!(main.contains("PgPoolOptions"), "the monitor builds its own pool");
+    assert!(
+        main.contains("PgPoolOptions"),
+        "the monitor builds its own pool"
+    );
     assert!(main.contains("DATABASE_URL"), "from its own configuration");
 }
 

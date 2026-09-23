@@ -241,9 +241,7 @@ fn hold_reasons() -> Vec<(&'static str, &'static str)> {
     [
         HoldReason::WindowClosed,
         HoldReason::DayBudgetExhausted,
-        HoldReason::DayBudgetUnreadable {
-            why: String::new(),
-        },
+        HoldReason::DayBudgetUnreadable { why: String::new() },
         HoldReason::Paused(Vec::new()),
         HoldReason::CannotDecide {
             missing: Vec::new(),
@@ -363,7 +361,12 @@ fn a_refused_lease_starts_no_child() {
         .find("execute::lease(")
         .expect("the driver sizes a lease");
     let after = &code[at..(at + 400).min(code.len())];
-    for swallow in [".ok()", ".unwrap_or", ".unwrap_or_default()", ".ok().flatten()"] {
+    for swallow in [
+        ".ok()",
+        ".unwrap_or",
+        ".unwrap_or_default()",
+        ".ok().flatten()",
+    ] {
         assert!(
             !after.contains(swallow),
             "`{swallow}` next to `execute::lease` turns a refusal into a missing value, and a \

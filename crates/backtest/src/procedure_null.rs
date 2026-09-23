@@ -226,7 +226,10 @@ impl Roc {
         for r in runs.iter().filter(|r| !r.is_null_world()) {
             // Bucket by strength via its bit pattern so that f64 can key a map
             // without an epsilon that would silently merge two planted levels.
-            let key = (r.generator, r.planted_strength.unwrap_or(f64::NAN).to_bits());
+            let key = (
+                r.generator,
+                r.planted_strength.unwrap_or(f64::NAN).to_bits(),
+            );
             buckets.entry(key).or_default().push(r);
         }
         if buckets.is_empty() {
@@ -334,8 +337,16 @@ mod tests {
     /// which is the direction that flatters the procedure.
     #[test]
     fn null_worlds_are_identified_by_generator_not_by_a_missing_strength() {
-        for g in [Generator::GarchT, Generator::MertonJump, Generator::RegimeSwitch] {
-            assert!(WorldRun { generator: g, ..null_world(1, 0) }.is_null_world());
+        for g in [
+            Generator::GarchT,
+            Generator::MertonJump,
+            Generator::RegimeSwitch,
+        ] {
+            assert!(WorldRun {
+                generator: g,
+                ..null_world(1, 0)
+            }
+            .is_null_world());
         }
         for g in [
             Generator::PlantedAr1,
@@ -368,7 +379,10 @@ mod tests {
         let floor = FalseDiscoveryFloor::measure(&runs).unwrap();
         assert!(floor.rate().abs() < f64::EPSILON);
         assert!((floor.upper_95() - 0.15).abs() < 1e-9);
-        assert!(!floor.is_interpretable_at(0.05), "a 15% bound interprets nothing at 5%");
+        assert!(
+            !floor.is_interpretable_at(0.05),
+            "a 15% bound interprets nothing at 5%"
+        );
     }
 
     #[test]
@@ -380,7 +394,10 @@ mod tests {
         let floor = FalseDiscoveryFloor::measure(&runs).unwrap();
         assert!((floor.rate() - 0.05).abs() < 1e-9);
         let u = floor.upper_95();
-        assert!(u > 0.05 && u < 0.12, "bound {u} should sit just above the estimate");
+        assert!(
+            u > 0.05 && u < 0.12,
+            "bound {u} should sit just above the estimate"
+        );
     }
 
     /// One null world can yield several false promotions, and the two counts
@@ -415,10 +432,16 @@ mod tests {
     #[test]
     fn a_curve_needs_both_arms() {
         let nulls: Vec<WorldRun> = (0..5).map(|i| null_world(i, 0)).collect();
-        assert_eq!(Roc::measure(&nulls).unwrap_err(), ProcedureNullError::NoPlantedWorlds);
+        assert_eq!(
+            Roc::measure(&nulls).unwrap_err(),
+            ProcedureNullError::NoPlantedWorlds
+        );
 
         let planted_only = vec![planted(1, 0.1, 1, 1)];
-        assert_eq!(Roc::measure(&planted_only).unwrap_err(), ProcedureNullError::NoNullWorlds);
+        assert_eq!(
+            Roc::measure(&planted_only).unwrap_err(),
+            ProcedureNullError::NoNullWorlds
+        );
     }
 
     #[test]
@@ -430,7 +453,10 @@ mod tests {
         }
         let roc = Roc::measure(&runs).unwrap();
         assert_eq!(roc.sensitivity.len(), 2);
-        assert!((roc.sensitivity[0].strength - 0.05).abs() < 1e-12, "ascending by strength");
+        assert!(
+            (roc.sensitivity[0].strength - 0.05).abs() < 1e-12,
+            "ascending by strength"
+        );
         assert!((roc.sensitivity[0].power() - 0.3).abs() < 1e-9);
         assert!((roc.sensitivity[1].power() - 1.0).abs() < 1e-9);
     }
@@ -458,8 +484,15 @@ mod tests {
             runs.push(planted(1_000 + i, 0.01, 1, 5));
         }
         let roc = Roc::measure(&runs).unwrap();
-        assert!((roc.sensitivity[0].power() - 1.0).abs() < 1e-9, "it finds every plant");
-        assert_eq!(roc.detection_limit(0.8, 0.05), None, "and has detected nothing");
+        assert!(
+            (roc.sensitivity[0].power() - 1.0).abs() < 1e-9,
+            "it finds every plant"
+        );
+        assert_eq!(
+            roc.detection_limit(0.8, 0.05),
+            None,
+            "and has detected nothing"
+        );
     }
 
     /// Finding the plant alongside nine spurious friends is not finding it.

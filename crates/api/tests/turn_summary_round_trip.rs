@@ -136,7 +136,10 @@ async fn a_second_turn_receives_the_firsts_conclusions_with_ids() {
             "the carry is missing `{expected}`:\n{text}"
         );
     }
-    assert!(text.contains("2 trial(s) spent"), "and what it cost:\n{text}");
+    assert!(
+        text.contains("2 trial(s) spent"),
+        "and what it cost:\n{text}"
+    );
     assert!(
         text.contains("does it survive a costed fill?"),
         "and what it left open:\n{text}"

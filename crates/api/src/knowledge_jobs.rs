@@ -193,7 +193,10 @@ pub const MIN_INSTRUMENTS_TO_FIT: i64 = 20;
 #[must_use]
 pub fn fit_readiness(trials: i64, instruments: i64) -> (bool, String) {
     if trials >= MIN_TRIALS_TO_FIT && instruments >= MIN_INSTRUMENTS_TO_FIT {
-        return (true, format!("{trials} trials over {instruments} instruments"));
+        return (
+            true,
+            format!("{trials} trials over {instruments} instruments"),
+        );
     }
     (
         false,
@@ -262,7 +265,19 @@ impl InsightStore {
         let mut tx = ledger::pg::tenant_tx(&self.pg, tenant_id)
             .await
             .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
-        let rows = sqlx::query_as::<_, (uuid::Uuid, i16, String, serde_json::Value, Vec<uuid::Uuid>, i32, i32, f32)>(
+        let rows = sqlx::query_as::<
+            _,
+            (
+                uuid::Uuid,
+                i16,
+                String,
+                serde_json::Value,
+                Vec<uuid::Uuid>,
+                i32,
+                i32,
+                f32,
+            ),
+        >(
             "SELECT insight_id, tier, claim, scope, evidence_trial_ids, support_n,
                     contradicted_n, decay_score
              FROM knowledge.insight
@@ -279,9 +294,29 @@ impl InsightStore {
 
         let all: Vec<Insight> = rows
             .into_iter()
-            .map(|(insight_id, tier, claim, scope, evidence_trial_ids, support_n, contradicted_n, decay_score)| {
-                Insight { insight_id, tier, claim, scope, evidence_trial_ids, support_n, contradicted_n, decay_score }
-            })
+            .map(
+                |(
+                    insight_id,
+                    tier,
+                    claim,
+                    scope,
+                    evidence_trial_ids,
+                    support_n,
+                    contradicted_n,
+                    decay_score,
+                )| {
+                    Insight {
+                        insight_id,
+                        tier,
+                        claim,
+                        scope,
+                        evidence_trial_ids,
+                        support_n,
+                        contradicted_n,
+                        decay_score,
+                    }
+                },
+            )
             .collect();
         Ok(apply_token_cap(all))
     }
@@ -393,7 +428,10 @@ mod tests {
     #[test]
     fn a_single_oversized_claim_does_not_blow_the_budget() {
         let (kept, used) = apply_token_cap(vec![insight(INSIGHT_TOKEN_CAP * 8, 1.0)]);
-        assert!(kept.is_empty(), "one claim bigger than the whole budget returns nothing");
+        assert!(
+            kept.is_empty(),
+            "one claim bigger than the whole budget returns nothing"
+        );
         assert_eq!(used, 0);
     }
 
@@ -420,7 +458,11 @@ mod tests {
 
     #[test]
     fn a_claims_token_cost_rounds_up() {
-        assert_eq!(insight(1, 1.0).token_cost(), 1, "one character still costs a token");
+        assert_eq!(
+            insight(1, 1.0).token_cost(),
+            1,
+            "one character still costs a token"
+        );
         assert_eq!(insight(4, 1.0).token_cost(), 1);
         assert_eq!(insight(5, 1.0).token_cost(), 2);
     }

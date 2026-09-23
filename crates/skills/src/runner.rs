@@ -136,11 +136,7 @@ pub struct Completed {
 /// Never returns `Err` for anything the skill did: a skill that raises, times
 /// out or breaks its contract produces a [`RunRecord`] saying so, because those
 /// are *results* and the library's whole value is in keeping them.
-pub async fn run(
-    skill: &Skill,
-    payload: &serde_json::Value,
-    config: &RunnerConfig,
-) -> Completed {
+pub async fn run(skill: &Skill, payload: &serde_json::Value, config: &RunnerConfig) -> Completed {
     let started = Instant::now();
 
     if let Err(violation) = skill.contract().check_input(payload) {
@@ -161,7 +157,9 @@ pub async fn run(
     let Ok(job_json) = serde_json::to_vec(&job) else {
         return finish(
             skill.hash(),
-            Outcome::RunnerFailed { detail: "the job would not serialise".into() },
+            Outcome::RunnerFailed {
+                detail: "the job would not serialise".into(),
+            },
             started,
             None,
             String::new(),
@@ -245,11 +243,17 @@ pub async fn run(
     .await;
 
     let output = match waited {
-        Ok(((out, err), Ok(status))) => Output { status_text: status.to_string(), stdout: out, stderr: err },
+        Ok(((out, err), Ok(status))) => Output {
+            status_text: status.to_string(),
+            stdout: out,
+            stderr: err,
+        },
         Ok((_, Err(e))) => {
             return finish(
                 skill.hash(),
-                Outcome::RunnerFailed { detail: e.to_string() },
+                Outcome::RunnerFailed {
+                    detail: e.to_string(),
+                },
                 started,
                 None,
                 String::new(),
@@ -266,7 +270,9 @@ pub async fn run(
             let _ = child.wait().await;
             return finish(
                 skill.hash(),
-                Outcome::TimedOut { limit_secs: config.limits.wall_seconds },
+                Outcome::TimedOut {
+                    limit_secs: config.limits.wall_seconds,
+                },
                 started,
                 None,
                 String::new(),
@@ -305,15 +311,24 @@ pub async fn run(
                 detail: "the runner reported success with no result".into(),
             },
         },
-        "raised" => Outcome::Raised { exception: envelope.detail.clone() },
-        "bad_output" => Outcome::BrokeContract { detail: envelope.detail.clone() },
-        "killed" => Outcome::Killed { reason: envelope.detail.clone() },
+        "raised" => Outcome::Raised {
+            exception: envelope.detail.clone(),
+        },
+        "bad_output" => Outcome::BrokeContract {
+            detail: envelope.detail.clone(),
+        },
+        "killed" => Outcome::Killed {
+            reason: envelope.detail.clone(),
+        },
         other => Outcome::RunnerFailed {
             detail: format!("unknown outcome {other:?} from the runner"),
         },
     };
 
-    let result = outcome.succeeded().then(|| envelope.result.clone()).flatten();
+    let result = outcome
+        .succeeded()
+        .then(|| envelope.result.clone())
+        .flatten();
     let mut completed = finish(
         skill.hash(),
         outcome,
@@ -336,7 +351,10 @@ fn finish(
     let mut record = RunRecord::new(hash.clone(), outcome, ms);
     record.peak_memory_bytes = peak;
     record.stdout_note = stdout;
-    Completed { record, result: None }
+    Completed {
+        record,
+        result: None,
+    }
 }
 
 /// A contract for a skill that takes nothing and returns one key. Handy in
@@ -390,7 +408,10 @@ mod tests {
     fn the_default_limits_are_bounded() {
         let l = Limits::default();
         assert!(l.wall_seconds <= 60);
-        assert!(l.cpu_seconds < l.wall_seconds, "CPU must bind before the wall clock");
+        assert!(
+            l.cpu_seconds < l.wall_seconds,
+            "CPU must bind before the wall clock"
+        );
         assert!(l.memory_mb <= 2048);
     }
 
@@ -404,7 +425,10 @@ mod tests {
         let done = run(&skill, &json!({}), &config()).await;
         assert!(matches!(done.record.outcome, Outcome::BadInput { .. }));
         assert!(!done.record.outcome.is_about_the_skill());
-        assert!(done.record.duration_ms < 1_000, "nothing should have been spawned");
+        assert!(
+            done.record.duration_ms < 1_000,
+            "nothing should have been spawned"
+        );
     }
 
     #[test]

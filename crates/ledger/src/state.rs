@@ -73,15 +73,20 @@ impl TrialState {
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            Self::Rejected | Self::Deduplicated | Self::Completed | Self::CompletedPass | Self::CompletedFail | Self::Failed
+            Self::Rejected
+                | Self::Deduplicated
+                | Self::Completed
+                | Self::CompletedPass
+                | Self::CompletedFail
+                | Self::Failed
         )
     }
 
     #[must_use]
     pub fn can_transition_to(self, to: Self) -> bool {
         use TrialState::{
-            Completed, CompletedFail, CompletedPass, Deduplicated, Evaluate, Failed, Gated, Paused, Preempted, Provision,
-            Queued, Recovering, Registered, Rejected, Running,
+            Completed, CompletedFail, CompletedPass, Deduplicated, Evaluate, Failed, Gated, Paused,
+            Preempted, Provision, Queued, Recovering, Registered, Rejected, Running,
         };
         // One arm per source state, so the compiler proves every state is covered.
         match self {
@@ -126,14 +131,24 @@ impl Censoring {
 
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
-        [Self::None, Self::RightAsha, Self::RightBudget, Self::RightPreempt, Self::RightCancel, Self::Failed]
-            .into_iter()
-            .find(|c| c.as_str() == s)
+        [
+            Self::None,
+            Self::RightAsha,
+            Self::RightBudget,
+            Self::RightPreempt,
+            Self::RightCancel,
+            Self::Failed,
+        ]
+        .into_iter()
+        .find(|c| c.as_str() == s)
     }
 
     #[must_use]
     pub fn is_right_censored(self) -> bool {
-        matches!(self, Self::RightAsha | Self::RightBudget | Self::RightPreempt | Self::RightCancel)
+        matches!(
+            self,
+            Self::RightAsha | Self::RightBudget | Self::RightPreempt | Self::RightCancel
+        )
     }
 }
 
@@ -214,8 +229,13 @@ impl TerminalReason {
             Self::Cancelled => Censoring::RightCancel,
             Self::PreemptedAbandoned => Censoring::RightPreempt,
             Self::GateFailed => Censoring::None,
-            Self::IntegrityRejected | Self::Oom | Self::NanDivergence | Self::DataError | Self::Timeout
-            | Self::LeakageDetected | Self::DependencyFailure => Censoring::Failed,
+            Self::IntegrityRejected
+            | Self::Oom
+            | Self::NanDivergence
+            | Self::DataError
+            | Self::Timeout
+            | Self::LeakageDetected
+            | Self::DependencyFailure => Censoring::Failed,
         }
     }
 }
@@ -258,8 +278,19 @@ mod tests {
         for r in TerminalReason::ALL {
             assert_eq!(TerminalReason::from_code(r.as_str()), Some(r));
         }
-        for junk in ["", "nan", "loss became nan", "NAN_DIVERGENCE", "data", "oom_killer"] {
-            assert_eq!(TerminalReason::from_code(junk), None, "{junk:?} must not parse");
+        for junk in [
+            "",
+            "nan",
+            "loss became nan",
+            "NAN_DIVERGENCE",
+            "data",
+            "oom_killer",
+        ] {
+            assert_eq!(
+                TerminalReason::from_code(junk),
+                None,
+                "{junk:?} must not parse"
+            );
         }
     }
 
@@ -268,7 +299,9 @@ mod tests {
     /// failure is how a search that works starts looking like one that does not.
     #[test]
     fn every_reason_has_the_censoring_spec_9_gives_it() {
-        use Censoring::{Failed, None as NoCensoring, RightAsha, RightBudget, RightCancel, RightPreempt};
+        use Censoring::{
+            Failed, None as NoCensoring, RightAsha, RightBudget, RightCancel, RightPreempt,
+        };
         for (reason, expected) in [
             (TerminalReason::AshaStopped, RightAsha),
             (TerminalReason::BudgetExceeded, RightBudget),
@@ -293,7 +326,10 @@ mod tests {
         for s in ALL_STATES {
             if s.is_terminal() {
                 for t in ALL_STATES {
-                    assert!(!s.can_transition_to(*t), "{s:?} is terminal but can go to {t:?}");
+                    assert!(
+                        !s.can_transition_to(*t),
+                        "{s:?} is terminal but can go to {t:?}"
+                    );
                 }
             }
         }
@@ -302,7 +338,18 @@ mod tests {
     #[test]
     fn preemption_resumes_without_a_new_trial() {
         use TrialState::*;
-        let path = [Registered, Queued, Provision, Running, Preempted, Recovering, Running, Evaluate, Gated, CompletedPass];
+        let path = [
+            Registered,
+            Queued,
+            Provision,
+            Running,
+            Preempted,
+            Recovering,
+            Running,
+            Evaluate,
+            Gated,
+            CompletedPass,
+        ];
         for w in path.windows(2) {
             assert!(w[0].can_transition_to(w[1]), "{:?} -> {:?}", w[0], w[1]);
         }

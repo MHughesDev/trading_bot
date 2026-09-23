@@ -1026,10 +1026,10 @@ impl ToolRegistry {
 /// run id to `get_backtest` and got a 404, which reads as a confused model and was a
 /// routing failure.
 const STOPWORDS: &[&str] = &[
-    "and", "the", "for", "with", "that", "this", "from", "into", "its", "was", "are",
-    "you", "your", "use", "using", "when", "then", "than", "but", "not", "all", "any",
-    "one", "two", "out", "how", "what", "which", "who", "why", "can", "will", "would",
-    "should", "must", "may", "have", "has", "had", "its", "it", "their", "them",
+    "and", "the", "for", "with", "that", "this", "from", "into", "its", "was", "are", "you",
+    "your", "use", "using", "when", "then", "than", "but", "not", "all", "any", "one", "two",
+    "out", "how", "what", "which", "who", "why", "can", "will", "would", "should", "must", "may",
+    "have", "has", "had", "its", "it", "their", "them",
 ];
 
 /// Renders one tool in the profile's schema style (§2.4).
@@ -1133,7 +1133,10 @@ fn rebuild(schema: &Value, prefix: &str, flat: &Map<String, Value>, out: &mut Ma
             // Nesting had this inverse and the array collapse did not, which is the
             // same omission one level down.
             if sub.get("type").and_then(Value::as_str) == Some("array") && v.is_string() {
-                out.insert(k.clone(), parse_collapsed_array(v.as_str().unwrap_or(""), sub));
+                out.insert(
+                    k.clone(),
+                    parse_collapsed_array(v.as_str().unwrap_or(""), sub),
+                );
             } else if sub.get("type").and_then(Value::as_str) == Some("object") && v.is_string() {
                 // Belt and braces. `flatten` now keeps a document as an object, so a
                 // flat tier should never send a string here — but a model that has
@@ -1339,7 +1342,7 @@ mod flat_array_roundtrip {
             "properties": {
                 "backtest_ids": { "type": "array", "items": { "type": "string" },
                                   "description": "Runs to compare.
-Second line." },
+        Second line." },
                 "limits":       { "type": "array", "items": { "type": "integer" } },
                 "name":         { "type": "string" }
             },
@@ -1356,8 +1359,8 @@ Second line." },
     /// being judged against.
     #[test]
     fn an_empty_list_written_as_a_string_comes_back_as_an_empty_array() {
-        let flat: Map<String, Value> = serde_json::from_value(json!({ "backtest_ids": "[]" }))
-            .unwrap();
+        let flat: Map<String, Value> =
+            serde_json::from_value(json!({ "backtest_ids": "[]" })).unwrap();
         let out = unflatten(&rich(), &flat);
         assert_eq!(out["backtest_ids"], json!([]));
     }
@@ -1384,7 +1387,8 @@ Second line." },
 
     #[test]
     fn an_empty_string_is_an_empty_list_not_a_one_element_list() {
-        let flat: Map<String, Value> = serde_json::from_value(json!({ "backtest_ids": "" })).unwrap();
+        let flat: Map<String, Value> =
+            serde_json::from_value(json!({ "backtest_ids": "" })).unwrap();
         assert_eq!(unflatten(&rich(), &flat)["backtest_ids"], json!([]));
     }
 
@@ -1399,8 +1403,7 @@ Second line." },
     /// split on a comma it happens to contain.
     #[test]
     fn a_genuine_string_is_left_alone() {
-        let flat: Map<String, Value> =
-            serde_json::from_value(json!({ "name": "a, b" })).unwrap();
+        let flat: Map<String, Value> = serde_json::from_value(json!({ "name": "a, b" })).unwrap();
         assert_eq!(unflatten(&rich(), &flat)["name"], json!("a, b"));
     }
 
@@ -1416,7 +1419,7 @@ Second line." },
             "type": "object",
             "properties": {
                 "definition_json": { "type": "object", "description": "The definition.
-More." },
+        More." },
                 "note": { "type": "string" }
             },
             "required": ["definition_json"]

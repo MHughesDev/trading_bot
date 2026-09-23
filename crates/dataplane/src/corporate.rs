@@ -144,9 +144,18 @@ pub fn member_at(
 
 /// Known-announced-but-not-yet-effective additions at `as_of`: tradeable information.
 #[must_use]
-pub fn pending_additions(rows: &[IndexMembership], index_id: i32, as_of: DateTime<Utc>) -> Vec<InstrumentKey> {
+pub fn pending_additions(
+    rows: &[IndexMembership],
+    index_id: i32,
+    as_of: DateTime<Utc>,
+) -> Vec<InstrumentKey> {
     rows.iter()
-        .filter(|m| m.index_id == index_id && m.knowledge_time <= as_of && m.announcement_time <= as_of && as_of < m.effective_from)
+        .filter(|m| {
+            m.index_id == index_id
+                && m.knowledge_time <= as_of
+                && m.announcement_time <= as_of
+                && as_of < m.effective_from
+        })
         .map(|m| m.instrument_id)
         .collect()
 }
@@ -185,20 +194,44 @@ mod tests {
         let stored_close = dec!(400);
         let bar_time = t(2024, 1, 10);
         let actions = vec![split(t(2024, 6, 1), t(2024, 5, 1))];
-        let early = factors_at(&actions, InstrumentKey(7), bar_time, t(2024, 4, 1), AdjustmentPolicy::SplitsOnly);
-        let late = factors_at(&actions, InstrumentKey(7), bar_time, t(2024, 7, 1), AdjustmentPolicy::SplitsOnly);
+        let early = factors_at(
+            &actions,
+            InstrumentKey(7),
+            bar_time,
+            t(2024, 4, 1),
+            AdjustmentPolicy::SplitsOnly,
+        );
+        let late = factors_at(
+            &actions,
+            InstrumentKey(7),
+            bar_time,
+            t(2024, 7, 1),
+            AdjustmentPolicy::SplitsOnly,
+        );
         assert_eq!(stored_close * early.price, dec!(400));
         assert_eq!(stored_close * late.price, dec!(100));
         assert_eq!(late.volume, dec!(4));
         // Bars after the effective time are not adjusted.
-        let post = factors_at(&actions, InstrumentKey(7), t(2024, 6, 2), t(2024, 7, 1), AdjustmentPolicy::SplitsOnly);
+        let post = factors_at(
+            &actions,
+            InstrumentKey(7),
+            t(2024, 6, 2),
+            t(2024, 7, 1),
+            AdjustmentPolicy::SplitsOnly,
+        );
         assert_eq!(post.price, Decimal::ONE);
     }
 
     #[test]
     fn unadjusted_policy_ignores_everything() {
         let actions = vec![split(t(2024, 6, 1), t(2024, 5, 1))];
-        let f = factors_at(&actions, InstrumentKey(7), t(2024, 1, 1), t(2025, 1, 1), AdjustmentPolicy::Unadjusted);
+        let f = factors_at(
+            &actions,
+            InstrumentKey(7),
+            t(2024, 1, 1),
+            t(2025, 1, 1),
+            AdjustmentPolicy::Unadjusted,
+        );
         assert_eq!(f.price, Decimal::ONE);
     }
 
@@ -208,8 +241,20 @@ mod tests {
         revised.price_factor = Some(dec!(0.5));
         revised.revision_seq = 1;
         let actions = vec![split(t(2024, 6, 1), t(2024, 5, 1)), revised];
-        let before = factors_at(&actions, InstrumentKey(7), t(2024, 1, 1), t(2024, 7, 1), AdjustmentPolicy::SplitsOnly);
-        let after = factors_at(&actions, InstrumentKey(7), t(2024, 1, 1), t(2024, 9, 1), AdjustmentPolicy::SplitsOnly);
+        let before = factors_at(
+            &actions,
+            InstrumentKey(7),
+            t(2024, 1, 1),
+            t(2024, 7, 1),
+            AdjustmentPolicy::SplitsOnly,
+        );
+        let after = factors_at(
+            &actions,
+            InstrumentKey(7),
+            t(2024, 1, 1),
+            t(2024, 9, 1),
+            AdjustmentPolicy::SplitsOnly,
+        );
         assert_eq!(before.price, dec!(0.25));
         assert_eq!(after.price, dec!(0.5));
     }
@@ -226,8 +271,23 @@ mod tests {
             knowledge_time: t(2024, 3, 1) + Duration::minutes(5),
         };
         let rows = vec![m];
-        assert_eq!(pending_additions(&rows, 500, t(2024, 3, 5)), vec![InstrumentKey(9)]);
-        assert!(!member_at(&rows, 500, InstrumentKey(9), t(2024, 3, 5), t(2024, 3, 5)));
-        assert!(member_at(&rows, 500, InstrumentKey(9), t(2024, 3, 20), t(2024, 3, 20)));
+        assert_eq!(
+            pending_additions(&rows, 500, t(2024, 3, 5)),
+            vec![InstrumentKey(9)]
+        );
+        assert!(!member_at(
+            &rows,
+            500,
+            InstrumentKey(9),
+            t(2024, 3, 5),
+            t(2024, 3, 5)
+        ));
+        assert!(member_at(
+            &rows,
+            500,
+            InstrumentKey(9),
+            t(2024, 3, 20),
+            t(2024, 3, 20)
+        ));
     }
 }

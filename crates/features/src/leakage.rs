@@ -691,7 +691,8 @@ pub fn random_label(
             severity: Severity::Flag,
             subject: "folds".into(),
             statistic: frame.row_count() as f64,
-            detail: "not enough rows to build the production fold geometry; test did not run".into(),
+            detail: "not enough rows to build the production fold geometry; test did not run"
+                .into(),
         });
         return RandomLabelResult {
             real_sharpe: f64::NAN,
@@ -978,7 +979,11 @@ impl Lcg {
     }
 
     fn below(&mut self, n: usize) -> usize {
-        if n == 0 { 0 } else { (self.next_u64() % n as u64) as usize }
+        if n == 0 {
+            0
+        } else {
+            (self.next_u64() % n as u64) as usize
+        }
     }
 }
 
@@ -1114,7 +1119,11 @@ fn pearson(x: &[f64], y: &[f64]) -> f64 {
     let cov: f64 = x.iter().zip(y).map(|(a, b)| (a - mx) * (b - my)).sum();
     let sx: f64 = x.iter().map(|a| (a - mx).powi(2)).sum::<f64>().sqrt();
     let sy: f64 = y.iter().map(|b| (b - my).powi(2)).sum::<f64>().sqrt();
-    if sx * sy < 1e-12 { 0.0 } else { cov / (sx * sy) }
+    if sx * sy < 1e-12 {
+        0.0
+    } else {
+        cov / (sx * sy)
+    }
 }
 
 // ===========================================================================
@@ -1343,7 +1352,11 @@ pub fn random_label_over_folds(
         permuted_sharpes.push(s);
         permuted_t_stats.push(t);
     }
-    let finite: Vec<f64> = permuted_sharpes.iter().copied().filter(|s| s.is_finite()).collect();
+    let finite: Vec<f64> = permuted_sharpes
+        .iter()
+        .copied()
+        .filter(|s| s.is_finite())
+        .collect();
     let permuted_mean = if finite.is_empty() {
         f64::NAN
     } else {
@@ -1521,7 +1534,10 @@ mod tests {
         };
         let r = random_label(&frame, &too_big, &pipeline(), 4, 7);
         assert!(!r.report.is_clean());
-        assert!(!r.report.has_blocking(), "a test that did not run is not a failure");
+        assert!(
+            !r.report.has_blocking(),
+            "a test that did not run is not a failure"
+        );
     }
 
     /// Determinism: a leakage verdict that depends on the day it ran is not a
@@ -1542,7 +1558,10 @@ mod tests {
     #[test]
     fn overlapping_folds_are_caught_structurally() {
         let clean = crate::walk_forward_folds(2_000, &spec(), &pipeline()).expect("folds");
-        assert!(fold_geometry(&clean).is_clean(), "production geometry is sound");
+        assert!(
+            fold_geometry(&clean).is_clean(),
+            "production geometry is sound"
+        );
         let broken = inject::overlapping_folds(2_000, 2);
         let r = fold_geometry(&broken);
         assert!(r.has_blocking());
@@ -1551,7 +1570,11 @@ mod tests {
     #[test]
     fn a_clean_frame_passes_both_frame_screens() {
         let f = clean_frame();
-        assert!(target_correlation(&f).is_clean(), "{:?}", target_correlation(&f).findings);
+        assert!(
+            target_correlation(&f).is_clean(),
+            "{:?}",
+            target_correlation(&f).findings
+        );
         assert!(full_sample_normalization(&f).is_clean());
     }
 
@@ -1599,7 +1622,10 @@ mod tests {
 
     #[test]
     fn the_cv_wf_gap_flags_but_does_not_block() {
-        assert!(cv_wf_gap("run", 1.4, 1.0).is_clean(), "0.4 is under the limit");
+        assert!(
+            cv_wf_gap("run", 1.4, 1.0).is_clean(),
+            "0.4 is under the limit"
+        );
         let r = cv_wf_gap("run", 2.5, 1.0);
         assert_eq!(r.findings.len(), 1);
         assert_eq!(r.findings[0].severity, Severity::Flag);
@@ -1653,7 +1679,9 @@ mod tests {
                 .has_blocking()
         );
         let folds = inject::overlapping_folds(clean.row_count(), 2);
-        assert!(random_label_over_folds(&clean, &folds, 8, 7).report.has_blocking());
+        assert!(random_label_over_folds(&clean, &folds, 8, 7)
+            .report
+            .has_blocking());
         // And the one nothing here catches, stated rather than hidden:
         let overlapped = inject::plant(&clean, Leak::OverlappingLabelBlocks);
         assert!(

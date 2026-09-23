@@ -3,14 +3,14 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod bar_persist;
+mod book_feed;
 mod feature_jobs;
 mod health_jobs;
+mod hot_path;
 mod leakage_jobs;
 mod ledger_jobs;
-mod regime_jobs;
-mod book_feed;
-mod hot_path;
 mod pipeline_manager;
+mod regime_jobs;
 mod tee;
 
 use std::sync::Arc;
@@ -59,13 +59,14 @@ async fn main() -> anyhow::Result<()> {
     // Ledger fixation (SPEC §4.6): signed daily anchors to WORM and whole-chain
     // verification. Required configuration; there is no way to run without it.
     let fixation = std::sync::Arc::new(
-        ledger_jobs::LedgerFixation::from_env(pg.clone()).context("ledger fixation is not configured")?,
+        ledger_jobs::LedgerFixation::from_env(pg.clone())
+            .context("ledger fixation is not configured")?,
     );
     fixation.clone().spawn();
     info!("ledger anchor and verification jobs started");
     feature_jobs::spawn(pg.clone(), cfg.clickhouse.url.clone());
     leakage_jobs::spawn(pg.clone());
-    health_jobs::spawn(pg.clone());
+    health_jobs::spawn(pg.clone(), cfg.clickhouse.url.clone());
     // The rule-tier regime labeller (SPEC §5.4, ADR-P3-02). Scoped to the
     // instruments that have bars: a regime is read against the market a strategy
     // trades, and there is no platform-wide "the market" that means the same
@@ -113,8 +114,12 @@ async fn main() -> anyhow::Result<()> {
     // Surrogate identity for every bar writer, then the one-time move of v2 into the
     // canonical four-timestamp table (clickhouse/07, ADR-P0-16). Chunked and verified;
     // a no-op once done.
-    let identity = storage::identity::PgIdentityService::new(pg.clone(), cfg.clickhouse.url.clone());
-    identity.sync_dims().await.context("failed to sync identity dimensions")?;
+    let identity =
+        storage::identity::PgIdentityService::new(pg.clone(), cfg.clickhouse.url.clone());
+    identity
+        .sync_dims()
+        .await
+        .context("failed to sync identity dimensions")?;
     storage::identity::install(identity);
     let canonical = storage::clickhouse::canonical::migrate_to_canonical(&cfg.clickhouse.url, &pg)
         .await
@@ -433,10 +438,12 @@ async fn main() -> anyhow::Result<()> {
                 // all of its time waiting on child jobs rather than computing,
                 // so it sits in the research pool beside the other coordinators
                 // instead of occupying a compute class.
-                pool = pool.register(std::sync::Arc::new(api::campaign_driver::CampaignWorker::new(
-                    job_store.clone(),
-                    app_state.pg.clone(),
-                )));
+                pool = pool.register(std::sync::Arc::new(
+                    api::campaign_driver::CampaignWorker::new(
+                        job_store.clone(),
+                        app_state.pg.clone(),
+                    ),
+                ));
                 // The `ResearchRun` child worker (AGENT-010 §9, AGENT-013 §8.5;
                 // S-10.11). The campaign driver has dispatched this kind since
                 // it was written and nothing claimed it, so a campaign reaching
@@ -520,11 +527,12 @@ async fn main() -> anyhow::Result<()> {
         .with_graceful_shutdown(async move {
             shutdown_signal().await;
             info!("shutdown signal received; draining agent turns");
-            let left = drain_target
-                .drain(std::time::Duration::from_secs(30))
-                .await;
+            let left = drain_target.drain(std::time::Duration::from_secs(30)).await;
             if left > 0 {
-                info!(runs = left, "left running for resume rather than killed mid-write");
+                info!(
+                    runs = left,
+                    "left running for resume rather than killed mid-write"
+                );
             }
         })
         .await

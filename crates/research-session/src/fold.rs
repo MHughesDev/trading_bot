@@ -591,7 +591,11 @@ mod tests {
     #[test]
     fn a_hole_in_the_log_is_an_anomaly() {
         let mut log = opened();
-        log.push(ev(5, EventKind::AgendaItemAdded, json!({"item": Uuid::new_v4()})));
+        log.push(ev(
+            5,
+            EventKind::AgendaItemAdded,
+            json!({"item": Uuid::new_v4()}),
+        ));
         let f = fold(&log);
         assert_eq!(f.anomalies.len(), 1);
         assert!(f.anomalies[0].what.contains("hole"));
@@ -600,7 +604,11 @@ mod tests {
     #[test]
     fn pause_and_stall_keep_their_reason() {
         let mut log = opened();
-        log.push(ev(2, EventKind::SessionPaused, json!({"why": "kill_switch"})));
+        log.push(ev(
+            2,
+            EventKind::SessionPaused,
+            json!({"why": "kill_switch"}),
+        ));
         assert_eq!(
             fold(&log).state,
             Some(SessionState::Paused {
@@ -664,8 +672,16 @@ mod tests {
         };
         let noisy = {
             let mut log = quiet.clone();
-            log.push(ev(3, EventKind::ProposalAwaiting, json!({"proposal": "p_1"})));
-            log.push(ev(4, EventKind::Note, json!({"what": "an offer was skipped"})));
+            log.push(ev(
+                3,
+                EventKind::ProposalAwaiting,
+                json!({"proposal": "p_1"}),
+            ));
+            log.push(ev(
+                4,
+                EventKind::Note,
+                json!({"what": "an offer was skipped"}),
+            ));
             log
         };
 
@@ -683,7 +699,10 @@ mod tests {
         }
         assert_eq!(checked, 2);
 
-        assert_eq!(EventKind::parse("proposal_awaiting"), Some(EventKind::ProposalAwaiting));
+        assert_eq!(
+            EventKind::parse("proposal_awaiting"),
+            Some(EventKind::ProposalAwaiting)
+        );
         assert_eq!(EventKind::parse("note"), Some(EventKind::Note));
 
         // Neither reaches the fold. In particular nothing about the proposal

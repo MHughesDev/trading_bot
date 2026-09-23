@@ -573,7 +573,11 @@ mod tests {
     /// `{}` is how a kind says it carries nothing, and a non-object is not that.
     #[test]
     fn a_payload_that_is_not_an_object_is_refused() {
-        for bad in [serde_json::json!(null), serde_json::json!([1]), serde_json::json!("limit")] {
+        for bad in [
+            serde_json::json!(null),
+            serde_json::json!([1]),
+            serde_json::json!("limit"),
+        ] {
             let err = propose(
                 Uuid::new_v4(),
                 ProposalKind::DeployPaper,
@@ -585,7 +589,10 @@ mod tests {
                 clear(),
             )
             .expect_err("not an object");
-            assert!(matches!(err, ProposalError::BadPayload(_)), "{bad}: {err:?}");
+            assert!(
+                matches!(err, ProposalError::BadPayload(_)),
+                "{bad}: {err:?}"
+            );
         }
     }
 
@@ -636,5 +643,4 @@ mod tests {
             "the set changed; `perform` in api::routes::proposals must gain the writer"
         );
     }
-
 }

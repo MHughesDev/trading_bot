@@ -75,7 +75,10 @@ pub struct SimRunExecutor {
 /// high`) are dropped rather than repaired. A repaired bar is a third thing that
 /// is neither the real world nor the null, and a p-value computed against it
 /// means nothing.
-fn apply_null_world(bars: &[crate::store::LoadedBar], nw: &crate::run::NullWorld) -> Vec<crate::store::LoadedBar> {
+fn apply_null_world(
+    bars: &[crate::store::LoadedBar],
+    nw: &crate::run::NullWorld,
+) -> Vec<crate::store::LoadedBar> {
     use crate::nulls::{Bar as NullBar, NullData};
     use rust_decimal::prelude::ToPrimitive;
 
@@ -96,7 +99,11 @@ fn apply_null_world(bars: &[crate::store::LoadedBar], nw: &crate::run::NullWorld
             .windows(2)
             .map(|w| {
                 let (a, b) = (f(w[0].close), f(w[1].close));
-                if a == 0.0 { 0.0 } else { b / a - 1.0 }
+                if a == 0.0 {
+                    0.0
+                } else {
+                    b / a - 1.0
+                }
             })
             .chain(std::iter::once(0.0))
             .collect(),
@@ -168,7 +175,10 @@ struct ExecFailure {
 
 impl ExecFailure {
     fn new(reason: TerminalReason, error: impl Into<anyhow::Error>) -> Self {
-        Self { reason, error: error.into() }
+        Self {
+            reason,
+            error: error.into(),
+        }
     }
 }
 
@@ -244,12 +254,16 @@ impl SimRunExecutor {
     }
 
     async fn execute_async(&self, cfg: &RunConfig) -> Result<DetailedOutcome, ExecFailure> {
-        let definition = self.resolve_definition(&cfg.strategy_ref).await.because(TerminalReason::DependencyFailure)?;
+        let definition = self
+            .resolve_definition(&cfg.strategy_ref)
+            .await
+            .because(TerminalReason::DependencyFailure)?;
         let definition = params::materialize(&definition, &cfg.params)
             .map_err(|e| anyhow!("parameters: {e}"))
             .because(TerminalReason::IntegrityRejected)?;
 
-        let requested = timeframe_for(cfg.data_slice.eval_resolution).because(TerminalReason::IntegrityRejected)?;
+        let requested = timeframe_for(cfg.data_slice.eval_resolution)
+            .because(TerminalReason::IntegrityRejected)?;
         let requirements = derive_requirements(&definition, requested)
             .map_err(|e| anyhow!("requirements: {e}"))
             .because(TerminalReason::IntegrityRejected)?;
@@ -324,9 +338,12 @@ impl RunExecutor for SimRunExecutor {
             cpu_ms: 0,
         };
         match outcome {
-            Ok(o) if o.cancelled => {
-                RunResult::failed(cfg, TerminalReason::Cancelled, "simulation cancelled", EXECUTOR_TAG)
-            }
+            Ok(o) if o.cancelled => RunResult::failed(
+                cfg,
+                TerminalReason::Cancelled,
+                "simulation cancelled",
+                EXECUTOR_TAG,
+            ),
             Ok(o) => {
                 // The assumptions ride on the result rather than on a log line:
                 // a run whose exits were resolved pessimistically and one whose

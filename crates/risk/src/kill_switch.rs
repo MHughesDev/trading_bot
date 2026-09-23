@@ -361,13 +361,21 @@ impl KillSwitch {
         if self.global.load(Ordering::Acquire) {
             out.push(Scope::Global);
         }
-        out.extend(self.halted_venues.iter().map(|e| Scope::Venue(e.key().clone())));
+        out.extend(
+            self.halted_venues
+                .iter()
+                .map(|e| Scope::Venue(e.key().clone())),
+        );
         out.extend(
             self.halted_strategies
                 .iter()
                 .map(|e| Scope::Strategy(e.key().clone())),
         );
-        out.extend(self.halted_drills.iter().map(|e| Scope::Drill(e.key().clone())));
+        out.extend(
+            self.halted_drills
+                .iter()
+                .map(|e| Scope::Drill(e.key().clone())),
+        );
         out.sort();
         out
     }
@@ -459,8 +467,14 @@ mod tests {
         // COMP-007 §4.2: the rehearsal asks the gate and the gate answers.
         let ks = KillSwitch::new(false);
         ks.trip_scope(&Scope::drill("global"));
-        assert!(ks.is_active_scope(&Scope::drill("global")), "the drill state is observable");
-        assert!(!ks.refuses(Some("kraken"), Some("s-1")), "and refuses nothing real");
+        assert!(
+            ks.is_active_scope(&Scope::drill("global")),
+            "the drill state is observable"
+        );
+        assert!(
+            !ks.refuses(Some("kraken"), Some("s-1")),
+            "and refuses nothing real"
+        );
         assert!(!ks.is_active());
     }
 
@@ -469,7 +483,10 @@ mod tests {
         let ks = KillSwitch::new(false);
         assert!(ks.monitor_available(), "unarmed, the lease gate is open");
         ks.require_monitor_lease();
-        assert!(!ks.monitor_available(), "armed and unseen is a refusal, not a pass");
+        assert!(
+            !ks.monitor_available(),
+            "armed and unseen is a refusal, not a pass"
+        );
     }
 
     #[test]
@@ -499,7 +516,10 @@ mod tests {
         ks.require_monitor_lease();
         ks.observe_lease(true);
         ks.require_monitor_lease();
-        assert!(ks.monitor_available(), "a second arm must not throw away a valid lease");
+        assert!(
+            ks.monitor_available(),
+            "a second arm must not throw away a valid lease"
+        );
         assert!(ks.lease_required());
     }
 
@@ -510,7 +530,10 @@ mod tests {
         assert!(ks.is_active());
         assert!(ks.refuses(Some("kraken"), None));
         ks.replace_halted(&[Scope::venue("alpaca")]);
-        assert!(!ks.is_active(), "global was reset in the table, so the mirror drops it");
+        assert!(
+            !ks.is_active(),
+            "global was reset in the table, so the mirror drops it"
+        );
         assert!(!ks.refuses(Some("kraken"), None));
         assert!(ks.refuses(Some("alpaca"), None));
     }
@@ -542,7 +565,14 @@ mod tests {
     fn an_unrecognised_scope_is_an_error_rather_than_global() {
         // A typo that parsed as Global would stop the book; one that parsed as a
         // no-op would fail to stop it. Neither is an acceptable reading of "eh?".
-        for bad in ["", "GLOBAL", "venue:", "strategy:", "venues:kraken", "everything"] {
+        for bad in [
+            "",
+            "GLOBAL",
+            "venue:",
+            "strategy:",
+            "venues:kraken",
+            "everything",
+        ] {
             assert!(Scope::from_str(bad).is_err(), "{bad:?} must not parse");
         }
     }

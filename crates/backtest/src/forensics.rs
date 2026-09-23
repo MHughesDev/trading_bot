@@ -73,7 +73,11 @@ impl Concentration {
 /// the useful default. Returns `None` for an empty list or one with no winners,
 /// because "how concentrated are the gains" has no answer when there are none.
 #[must_use]
-pub fn concentration(trades: &[TradeSlice], share_target: f64, top_n: usize) -> Option<Concentration> {
+pub fn concentration(
+    trades: &[TradeSlice],
+    share_target: f64,
+    top_n: usize,
+) -> Option<Concentration> {
     if trades.is_empty() {
         return None;
     }
@@ -82,11 +86,8 @@ pub fn concentration(trades: &[TradeSlice], share_target: f64, top_n: usize) -> 
         return None;
     }
 
-    let mut ranked: Vec<(usize, f64)> = trades
-        .iter()
-        .enumerate()
-        .map(|(i, t)| (i, t.pnl))
-        .collect();
+    let mut ranked: Vec<(usize, f64)> =
+        trades.iter().enumerate().map(|(i, t)| (i, t.pnl)).collect();
     ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
 
     let mut running = 0.0;
@@ -172,7 +173,11 @@ pub fn suspicious_bars(bars: &[BarSlice], wick_multiple: f64, spike_sigma: f64) 
 
     for (i, b) in bars.iter().enumerate() {
         if b.open <= 0.0 || b.high <= 0.0 || b.low <= 0.0 || b.close <= 0.0 {
-            out.push(Suspicion { index: i, defect: BarDefect::NonPositivePrice, magnitude: 0.0 });
+            out.push(Suspicion {
+                index: i,
+                defect: BarDefect::NonPositivePrice,
+                magnitude: 0.0,
+            });
             continue;
         }
         if b.high < b.low
@@ -181,7 +186,11 @@ pub fn suspicious_bars(bars: &[BarSlice], wick_multiple: f64, spike_sigma: f64) 
             || b.close > b.high
             || b.close < b.low
         {
-            out.push(Suspicion { index: i, defect: BarDefect::Impossible, magnitude: 0.0 });
+            out.push(Suspicion {
+                index: i,
+                defect: BarDefect::Impossible,
+                magnitude: 0.0,
+            });
             continue;
         }
 
@@ -198,7 +207,11 @@ pub fn suspicious_bars(bars: &[BarSlice], wick_multiple: f64, spike_sigma: f64) 
                 magnitude: wick / body,
             });
         } else if b.volume <= 0.0 {
-            out.push(Suspicion { index: i, defect: BarDefect::NoVolume, magnitude: 0.0 });
+            out.push(Suspicion {
+                index: i,
+                defect: BarDefect::NoVolume,
+                magnitude: 0.0,
+            });
         }
 
         if i > 0 {
@@ -209,7 +222,11 @@ pub fn suspicious_bars(bars: &[BarSlice], wick_multiple: f64, spike_sigma: f64) 
                 && (b.low - p.low).abs() < f64::EPSILON
                 && (b.close - p.close).abs() < f64::EPSILON
             {
-                out.push(Suspicion { index: i, defect: BarDefect::StaleRepeat, magnitude: 0.0 });
+                out.push(Suspicion {
+                    index: i,
+                    defect: BarDefect::StaleRepeat,
+                    magnitude: 0.0,
+                });
             }
         }
     }
@@ -220,7 +237,13 @@ pub fn suspicious_bars(bars: &[BarSlice], wick_multiple: f64, spike_sigma: f64) 
     if bars.len() > WINDOW + 2 {
         let returns: Vec<f64> = bars
             .windows(2)
-            .map(|w| if w[0].close > 0.0 { (w[1].close - w[0].close) / w[0].close } else { 0.0 })
+            .map(|w| {
+                if w[0].close > 0.0 {
+                    (w[1].close - w[0].close) / w[0].close
+                } else {
+                    0.0
+                }
+            })
             .collect();
 
         for i in WINDOW..returns.len().saturating_sub(1) {
@@ -294,10 +317,7 @@ impl ShiftSensitivity {
 ///
 /// `evaluate(shift)` re-runs whatever produced the metric with the signal moved
 /// by `shift` bars. The caller owns that; this owns the interpretation.
-pub fn shift_sensitivity(
-    mut evaluate: impl FnMut(i32) -> f64,
-    shifts: &[i32],
-) -> ShiftSensitivity {
+pub fn shift_sensitivity(mut evaluate: impl FnMut(i32) -> f64, shifts: &[i32]) -> ShiftSensitivity {
     let baseline = evaluate(0);
     let shifted: Vec<(i32, f64)> = shifts
         .iter()
@@ -421,11 +441,21 @@ mod tests {
     use super::*;
 
     fn trade(pnl: f64) -> TradeSlice {
-        TradeSlice { entry_index: 0, exit_index: 1, pnl }
+        TradeSlice {
+            entry_index: 0,
+            exit_index: 1,
+            pnl,
+        }
     }
 
     fn bar(open: f64, high: f64, low: f64, close: f64, volume: f64) -> BarSlice {
-        BarSlice { open, high, low, close, volume }
+        BarSlice {
+            open,
+            high,
+            low,
+            close,
+            volume,
+        }
     }
 
     // ── concentration ────────────────────────────────────────────────────────
@@ -440,10 +470,16 @@ mod tests {
         let c = concentration(&trades, 0.9, 6).unwrap();
 
         assert_eq!(c.total_trades, 200);
-        assert!((c.top_n_share - 1.0).abs() < 1e-9, "all the gain is in six trades");
+        assert!(
+            (c.top_n_share - 1.0).abs() < 1e-9,
+            "all the gain is in six trades"
+        );
         assert_eq!(c.trades_for_target, 6);
         assert!(c.net_pnl > 0.0);
-        assert!(c.net_without_top(6) < 0.0, "without them the strategy loses money");
+        assert!(
+            c.net_without_top(6) < 0.0,
+            "without them the strategy loses money"
+        );
     }
 
     /// Dividing by *net* P&L lets a strategy whose net is near zero report a
@@ -454,7 +490,10 @@ mod tests {
         let trades = vec![trade(100.0), trade(-99.0), trade(1.0)];
         let c = concentration(&trades, 0.9, 1).unwrap();
         assert!((c.gross_gain - 101.0).abs() < 1e-9);
-        assert!(c.top_n_share <= 1.0, "a share above 1 would be an artefact of the denominator");
+        assert!(
+            c.top_n_share <= 1.0,
+            "a share above 1 would be an artefact of the denominator"
+        );
     }
 
     #[test]
@@ -483,10 +522,15 @@ mod tests {
             bar(100.1, 100.6, 99.8, 100.2, 1000.0),
         ];
         let found = suspicious_bars(&bars, 3.0, 8.0);
-        let wick = found.iter().find(|s| s.defect == BarDefect::WickWithoutVolume);
+        let wick = found
+            .iter()
+            .find(|s| s.defect == BarDefect::WickWithoutVolume);
         assert!(wick.is_some(), "{found:?}");
         assert_eq!(wick.unwrap().index, 1);
-        assert!(wick.unwrap().magnitude > 100.0, "the wick is enormous relative to the body");
+        assert!(
+            wick.unwrap().magnitude > 100.0,
+            "the wick is enormous relative to the body"
+        );
     }
 
     #[test]
@@ -500,14 +544,22 @@ mod tests {
     #[test]
     fn a_close_outside_the_bars_range_is_impossible() {
         let bars = vec![bar(100.0, 101.0, 99.0, 105.0, 5.0)];
-        assert_eq!(suspicious_bars(&bars, 3.0, 8.0)[0].defect, BarDefect::Impossible);
+        assert_eq!(
+            suspicious_bars(&bars, 3.0, 8.0)[0].defect,
+            BarDefect::Impossible
+        );
     }
 
     #[test]
     fn a_republished_bar_is_flagged_as_stale() {
         let b = bar(100.0, 101.0, 99.0, 100.5, 500.0);
         let found = suspicious_bars(&[b, b], 3.0, 8.0);
-        assert!(found.iter().any(|s| s.defect == BarDefect::StaleRepeat && s.index == 1), "{found:?}");
+        assert!(
+            found
+                .iter()
+                .any(|s| s.defect == BarDefect::StaleRepeat && s.index == 1),
+            "{found:?}"
+        );
     }
 
     #[test]
@@ -612,7 +664,11 @@ mod tests {
             },
             &[0, 1, -1],
         );
-        assert_eq!(calls, vec![0, 1, -1], "the explicit 0 in the list is skipped");
+        assert_eq!(
+            calls,
+            vec![0, 1, -1],
+            "the explicit 0 in the list is skipped"
+        );
         assert_eq!(s.shifted.len(), 2);
     }
 
@@ -654,7 +710,9 @@ mod tests {
 
         let problems = metric_validity(&returns, 30);
         assert!(
-            problems.iter().any(|p| matches!(p, MetricProblem::MostlyFlat { non_zero: 4, .. })),
+            problems
+                .iter()
+                .any(|p| matches!(p, MetricProblem::MostlyFlat { non_zero: 4, .. })),
             "{problems:?}"
         );
     }
@@ -671,9 +729,15 @@ mod tests {
         returns.push(f64::NAN);
         let problems = metric_validity(&returns, 100);
         assert!(problems.len() >= 3, "{problems:?}");
-        assert!(problems.iter().any(|p| matches!(p, MetricProblem::NonFinite { .. })));
-        assert!(problems.iter().any(|p| matches!(p, MetricProblem::TooFewObservations { .. })));
-        assert!(problems.iter().any(|p| matches!(p, MetricProblem::MostlyFlat { .. })));
+        assert!(problems
+            .iter()
+            .any(|p| matches!(p, MetricProblem::NonFinite { .. })));
+        assert!(problems
+            .iter()
+            .any(|p| matches!(p, MetricProblem::TooFewObservations { .. })));
+        assert!(problems
+            .iter()
+            .any(|p| matches!(p, MetricProblem::MostlyFlat { .. })));
     }
 
     #[test]

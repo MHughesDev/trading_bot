@@ -109,25 +109,48 @@ pub enum Lookback {
     MaxScaled { mult: usize, plus: usize },
     /// `params[i] + params[j] * mult + plus` — a window over a windowed input,
     /// where the inner feature's own lookback is part of the outer window.
-    Nested { outer: usize, inner: usize, mult: usize, plus: usize },
+    Nested {
+        outer: usize,
+        inner: usize,
+        mult: usize,
+        plus: usize,
+    },
     /// `(params[i] + params[j]) * mult + plus` — a windowed feature *of* a
     /// windowed feature, where both windows are scaled the same way. The macd
     /// signal line is the case: `signal` exponential steps over a macd series,
     /// each macd value needing `slow * mult` bars of its own.
-    SumScaled { i: usize, j: usize, mult: usize, plus: usize },
+    SumScaled {
+        i: usize,
+        j: usize,
+        mult: usize,
+        plus: usize,
+    },
 }
 
 impl Lookback {
     fn bars(self, params: &[usize]) -> Option<u32> {
         let v = match self {
             Self::Fixed(n) => return Some(n),
-            Self::Scaled { i, mult, plus } => params.get(i)?.checked_mul(mult)?.checked_add(plus)?,
-            Self::MaxScaled { mult, plus } => params.iter().max()?.checked_mul(mult)?.checked_add(plus)?,
-            Self::Nested { outer, inner, mult, plus } => params
+            Self::Scaled { i, mult, plus } => {
+                params.get(i)?.checked_mul(mult)?.checked_add(plus)?
+            }
+            Self::MaxScaled { mult, plus } => {
+                params.iter().max()?.checked_mul(mult)?.checked_add(plus)?
+            }
+            Self::Nested {
+                outer,
+                inner,
+                mult,
+                plus,
+            } => params
                 .get(outer)?
                 .checked_add(params.get(inner)?.checked_mul(mult)?)?
                 .checked_add(plus)?,
-            Self::SumScaled { i, j, mult, plus } => params.get(i)?.checked_add(*params.get(j)?)?.checked_mul(mult)?.checked_add(plus)?,
+            Self::SumScaled { i, j, mult, plus } => params
+                .get(i)?
+                .checked_add(*params.get(j)?)?
+                .checked_mul(mult)?
+                .checked_add(plus)?,
         };
         u32::try_from(v).ok()
     }
@@ -214,7 +237,15 @@ impl Family {
     /// Example parameter values — the midpoint of convention, not of the range.
     #[must_use]
     pub fn example_params(&self) -> Vec<usize> {
-        self.params.iter().map(|p| EXAMPLES.iter().find(|(n, _)| *n == p.name).map_or(p.min.max(14), |(_, v)| (*v).clamp(p.min, p.max))).collect()
+        self.params
+            .iter()
+            .map(|p| {
+                EXAMPLES
+                    .iter()
+                    .find(|(n, _)| *n == p.name)
+                    .map_or(p.min.max(14), |(_, v)| (*v).clamp(p.min, p.max))
+            })
+            .collect()
     }
 }
 
@@ -366,21 +397,38 @@ pub fn family(name: &str) -> Option<&'static Family> {
 pub fn resolve(name: &str) -> Option<Resolved> {
     let mut best: Option<(&'static Family, Vec<usize>)> = None;
     for f in FAMILIES {
-        let Some(rest) = name.strip_prefix(f.name) else { continue };
+        let Some(rest) = name.strip_prefix(f.name) else {
+            continue;
+        };
         let params: Vec<usize> = if rest.is_empty() {
             vec![]
         } else {
-            let Some(tail) = rest.strip_prefix('_') else { continue };
-            let Ok(parsed) = tail.split('_').map(str::parse::<usize>).collect::<Result<Vec<_>, _>>() else { continue };
+            let Some(tail) = rest.strip_prefix('_') else {
+                continue;
+            };
+            let Ok(parsed) = tail
+                .split('_')
+                .map(str::parse::<usize>)
+                .collect::<Result<Vec<_>, _>>()
+            else {
+                continue;
+            };
             parsed
         };
         if params.len() != f.params.len() {
             continue;
         }
-        if params.iter().zip(f.params).any(|(v, spec)| *v < spec.min || *v > spec.max) {
+        if params
+            .iter()
+            .zip(f.params)
+            .any(|(v, spec)| *v < spec.min || *v > spec.max)
+        {
             continue;
         }
-        if best.as_ref().is_none_or(|(b, _)| f.name.len() > b.name.len()) {
+        if best
+            .as_ref()
+            .is_none_or(|(b, _)| f.name.len() > b.name.len())
+        {
             best = Some((f, params));
         }
     }
@@ -393,7 +441,11 @@ pub fn resolve(name: &str) -> Option<Resolved> {
     arr[..params.len()].copy_from_slice(&params);
     // A resolved name whose lookback cannot be expressed is not resolved: the
     // executor would have nothing to enforce coverage against (INV-13).
-    let r = Resolved { family: canonical, params: arr, n: params.len() };
+    let r = Resolved {
+        family: canonical,
+        params: arr,
+        n: params.len(),
+    };
     r.lookback_bars()?;
     Some(r)
 }
@@ -408,7 +460,11 @@ pub fn is_known(name: &str) -> bool {
 ///
 /// `query` matches the family name or its `use_when` text, case-insensitively.
 #[must_use]
-pub fn list(family_filter: Option<&str>, cost: Option<CostClass>, query: Option<&str>) -> Vec<&'static Family> {
+pub fn list(
+    family_filter: Option<&str>,
+    cost: Option<CostClass>,
+    query: Option<&str>,
+) -> Vec<&'static Family> {
     let q = query.map(str::to_lowercase);
     FAMILIES
         .iter()
@@ -434,7 +490,11 @@ pub fn list(family_filter: Option<&str>, cost: Option<CostClass>, query: Option<
 pub fn suggestions(name: &str) -> Vec<&'static Family> {
     let stem: String = name.chars().take_while(|c| !c.is_ascii_digit()).collect();
     let stem = stem.trim_end_matches('_').to_lowercase();
-    let mut scored: Vec<(usize, &'static Family)> = FAMILIES.iter().map(|f| (edit_distance(&stem, f.name), f)).filter(|(d, f)| *d <= 3 || f.name.starts_with(&stem)).collect();
+    let mut scored: Vec<(usize, &'static Family)> = FAMILIES
+        .iter()
+        .map(|f| (edit_distance(&stem, f.name), f))
+        .filter(|(d, f)| *d <= 3 || f.name.starts_with(&stem))
+        .collect();
     scored.sort_by_key(|(d, f)| (*d, f.name));
     scored.into_iter().take(3).map(|(_, f)| f).collect()
 }
@@ -447,7 +507,9 @@ fn edit_distance(a: &str, b: &str) -> usize {
     for (i, ca) in a.iter().enumerate() {
         cur[0] = i + 1;
         for (j, cb) in b.iter().enumerate() {
-            cur[j + 1] = (prev[j] + usize::from(ca != cb)).min(prev[j + 1] + 1).min(cur[j] + 1);
+            cur[j + 1] = (prev[j] + usize::from(ca != cb))
+                .min(prev[j + 1] + 1)
+                .min(cur[j] + 1);
         }
         std::mem::swap(&mut prev, &mut cur);
     }
@@ -463,9 +525,19 @@ mod tests {
         let mut seen = std::collections::BTreeSet::new();
         for f in families() {
             assert!(seen.insert(f.name), "duplicate family `{}`", f.name);
-            assert!(f.use_when.len() <= 120, "`{}` use_when is {} chars", f.name, f.use_when.len());
+            assert!(
+                f.use_when.len() <= 120,
+                "`{}` use_when is {} chars",
+                f.name,
+                f.use_when.len()
+            );
             assert!(!f.use_when.is_empty(), "`{}` has no use_when", f.name);
-            assert!(f.params.len() <= MAX_PARAMS, "`{}` takes {} params", f.name, f.params.len());
+            assert!(
+                f.params.len() <= MAX_PARAMS,
+                "`{}` takes {} params",
+                f.name,
+                f.params.len()
+            );
         }
     }
 
@@ -475,9 +547,19 @@ mod tests {
     fn every_alias_points_at_a_real_family_with_the_same_arity() {
         for f in families() {
             let Some(target) = f.alias_of else { continue };
-            let t = family(target).unwrap_or_else(|| panic!("`{}` aliases missing `{target}`", f.name));
-            assert!(t.alias_of.is_none(), "`{}` aliases `{target}`, which is itself an alias", f.name);
-            assert_eq!(f.params.len(), t.params.len(), "`{}` and `{target}` differ in arity", f.name);
+            let t =
+                family(target).unwrap_or_else(|| panic!("`{}` aliases missing `{target}`", f.name));
+            assert!(
+                t.alias_of.is_none(),
+                "`{}` aliases `{target}`, which is itself an alias",
+                f.name
+            );
+            assert_eq!(
+                f.params.len(),
+                t.params.len(),
+                "`{}` and `{target}` differ in arity",
+                f.name
+            );
         }
     }
 
@@ -492,8 +574,14 @@ mod tests {
     #[test]
     fn a_longer_family_name_wins_over_a_prefix_of_it() {
         assert_eq!(resolve("macd_12_26").unwrap().family.name, "macd");
-        assert_eq!(resolve("macd_hist_12_26_9").unwrap().family.name, "macd_hist");
-        assert_eq!(resolve("rolling_mean_20").unwrap().family.name, "rolling_mean");
+        assert_eq!(
+            resolve("macd_hist_12_26_9").unwrap().family.name,
+            "macd_hist"
+        );
+        assert_eq!(
+            resolve("rolling_mean_20").unwrap().family.name,
+            "rolling_mean"
+        );
     }
 
     #[test]
@@ -508,7 +596,10 @@ mod tests {
     /// resolve at all, rather than resolving to something the engine clamps.
     #[test]
     fn a_parameter_outside_its_declared_range_does_not_resolve() {
-        assert!(resolve("rsi_1").is_none(), "rsi needs at least two bars of change");
+        assert!(
+            resolve("rsi_1").is_none(),
+            "rsi needs at least two bars of change"
+        );
         assert!(resolve("rolling_skew_2").is_none());
         assert!(resolve("rolling_quantile_20_101").is_none());
         assert!(resolve("bb_upper_20_0").is_none());
@@ -535,22 +626,32 @@ mod tests {
     fn lookback_follows_the_parameters() {
         assert_eq!(resolve("ema_20").unwrap().lookback_bars(), Some(100));
         assert_eq!(resolve("rsi_14").unwrap().lookback_bars(), Some(71));
-        assert_eq!(resolve("rolling_mean_20").unwrap().lookback_bars(), Some(20));
+        assert_eq!(
+            resolve("rolling_mean_20").unwrap().lookback_bars(),
+            Some(20)
+        );
         assert_eq!(resolve("returns_5").unwrap().lookback_bars(), Some(6));
         // macd spans the slower of its two emas.
         assert_eq!(resolve("macd_12_26").unwrap().lookback_bars(), Some(130));
         // the signal ema runs over the macd series, so both windows compose.
-        assert_eq!(resolve("macd_signal_12_26_9").unwrap().lookback_bars(), Some(175));
+        assert_eq!(
+            resolve("macd_signal_12_26_9").unwrap().lookback_bars(),
+            Some(175)
+        );
         assert_eq!(resolve("close").unwrap().lookback_bars(), Some(1));
     }
 
     #[test]
     fn list_filters_on_family_cost_and_query() {
         assert_eq!(list(Some("ema"), None, None).len(), 1);
-        assert!(list(None, Some(CostClass::Cheap), None).iter().all(|f| f.cost == CostClass::Cheap));
+        assert!(list(None, Some(CostClass::Cheap), None)
+            .iter()
+            .all(|f| f.cost == CostClass::Cheap));
         let rsi = list(None, None, Some("rsi"));
         assert!(rsi.iter().any(|f| f.name == "rsi"));
-        assert!(list(None, None, Some("oversold")).iter().any(|f| f.name == "rsi"));
+        assert!(list(None, None, Some("oversold"))
+            .iter()
+            .any(|f| f.name == "rsi"));
         assert!(list(Some("no_such_family"), None, None).is_empty());
     }
 
@@ -566,7 +667,11 @@ mod tests {
     fn an_example_name_resolves() {
         for f in families() {
             let name = f.example();
-            assert!(resolve(&name).is_some(), "`{}` example `{name}` does not resolve", f.name);
+            assert!(
+                resolve(&name).is_some(),
+                "`{}` example `{name}` does not resolve",
+                f.name
+            );
         }
     }
 
@@ -575,9 +680,17 @@ mod tests {
     #[test]
     fn every_f1_and_f2_family_is_bar_derived_and_declares_no_source_lag() {
         for f in families() {
-            assert_eq!(f.pit_lag_ms, 0, "`{}` declares a source lag but reads bars", f.name);
+            assert_eq!(
+                f.pit_lag_ms, 0,
+                "`{}` declares a source lag but reads bars",
+                f.name
+            );
             assert_eq!(f.output_dtype, "f64");
-            assert_ne!(f.cost, CostClass::Model, "no F1/F2 family reads a model artifact");
+            assert_ne!(
+                f.cost,
+                CostClass::Model,
+                "no F1/F2 family reads a model artifact"
+            );
         }
     }
 }

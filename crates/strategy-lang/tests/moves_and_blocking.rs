@@ -111,7 +111,12 @@ fn a_suggestion_acted_on_produces_the_move_it_said_it_would() {
     assert_eq!(c.kind, m.kind);
     assert_eq!(
         c.path,
-        m.path.rsplit_once(".clause[").expect("a clause path").0.to_string() + ".when",
+        m.path
+            .rsplit_once(".clause[")
+            .expect("a clause path")
+            .0
+            .to_string()
+            + ".when",
         "a condition-level move addresses the condition; the clause it touched is in `before`"
     );
     assert_eq!(c.before.as_deref(), Some("rsi(close, 14) < 30"));
@@ -265,7 +270,5 @@ exit time 48 bars
     let edited = two_sided.replace("r > 70", "r > 80");
     let diffed = diff(&d, &def(&edited)).expect("diffs");
     assert_eq!(diffed.changes()[0].path, "entry.short[0].when");
-    assert!(diffed.changes()[0]
-        .path
-        .starts_with(&clauses[1].path));
+    assert!(diffed.changes()[0].path.starts_with(&clauses[1].path));
 }

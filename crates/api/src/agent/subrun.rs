@@ -197,18 +197,24 @@ pub async fn campaign_brief(
     .bind(campaign_id)
     .fetch_optional(pg)
     .await?;
-    Ok(row.map(|(run_id, projection, brief, digest, shown, withheld)| CampaignBrief {
-        campaign_id,
-        run_id,
-        projection,
-        brief,
-        digest,
-        shown: shown
-            .as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-            .unwrap_or_default(),
-        withheld,
-    }))
+    Ok(row.map(
+        |(run_id, projection, brief, digest, shown, withheld)| CampaignBrief {
+            campaign_id,
+            run_id,
+            projection,
+            brief,
+            digest,
+            shown: shown
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            withheld,
+        },
+    ))
 }
 
 /// A claimed position in a campaign's fold.

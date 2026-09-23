@@ -61,7 +61,17 @@ let env: OhlcEnvelope = serde_json::from_slice(body)
     .map_err(|e| FetchError::Integrity(format!("kraken ohlc: {e}")))?;
 ```
 
-Three properties make it a mechanism rather than a comment:
+A standalone marker covers the **statement** below it, not the line below it, capped at
+eight code lines. That distinction is load-bearing rather than lenient: `cargo fmt`
+breaks a long `let` after the `=`, which moves the call one line further down than the
+author left it. The workspace-wide `cargo fmt --all` of 2026-09-22 (`2ca5ba3`) did
+exactly that to both `serde_json::from_str` calls in `derivs/funding.rs`, and under a
+next-line rule each became two violations — a stale marker and an unmarked call — from a
+commit that changed no code. A check whose answer depends on whether the formatter has
+run is a check nobody can keep green. The eight-line cap is what stops "the statement
+below" decaying into "the rest of the function".
+
+Three further properties make it a mechanism rather than a comment:
 
 1. **The reason is mandatory.** `// json-at-boundary:` with nothing after the colon is
    itself a violation. An exemption nobody had to justify is an exemption nobody reviews.
@@ -116,6 +126,10 @@ an illegal one, and which no amount of pattern matching could have recovered.
   the grep", which was the right call. Their six call sites now carry markers and those
   comments are gone. That is the check's first real test: it named all six by file and
   line the moment `main` merged, which is what it is for.
+- The marker is formatter-stable. That was not true of the first version and was found
+  the same week, by merging `2ca5ba3` rather than by reasoning about it — which is the
+  argument for landing a guard and then running the workspace through it, instead of
+  declaring it correct.
 - The exemption list is now distributed across the call sites instead of centralised in
   `xtask`. A reviewer reads the reason next to the code, and `git grep json-at-boundary:`
   enumerates every exemption in the workspace.

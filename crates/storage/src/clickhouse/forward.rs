@@ -44,8 +44,11 @@ fn mantissa(d: Decimal) -> Result<i128, ChError> {
     let scaled = d.round_dp(SCALE);
     let m = scaled.mantissa();
     let shortfall = SCALE.saturating_sub(scaled.scale());
-    let factor = 10i128.checked_pow(shortfall).ok_or_else(|| ChError::Insert(format!("{d} does not fit Decimal(38,18)")))?;
-    m.checked_mul(factor).ok_or_else(|| ChError::Insert(format!("{d} overflows Decimal(38,18)")))
+    let factor = 10i128
+        .checked_pow(shortfall)
+        .ok_or_else(|| ChError::Insert(format!("{d} does not fit Decimal(38,18)")))?;
+    m.checked_mul(factor)
+        .ok_or_else(|| ChError::Insert(format!("{d} overflows Decimal(38,18)")))
 }
 
 fn opt_mantissa(d: Option<Decimal>) -> Result<Option<i128>, ChError> {
@@ -200,7 +203,9 @@ pub async fn write_funding(url: &str, rows: &[FundingRow]) -> Result<usize, ChEr
         return Ok(0);
     }
     let client = super::connect(url);
-    let mut insert = client.insert("funding_rates").map_err(|e| ChError::Insert(e.to_string()))?;
+    let mut insert = client
+        .insert("funding_rates")
+        .map_err(|e| ChError::Insert(e.to_string()))?;
     for r in rows {
         insert
             .write(&WireFunding {
@@ -221,7 +226,10 @@ pub async fn write_funding(url: &str, rows: &[FundingRow]) -> Result<usize, ChEr
             .await
             .map_err(|e| ChError::Insert(e.to_string()))?;
     }
-    insert.end().await.map_err(|e| ChError::Insert(e.to_string()))?;
+    insert
+        .end()
+        .await
+        .map_err(|e| ChError::Insert(e.to_string()))?;
     Ok(rows.len())
 }
 
@@ -235,7 +243,9 @@ pub async fn write_open_interest(url: &str, rows: &[OpenInterestRow]) -> Result<
         return Ok(0);
     }
     let client = super::connect(url);
-    let mut insert = client.insert("open_interest").map_err(|e| ChError::Insert(e.to_string()))?;
+    let mut insert = client
+        .insert("open_interest")
+        .map_err(|e| ChError::Insert(e.to_string()))?;
     for r in rows {
         insert
             .write(&WireOpenInterest {
@@ -253,7 +263,10 @@ pub async fn write_open_interest(url: &str, rows: &[OpenInterestRow]) -> Result<
             .await
             .map_err(|e| ChError::Insert(e.to_string()))?;
     }
-    insert.end().await.map_err(|e| ChError::Insert(e.to_string()))?;
+    insert
+        .end()
+        .await
+        .map_err(|e| ChError::Insert(e.to_string()))?;
     Ok(rows.len())
 }
 
@@ -266,7 +279,9 @@ pub async fn write_chain_snapshot(url: &str, rows: &[ChainSnapshotRow]) -> Resul
         return Ok(0);
     }
     let client = super::connect(url);
-    let mut insert = client.insert("option_chain_snapshots").map_err(|e| ChError::Insert(e.to_string()))?;
+    let mut insert = client
+        .insert("option_chain_snapshots")
+        .map_err(|e| ChError::Insert(e.to_string()))?;
     for r in rows {
         insert
             .write(&WireChain {
@@ -300,7 +315,10 @@ pub async fn write_chain_snapshot(url: &str, rows: &[ChainSnapshotRow]) -> Resul
             .await
             .map_err(|e| ChError::Insert(e.to_string()))?;
     }
-    insert.end().await.map_err(|e| ChError::Insert(e.to_string()))?;
+    insert
+        .end()
+        .await
+        .map_err(|e| ChError::Insert(e.to_string()))?;
     Ok(rows.len())
 }
 
@@ -330,7 +348,9 @@ pub async fn write_heartbeats(url: &str, rows: &[HeartbeatRow]) -> Result<usize,
         return Ok(0);
     }
     let client = super::connect(url);
-    let mut insert = client.insert("forward_series_heartbeat").map_err(|e| ChError::Insert(e.to_string()))?;
+    let mut insert = client
+        .insert("forward_series_heartbeat")
+        .map_err(|e| ChError::Insert(e.to_string()))?;
     let now = ns(Utc::now());
     for r in rows {
         insert
@@ -345,7 +365,10 @@ pub async fn write_heartbeats(url: &str, rows: &[HeartbeatRow]) -> Result<usize,
             .await
             .map_err(|e| ChError::Insert(e.to_string()))?;
     }
-    insert.end().await.map_err(|e| ChError::Insert(e.to_string()))?;
+    insert
+        .end()
+        .await
+        .map_err(|e| ChError::Insert(e.to_string()))?;
     Ok(rows.len())
 }
 
@@ -358,7 +381,9 @@ pub async fn write_heartbeats(url: &str, rows: &[HeartbeatRow]) -> Result<usize,
 ///
 /// # Errors
 /// [`ChError::Client`] if the catalogue cannot be read.
-pub async fn source_ids(pg: &sqlx::PgPool) -> Result<std::collections::HashMap<String, i32>, ChError> {
+pub async fn source_ids(
+    pg: &sqlx::PgPool,
+) -> Result<std::collections::HashMap<String, i32>, ChError> {
     let rows: Vec<(String, i32)> = sqlx::query_as("SELECT name, source_id FROM dataplane.source")
         .fetch_all(pg)
         .await
@@ -372,7 +397,14 @@ pub async fn source_ids(pg: &sqlx::PgPool) -> Result<std::collections::HashMap<S
 ///
 /// # Errors
 /// Backend failures.
-pub async fn beat(url: &str, series: &str, venue: &str, instrument: &str, last_event: DateTime<Utc>, rows: u64) -> Result<(), ChError> {
+pub async fn beat(
+    url: &str,
+    series: &str,
+    venue: &str,
+    instrument: &str,
+    last_event: DateTime<Utc>,
+    rows: u64,
+) -> Result<(), ChError> {
     write_heartbeats(
         url,
         &[HeartbeatRow {
@@ -449,7 +481,9 @@ impl FundingKind {
         match s {
             "realized" => Ok(Self::Realized),
             "predicted" => Ok(Self::Predicted),
-            other => Err(ChError::Decode(format!("funding kind {other:?} is neither realized nor predicted"))),
+            other => Err(ChError::Decode(format!(
+                "funding kind {other:?} is neither realized nor predicted"
+            ))),
         }
     }
 }
@@ -475,7 +509,9 @@ impl FundingRate {
     }
 
     fn decode(raw: &str) -> Result<Self, ChError> {
-        raw.parse::<Decimal>().map(Self).map_err(|e| ChError::Decode(format!("funding rate {raw:?}: {e}")))
+        raw.parse::<Decimal>()
+            .map(Self)
+            .map_err(|e| ChError::Decode(format!("funding rate {raw:?}: {e}")))
     }
 }
 
@@ -498,14 +534,19 @@ impl OpenInterestLevel {
     }
 
     fn decode(raw: &str) -> Result<Self, ChError> {
-        raw.parse::<Decimal>().map(Self).map_err(|e| ChError::Decode(format!("open interest {raw:?}: {e}")))
+        raw.parse::<Decimal>()
+            .map(Self)
+            .map_err(|e| ChError::Decode(format!("open interest {raw:?}: {e}")))
     }
 }
 
 fn decode_opt(raw: Option<&str>, what: &str) -> Result<Option<Decimal>, ChError> {
     match raw {
         None => Ok(None),
-        Some(s) => s.parse::<Decimal>().map(Some).map_err(|e| ChError::Decode(format!("{what} {s:?}: {e}"))),
+        Some(s) => s
+            .parse::<Decimal>()
+            .map(Some)
+            .map_err(|e| ChError::Decode(format!("{what} {s:?}: {e}"))),
     }
 }
 
@@ -526,7 +567,10 @@ pub enum SeriesRead<T> {
     /// The table is not in this database. Nothing was measured, and this is not
     /// "no funding" — it is "no series". `database` is included because the last
     /// time someone asked this question they were connected to the wrong one.
-    NoSuchSeries { table: &'static str, database: String },
+    NoSuchSeries {
+        table: &'static str,
+        database: String,
+    },
 }
 
 impl<T> SeriesRead<T> {
@@ -575,14 +619,31 @@ pub struct SeriesQuery {
 impl SeriesQuery {
     /// A window read as the world stood at `as_of`.
     #[must_use]
-    pub fn new(venue: impl Into<String>, instrument: impl Into<String>, from: DateTime<Utc>, to: DateTime<Utc>, as_of: DateTime<Utc>) -> Self {
-        Self { venue: venue.into(), instrument: instrument.into(), from, to, as_of }
+    pub fn new(
+        venue: impl Into<String>,
+        instrument: impl Into<String>,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+        as_of: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            venue: venue.into(),
+            instrument: instrument.into(),
+            from,
+            to,
+            as_of,
+        }
     }
 
     /// A window read as the world stands now. Still a horizon: rows stamped in the
     /// future stay invisible.
     #[must_use]
-    pub fn as_of_now(venue: impl Into<String>, instrument: impl Into<String>, from: DateTime<Utc>, to: DateTime<Utc>) -> Self {
+    pub fn as_of_now(
+        venue: impl Into<String>,
+        instrument: impl Into<String>,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Self {
         Self::new(venue, instrument, from, to, Utc::now())
     }
 }
@@ -608,7 +669,9 @@ impl FundingPoint {
     /// for rows whose knowledge time was a real receipt.
     #[must_use]
     pub const fn is_forward_evidence(&self) -> bool {
-        !self.quality_flags.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME)
+        !self
+            .quality_flags
+            .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME)
     }
 }
 
@@ -646,9 +709,15 @@ pub enum FundingAt {
     /// **This is not a funding rate of zero.** A perpetual's carry over this
     /// interval is unknown, and a backtest that needs it must either skip the
     /// interval or refuse the study — it may not treat it as free.
-    NotRecorded { searched_back_to: DateTime<Utc>, at: DateTime<Utc> },
+    NotRecorded {
+        searched_back_to: DateTime<Utc>,
+        at: DateTime<Utc>,
+    },
     /// The funding series is not in this database at all.
-    SeriesAbsent { table: &'static str, database: String },
+    SeriesAbsent {
+        table: &'static str,
+        database: String,
+    },
 }
 
 const FUNDING_TABLE: &str = "funding_rates";
@@ -673,7 +742,11 @@ async fn probe(client: &ChClient, table: &str) -> Result<(bool, String), ChError
            FROM system.tables
           WHERE database = currentDatabase()"
     );
-    let p: Probe = client.query(&sql).fetch_one().await.map_err(|e| ChError::Client(e.to_string()))?;
+    let p: Probe = client
+        .query(&sql)
+        .fetch_one()
+        .await
+        .map_err(|e| ChError::Client(e.to_string()))?;
     Ok((p.n > 0, p.db))
 }
 
@@ -791,11 +864,18 @@ fn keep_latest_revision<T>(rows: Vec<T>, key: impl Fn(&T) -> DateTime<Utc>) -> V
 /// cannot be read as an absence of funding — or [`ChError::Decode`] if a stored
 /// value would not parse. A rate that will not decode is refused rather than
 /// dropped: a silently skipped settlement is a hole nobody sees.
-pub async fn read_funding(url: &str, q: &SeriesQuery, kind: FundingKind) -> Result<SeriesRead<FundingPoint>, ChError> {
+pub async fn read_funding(
+    url: &str,
+    q: &SeriesQuery,
+    kind: FundingKind,
+) -> Result<SeriesRead<FundingPoint>, ChError> {
     let client = super::connect(url);
     let (exists, database) = probe(&client, FUNDING_TABLE).await?;
     if !exists {
-        return Ok(SeriesRead::NoSuchSeries { table: FUNDING_TABLE, database });
+        return Ok(SeriesRead::NoSuchSeries {
+            table: FUNDING_TABLE,
+            database,
+        });
     }
     let raw: Vec<WireFundingOut> = client
         .query(&funding_sql(q))
@@ -815,12 +895,15 @@ pub async fn read_funding(url: &str, q: &SeriesQuery, kind: FundingKind) -> Resu
             event_time: instant(r.event_ns),
             knowledge_time: instant(r.knowledge_ns),
             rate: FundingRate::decode(&r.rate)?,
-            relative_rate: decode_opt(r.relative_rate.as_deref(), "relative funding rate")?.map(FundingRate),
+            relative_rate: decode_opt(r.relative_rate.as_deref(), "relative funding rate")?
+                .map(FundingRate),
             quality_flags: QualityFlags(r.quality_flags),
             source_id: r.source_id,
         });
     }
-    Ok(SeriesRead::Present { rows: keep_latest_revision(rows, |p| p.event_time) })
+    Ok(SeriesRead::Present {
+        rows: keep_latest_revision(rows, |p| p.event_time),
+    })
 }
 
 /// Read one window of open-interest samples, point-in-time. Same three-way answer
@@ -828,11 +911,17 @@ pub async fn read_funding(url: &str, q: &SeriesQuery, kind: FundingKind) -> Resu
 ///
 /// # Errors
 /// As [`read_funding`].
-pub async fn read_open_interest(url: &str, q: &SeriesQuery) -> Result<SeriesRead<OpenInterestPoint>, ChError> {
+pub async fn read_open_interest(
+    url: &str,
+    q: &SeriesQuery,
+) -> Result<SeriesRead<OpenInterestPoint>, ChError> {
     let client = super::connect(url);
     let (exists, database) = probe(&client, OPEN_INTEREST_TABLE).await?;
     if !exists {
-        return Ok(SeriesRead::NoSuchSeries { table: OPEN_INTEREST_TABLE, database });
+        return Ok(SeriesRead::NoSuchSeries {
+            table: OPEN_INTEREST_TABLE,
+            database,
+        });
     }
     let raw: Vec<WireOpenInterestOut> = client
         .query(&open_interest_sql(q))
@@ -855,7 +944,9 @@ pub async fn read_open_interest(url: &str, q: &SeriesQuery) -> Result<SeriesRead
             source_id: r.source_id,
         });
     }
-    Ok(SeriesRead::Present { rows: keep_latest_revision(rows, |p| p.event_time) })
+    Ok(SeriesRead::Present {
+        rows: keep_latest_revision(rows, |p| p.event_time),
+    })
 }
 
 /// Every forward series' last write.
@@ -871,7 +962,10 @@ pub async fn read_heartbeats(url: &str) -> Result<SeriesRead<Heartbeat>, ChError
     let client = super::connect(url);
     let (exists, database) = probe(&client, HEARTBEAT_TABLE).await?;
     if !exists {
-        return Ok(SeriesRead::NoSuchSeries { table: HEARTBEAT_TABLE, database });
+        return Ok(SeriesRead::NoSuchSeries {
+            table: HEARTBEAT_TABLE,
+            database,
+        });
     }
     let raw: Vec<WireHeartbeatOut> = client
         .query(&format!(
@@ -922,12 +1016,23 @@ pub async fn funding_at(
     let searched_back_to = at_time - lookback;
     // `to` is exclusive, so nudge past the instant itself: a settlement stamped
     // exactly at `at_time` is in force at `at_time`.
-    let q = SeriesQuery::new(venue, instrument, searched_back_to, at_time + chrono::Duration::nanoseconds(1), as_of);
+    let q = SeriesQuery::new(
+        venue,
+        instrument,
+        searched_back_to,
+        at_time + chrono::Duration::nanoseconds(1),
+        as_of,
+    );
     match read_funding(url, &q, FundingKind::Realized).await? {
-        SeriesRead::NoSuchSeries { table, database } => Ok(FundingAt::SeriesAbsent { table, database }),
+        SeriesRead::NoSuchSeries { table, database } => {
+            Ok(FundingAt::SeriesAbsent { table, database })
+        }
         SeriesRead::Present { mut rows } => match rows.pop() {
             Some(p) => Ok(FundingAt::Settled(Box::new(p))),
-            None => Ok(FundingAt::NotRecorded { searched_back_to, at: at_time }),
+            None => Ok(FundingAt::NotRecorded {
+                searched_back_to,
+                at: at_time,
+            }),
         },
     }
 }
@@ -967,16 +1072,27 @@ mod tests {
     fn a_derived_row_carries_the_sentinel_and_an_observed_one_does_not() {
         let src = SourceDecl::kraken_futures_ticker();
         let derived = row(src.knowledge_for(t(5), Collection::Historical).unwrap());
-        assert_eq!(derived.knowledge.quality_flags().0, QualityFlags::BACKFILLED_KNOWLEDGE_TIME.0);
+        assert_eq!(
+            derived.knowledge.quality_flags().0,
+            QualityFlags::BACKFILLED_KNOWLEDGE_TIME.0
+        );
 
-        let observed = row(src.knowledge_for(t(5), Collection::Forward { received_at: t(6) }).unwrap());
+        let observed = row(src
+            .knowledge_for(t(5), Collection::Forward { received_at: t(6) })
+            .unwrap());
         assert_eq!(observed.knowledge.quality_flags().0, QualityFlags::NONE.0);
-        assert!(observed.knowledge.is_forward_evidence(), "a forward poll is what Gate 15 reads (D-P3)");
+        assert!(
+            observed.knowledge.is_forward_evidence(),
+            "a forward poll is what Gate 15 reads (D-P3)"
+        );
 
         // And the two are distinguishable in the row that goes to storage, even
         // though both land on the same instant here.
         assert_eq!(derived.knowledge.time(), observed.knowledge.time());
-        assert_ne!(derived.knowledge.quality_flags().0, observed.knowledge.quality_flags().0);
+        assert_ne!(
+            derived.knowledge.quality_flags().0,
+            observed.knowledge.quality_flags().0
+        );
     }
 
     /// Adversarial: the funding rate the venue actually publishes has 16
@@ -986,7 +1102,10 @@ mod tests {
     fn a_real_funding_rate_survives_the_decimal_conversion_exactly() {
         let d = Decimal::from_str("0.000006707804166667").unwrap();
         let m = mantissa(d).unwrap();
-        assert_eq!(m, 6_707_804_166_667_i128, "18dp mantissa of the venue's own relativeFundingRate");
+        assert_eq!(
+            m, 6_707_804_166_667_i128,
+            "18dp mantissa of the venue's own relativeFundingRate"
+        );
         // Round-trip: the mantissa divided back by 10^18 is the original.
         let back = Decimal::from_i128_with_scale(m, SCALE);
         assert_eq!(back, d);
@@ -1010,8 +1129,14 @@ mod tests {
 
     #[test]
     fn epoch_days_matches_clickhouse_date() {
-        assert_eq!(epoch_days(chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()), 0);
-        assert_eq!(epoch_days(chrono::NaiveDate::from_ymd_opt(1970, 1, 2).unwrap()), 1);
+        assert_eq!(
+            epoch_days(chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()),
+            0
+        );
+        assert_eq!(
+            epoch_days(chrono::NaiveDate::from_ymd_opt(1970, 1, 2).unwrap()),
+            1
+        );
     }
 
     /// There is no delete path in this module, and that is a property worth
@@ -1022,10 +1147,17 @@ mod tests {
         // Everything above the test module: the test's own vocabulary must not be
         // what trips it.
         let production = src.split("#[cfg(test)]").next().unwrap_or(src);
-        let code: String =
-            production.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n").to_ascii_uppercase();
+        let code: String = production
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .to_ascii_uppercase();
         for forbidden in ["DELETE FROM", "TRUNCATE", "DROP TABLE", "ALTER TABLE"] {
-            assert!(!code.contains(forbidden), "forward-only rows are never destroyed (FM-11); found {forbidden}");
+            assert!(
+                !code.contains(forbidden),
+                "forward-only rows are never destroyed (FM-11); found {forbidden}"
+            );
         }
     }
 
@@ -1050,9 +1182,15 @@ mod tests {
     #[test]
     fn an_empty_window_an_absent_series_and_a_failure_are_three_different_answers() {
         let empty: SeriesRead<FundingPoint> = SeriesRead::Present { rows: Vec::new() };
-        let absent: SeriesRead<FundingPoint> = SeriesRead::NoSuchSeries { table: FUNDING_TABLE, database: "default".into() };
+        let absent: SeriesRead<FundingPoint> = SeriesRead::NoSuchSeries {
+            table: FUNDING_TABLE,
+            database: "default".into(),
+        };
 
-        assert!(empty.is_measured_empty(), "the series exists and the window held nothing");
+        assert!(
+            empty.is_measured_empty(),
+            "the series exists and the window held nothing"
+        );
         assert!(!empty.is_absent());
         assert!(absent.is_absent(), "the series is not in this database");
         assert!(!absent.is_measured_empty());
@@ -1071,8 +1209,13 @@ mod tests {
     async fn a_failed_query_is_an_error_not_an_empty_series() {
         let q = SeriesQuery::new("kraken_futures", "PF_XBTUSD", t(0), t(6), t(6));
         let fut = read_funding("http://127.0.0.1:1/trading", &q, FundingKind::Realized);
-        let r = tokio::time::timeout(std::time::Duration::from_secs(20), fut).await.expect("the read should fail fast, not hang");
-        assert!(matches!(r, Err(ChError::Client(_))), "a refused connection must surface, got {r:?}");
+        let r = tokio::time::timeout(std::time::Duration::from_secs(20), fut)
+            .await
+            .expect("the read should fail fast, not hang");
+        assert!(
+            matches!(r, Err(ChError::Client(_))),
+            "a refused connection must surface, got {r:?}"
+        );
     }
 
     /// Every read in this module is point-in-time. The clause is built in one
@@ -1082,8 +1225,14 @@ mod tests {
     fn every_read_filters_on_knowledge_time() {
         let q = SeriesQuery::new("kraken_futures", "PF_XBTUSD", t(0), t(6), t(5));
         for sql in [funding_sql(&q), open_interest_sql(&q)] {
-            assert!(sql.contains("knowledge_time <= fromUnixTimestamp64Nano"), "a read without a horizon can see the future:\n{sql}");
-            assert!(sql.contains(&ns(t(5)).to_string()), "the horizon in the SQL must be the caller's as_of");
+            assert!(
+                sql.contains("knowledge_time <= fromUnixTimestamp64Nano"),
+                "a read without a horizon can see the future:\n{sql}"
+            );
+            assert!(
+                sql.contains(&ns(t(5)).to_string()),
+                "the horizon in the SQL must be the caller's as_of"
+            );
         }
     }
 
@@ -1094,9 +1243,18 @@ mod tests {
     fn the_window_is_half_open_and_the_horizon_is_a_separate_axis() {
         let q = SeriesQuery::new("kraken_futures", "PF_XBTUSD", t(1), t(6), t(9));
         let sql = funding_sql(&q);
-        assert!(sql.contains(&format!("event_time >= fromUnixTimestamp64Nano({})", ns(t(1)))));
-        assert!(sql.contains(&format!("event_time < fromUnixTimestamp64Nano({})", ns(t(6)))));
-        assert!(sql.contains(&format!("knowledge_time <= fromUnixTimestamp64Nano({})", ns(t(9)))));
+        assert!(sql.contains(&format!(
+            "event_time >= fromUnixTimestamp64Nano({})",
+            ns(t(1))
+        )));
+        assert!(sql.contains(&format!(
+            "event_time < fromUnixTimestamp64Nano({})",
+            ns(t(6))
+        )));
+        assert!(sql.contains(&format!(
+            "knowledge_time <= fromUnixTimestamp64Nano({})",
+            ns(t(9))
+        )));
     }
 
     /// `funding_rates` and `open_interest` may be named in exactly one read each.
@@ -1105,9 +1263,17 @@ mod tests {
     fn each_forward_table_is_read_in_exactly_one_place() {
         let src = include_str!("forward.rs");
         let production = src.split("#[cfg(test)]").next().unwrap_or(src);
-        let code: String = production.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
+        let code: String = production
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
         for table in ["FROM {FUNDING_TABLE}", "FROM {OPEN_INTEREST_TABLE}"] {
-            assert_eq!(code.matches(table).count(), 1, "{table} is read in more than one place; only the PIT builder may name it");
+            assert_eq!(
+                code.matches(table).count(),
+                1,
+                "{table} is read in more than one place; only the PIT builder may name it"
+            );
         }
     }
 
@@ -1124,7 +1290,11 @@ mod tests {
         let resolved = keep_latest_revision(rows, |p| p.event_time);
         assert_eq!(resolved.len(), 2, "one row per settlement");
         assert_eq!(resolved[0].rate, FundingRate::decode("0.11").unwrap());
-        assert_eq!(resolved[0].knowledge_time, t(6), "the rate and its knowledge time come from the same revision");
+        assert_eq!(
+            resolved[0].knowledge_time,
+            t(6),
+            "the rate and its knowledge time come from the same revision"
+        );
         assert_eq!(resolved[1].rate, FundingRate::decode("0.20").unwrap());
     }
 
@@ -1133,7 +1303,10 @@ mod tests {
     /// so a caller cannot add an absence into a carry.
     #[test]
     fn an_uncollected_hour_is_not_a_rate_of_zero() {
-        let miss = FundingAt::NotRecorded { searched_back_to: t(4), at: t(5) };
+        let miss = FundingAt::NotRecorded {
+            searched_back_to: t(4),
+            at: t(5),
+        };
         let rate = match &miss {
             FundingAt::Settled(p) => Some(p.rate),
             FundingAt::NotRecorded { .. } | FundingAt::SeriesAbsent { .. } => None,
@@ -1146,7 +1319,10 @@ mod tests {
             FundingAt::Settled(p) => Some(p.rate),
             FundingAt::NotRecorded { .. } | FundingAt::SeriesAbsent { .. } => None,
         };
-        assert_eq!(rate.map(FundingRate::get), Some(Decimal::from_str("0.0001").unwrap()));
+        assert_eq!(
+            rate.map(FundingRate::get),
+            Some(Decimal::from_str("0.0001").unwrap())
+        );
     }
 
     /// The enforcement behind the previous test is the type, not a comment: a
@@ -1157,7 +1333,11 @@ mod tests {
     fn a_rate_has_no_zero_no_default_and_no_sum() {
         let src = include_str!("forward.rs");
         let production = src.split("#[cfg(test)]").next().unwrap_or(src);
-        let code: String = production.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
+        let code: String = production
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
 
         for forbidden in [
             "impl Default for FundingRate",
@@ -1170,14 +1350,25 @@ mod tests {
             "Decimal::ZERO",
             "unwrap_or_default",
         ] {
-            assert!(!code.contains(forbidden), "an absent measurement must never become a zero; found `{forbidden}`");
+            assert!(
+                !code.contains(forbidden),
+                "an absent measurement must never become a zero; found `{forbidden}`"
+            );
         }
 
         // And no `Default` slipped in through a derive on any of them.
-        for ty in ["pub struct FundingRate", "pub struct OpenInterestLevel", "pub struct SeriesQuery", "pub enum SeriesRead", "pub enum FundingAt"] {
+        for ty in [
+            "pub struct FundingRate",
+            "pub struct OpenInterestLevel",
+            "pub struct SeriesQuery",
+            "pub enum SeriesRead",
+            "pub enum FundingAt",
+        ] {
             let at = code.find(ty).unwrap_or_else(|| panic!("{ty} not found"));
             let head = &code[..at];
-            let derive_at = head.rfind("#[derive(").unwrap_or_else(|| panic!("{ty} has no derive"));
+            let derive_at = head
+                .rfind("#[derive(")
+                .unwrap_or_else(|| panic!("{ty} has no derive"));
             let derive = &head[derive_at..];
             assert!(!derive.contains("Default"), "{ty} must not derive Default");
         }
@@ -1202,9 +1393,15 @@ mod tests {
     fn an_undecodable_rate_is_an_error_rather_than_a_zero() {
         for bad in ["", "n/a", "NaN", "1.2.3"] {
             let r = FundingRate::decode(bad);
-            assert!(matches!(r, Err(ChError::Decode(_))), "{bad:?} must not decode");
+            assert!(
+                matches!(r, Err(ChError::Decode(_))),
+                "{bad:?} must not decode"
+            );
         }
-        assert!(matches!(decode_opt(Some("oops"), "mark price"), Err(ChError::Decode(_))));
+        assert!(matches!(
+            decode_opt(Some("oops"), "mark price"),
+            Err(ChError::Decode(_))
+        ));
         // A genuinely absent nullable column stays absent.
         assert_eq!(decode_opt(None, "mark price").unwrap(), None);
     }
@@ -1214,11 +1411,26 @@ mod tests {
     /// into `realized`, which would hand a strategy the next settlement early.
     #[test]
     fn a_kind_is_named_never_defaulted() {
-        assert_eq!(FundingKind::from_column("realized").unwrap(), FundingKind::Realized);
-        assert_eq!(FundingKind::from_column("predicted").unwrap(), FundingKind::Predicted);
-        assert!(matches!(FundingKind::from_column("REALIZED"), Err(ChError::Decode(_))));
-        assert!(matches!(FundingKind::from_column(""), Err(ChError::Decode(_))));
-        assert_ne!(FundingKind::Realized.as_str(), FundingKind::Predicted.as_str());
+        assert_eq!(
+            FundingKind::from_column("realized").unwrap(),
+            FundingKind::Realized
+        );
+        assert_eq!(
+            FundingKind::from_column("predicted").unwrap(),
+            FundingKind::Predicted
+        );
+        assert!(matches!(
+            FundingKind::from_column("REALIZED"),
+            Err(ChError::Decode(_))
+        ));
+        assert!(matches!(
+            FundingKind::from_column(""),
+            Err(ChError::Decode(_))
+        ));
+        assert_ne!(
+            FundingKind::Realized.as_str(),
+            FundingKind::Predicted.as_str()
+        );
     }
 
     /// A row read back reports whether Gate 15 may take forward evidence from it
@@ -1230,7 +1442,10 @@ mod tests {
 
         let mut derived = point(t(5), t(6), "0.1");
         derived.quality_flags = QualityFlags::BACKFILLED_KNOWLEDGE_TIME;
-        assert!(!derived.is_forward_evidence(), "a sentinel knowledge time is not a receipt");
+        assert!(
+            !derived.is_forward_evidence(),
+            "a sentinel knowledge time is not a receipt"
+        );
     }
 
     /// Against the live store. Gated, because it needs one.
@@ -1252,18 +1467,34 @@ mod tests {
         };
         let q = SeriesQuery::new("kraken_futures", "PF_XBTUSD", t(0), t(23), t(23));
 
-        let here = read_funding(&url, &q, FundingKind::Realized).await.expect("the configured database must answer");
-        assert!(!here.is_absent(), "funding_rates must exist in the database the writers target");
+        let here = read_funding(&url, &q, FundingKind::Realized)
+            .await
+            .expect("the configured database must answer");
+        assert!(
+            !here.is_absent(),
+            "funding_rates must exist in the database the writers target"
+        );
 
         // The same query against a database that exists but holds no such table.
-        let wrong = url.rsplit_once('/').map(|(head, _)| format!("{head}/default")).expect("url must carry a database");
-        let there = read_funding(&wrong, &q, FundingKind::Realized).await.expect("the wrong database must still answer");
+        let wrong = url
+            .rsplit_once('/')
+            .map(|(head, _)| format!("{head}/default"))
+            .expect("url must carry a database");
+        let there = read_funding(&wrong, &q, FundingKind::Realized)
+            .await
+            .expect("the wrong database must still answer");
         match there {
             SeriesRead::NoSuchSeries { table, database } => {
                 assert_eq!(table, FUNDING_TABLE);
-                assert_eq!(database, "default", "the reader reports which database it looked in");
+                assert_eq!(
+                    database, "default",
+                    "the reader reports which database it looked in"
+                );
             }
-            SeriesRead::Present { rows } => panic!("`default` should not hold funding_rates; got {} rows", rows.len()),
+            SeriesRead::Present { rows } => panic!(
+                "`default` should not hold funding_rates; got {} rows",
+                rows.len()
+            ),
         }
 
         // And the heartbeat read answers the operational question separately.

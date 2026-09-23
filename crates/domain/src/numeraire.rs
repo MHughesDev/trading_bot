@@ -57,9 +57,13 @@ impl Numeraire {
         match currency.to_ascii_uppercase().as_str() {
             "USD" => Self::Usd,
             s @ ("USDC" | "USDT" | "DAI" | "TUSD" | "USDP" | "FDUSD" | "PYUSD" | "BUSD") => {
-                Self::Stablecoin { symbol: s.to_string() }
+                Self::Stablecoin {
+                    symbol: s.to_string(),
+                }
             }
-            s => Self::Other { symbol: s.to_string() },
+            s => Self::Other {
+                symbol: s.to_string(),
+            },
         }
     }
 
@@ -203,7 +207,11 @@ pub fn total_usd(
         }
     }
 
-    Ok(Converted { amount_usd, assumptions, excluded })
+    Ok(Converted {
+        amount_usd,
+        assumptions,
+        excluded,
+    })
 }
 
 fn record(
@@ -218,7 +226,12 @@ fn record(
     if let Some(existing) = into.iter_mut().find(|a| a.symbol == symbol) {
         existing.gross += gross;
     } else {
-        into.push(PegAssumption { symbol: symbol.to_string(), rate, policy, gross });
+        into.push(PegAssumption {
+            symbol: symbol.to_string(),
+            rate,
+            policy,
+            gross,
+        });
     }
 }
 
@@ -270,7 +283,12 @@ mod tests {
         let n = Numeraire::of("USDSCAM");
         assert!(!n.has_peg_risk());
         assert!(!n.is_dollar_denominated());
-        assert_eq!(n, Numeraire::Other { symbol: "USDSCAM".into() });
+        assert_eq!(
+            n,
+            Numeraire::Other {
+                symbol: "USDSCAM".into()
+            }
+        );
     }
 
     #[test]
@@ -305,8 +323,12 @@ mod tests {
 
     #[test]
     fn a_pure_dollar_total_rests_on_no_peg() {
-        let c = total_usd(&[(Numeraire::Usd, dec!(42))], PegPolicy::AssumeParity, no_rates)
-            .unwrap();
+        let c = total_usd(
+            &[(Numeraire::Usd, dec!(42))],
+            PegPolicy::AssumeParity,
+            no_rates,
+        )
+        .unwrap();
         assert!(!c.rests_on_a_peg());
         assert_eq!(c.peg_exposure_usd(), Decimal::ZERO);
     }
@@ -337,14 +359,18 @@ mod tests {
     /// 2000 and a strategy long USDC-quoted assets shows a 12% edge from nothing.
     #[test]
     fn an_observed_depeg_changes_the_total_and_parity_hides_it() {
-        let holdings = [(Numeraire::Usd, dec!(1000)), (Numeraire::of("USDC"), dec!(1000))];
+        let holdings = [
+            (Numeraire::Usd, dec!(1000)),
+            (Numeraire::of("USDC"), dec!(1000)),
+        ];
 
         let parity = total_usd(&holdings, PegPolicy::AssumeParity, no_rates).unwrap();
         assert_eq!(parity.parts().0, dec!(2000));
 
-        let observed =
-            total_usd(&holdings, PegPolicy::Observed, |s| (s == "USDC").then(|| dec!(0.88)))
-                .unwrap();
+        let observed = total_usd(&holdings, PegPolicy::Observed, |s| {
+            (s == "USDC").then(|| dec!(0.88))
+        })
+        .unwrap();
         assert_eq!(observed.parts().0, dec!(1880));
         assert_eq!(observed.parts().1[0].rate, dec!(0.88));
         assert_eq!(observed.parts().1[0].policy, PegPolicy::Observed);
@@ -355,7 +381,10 @@ mod tests {
     #[test]
     fn a_missing_observed_rate_excludes_rather_than_assuming_parity() {
         let c = total_usd(
-            &[(Numeraire::Usd, dec!(100)), (Numeraire::of("USDT"), dec!(900))],
+            &[
+                (Numeraire::Usd, dec!(100)),
+                (Numeraire::of("USDT"), dec!(900)),
+            ],
             PegPolicy::Observed,
             no_rates,
         )
@@ -377,7 +406,12 @@ mod tests {
             no_rates,
         )
         .unwrap_err();
-        assert_eq!(err, NumeraireError::CrossNumeraireRefused { symbol: "USDT".into() });
+        assert_eq!(
+            err,
+            NumeraireError::CrossNumeraireRefused {
+                symbol: "USDT".into()
+            }
+        );
     }
 
     #[test]
@@ -553,7 +587,9 @@ impl Numeraire {
             "EUR" => Ok("eur"),
             "BTC" => Ok("btc"),
             "ETH" => Ok("eth"),
-            other => Err(UnstorableNumeraire { symbol: other.to_string() }),
+            other => Err(UnstorableNumeraire {
+                symbol: other.to_string(),
+            }),
         }
     }
 }
@@ -587,7 +623,9 @@ mod storage_tests {
     /// The failure is named and typed, not a Postgres CHECK violation.
     #[test]
     fn a_numeraire_the_schema_has_no_token_for_is_refused_by_name() {
-        let err = Numeraire::of("DAI").as_storage_token().expect_err("DAI is not in the six");
+        let err = Numeraire::of("DAI")
+            .as_storage_token()
+            .expect_err("DAI is not in the six");
         assert_eq!(err.symbol, "DAI");
         assert!(err.to_string().contains("migration 0105"));
     }
@@ -595,8 +633,13 @@ mod storage_tests {
     /// `usd` from Postgres and `USD` from a venue are the same unit.
     #[test]
     fn parsing_is_case_insensitive() {
-        assert_eq!(Numeraire::from_str("usd").unwrap(), Numeraire::from_str("USD").unwrap());
-        assert_eq!(Numeraire::from_str("usdt").unwrap(), Numeraire::from_str("USDT").unwrap());
+        assert_eq!(
+            Numeraire::from_str("usd").unwrap(),
+            Numeraire::from_str("USD").unwrap()
+        );
+        assert_eq!(
+            Numeraire::from_str("usdt").unwrap(),
+            Numeraire::from_str("USDT").unwrap()
+        );
     }
 }
-

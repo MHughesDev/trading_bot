@@ -35,7 +35,9 @@ const MIN_OBSERVATIONS: usize = 30;
 /// number, and it is not evidence.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum BootstrapError {
-    #[error("need at least {MIN_OBSERVATIONS} observations for a stationary bootstrap, have {have}")]
+    #[error(
+        "need at least {MIN_OBSERVATIONS} observations for a stationary bootstrap, have {have}"
+    )]
     TooShort { have: usize },
     #[error("need at least {min} resamples for this gate, asked for {asked}")]
     TooFewResamples { min: usize, asked: usize },
@@ -190,7 +192,9 @@ pub fn bootstrap_sharpe(
     seed: u64,
 ) -> Result<BootstrapSharpe, BootstrapError> {
     if returns.len() < MIN_OBSERVATIONS {
-        return Err(BootstrapError::TooShort { have: returns.len() });
+        return Err(BootstrapError::TooShort {
+            have: returns.len(),
+        });
     }
     if resamples < MIN_BOOTSTRAP_RESAMPLES {
         return Err(BootstrapError::TooFewResamples {
@@ -342,7 +346,11 @@ pub fn romano_wolf(
 
     // Descending by observed statistic — the stepdown order.
     let mut order: Vec<usize> = (0..k).collect();
-    order.sort_by(|a, b| stats[*b].partial_cmp(&stats[*a]).unwrap_or(std::cmp::Ordering::Equal));
+    order.sort_by(|a, b| {
+        stats[*b]
+            .partial_cmp(&stats[*a])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let mut active: Vec<usize> = order.clone();
     let mut verdicts: Vec<StepdownVerdict> = Vec::with_capacity(k);
@@ -501,10 +509,7 @@ mod tests {
     fn resampling_preserves_contiguous_runs() {
         let mut rng = DetRng::new(11);
         let idx = stationary_indices(500, 20.0, &mut rng);
-        let continued = idx
-            .windows(2)
-            .filter(|w| w[1] == (w[0] + 1) % 500)
-            .count();
+        let continued = idx.windows(2).filter(|w| w[1] == (w[0] + 1) % 500).count();
         // With a mean block of 20, roughly 95% of steps continue their block.
         assert!(
             continued > 400,
@@ -600,7 +605,10 @@ mod tests {
     #[test]
     fn a_ragged_family_is_refused() {
         let f = vec![series(100, 0.0, 0.0, 1), series(90, 0.0, 0.0, 2)];
-        assert_eq!(romano_wolf(&f, 0.05, 5_000, 1), Err(BootstrapError::RaggedFamily(1)));
+        assert_eq!(
+            romano_wolf(&f, 0.05, 5_000, 1),
+            Err(BootstrapError::RaggedFamily(1))
+        );
     }
 
     #[test]
@@ -638,7 +646,11 @@ mod tests {
 
         let r = romano_wolf(&family, 0.05, 5_000, 7).expect("stepdown");
         let v = r.for_index(winner).expect("the winner is reported");
-        assert!(v.rejected, "the real edge was not detected; adjusted p = {}", v.adjusted_p);
+        assert!(
+            v.rejected,
+            "the real edge was not detected; adjusted p = {}",
+            v.adjusted_p
+        );
         assert!(v.t_stat > 0.0);
         // And it did not drag the noise along with it.
         assert!(

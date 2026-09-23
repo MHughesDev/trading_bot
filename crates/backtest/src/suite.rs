@@ -34,7 +34,6 @@ use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::experiment::{Experiment, ExperimentError, ExperimentState, Holdout, VaultAccess};
-use ledger::{ActorKind, DispatchContext, InMemoryLedger, TrialLedger};
 use crate::gates::{
     CorroboratorInputs, Gate, Gate3Outcome, GateError, GateRunner, GateVerdict, IntegrityInputs,
 };
@@ -53,6 +52,7 @@ use crate::study::{
     Distribution, SelectionRule, StudyBudget, StudyConfig, StudyEngine, StudyKind, StudyResult,
     StudyVerdict, VarySpec,
 };
+use ledger::{ActorKind, DispatchContext, InMemoryLedger, TrialLedger};
 
 /// Synthetic, deterministic Run executor (the real one is the deferred live leg).
 ///
@@ -192,7 +192,11 @@ fn observations_per_year(curve: &[(DateTime<Utc>, f64)]) -> f64 {
 }
 
 fn mean(xs: &[f64]) -> f64 {
-    if xs.is_empty() { 0.0 } else { xs.iter().sum::<f64>() / xs.len() as f64 }
+    if xs.is_empty() {
+        0.0
+    } else {
+        xs.iter().sum::<f64>() / xs.len() as f64
+    }
 }
 
 /// Sample variance (ddof = 1).
@@ -651,7 +655,10 @@ impl SuiteManager {
     #[must_use]
     pub fn new() -> Self {
         let exec: fn(&RunConfig) -> RunResult = synthetic_execute;
-        Self::with_executor(Box::new(ClosureExecutor(exec)), Arc::new(InMemoryLedger::new()))
+        Self::with_executor(
+            Box::new(ClosureExecutor(exec)),
+            Arc::new(InMemoryLedger::new()),
+        )
     }
 
     /// A manager over an injected executor and ledger — the platform passes the
@@ -917,7 +924,8 @@ impl SuiteManager {
             .get_mut(&id)
             .filter(|r| r.user_id == user_id)
             .ok_or(SuiteError::NotFound)?;
-        r.exp.record_study_result(study.study_id.clone(), study.kind, &result);
+        r.exp
+            .record_study_result(study.study_id.clone(), study.kind, &result);
         let view = Self::study_view(
             spec.kind,
             spec.metric,
@@ -1721,12 +1729,14 @@ impl SuiteManager {
                 if res.status != RunStatus::Ok {
                     continue;
                 }
-                evidence.neighbourhood.push(ledger::evidence::NeighbourhoodPoint {
-                    param: param.clone(),
-                    param_value: value,
-                    metric: Self::metric_of(&res, nbhd.metric),
-                    is_center: (value - center).abs() < f64::EPSILON,
-                });
+                evidence
+                    .neighbourhood
+                    .push(ledger::evidence::NeighbourhoodPoint {
+                        param: param.clone(),
+                        param_value: value,
+                        metric: Self::metric_of(&res, nbhd.metric),
+                        is_center: (value - center).abs() < f64::EPSILON,
+                    });
             }
         }
 
@@ -1797,9 +1807,8 @@ impl SuiteManager {
                             .into_iter()
                             .map(|(aum, trial, returns, _)| (aum, trial, returns))
                             .collect();
-                        match capacity::Ladder::from_runs(
-                            &exposure, base_aum, true, years, &points,
-                        ) {
+                        match capacity::Ladder::from_runs(&exposure, base_aum, true, years, &points)
+                        {
                             Ok(ladder) => {
                                 evidence.capacity_base = Some(ladder.base);
                                 evidence.capacity_curve = ladder.points;
@@ -1878,7 +1887,12 @@ impl SuiteManager {
                 .run_traced_with_trial(&crate::run::RunDispatch::new(&ctx, &cfg, 1.0))
                 .map_err(|e| SuiteError::Gate(format!("capacity rung refused: {e}")))?;
             r.exp.record_dispatches(1);
-            out.push((aum, trial, daily_returns(&res.equity_curve), res.produced_by));
+            out.push((
+                aum,
+                trial,
+                daily_returns(&res.equity_curve),
+                res.produced_by,
+            ));
         }
         self.emit(user_id, id, "study_complete", 95.0, "capacity ladder");
         Ok(out)
@@ -1969,7 +1983,11 @@ impl SuiteManager {
     /// rather than poisoning every statistic downstream with a NaN.
     fn metric_of(res: &RunResult, metric: MetricKind) -> f64 {
         let v = res.metrics.value(metric);
-        if v.is_finite() { v } else { 0.0 }
+        if v.is_finite() {
+            v
+        } else {
+            0.0
+        }
     }
 
     fn run_evidence(
@@ -2022,7 +2040,11 @@ impl SuiteManager {
     /// # Errors
     /// [`SuiteError::NotFound`] for an unknown or other-user Experiment;
     /// [`SuiteError::Gate`] when the family has not been sealed by a Gate 3 run.
-    pub fn audit_deflated_sharpe(&self, user_id: Uuid, id: Uuid) -> Result<AuditDsrView, SuiteError> {
+    pub fn audit_deflated_sharpe(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+    ) -> Result<AuditDsrView, SuiteError> {
         let records = self.records.read().expect("suite lock poisoned");
         let r = records
             .get(&id)
@@ -2141,7 +2163,9 @@ impl SuiteManager {
                 )));
             }
         };
-        let res = self.run_result(user_id, run_id).ok_or(SuiteError::NotFound)?;
+        let res = self
+            .run_result(user_id, run_id)
+            .ok_or(SuiteError::NotFound)?;
         let all = [
             ("cagr", MetricKind::Cagr),
             ("total_return", MetricKind::TotalReturn),
@@ -2289,7 +2313,11 @@ impl SuiteManager {
             n_configs: family.len(),
             n_periods: periods,
             observations_per_config: length,
-            config_run_ids: family.iter().map(|(id, _, _)| id.clone()).take(64).collect(),
+            config_run_ids: family
+                .iter()
+                .map(|(id, _, _)| id.clone())
+                .take(64)
+                .collect(),
         })
     }
 
@@ -2378,7 +2406,9 @@ impl SuiteManager {
         run_id: &str,
         confidence: f64,
     ) -> Result<AuditTrlView, SuiteError> {
-        let res = self.run_result(user_id, run_id).ok_or(SuiteError::NotFound)?;
+        let res = self
+            .run_result(user_id, run_id)
+            .ok_or(SuiteError::NotFound)?;
         let returns = daily_returns(&res.equity_curve);
         let n = returns.len();
         // Per observation, which is the unit MinTRL wants. The metric set's

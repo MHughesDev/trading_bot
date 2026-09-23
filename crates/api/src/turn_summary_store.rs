@@ -205,7 +205,8 @@ fn truncate_without_dropping_ids(text: String) -> String {
     }
     let mut lines: Vec<&str> = text.lines().collect();
     let mut dropped = 0;
-    while lines.iter().map(|l| l.len() + 1).sum::<usize>() > RENDER_BUDGET_CHARS && lines.len() > 1 {
+    while lines.iter().map(|l| l.len() + 1).sum::<usize>() > RENDER_BUDGET_CHARS && lines.len() > 1
+    {
         lines.pop();
         dropped += 1;
     }

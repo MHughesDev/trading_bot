@@ -176,7 +176,10 @@ pub fn kinds_not_covered(memory: &Readable, monitor: &Readable, budget: &Budget)
                  therefore silent about findings, which is not the same as there being none."
             ),
         ));
-        out.push(gap("refuted", "same source as `finding`, same failure".into()));
+        out.push(gap(
+            "refuted",
+            "same source as `finding`, same failure".into(),
+        ));
     }
 
     if let Err(e) = monitor {
@@ -597,7 +600,9 @@ fn monitor_line(r: &sqlx::postgres::PgRow) -> Value {
         }
     }
     if suppressed.is_some() {
-        text.push_str(" (an open maintenance window suppressed the action; the event was recorded anyway)");
+        text.push_str(
+            " (an open maintenance window suppressed the action; the event was recorded anyway)",
+        );
     }
 
     line(
@@ -798,7 +803,10 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("permission denied"));
-        assert!(gaps[3]["why"].as_str().unwrap().contains("connection closed"));
+        assert!(gaps[3]["why"]
+            .as_str()
+            .unwrap()
+            .contains("connection closed"));
     }
 
     /// An unmeasured spend is a gap, never a zero.

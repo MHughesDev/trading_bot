@@ -234,7 +234,11 @@ mod tests {
         let close = rows[0].event_time;
         assert!(bars_as_of(&rows, close).is_empty());
         assert_eq!(
-            bars_as_of(&rows, close + chrono::Duration::milliseconds(DECLARED_LAG_MS)).len(),
+            bars_as_of(
+                &rows,
+                close + chrono::Duration::milliseconds(DECLARED_LAG_MS)
+            )
+            .len(),
             1
         );
     }

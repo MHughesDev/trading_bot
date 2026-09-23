@@ -181,9 +181,10 @@ fn every_mutating_monitor_handler_asks_the_one_authority_question() {
         // as an offender. Checking for the parameter with its comma-or-newline
         // boundary is the narrow fix; checking `!body.contains("_token:")` is
         // not, because a handler may take both.
-        let acts_on_behalf = body.contains("
-    token: BearerToken")
-            || body.contains("(token: BearerToken");
+        let acts_on_behalf = body.contains(
+            "
+    token: BearerToken",
+        ) || body.contains("(token: BearerToken");
         if !acts_on_behalf {
             continue;
         }

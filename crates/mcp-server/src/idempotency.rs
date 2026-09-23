@@ -243,7 +243,10 @@ mod tests {
     fn different_runs_and_tools_do_not_collide() {
         let args = json!({});
         assert_ne!(key(RUN, 1, "a", &args), key(RUN, 1, "b", &args));
-        assert_ne!(key(RUN, 1, "a", &args), key(Uuid::from_u128(1), 1, "a", &args));
+        assert_ne!(
+            key(RUN, 1, "a", &args),
+            key(Uuid::from_u128(1), 1, "a", &args)
+        );
     }
 
     /// The whole point: one action, and the repeat gets the first result rather

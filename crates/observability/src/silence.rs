@@ -105,8 +105,16 @@ pub struct FeedKey {
 }
 
 impl FeedKey {
-    pub fn new(series: impl Into<String>, venue: impl Into<String>, instrument: impl Into<String>) -> Self {
-        Self { series: series.into(), venue: venue.into(), instrument: instrument.into() }
+    pub fn new(
+        series: impl Into<String>,
+        venue: impl Into<String>,
+        instrument: impl Into<String>,
+    ) -> Self {
+        Self {
+            series: series.into(),
+            venue: venue.into(),
+            instrument: instrument.into(),
+        }
     }
 }
 
@@ -210,17 +218,23 @@ impl FeedExpectation {
     /// `option_chain_snapshots` — so the venue is always part of the match.
     #[must_use]
     pub fn owns(&self, feed: &FeedKey) -> bool {
-        feed.venue == self.spec.venue && (feed.series == self.spec.series_id || feed.series == self.spec.store_table)
+        feed.venue == self.spec.venue
+            && (feed.series == self.spec.series_id || feed.series == self.spec.store_table)
     }
 
     /// The feeds this expectation asserts must exist, when nothing has been
     /// observed to enumerate them.
     fn promised_feeds(&self) -> Vec<FeedKey> {
         match &self.roster {
-            Roster::Declared { instruments } => {
-                instruments.iter().map(|i| FeedKey::new(&self.spec.series_id, &self.spec.venue, i)).collect()
-            }
-            Roster::WhateverAppears => vec![FeedKey::new(&self.spec.series_id, &self.spec.venue, WHOLE_SERIES)],
+            Roster::Declared { instruments } => instruments
+                .iter()
+                .map(|i| FeedKey::new(&self.spec.series_id, &self.spec.venue, i))
+                .collect(),
+            Roster::WhateverAppears => vec![FeedKey::new(
+                &self.spec.series_id,
+                &self.spec.venue,
+                WHOLE_SERIES,
+            )],
         }
     }
 
@@ -233,7 +247,9 @@ impl FeedExpectation {
         let cadences = i64::from(self.spec.alarm_after_cadences.max(1));
         match self.arrival {
             Arrival::Always => Some(i64::from(self.spec.cadence_secs.max(1)) * cadences),
-            Arrival::Polled { poll_period_secs } => Some(i64::from(poll_period_secs.max(1)) * cadences),
+            Arrival::Polled { poll_period_secs } => {
+                Some(i64::from(poll_period_secs.max(1)) * cadences)
+            }
             Arrival::Unknown => None,
         }
     }
@@ -252,27 +268,42 @@ impl FeedExpectation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "census", rename_all = "snake_case")]
 pub enum Census {
-    Taken { at: DateTime<Utc>, beats: Vec<Heartbeat> },
+    Taken {
+        at: DateTime<Utc>,
+        beats: Vec<Heartbeat>,
+    },
     /// The read did not happen or did not complete. We are blind, which is a
     /// different fact from everything being fine.
-    Failed { attempted_at: DateTime<Utc>, reason: String },
+    Failed {
+        attempted_at: DateTime<Utc>,
+        reason: String,
+    },
 }
 
 impl Census {
     /// Build a census straight from a reader's `Result`. This is the spelling to
     /// use at a call site: an error becomes [`Census::Failed`] without the caller
     /// having to remember that it should.
-    pub fn from_read<E: std::fmt::Display>(at: DateTime<Utc>, read: Result<Vec<Heartbeat>, E>) -> Self {
+    pub fn from_read<E: std::fmt::Display>(
+        at: DateTime<Utc>,
+        read: Result<Vec<Heartbeat>, E>,
+    ) -> Self {
         match read {
             Ok(beats) => Self::Taken { at, beats },
-            Err(e) => Self::Failed { attempted_at: at, reason: e.to_string() },
+            Err(e) => Self::Failed {
+                attempted_at: at,
+                reason: e.to_string(),
+            },
         }
     }
 
     #[must_use]
     pub const fn at(&self) -> DateTime<Utc> {
         match self {
-            Self::Taken { at, .. } | Self::Failed { attempted_at: at, .. } => *at,
+            Self::Taken { at, .. }
+            | Self::Failed {
+                attempted_at: at, ..
+            } => *at,
         }
     }
 }
@@ -288,7 +319,10 @@ impl Census {
 pub enum Verdict {
     /// Writing on time, and — where the series was declared continuous — carrying
     /// fresh events. The only healthy verdict there is.
-    Live { write_age_secs: i64, event_age_secs: i64 },
+    Live {
+        write_age_secs: i64,
+        event_age_secs: i64,
+    },
 
     /// Nothing written past the deadline on *our* clock. The dead persister.
     ///
@@ -297,7 +331,10 @@ pub enum Verdict {
     /// collector from writing. This is what the alarm is really for, and it is
     /// checked before the venue's clock because it is the more actionable
     /// diagnosis: restart the collector, rather than go and ask the venue.
-    CollectorSilent { write_age_secs: i64, deadline_secs: i64 },
+    CollectorSilent {
+        write_age_secs: i64,
+        deadline_secs: i64,
+    },
 
     /// The collector is writing on time and the venue has published nothing new
     /// past the event deadline.
@@ -306,7 +343,10 @@ pub enum Verdict {
     /// no innocent explanation. `rows_missed` states the cost rather than the
     /// status: on a forward-only series those observations are unrecoverable at
     /// any price.
-    EventsSilent { event_age_secs: i64, rows_missed: u64 },
+    EventsSilent {
+        event_age_secs: i64,
+        rows_missed: u64,
+    },
 
     /// The poll is on time and the venue had nothing to give.
     ///
@@ -315,7 +355,10 @@ pub enum Verdict {
     /// quiet feed and a working one are different facts, and a dashboard that
     /// paints them the same colour is how a feed that went quiet in March gets
     /// noticed in June.
-    QuietAndPolledOnTime { event_age_secs: i64, write_age_secs: i64 },
+    QuietAndPolledOnTime {
+        event_age_secs: i64,
+        write_age_secs: i64,
+    },
 
     /// Promised and never seen at all.
     ///
@@ -370,9 +413,13 @@ impl Verdict {
     pub const fn severity(&self) -> Severity {
         match self {
             Self::Live { .. } => Severity::Ok,
-            Self::QuietAndPolledOnTime { .. } | Self::CannotJudge { .. } | Self::Disabled => Severity::Info,
+            Self::QuietAndPolledOnTime { .. } | Self::CannotJudge { .. } | Self::Disabled => {
+                Severity::Info
+            }
             Self::Unobserved { .. } | Self::ClockFault { .. } => Severity::Warn,
-            Self::CollectorSilent { .. } | Self::EventsSilent { .. } | Self::NeverSeen => Severity::Alarm,
+            Self::CollectorSilent { .. } | Self::EventsSilent { .. } | Self::NeverSeen => {
+                Severity::Alarm
+            }
         }
     }
 
@@ -440,7 +487,10 @@ pub enum Page {
     /// One page for a group that failed together. The per-feed findings are still
     /// in the report — nothing is hidden — but 279 simultaneous pages is a request
     /// to be muted, and a muted alarm is worse than none.
-    SharedCause { cause: SharedCause, feeds: Vec<FeedKey> },
+    SharedCause {
+        cause: SharedCause,
+        feeds: Vec<FeedKey>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -476,14 +526,21 @@ impl SilenceReport {
     /// naming the group when they went silent together.
     #[must_use]
     pub fn pages(&self) -> Vec<Page> {
-        let alarming: Vec<&Finding> = self.findings.iter().filter(|f| f.verdict.is_alarming()).collect();
+        let alarming: Vec<&Finding> = self
+            .findings
+            .iter()
+            .filter(|f| f.verdict.is_alarming())
+            .collect();
         if let Some(cause) = &self.shared_cause {
             let feeds = alarming
                 .iter()
                 .filter(|f| matches!(f.verdict, Verdict::CollectorSilent { .. }))
                 .map(|f| f.feed.clone())
                 .collect();
-            let mut pages = vec![Page::SharedCause { cause: cause.clone(), feeds }];
+            let mut pages = vec![Page::SharedCause {
+                cause: cause.clone(),
+                feeds,
+            }];
             // Alarms with a different shape are not explained by the shared cause
             // and still stand on their own.
             pages.extend(
@@ -494,7 +551,10 @@ impl SilenceReport {
             );
             return pages;
         }
-        alarming.into_iter().map(|f| Page::Feed(Box::new(f.clone()))).collect()
+        alarming
+            .into_iter()
+            .map(|f| Page::Feed(Box::new(f.clone())))
+            .collect()
     }
 
     /// One report from several, for a pass that had to ask more than one store.
@@ -515,7 +575,11 @@ impl SilenceReport {
     pub fn merged(at: DateTime<Utc>, reports: Vec<Self>) -> Self {
         let findings: Vec<Finding> = reports.into_iter().flat_map(|r| r.findings).collect();
         let shared_cause = infer_shared_cause(&findings);
-        Self { taken_at: at, findings, shared_cause }
+        Self {
+            taken_at: at,
+            findings,
+            shared_cause,
+        }
     }
 }
 
@@ -532,11 +596,16 @@ pub fn judge(exp: &FeedExpectation, beat: Option<&Heartbeat>, now: DateTime<Utc>
 
     let Some(deadline_secs) = exp.write_deadline_secs() else {
         return Verdict::CannotJudge {
-            reason: format!("{} declares an unknown arrival pattern; no deadline can be defended", exp.spec.series_id),
+            reason: format!(
+                "{} declares an unknown arrival pattern; no deadline can be defended",
+                exp.spec.series_id
+            ),
         };
     };
 
-    let Some(b) = beat else { return Verdict::NeverSeen };
+    let Some(b) = beat else {
+        return Verdict::NeverSeen;
+    };
 
     // Our own clock cannot run ahead of us. A write stamped in the future is a
     // fault, and left unflagged it is an alibi: it makes `write_age` negative and
@@ -546,9 +615,7 @@ pub fn judge(exp: &FeedExpectation, beat: Option<&Heartbeat>, now: DateTime<Utc>
         return Verdict::ClockFault {
             detail: format!(
                 "{} last wrote at {}, which is {}s after the census at {now}",
-                b.feed.instrument,
-                b.last_write_time,
-                -write_age_secs
+                b.feed.instrument, b.last_write_time, -write_age_secs
             ),
         };
     }
@@ -556,7 +623,10 @@ pub fn judge(exp: &FeedExpectation, beat: Option<&Heartbeat>, now: DateTime<Utc>
     // Our clock first: it is the one no market can stop, and the one whose
     // failure has an unambiguous fix.
     if write_age_secs > deadline_secs {
-        return Verdict::CollectorSilent { write_age_secs, deadline_secs };
+        return Verdict::CollectorSilent {
+            write_age_secs,
+            deadline_secs,
+        };
     }
 
     let event_age_secs = (now - b.last_event_time).num_seconds();
@@ -566,14 +636,23 @@ pub fn judge(exp: &FeedExpectation, beat: Option<&Heartbeat>, now: DateTime<Utc>
             // Delegated, never copied: one deadline rule for the venue's clock.
             let a = retention::alarm(&exp.spec, Some(b.last_event_time), now);
             match a.state {
-                AlarmState::Stale => Verdict::EventsSilent { event_age_secs, rows_missed: a.rows_missed },
+                AlarmState::Stale => Verdict::EventsSilent {
+                    event_age_secs,
+                    rows_missed: a.rows_missed,
+                },
                 // `NeverCollected` is unreachable here — we hold a heartbeat, so a
                 // last event time exists. Treating it as live would be a guess;
                 // saying so is not.
                 AlarmState::NeverCollected => Verdict::CannotJudge {
-                    reason: format!("{} reported no last event despite a heartbeat", b.feed.instrument),
+                    reason: format!(
+                        "{} reported no last event despite a heartbeat",
+                        b.feed.instrument
+                    ),
                 },
-                AlarmState::Ok => Verdict::Live { write_age_secs, event_age_secs },
+                AlarmState::Ok => Verdict::Live {
+                    write_age_secs,
+                    event_age_secs,
+                },
             }
         }
         Arrival::Polled { .. } => {
@@ -581,12 +660,20 @@ pub fn judge(exp: &FeedExpectation, beat: Option<&Heartbeat>, now: DateTime<Utc>
             // of the weekend problem: we do not know this venue's calendar, so we
             // do not pretend to, and we do not page about it either.
             if event_age_secs > deadline_secs {
-                Verdict::QuietAndPolledOnTime { event_age_secs, write_age_secs }
+                Verdict::QuietAndPolledOnTime {
+                    event_age_secs,
+                    write_age_secs,
+                }
             } else {
-                Verdict::Live { write_age_secs, event_age_secs }
+                Verdict::Live {
+                    write_age_secs,
+                    event_age_secs,
+                }
             }
         }
-        Arrival::Unknown => unreachable!("write_deadline_secs returns None for Unknown and we returned above"),
+        Arrival::Unknown => {
+            unreachable!("write_deadline_secs returns None for Unknown and we returned above")
+        }
     }
 }
 
@@ -602,12 +689,19 @@ pub fn evaluate(expectations: &[FeedExpectation], census: &Census) -> SilenceRep
             let findings = expectations
                 .iter()
                 .flat_map(|e| {
-                    e.promised_feeds()
-                        .into_iter()
-                        .map(|feed| Finding { feed, verdict: Verdict::Unobserved { reason: reason.clone() } })
+                    e.promised_feeds().into_iter().map(|feed| Finding {
+                        feed,
+                        verdict: Verdict::Unobserved {
+                            reason: reason.clone(),
+                        },
+                    })
                 })
                 .collect();
-            return SilenceReport { taken_at, findings, shared_cause: None };
+            return SilenceReport {
+                taken_at,
+                findings,
+                shared_cause: None,
+            };
         }
         Census::Taken { beats, .. } => beats,
     };
@@ -622,7 +716,10 @@ pub fn evaluate(expectations: &[FeedExpectation], census: &Census) -> SilenceRep
                 for inst in instruments {
                     let beat = mine.iter().copied().find(|b| &b.feed.instrument == inst);
                     let feed = FeedKey::new(&exp.spec.series_id, &exp.spec.venue, inst);
-                    findings.push(Finding { feed, verdict: judge(exp, beat, taken_at) });
+                    findings.push(Finding {
+                        feed,
+                        verdict: judge(exp, beat, taken_at),
+                    });
                 }
             }
             Roster::WhateverAppears => {
@@ -637,8 +734,12 @@ pub fn evaluate(expectations: &[FeedExpectation], census: &Census) -> SilenceRep
                     });
                 } else {
                     for b in mine {
-                        let feed = FeedKey::new(&exp.spec.series_id, &exp.spec.venue, &b.feed.instrument);
-                        findings.push(Finding { feed, verdict: judge(exp, Some(b), taken_at) });
+                        let feed =
+                            FeedKey::new(&exp.spec.series_id, &exp.spec.venue, &b.feed.instrument);
+                        findings.push(Finding {
+                            feed,
+                            verdict: judge(exp, Some(b), taken_at),
+                        });
                     }
                 }
             }
@@ -652,14 +753,21 @@ pub fn evaluate(expectations: &[FeedExpectation], census: &Census) -> SilenceRep
             findings.push(Finding {
                 feed: b.feed.clone(),
                 verdict: Verdict::CannotJudge {
-                    reason: format!("no registered series covers {}/{}", b.feed.series, b.feed.venue),
+                    reason: format!(
+                        "no registered series covers {}/{}",
+                        b.feed.series, b.feed.venue
+                    ),
                 },
             });
         }
     }
 
     let shared_cause = infer_shared_cause(&findings);
-    SilenceReport { taken_at, findings, shared_cause }
+    SilenceReport {
+        taken_at,
+        findings,
+        shared_cause,
+    }
 }
 
 /// When enough of what we could judge went silent at once, one cause is more
@@ -671,9 +779,20 @@ pub fn evaluate(expectations: &[FeedExpectation], census: &Census) -> SilenceRep
 fn infer_shared_cause(findings: &[Finding]) -> Option<SharedCause> {
     let judgeable = findings
         .iter()
-        .filter(|f| matches!(f.verdict, Verdict::Live { .. } | Verdict::CollectorSilent { .. } | Verdict::EventsSilent { .. } | Verdict::QuietAndPolledOnTime { .. }))
+        .filter(|f| {
+            matches!(
+                f.verdict,
+                Verdict::Live { .. }
+                    | Verdict::CollectorSilent { .. }
+                    | Verdict::EventsSilent { .. }
+                    | Verdict::QuietAndPolledOnTime { .. }
+            )
+        })
         .count();
-    let silent = findings.iter().filter(|f| matches!(f.verdict, Verdict::CollectorSilent { .. })).count();
+    let silent = findings
+        .iter()
+        .filter(|f| matches!(f.verdict, Verdict::CollectorSilent { .. }))
+        .count();
 
     if judgeable < MIN_FEEDS_FOR_SHARED_CAUSE || silent * 100 < judgeable * SHARED_CAUSE_PCT {
         return None;
@@ -778,35 +897,56 @@ impl FeedExpectation {
         let cadence_secs = u32::try_from(row.cadence_secs)
             .ok()
             .filter(|c| *c > 0)
-            .ok_or_else(|| ExpectationError::BadCadence { series_id: id(), got: row.cadence_secs })?;
+            .ok_or_else(|| ExpectationError::BadCadence {
+                series_id: id(),
+                got: row.cadence_secs,
+            })?;
         let alarm_after_cadences = u32::try_from(row.alarm_after_cadences)
             .ok()
             .filter(|c| *c >= 1)
-            .ok_or_else(|| ExpectationError::BadDeadline { series_id: id(), got: row.alarm_after_cadences })?;
+            .ok_or_else(|| ExpectationError::BadDeadline {
+                series_id: id(),
+                got: row.alarm_after_cadences,
+            })?;
         let disk_budget_bytes = u64::try_from(row.disk_budget_bytes)
             .ok()
             .filter(|b| *b > 0)
-            .ok_or_else(|| ExpectationError::BadBudget { series_id: id(), got: row.disk_budget_bytes })?;
+            .ok_or_else(|| ExpectationError::BadBudget {
+                series_id: id(),
+                got: row.disk_budget_bytes,
+            })?;
 
         let retention = match row.retention_policy.as_str() {
             "none" => retention::RetentionPolicy::None,
             "downsample" => {
-                let (Some(after_days), Some(to_secs)) = (row.downsample_after_days, row.downsample_to_secs) else {
+                let (Some(after_days), Some(to_secs)) =
+                    (row.downsample_after_days, row.downsample_to_secs)
+                else {
                     return Err(ExpectationError::IncompletePolicy { series_id: id() });
                 };
                 let after_days = u32::try_from(after_days)
                     .map_err(|_| ExpectationError::IncompletePolicy { series_id: id() })?;
-                let to_secs =
-                    u32::try_from(to_secs).map_err(|_| ExpectationError::IncompletePolicy { series_id: id() })?;
-                retention::RetentionPolicy::Downsample { after_days, to_secs }
+                let to_secs = u32::try_from(to_secs)
+                    .map_err(|_| ExpectationError::IncompletePolicy { series_id: id() })?;
+                retention::RetentionPolicy::Downsample {
+                    after_days,
+                    to_secs,
+                }
             }
-            other => return Err(ExpectationError::BadPolicy { series_id: id(), got: other.to_string() }),
+            other => {
+                return Err(ExpectationError::BadPolicy {
+                    series_id: id(),
+                    got: other.to_string(),
+                })
+            }
         };
 
         let arrival = match &row.arrival {
             // The registry cannot say. Fall back to what it *can* say: our own
             // collection cadence. See the doc comment above.
-            None => Arrival::Polled { poll_period_secs: cadence_secs },
+            None => Arrival::Polled {
+                poll_period_secs: cadence_secs,
+            },
             Some(d) => match d.kind.as_str() {
                 "always" => Arrival::Always,
                 "unknown" => Arrival::Unknown,
@@ -816,9 +956,16 @@ impl FeedExpectation {
                         .and_then(|p| u32::try_from(p).ok())
                         .filter(|p| *p > 0)
                         .ok_or_else(|| ExpectationError::PolledWithoutPeriod { series_id: id() })?;
-                    Arrival::Polled { poll_period_secs: p }
+                    Arrival::Polled {
+                        poll_period_secs: p,
+                    }
                 }
-                other => return Err(ExpectationError::BadArrival { series_id: id(), got: other.to_string() }),
+                other => {
+                    return Err(ExpectationError::BadArrival {
+                        series_id: id(),
+                        got: other.to_string(),
+                    })
+                }
             },
         };
 
@@ -862,7 +1009,9 @@ impl From<&SilenceReport> for SilenceSummary {
             quiet: count(|v| matches!(v, Verdict::QuietAndPolledOnTime { .. })),
             alarming: count(Verdict::is_alarming),
             unobserved: count(|v| matches!(v, Verdict::Unobserved { .. })),
-            unjudgeable: count(|v| matches!(v, Verdict::CannotJudge { .. } | Verdict::ClockFault { .. })),
+            unjudgeable: count(|v| {
+                matches!(v, Verdict::CannotJudge { .. } | Verdict::ClockFault { .. })
+            }),
             disabled: count(|v| matches!(v, Verdict::Disabled)),
         }
     }
@@ -937,7 +1086,11 @@ pub fn emit(report: &SilenceReport) {
 /// Time until a healthy feed would trip the write deadline. `None` once it has,
 /// or when no deadline can be defended.
 #[must_use]
-pub fn time_to_alarm(exp: &FeedExpectation, beat: &Heartbeat, now: DateTime<Utc>) -> Option<Duration> {
+pub fn time_to_alarm(
+    exp: &FeedExpectation,
+    beat: &Heartbeat,
+    now: DateTime<Utc>,
+) -> Option<Duration> {
     let deadline = exp.write_deadline_secs()?;
     let age = (now - beat.last_write_time).num_seconds();
     if age > deadline {
@@ -978,7 +1131,9 @@ mod tests {
         FeedExpectation {
             spec: spec("kraken_futures.funding", "funding_rates", "kraken_futures"),
             arrival: Arrival::Always,
-            roster: Roster::Declared { instruments: vec!["PF_XBTUSD".into()] },
+            roster: Roster::Declared {
+                instruments: vec!["PF_XBTUSD".into()],
+            },
         }
     }
 
@@ -986,12 +1141,22 @@ mod tests {
     fn chains() -> FeedExpectation {
         FeedExpectation {
             spec: spec("equity.option_chains", "option_chain_snapshots", "tradier"),
-            arrival: Arrival::Polled { poll_period_secs: 3600 },
-            roster: Roster::Declared { instruments: vec!["SPY".into()] },
+            arrival: Arrival::Polled {
+                poll_period_secs: 3600,
+            },
+            roster: Roster::Declared {
+                instruments: vec!["SPY".into()],
+            },
         }
     }
 
-    fn beat(exp: &FeedExpectation, inst: &str, event: DateTime<Utc>, write: DateTime<Utc>, rows: u64) -> Heartbeat {
+    fn beat(
+        exp: &FeedExpectation,
+        inst: &str,
+        event: DateTime<Utc>,
+        write: DateTime<Utc>,
+        rows: u64,
+    ) -> Heartbeat {
         Heartbeat {
             feed: FeedKey::new(&exp.spec.store_table, &exp.spec.venue, inst),
             last_event_time: event,
@@ -1013,14 +1178,23 @@ mod tests {
         // The venue gave us nothing for 60 hours, but we polled ten minutes ago.
         let quiet = beat(&exp, "SPY", hours(0), now - Duration::minutes(10), 0);
         let v = judge(&exp, Some(&quiet), now);
-        assert!(matches!(v, Verdict::QuietAndPolledOnTime { .. }), "a closed venue must not page: {v:?}");
+        assert!(
+            matches!(v, Verdict::QuietAndPolledOnTime { .. }),
+            "a closed venue must not page: {v:?}"
+        );
         assert_eq!(v.severity(), Severity::Info);
-        assert!(!v.is_alarming(), "an alarm that fires every weekend gets muted");
+        assert!(
+            !v.is_alarming(),
+            "an alarm that fires every weekend gets muted"
+        );
 
         // Same event age, but we stopped polling too.
         let dead = beat(&exp, "SPY", hours(0), hours(0), 0);
         let v = judge(&exp, Some(&dead), now);
-        assert!(matches!(v, Verdict::CollectorSilent { .. }), "a collector that stopped writing must page: {v:?}");
+        assert!(
+            matches!(v, Verdict::CollectorSilent { .. }),
+            "a collector that stopped writing must page: {v:?}"
+        );
         assert_eq!(v.severity(), Severity::Alarm);
     }
 
@@ -1046,9 +1220,15 @@ mod tests {
         // was 48 hours ago.
         let b = beat(&exp, "PF_XBTUSD", hours(0), now - Duration::minutes(1), 1);
         match judge(&exp, Some(&b), now) {
-            Verdict::EventsSilent { event_age_secs, rows_missed } => {
+            Verdict::EventsSilent {
+                event_age_secs,
+                rows_missed,
+            } => {
                 assert_eq!(event_age_secs, 48 * 3600);
-                assert_eq!(rows_missed, 47, "47 hourly settlements no backfill can recover");
+                assert_eq!(
+                    rows_missed, 47,
+                    "47 hourly settlements no backfill can recover"
+                );
             }
             other => panic!("expected EventsSilent, got {other:?}"),
         }
@@ -1063,8 +1243,16 @@ mod tests {
         let polled = chains();
         let alive_write = now - Duration::minutes(1);
 
-        let a = judge(&always, Some(&beat(&always, "PF_XBTUSD", hours(0), alive_write, 1)), now);
-        let p = judge(&polled, Some(&beat(&polled, "SPY", hours(0), alive_write, 0)), now);
+        let a = judge(
+            &always,
+            Some(&beat(&always, "PF_XBTUSD", hours(0), alive_write, 1)),
+            now,
+        );
+        let p = judge(
+            &polled,
+            Some(&beat(&polled, "SPY", hours(0), alive_write, 0)),
+            now,
+        );
 
         assert!(a.is_alarming());
         assert!(!p.is_alarming());
@@ -1078,14 +1266,24 @@ mod tests {
     /// asked about must not produce the same answer.
     #[test]
     fn nothing_measured_is_not_all_clear() {
-        let empty = SilenceReport { taken_at: t(0), findings: vec![], shared_cause: None };
-        assert!(!empty.all_clear(), "evaluating zero feeds is not a clean bill of health");
+        let empty = SilenceReport {
+            taken_at: t(0),
+            findings: vec![],
+            shared_cause: None,
+        };
+        assert!(
+            !empty.all_clear(),
+            "evaluating zero feeds is not a clean bill of health"
+        );
 
         let exp = funding();
         let now = hours(1);
         let live = evaluate(
             std::slice::from_ref(&exp),
-            &Census::Taken { at: now, beats: vec![beat(&exp, "PF_XBTUSD", now, now, 1)] },
+            &Census::Taken {
+                at: now,
+                beats: vec![beat(&exp, "PF_XBTUSD", now, now, 1)],
+            },
         );
         assert!(live.all_clear());
     }
@@ -1097,7 +1295,10 @@ mod tests {
         let exp = funding();
         let r = evaluate(
             std::slice::from_ref(&exp),
-            &Census::Failed { attempted_at: t(0), reason: "clickhouse: connection refused".into() },
+            &Census::Failed {
+                attempted_at: t(0),
+                reason: "clickhouse: connection refused".into(),
+            },
         );
         assert_eq!(r.findings.len(), 1);
         match &r.findings[0].verdict {
@@ -1105,7 +1306,11 @@ mod tests {
             other => panic!("a failed read must not be a collector verdict: {other:?}"),
         }
         assert!(!r.all_clear());
-        assert_eq!(r.worst(), Some(Severity::Warn), "we cannot accuse a collector we never looked at");
+        assert_eq!(
+            r.worst(),
+            Some(Severity::Warn),
+            "we cannot accuse a collector we never looked at"
+        );
         assert!(r.pages().is_empty(), "blindness does not page a feed owner");
     }
 
@@ -1114,7 +1319,10 @@ mod tests {
     #[test]
     fn a_reader_error_cannot_become_an_empty_success() {
         let err: Result<Vec<Heartbeat>, String> = Err("timeout".into());
-        assert!(matches!(Census::from_read(t(0), err), Census::Failed { .. }));
+        assert!(matches!(
+            Census::from_read(t(0), err),
+            Census::Failed { .. }
+        ));
         let ok: Result<Vec<Heartbeat>, String> = Ok(vec![]);
         assert!(matches!(Census::from_read(t(0), ok), Census::Taken { .. }));
     }
@@ -1124,7 +1332,13 @@ mod tests {
     #[test]
     fn even_a_lying_caller_cannot_manufacture_an_all_clear() {
         let exp = funding();
-        let r = evaluate(std::slice::from_ref(&exp), &Census::Taken { at: t(0), beats: vec![] });
+        let r = evaluate(
+            std::slice::from_ref(&exp),
+            &Census::Taken {
+                at: t(0),
+                beats: vec![],
+            },
+        );
         assert!(!r.all_clear());
         assert_eq!(r.findings[0].verdict, Verdict::NeverSeen);
         assert!(!r.pages().is_empty());
@@ -1137,7 +1351,10 @@ mod tests {
         let now = hours(100);
         assert_eq!(judge(&exp, None, now), Verdict::NeverSeen);
         let b = beat(&exp, "PF_XBTUSD", hours(0), hours(0), 1);
-        assert!(matches!(judge(&exp, Some(&b), now), Verdict::CollectorSilent { .. }));
+        assert!(matches!(
+            judge(&exp, Some(&b), now),
+            Verdict::CollectorSilent { .. }
+        ));
         assert_ne!(judge(&exp, None, now), judge(&exp, Some(&b), now));
     }
 
@@ -1151,7 +1368,12 @@ mod tests {
     fn one_live_instrument_does_not_certify_a_series_whose_others_are_dead() {
         let exp = FeedExpectation {
             roster: Roster::Declared {
-                instruments: vec!["PF_XBTUSD".into(), "PF_ETHUSD".into(), "PF_SOLUSD".into(), "PF_XRPUSD".into()],
+                instruments: vec![
+                    "PF_XBTUSD".into(),
+                    "PF_ETHUSD".into(),
+                    "PF_SOLUSD".into(),
+                    "PF_XRPUSD".into(),
+                ],
             },
             ..funding()
         };
@@ -1162,7 +1384,10 @@ mod tests {
             beat(&exp, "PF_SOLUSD", hours(0), hours(0), 1),
             beat(&exp, "PF_XRPUSD", hours(0), hours(0), 1),
         ];
-        let r = evaluate(std::slice::from_ref(&exp), &Census::Taken { at: now, beats });
+        let r = evaluate(
+            std::slice::from_ref(&exp),
+            &Census::Taken { at: now, beats },
+        );
         assert!(!r.all_clear());
         assert_eq!(r.with_severity(Severity::Alarm).len(), 3);
         assert_eq!(r.with_severity(Severity::Ok).len(), 1);
@@ -1172,11 +1397,17 @@ mod tests {
     /// than reporting the ones we have as the whole truth.
     #[test]
     fn without_a_roster_only_what_appeared_can_be_judged() {
-        let exp = FeedExpectation { roster: Roster::WhateverAppears, ..funding() };
+        let exp = FeedExpectation {
+            roster: Roster::WhateverAppears,
+            ..funding()
+        };
         let now = hours(200);
         let r = evaluate(
             std::slice::from_ref(&exp),
-            &Census::Taken { at: now, beats: vec![beat(&exp, "PF_XBTUSD", now, now, 1)] },
+            &Census::Taken {
+                at: now,
+                beats: vec![beat(&exp, "PF_XBTUSD", now, now, 1)],
+            },
         );
         // The one we saw is judged. The 278 we did not are not invented, and not
         // certified either — they are simply absent from the report.
@@ -1187,8 +1418,17 @@ mod tests {
     /// But a series that has produced nothing at all is still caught, roster or no.
     #[test]
     fn a_series_that_produced_nothing_is_caught_without_a_roster() {
-        let exp = FeedExpectation { roster: Roster::WhateverAppears, ..funding() };
-        let r = evaluate(std::slice::from_ref(&exp), &Census::Taken { at: hours(200), beats: vec![] });
+        let exp = FeedExpectation {
+            roster: Roster::WhateverAppears,
+            ..funding()
+        };
+        let r = evaluate(
+            std::slice::from_ref(&exp),
+            &Census::Taken {
+                at: hours(200),
+                beats: vec![],
+            },
+        );
         assert_eq!(r.findings.len(), 1);
         assert_eq!(r.findings[0].feed.instrument, WHOLE_SERIES);
         assert_eq!(r.findings[0].verdict, Verdict::NeverSeen);
@@ -1202,8 +1442,16 @@ mod tests {
     #[test]
     fn the_store_table_and_the_registry_id_both_match() {
         let exp = funding();
-        assert!(exp.owns(&FeedKey::new("funding_rates", "kraken_futures", "PF_XBTUSD")));
-        assert!(exp.owns(&FeedKey::new("kraken_futures.funding", "kraken_futures", "PF_XBTUSD")));
+        assert!(exp.owns(&FeedKey::new(
+            "funding_rates",
+            "kraken_futures",
+            "PF_XBTUSD"
+        )));
+        assert!(exp.owns(&FeedKey::new(
+            "kraken_futures.funding",
+            "kraken_futures",
+            "PF_XBTUSD"
+        )));
         assert!(!exp.owns(&FeedKey::new("funding_rates", "binance", "PF_XBTUSD")));
     }
 
@@ -1218,7 +1466,10 @@ mod tests {
         };
         let k = FeedKey::new("option_chain_snapshots", "tradier", "SPY");
         assert!(equity.owns(&k));
-        assert!(!crypto.owns(&k), "a shared store table must not make two series one");
+        assert!(
+            !crypto.owns(&k),
+            "a shared store table must not make two series one"
+        );
     }
 
     // ── Clock faults and alibis ──────────────────────────────────────────────
@@ -1250,12 +1501,19 @@ mod tests {
         // it was written 100 hours ago.
         let b = beat(&exp, "PF_XBTUSD", now + Duration::hours(8), hours(0), 1);
         let v = judge(&exp, Some(&b), now);
-        assert!(matches!(v, Verdict::CollectorSilent { .. }), "a future event time must not confer health: {v:?}");
+        assert!(
+            matches!(v, Verdict::CollectorSilent { .. }),
+            "a future event time must not confer health: {v:?}"
+        );
 
         // And the single-clock function it replaces *is* fooled — which is why the
         // second clock had to exist.
         let single = retention::alarm(&exp.spec, Some(b.last_event_time), now);
-        assert_eq!(single.state, AlarmState::Ok, "this is the failure mode, pinned so it cannot be forgotten");
+        assert_eq!(
+            single.state,
+            AlarmState::Ok,
+            "this is the failure mode, pinned so it cannot be forgotten"
+        );
     }
 
     /// The other live hazard, from the store as it stands today: a planted
@@ -1266,13 +1524,26 @@ mod tests {
     fn a_planted_fixture_does_not_page_for_being_six_years_old() {
         let exp = FeedExpectation {
             spec: spec("synthetic.planted", "market_bars_v2", "synthetic"),
-            arrival: Arrival::Polled { poll_period_secs: 60 },
-            roster: Roster::Declared { instruments: vec!["SYN-PLANTED-AR1-424242".into()] },
+            arrival: Arrival::Polled {
+                poll_period_secs: 60,
+            },
+            roster: Roster::Declared {
+                instruments: vec!["SYN-PLANTED-AR1-424242".into()],
+            },
         };
         let now = hours(0);
-        let b = beat(&exp, "SYN-PLANTED-AR1-424242", now - Duration::days(2270), now - Duration::seconds(30), 5000);
+        let b = beat(
+            &exp,
+            "SYN-PLANTED-AR1-424242",
+            now - Duration::days(2270),
+            now - Duration::seconds(30),
+            5000,
+        );
         let v = judge(&exp, Some(&b), now);
-        assert!(!v.is_alarming(), "a six-year-old event on a fresh write is a fixture, not an outage: {v:?}");
+        assert!(
+            !v.is_alarming(),
+            "a six-year-old event on a fresh write is a fixture, not an outage: {v:?}"
+        );
         assert!(matches!(v, Verdict::QuietAndPolledOnTime { .. }));
     }
 
@@ -1289,14 +1560,22 @@ mod tests {
             ..funding()
         };
         let now = hours(300);
-        let beats: Vec<Heartbeat> =
-            (0..40).map(|i| beat(&exp, &format!("PF_{i:03}USD"), hours(0), hours(0), 1)).collect();
-        let r = evaluate(std::slice::from_ref(&exp), &Census::Taken { at: now, beats });
+        let beats: Vec<Heartbeat> = (0..40)
+            .map(|i| beat(&exp, &format!("PF_{i:03}USD"), hours(0), hours(0), 1))
+            .collect();
+        let r = evaluate(
+            std::slice::from_ref(&exp),
+            &Census::Taken { at: now, beats },
+        );
 
         assert_eq!(r.findings.len(), 40, "every feed is still reported");
         assert_eq!(r.with_severity(Severity::Alarm).len(), 40);
         let pages = r.pages();
-        assert_eq!(pages.len(), 1, "40 simultaneous pages is a request to be muted");
+        assert_eq!(
+            pages.len(),
+            1,
+            "40 simultaneous pages is a request to be muted"
+        );
         match &pages[0] {
             Page::SharedCause { cause, feeds } => {
                 assert_eq!(cause.silent_feeds, 40);
@@ -1323,7 +1602,10 @@ mod tests {
                 beat(&exp, &format!("PF_{i:03}USD"), stamp, stamp, 1)
             })
             .collect();
-        let r = evaluate(std::slice::from_ref(&exp), &Census::Taken { at: now, beats });
+        let r = evaluate(
+            std::slice::from_ref(&exp),
+            &Census::Taken { at: now, beats },
+        );
         assert!(r.shared_cause.is_none());
         let pages = r.pages();
         assert_eq!(pages.len(), 1);
@@ -1335,12 +1617,20 @@ mod tests {
     #[test]
     fn two_feeds_is_not_evidence_of_a_shared_cause() {
         let exp = FeedExpectation {
-            roster: Roster::Declared { instruments: vec!["A".into(), "B".into()] },
+            roster: Roster::Declared {
+                instruments: vec!["A".into(), "B".into()],
+            },
             ..funding()
         };
         let now = hours(300);
-        let beats = vec![beat(&exp, "A", hours(0), hours(0), 1), beat(&exp, "B", hours(0), hours(0), 1)];
-        let r = evaluate(std::slice::from_ref(&exp), &Census::Taken { at: now, beats });
+        let beats = vec![
+            beat(&exp, "A", hours(0), hours(0), 1),
+            beat(&exp, "B", hours(0), hours(0), 1),
+        ];
+        let r = evaluate(
+            std::slice::from_ref(&exp),
+            &Census::Taken { at: now, beats },
+        );
         assert!(r.shared_cause.is_none());
         assert_eq!(r.pages().len(), 2);
     }
@@ -1355,24 +1645,39 @@ mod tests {
     #[test]
     fn a_cause_shared_across_two_stores_is_only_visible_in_the_union() {
         let exp = FeedExpectation {
-            roster: Roster::Declared { instruments: vec!["A".into(), "B".into()] },
+            roster: Roster::Declared {
+                instruments: vec!["A".into(), "B".into()],
+            },
             ..funding()
         };
-        let other = FeedExpectation { roster: exp.roster.clone(), ..chains() };
+        let other = FeedExpectation {
+            roster: exp.roster.clone(),
+            ..chains()
+        };
         let now = hours(300);
         let dead = |e: &FeedExpectation| {
-            let beats = ["A", "B"].iter().map(|n| beat(e, n, hours(0), hours(0), 1)).collect();
+            let beats = ["A", "B"]
+                .iter()
+                .map(|n| beat(e, n, hours(0), hours(0), 1))
+                .collect();
             evaluate(std::slice::from_ref(e), &Census::Taken { at: now, beats })
         };
         let one = dead(&exp);
         let two = dead(&other);
         assert!(one.shared_cause.is_none(), "two feeds is a coincidence");
         assert!(two.shared_cause.is_none());
-        assert_eq!(one.pages().len() + two.pages().len(), 4, "separately, four pages");
+        assert_eq!(
+            one.pages().len() + two.pages().len(),
+            4,
+            "separately, four pages"
+        );
 
         let m = SilenceReport::merged(now, vec![one, two]);
         assert_eq!(m.findings.len(), 4, "nothing is hidden by merging");
-        assert!(m.shared_cause.is_some(), "four of four judgeable feeds silent is one cause");
+        assert!(
+            m.shared_cause.is_some(),
+            "four of four judgeable feeds silent is one cause"
+        );
         assert_eq!(m.pages().len(), 1, "one incident, one page");
         assert_eq!(m.taken_at, now);
     }
@@ -1384,7 +1689,10 @@ mod tests {
     fn a_merge_of_nothing_is_not_all_clear() {
         let m = SilenceReport::merged(hours(1), Vec::new());
         assert!(m.findings.is_empty());
-        assert!(!m.all_clear(), "zero feeds evaluated is not zero feeds broken");
+        assert!(
+            !m.all_clear(),
+            "zero feeds evaluated is not zero feeds broken"
+        );
         assert_eq!(m.worst(), None);
         assert!(m.pages().is_empty());
     }
@@ -1397,17 +1705,26 @@ mod tests {
         let now = hours(300);
         let blind = evaluate(
             std::slice::from_ref(&funding()),
-            &Census::Failed { attempted_at: now, reason: "connection refused".into() },
+            &Census::Failed {
+                attempted_at: now,
+                reason: "connection refused".into(),
+            },
         );
         let exp = chains();
         let ok = evaluate(
             std::slice::from_ref(&exp),
-            &Census::Taken { at: now, beats: vec![beat(&exp, "SPY", now, now, 1)] },
+            &Census::Taken {
+                at: now,
+                beats: vec![beat(&exp, "SPY", now, now, 1)],
+            },
         );
         assert!(ok.all_clear());
 
         let m = SilenceReport::merged(now, vec![blind, ok]);
-        assert!(!m.all_clear(), "one store unread is not every store healthy");
+        assert!(
+            !m.all_clear(),
+            "one store unread is not every store healthy"
+        );
         assert_eq!(m.worst(), Some(Severity::Warn));
         assert_eq!(m.with_severity(Severity::Warn).len(), 1);
     }
@@ -1416,19 +1733,38 @@ mod tests {
     /// accept a permanent hole and must look like one.
     #[test]
     fn a_disabled_series_is_not_alarming_and_not_healthy_either() {
-        let exp = FeedExpectation { spec: ForwardSeriesSpec { enabled: false, ..funding().spec }, ..funding() };
+        let exp = FeedExpectation {
+            spec: ForwardSeriesSpec {
+                enabled: false,
+                ..funding().spec
+            },
+            ..funding()
+        };
         let v = judge(&exp, None, hours(1000));
         assert_eq!(v, Verdict::Disabled);
         assert!(!v.is_alarming());
-        assert_ne!(v.severity(), Severity::Ok, "an accepted hole is not a clean bill of health");
-        let r = evaluate(std::slice::from_ref(&exp), &Census::Taken { at: hours(1000), beats: vec![] });
+        assert_ne!(
+            v.severity(),
+            Severity::Ok,
+            "an accepted hole is not a clean bill of health"
+        );
+        let r = evaluate(
+            std::slice::from_ref(&exp),
+            &Census::Taken {
+                at: hours(1000),
+                beats: vec![],
+            },
+        );
         assert!(!r.all_clear());
     }
 
     /// An undeclared arrival pattern alarms on nothing, and says why.
     #[test]
     fn an_undeclared_cadence_alarms_on_nothing_and_says_so() {
-        let exp = FeedExpectation { arrival: Arrival::Unknown, ..funding() };
+        let exp = FeedExpectation {
+            arrival: Arrival::Unknown,
+            ..funding()
+        };
         let v = judge(&exp, None, hours(1000));
         match &v {
             Verdict::CannotJudge { reason } => assert!(reason.contains("unknown arrival")),
@@ -1452,11 +1788,20 @@ mod tests {
         };
         let r = evaluate(
             std::slice::from_ref(&exp),
-            &Census::Taken { at: now, beats: vec![beat(&exp, "PF_XBTUSD", now, now, 1), stray] },
+            &Census::Taken {
+                at: now,
+                beats: vec![beat(&exp, "PF_XBTUSD", now, now, 1), stray],
+            },
         );
         assert_eq!(r.findings.len(), 2);
-        assert!(r.findings.iter().any(|f| matches!(f.verdict, Verdict::CannotJudge { .. })));
-        assert!(!r.all_clear(), "an unexplained collector is not a clean report");
+        assert!(r
+            .findings
+            .iter()
+            .any(|f| matches!(f.verdict, Verdict::CannotJudge { .. })));
+        assert!(
+            !r.all_clear(),
+            "an unexplained collector is not a clean report"
+        );
     }
 
     // ── Boundaries and delegation ────────────────────────────────────────────
@@ -1470,12 +1815,18 @@ mod tests {
         for h in 0..=3 {
             let b = beat(&exp, "PF_XBTUSD", hours(h), last, 1);
             let v = judge(&exp, Some(&b), hours(h));
-            assert!(!matches!(v, Verdict::CollectorSilent { .. }), "hour {h} is inside the deadline: {v:?}");
+            assert!(
+                !matches!(v, Verdict::CollectorSilent { .. }),
+                "hour {h} is inside the deadline: {v:?}"
+            );
         }
         let b = beat(&exp, "PF_XBTUSD", hours(3), last, 1);
         let v = judge(&exp, Some(&b), hours(3) + Duration::seconds(1));
         match v {
-            Verdict::CollectorSilent { write_age_secs, deadline_secs } => {
+            Verdict::CollectorSilent {
+                write_age_secs,
+                deadline_secs,
+            } => {
                 assert_eq!(deadline_secs, 3 * 3600);
                 assert_eq!(write_age_secs, 3 * 3600 + 1);
             }
@@ -1495,7 +1846,8 @@ mod tests {
                 let now = hours(h) + Duration::seconds(extra);
                 let b = beat(&exp, "PF_XBTUSD", hours(0), alive(now), 1);
                 let ours = matches!(judge(&exp, Some(&b), now), Verdict::EventsSilent { .. });
-                let theirs = retention::alarm(&exp.spec, Some(hours(0)), now).state == AlarmState::Stale;
+                let theirs =
+                    retention::alarm(&exp.spec, Some(hours(0)), now).state == AlarmState::Stale;
                 assert_eq!(ours, theirs, "the two disagree at {now}");
             }
         }
@@ -1508,7 +1860,10 @@ mod tests {
         let exp = funding();
         let now = hours(100);
         let b = beat(&exp, "PF_XBTUSD", hours(0), hours(0), 1);
-        assert!(matches!(judge(&exp, Some(&b), now), Verdict::CollectorSilent { .. }));
+        assert!(matches!(
+            judge(&exp, Some(&b), now),
+            Verdict::CollectorSilent { .. }
+        ));
     }
 
     #[test]
@@ -1517,7 +1872,10 @@ mod tests {
         let b = beat(&exp, "PF_XBTUSD", hours(0), hours(0), 1);
         assert_eq!(time_to_alarm(&exp, &b, hours(1)).unwrap().num_hours(), 2);
         assert!(time_to_alarm(&exp, &b, hours(10)).is_none());
-        let unknown = FeedExpectation { arrival: Arrival::Unknown, ..funding() };
+        let unknown = FeedExpectation {
+            arrival: Arrival::Unknown,
+            ..funding()
+        };
         assert!(time_to_alarm(&unknown, &b, hours(1)).is_none());
     }
 
@@ -1531,24 +1889,57 @@ mod tests {
     #[test]
     fn no_verdict_but_live_may_be_recorded_as_ok() {
         let all = [
-            Verdict::Live { write_age_secs: 0, event_age_secs: 0 },
-            Verdict::CollectorSilent { write_age_secs: 1, deadline_secs: 0 },
-            Verdict::EventsSilent { event_age_secs: 1, rows_missed: 1 },
-            Verdict::QuietAndPolledOnTime { event_age_secs: 1, write_age_secs: 0 },
+            Verdict::Live {
+                write_age_secs: 0,
+                event_age_secs: 0,
+            },
+            Verdict::CollectorSilent {
+                write_age_secs: 1,
+                deadline_secs: 0,
+            },
+            Verdict::EventsSilent {
+                event_age_secs: 1,
+                rows_missed: 1,
+            },
+            Verdict::QuietAndPolledOnTime {
+                event_age_secs: 1,
+                write_age_secs: 0,
+            },
             Verdict::NeverSeen,
-            Verdict::Unobserved { reason: String::new() },
-            Verdict::CannotJudge { reason: String::new() },
+            Verdict::Unobserved {
+                reason: String::new(),
+            },
+            Verdict::CannotJudge {
+                reason: String::new(),
+            },
             Verdict::Disabled,
-            Verdict::ClockFault { detail: String::new() },
+            Verdict::ClockFault {
+                detail: String::new(),
+            },
         ];
         for v in &all {
             if v.pg_alarm_state() == Some("ok") {
-                assert!(matches!(v, Verdict::Live { .. }), "{v:?} must not be recorded as ok");
+                assert!(
+                    matches!(v, Verdict::Live { .. }),
+                    "{v:?} must not be recorded as ok"
+                );
             }
         }
         // And blindness has no row at all rather than a reassuring one.
-        assert_eq!(Verdict::Unobserved { reason: String::new() }.pg_alarm_state(), None);
-        assert_eq!(Verdict::ClockFault { detail: String::new() }.pg_alarm_state(), None);
+        assert_eq!(
+            Verdict::Unobserved {
+                reason: String::new()
+            }
+            .pg_alarm_state(),
+            None
+        );
+        assert_eq!(
+            Verdict::ClockFault {
+                detail: String::new()
+            }
+            .pg_alarm_state(),
+            None
+        );
         assert_eq!(Verdict::Disabled.pg_alarm_state(), None);
     }
 
@@ -1557,17 +1948,38 @@ mod tests {
     #[test]
     fn exactly_one_verdict_is_healthy() {
         let all = [
-            Verdict::Live { write_age_secs: 0, event_age_secs: 0 },
-            Verdict::CollectorSilent { write_age_secs: 1, deadline_secs: 0 },
-            Verdict::EventsSilent { event_age_secs: 1, rows_missed: 1 },
-            Verdict::QuietAndPolledOnTime { event_age_secs: 1, write_age_secs: 0 },
+            Verdict::Live {
+                write_age_secs: 0,
+                event_age_secs: 0,
+            },
+            Verdict::CollectorSilent {
+                write_age_secs: 1,
+                deadline_secs: 0,
+            },
+            Verdict::EventsSilent {
+                event_age_secs: 1,
+                rows_missed: 1,
+            },
+            Verdict::QuietAndPolledOnTime {
+                event_age_secs: 1,
+                write_age_secs: 0,
+            },
             Verdict::NeverSeen,
-            Verdict::Unobserved { reason: String::new() },
-            Verdict::CannotJudge { reason: String::new() },
+            Verdict::Unobserved {
+                reason: String::new(),
+            },
+            Verdict::CannotJudge {
+                reason: String::new(),
+            },
             Verdict::Disabled,
-            Verdict::ClockFault { detail: String::new() },
+            Verdict::ClockFault {
+                detail: String::new(),
+            },
         ];
-        assert_eq!(all.iter().filter(|v| v.severity() == Severity::Ok).count(), 1);
+        assert_eq!(
+            all.iter().filter(|v| v.severity() == Severity::Ok).count(),
+            1
+        );
     }
 
     // ── The trap this crate must not walk into ───────────────────────────────
@@ -1580,7 +1992,14 @@ mod tests {
     #[test]
     fn no_db_client_creeps_into_this_crate() {
         let manifest = include_str!("../Cargo.toml");
-        for forbidden in ["clickhouse", "sqlx", "reqwest", "tokio-postgres", "redis", "diesel"] {
+        for forbidden in [
+            "clickhouse",
+            "sqlx",
+            "reqwest",
+            "tokio-postgres",
+            "redis",
+            "diesel",
+        ] {
             assert!(
                 !manifest.contains(forbidden),
                 "observability must stay free of {forbidden}: a staleness monitor that reads the store \
@@ -1620,10 +2039,27 @@ mod tests {
     fn an_undeclared_arrival_falls_back_to_our_own_cadence_not_to_a_venue_claim() {
         for row in seeded_rows() {
             let exp = FeedExpectation::from_registry(&row, Roster::WhateverAppears).unwrap();
-            assert_eq!(exp.arrival, Arrival::Polled { poll_period_secs: 3600 });
-            assert_eq!(exp.write_deadline_secs(), Some(3 * 3600), "three cadences, as the registry says");
-            assert_ne!(exp.arrival, Arrival::Always, "we hold no evidence this venue never closes");
-            assert_ne!(exp.arrival, Arrival::Unknown, "an alarm that alarms on nothing is not safe, it is useless");
+            assert_eq!(
+                exp.arrival,
+                Arrival::Polled {
+                    poll_period_secs: 3600
+                }
+            );
+            assert_eq!(
+                exp.write_deadline_secs(),
+                Some(3 * 3600),
+                "three cadences, as the registry says"
+            );
+            assert_ne!(
+                exp.arrival,
+                Arrival::Always,
+                "we hold no evidence this venue never closes"
+            );
+            assert_ne!(
+                exp.arrival,
+                Arrival::Unknown,
+                "an alarm that alarms on nothing is not safe, it is useless"
+            );
         }
     }
 
@@ -1640,7 +2076,10 @@ mod tests {
             last_write_time: hours(0),
             rows_written: 1,
         };
-        assert!(matches!(judge(&exp, Some(&b), now), Verdict::CollectorSilent { .. }));
+        assert!(matches!(
+            judge(&exp, Some(&b), now),
+            Verdict::CollectorSilent { .. }
+        ));
     }
 
     /// ...and does not fire on a venue that is merely shut, which is what makes it
@@ -1664,7 +2103,10 @@ mod tests {
     #[test]
     fn declaring_always_adds_the_event_dimension() {
         let mut row = seeded_rows().remove(0);
-        row.arrival = Some(ArrivalDecl { kind: "always".into(), poll_period_secs: None });
+        row.arrival = Some(ArrivalDecl {
+            kind: "always".into(),
+            poll_period_secs: None,
+        });
         let exp = FeedExpectation::from_registry(&row, Roster::WhateverAppears).unwrap();
         assert_eq!(exp.arrival, Arrival::Always);
         let now = hours(48);
@@ -1674,18 +2116,27 @@ mod tests {
             last_write_time: now - Duration::minutes(1),
             rows_written: 1,
         };
-        assert!(matches!(judge(&exp, Some(&b), now), Verdict::EventsSilent { .. }));
+        assert!(matches!(
+            judge(&exp, Some(&b), now),
+            Verdict::EventsSilent { .. }
+        ));
     }
 
     #[test]
     fn a_registry_row_that_violates_its_own_checks_is_refused() {
         let base = seeded_rows().remove(0);
-        let bad_cadence = RegistryRow { cadence_secs: 0, ..base.clone() };
+        let bad_cadence = RegistryRow {
+            cadence_secs: 0,
+            ..base.clone()
+        };
         assert!(matches!(
             FeedExpectation::from_registry(&bad_cadence, Roster::WhateverAppears),
             Err(ExpectationError::BadCadence { .. })
         ));
-        let bad_policy = RegistryRow { retention_policy: "delete".into(), ..base.clone() };
+        let bad_policy = RegistryRow {
+            retention_policy: "delete".into(),
+            ..base.clone()
+        };
         assert!(
             matches!(
                 FeedExpectation::from_registry(&bad_policy, Roster::WhateverAppears),
@@ -1693,21 +2144,32 @@ mod tests {
             ),
             "there is no delete tier, here or anywhere"
         );
-        let incomplete = RegistryRow { retention_policy: "downsample".into(), ..base.clone() };
+        let incomplete = RegistryRow {
+            retention_policy: "downsample".into(),
+            ..base.clone()
+        };
         assert!(matches!(
             FeedExpectation::from_registry(&incomplete, Roster::WhateverAppears),
             Err(ExpectationError::IncompletePolicy { .. })
         ));
         let bad_arrival = RegistryRow {
-            arrival: Some(ArrivalDecl { kind: "sometimes".into(), poll_period_secs: None }),
+            arrival: Some(ArrivalDecl {
+                kind: "sometimes".into(),
+                poll_period_secs: None,
+            }),
             ..base.clone()
         };
         assert!(matches!(
             FeedExpectation::from_registry(&bad_arrival, Roster::WhateverAppears),
             Err(ExpectationError::BadArrival { .. })
         ));
-        let polled_no_period =
-            RegistryRow { arrival: Some(ArrivalDecl { kind: "polled".into(), poll_period_secs: None }), ..base };
+        let polled_no_period = RegistryRow {
+            arrival: Some(ArrivalDecl {
+                kind: "polled".into(),
+                poll_period_secs: None,
+            }),
+            ..base
+        };
         assert!(matches!(
             FeedExpectation::from_registry(&polled_no_period, Roster::WhateverAppears),
             Err(ExpectationError::PolledWithoutPeriod { .. })
@@ -1724,7 +2186,13 @@ mod tests {
             .iter()
             .map(|r| FeedExpectation::from_registry(r, Roster::WhateverAppears).unwrap())
             .collect();
-        let r = evaluate(&exps, &Census::Taken { at: hours(1), beats: vec![] });
+        let r = evaluate(
+            &exps,
+            &Census::Taken {
+                at: hours(1),
+                beats: vec![],
+            },
+        );
         assert!(!r.all_clear());
         assert_eq!(r.with_severity(Severity::Alarm).len(), 2);
         assert!(r.findings.iter().all(|f| f.verdict == Verdict::NeverSeen));
@@ -1738,7 +2206,10 @@ mod tests {
         let now = hours(300);
         let r = evaluate(
             std::slice::from_ref(&exp),
-            &Census::Taken { at: now, beats: vec![beat(&exp, "PF_XBTUSD", hours(0), hours(0), 1)] },
+            &Census::Taken {
+                at: now,
+                beats: vec![beat(&exp, "PF_XBTUSD", hours(0), hours(0), 1)],
+            },
         );
         let s = SilenceSummary::from(&r);
         assert_eq!(s.feeds, 1);
@@ -1750,17 +2221,33 @@ mod tests {
     /// specifically meant to complain about.
     #[test]
     fn emit_handles_every_report_shape() {
-        emit(&SilenceReport { taken_at: t(0), findings: vec![], shared_cause: None });
+        emit(&SilenceReport {
+            taken_at: t(0),
+            findings: vec![],
+            shared_cause: None,
+        });
         let exp = funding();
         let now = hours(300);
-        emit(&evaluate(std::slice::from_ref(&exp), &Census::Failed { attempted_at: now, reason: "down".into() }));
         emit(&evaluate(
             std::slice::from_ref(&exp),
-            &Census::Taken { at: now, beats: vec![beat(&exp, "PF_XBTUSD", now, now, 1)] },
+            &Census::Failed {
+                attempted_at: now,
+                reason: "down".into(),
+            },
         ));
         emit(&evaluate(
             std::slice::from_ref(&exp),
-            &Census::Taken { at: now, beats: vec![beat(&exp, "PF_XBTUSD", hours(0), hours(0), 1)] },
+            &Census::Taken {
+                at: now,
+                beats: vec![beat(&exp, "PF_XBTUSD", now, now, 1)],
+            },
+        ));
+        emit(&evaluate(
+            std::slice::from_ref(&exp),
+            &Census::Taken {
+                at: now,
+                beats: vec![beat(&exp, "PF_XBTUSD", hours(0), hours(0), 1)],
+            },
         ));
     }
 
@@ -1771,7 +2258,10 @@ mod tests {
         let now = hours(300);
         let r = evaluate(
             std::slice::from_ref(&exp),
-            &Census::Taken { at: now, beats: vec![beat(&exp, "PF_XBTUSD", hours(0), hours(0), 1)] },
+            &Census::Taken {
+                at: now,
+                beats: vec![beat(&exp, "PF_XBTUSD", hours(0), hours(0), 1)],
+            },
         );
         let json = serde_json::to_string(&r).unwrap();
         let back: SilenceReport = serde_json::from_str(&json).unwrap();

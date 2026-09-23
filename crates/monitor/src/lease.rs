@@ -115,7 +115,10 @@ mod tests {
 
     #[test]
     fn a_fresh_lease_permits_orders() {
-        assert_eq!(LeaseStatus::of(Some(&lease(120)), at(10)), LeaseStatus::Valid);
+        assert_eq!(
+            LeaseStatus::of(Some(&lease(120)), at(10)),
+            LeaseStatus::Valid
+        );
         assert!(LeaseStatus::of(Some(&lease(120)), at(10)).permits_orders());
     }
 
@@ -123,7 +126,10 @@ mod tests {
     fn a_lapsed_lease_refuses_rather_than_permits() {
         // The adversarial half of §4: the failure mode that matters is not a
         // monitor saying "halt", it is a monitor saying nothing at all.
-        assert_eq!(LeaseStatus::of(Some(&lease(120)), at(121)), LeaseStatus::Expired);
+        assert_eq!(
+            LeaseStatus::of(Some(&lease(120)), at(121)),
+            LeaseStatus::Expired
+        );
         assert!(!LeaseStatus::of(Some(&lease(120)), at(121)).permits_orders());
     }
 
@@ -132,7 +138,10 @@ mod tests {
         // At exactly expires_at the lease is over. Treating the boundary as still
         // valid would mean a stopped monitor keeps the gate open for one more
         // instant on every clock that happens to land on it.
-        assert_eq!(LeaseStatus::of(Some(&lease(120)), at(120)), LeaseStatus::Expired);
+        assert_eq!(
+            LeaseStatus::of(Some(&lease(120)), at(120)),
+            LeaseStatus::Expired
+        );
     }
 
     #[test]

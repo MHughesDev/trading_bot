@@ -111,7 +111,10 @@ pub enum Event {
     /// than the run. The hash is what a replay needs — it proves the rebuilt
     /// state is the same state, and it is the only way to tell "the effects
     /// matched" from "the effects matched and the loop is in the same place".
-    StateSnapshot { step: u32, working_state_hash: String },
+    StateSnapshot {
+        step: u32,
+        working_state_hash: String,
+    },
 }
 
 /// One entry in the task's trace.

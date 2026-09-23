@@ -326,7 +326,10 @@ impl Evaluator {
             DwellVerdict::Recovering => Outcome::Recovering,
             DwellVerdict::Recovered => Outcome::Release,
         };
-        let limit_value = limit.crossed_bound(reading.value).or(limit.lower).or(limit.upper);
+        let limit_value = limit
+            .crossed_bound(reading.value)
+            .or(limit.lower)
+            .or(limit.upper);
 
         Evaluation {
             reading,
@@ -353,7 +356,11 @@ impl Evaluator {
 
     /// A fact: acts now, no dwell (COMP-007 §4.1).
     #[must_use]
-    pub fn on_fact(fact: &Fact, from: StrategyState, policy: crate::state::HaltPolicy) -> Transition {
+    pub fn on_fact(
+        fact: &Fact,
+        from: StrategyState,
+        policy: crate::state::HaltPolicy,
+    ) -> Transition {
         crate::state::on_sustained(from, Severity::Breach(fact.family()), policy)
     }
 }
@@ -400,8 +407,18 @@ mod tests {
 
     fn evaluator() -> Evaluator {
         let mut book = LimitBook::new();
-        book.declare(limit("fill_rate", Family::Execution, 0.8, LimitSeverity::Breach));
-        book.declare(limit("sharpe_60d", Family::Pnl, 0.5, LimitSeverity::Warning));
+        book.declare(limit(
+            "fill_rate",
+            Family::Execution,
+            0.8,
+            LimitSeverity::Breach,
+        ));
+        book.declare(limit(
+            "sharpe_60d",
+            Family::Pnl,
+            0.5,
+            LimitSeverity::Warning,
+        ));
         Evaluator::new(book, DwellConfig::default())
     }
 
@@ -411,7 +428,12 @@ mod tests {
         // "there is no limit" render the same, so a strategy nobody declared
         // limits for looks like the best-behaved one on the page.
         let mut e = evaluator();
-        let ev = e.evaluate(MetricReading::new("s", "cancel_ratio", Family::Behaviour, 0.99));
+        let ev = e.evaluate(MetricReading::new(
+            "s",
+            "cancel_ratio",
+            Family::Behaviour,
+            0.99,
+        ));
         assert_eq!(ev.outcome, Outcome::Undeclared);
         assert_ne!(ev.outcome, Outcome::Inside);
     }
@@ -425,9 +447,15 @@ mod tests {
             last = Some(e.evaluate(MetricReading::new("s", "fill_rate", Family::Execution, 0.4)));
         }
         let ev = last.expect("three cadences");
-        assert_eq!(ev.outcome, Outcome::Act(Severity::Breach(Family::Execution)));
+        assert_eq!(
+            ev.outcome,
+            Outcome::Act(Severity::Breach(Family::Execution))
+        );
         assert_eq!(ev.limit_value, Some(0.8), "the event must name the limit");
-        assert!((ev.reading.value - 0.4).abs() < f64::EPSILON, "and the value");
+        assert!(
+            (ev.reading.value - 0.4).abs() < f64::EPSILON,
+            "and the value"
+        );
 
         let t = e.transition(&ev, StrategyState::Nominal, crate::state::HaltPolicy::Hold);
         assert_eq!(t.to, StrategyState::ScaledDown);
@@ -459,16 +487,28 @@ mod tests {
     #[test]
     fn a_fresh_feed_is_fresh_and_a_four_minute_old_daily_bar_is_too() {
         assert_eq!(staleness(&btc(), Some(30), 60), Staleness::Fresh);
-        assert_eq!(staleness(&feed("AAPL", "alpaca"), Some(240), 86_400), Staleness::Fresh);
+        assert_eq!(
+            staleness(&feed("AAPL", "alpaca"), Some(240), 86_400),
+            Staleness::Fresh
+        );
     }
 
     #[test]
     fn staleness_is_measured_against_the_feeds_own_timeframe() {
         // 240s is fine for a daily bar and a hard halt for a one-minute one. A
         // single global threshold gets exactly one of those two wrong.
-        assert!(matches!(staleness(&btc(), Some(240), 60), Staleness::Warning { .. }));
-        assert!(matches!(staleness(&btc(), Some(700), 60), Staleness::Hard(_)));
-        assert_eq!(staleness(&feed("AAPL", "alpaca"), Some(700), 86_400), Staleness::Fresh);
+        assert!(matches!(
+            staleness(&btc(), Some(240), 60),
+            Staleness::Warning { .. }
+        ));
+        assert!(matches!(
+            staleness(&btc(), Some(700), 60),
+            Staleness::Hard(_)
+        ));
+        assert_eq!(
+            staleness(&feed("AAPL", "alpaca"), Some(700), 86_400),
+            Staleness::Fresh
+        );
     }
 
     #[test]
@@ -486,8 +526,15 @@ mod tests {
         let Staleness::Hard(fact) = staleness(&btc(), Some(700), 60) else {
             panic!("700s on a 60s bar is past the hard multiple");
         };
-        assert!(fact.family().breach_halts(), "COMP-007 §3: a hard-stale feed halts");
-        let t = Evaluator::on_fact(&fact, StrategyState::Nominal, crate::state::HaltPolicy::Hold);
+        assert!(
+            fact.family().breach_halts(),
+            "COMP-007 §3: a hard-stale feed halts"
+        );
+        let t = Evaluator::on_fact(
+            &fact,
+            StrategyState::Nominal,
+            crate::state::HaltPolicy::Hold,
+        );
         assert_eq!(
             t.to,
             StrategyState::Halted,
@@ -602,7 +649,14 @@ mod tests {
         // — or a `timeframe_secs <= 0` guard someone "simplifies" into a
         // `.max(1)`, which is the tempting one — fails here rather than shipping.
         let timeframes = [-86_400_i64, -60, 0, 1, 60, 86_400];
-        let ages = [None, Some(-1_i64), Some(0), Some(1), Some(59), Some(999_999)];
+        let ages = [
+            None,
+            Some(-1_i64),
+            Some(0),
+            Some(1),
+            Some(59),
+            Some(999_999),
+        ];
         let mut fresh = 0;
         let mut unmeasurable = 0;
         for tf in timeframes {
@@ -626,7 +680,10 @@ mod tests {
         // Anti-vacuity, both ways: a `staleness` that refused everything would
         // satisfy every assertion in the loop, and so would one that measured
         // everything.
-        assert!(fresh > 0, "the sweep never reached Fresh; it is broken, not satisfied");
+        assert!(
+            fresh > 0,
+            "the sweep never reached Fresh; it is broken, not satisfied"
+        );
         assert!(
             unmeasurable > 0,
             "the sweep never reached Unmeasurable; it is broken, not satisfied"
@@ -716,7 +773,11 @@ mod tests {
             venue: Venue::named("kraken").expect("a venue"),
         };
         assert_eq!(fact.family(), Family::Venue);
-        let t = Evaluator::on_fact(&fact, StrategyState::Nominal, crate::state::HaltPolicy::Hold);
+        let t = Evaluator::on_fact(
+            &fact,
+            StrategyState::Nominal,
+            crate::state::HaltPolicy::Hold,
+        );
         assert!(t.changed());
     }
 }

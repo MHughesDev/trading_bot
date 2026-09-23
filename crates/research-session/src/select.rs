@@ -213,7 +213,10 @@ fn percentiles(values: &[f64]) -> Vec<f64> {
     for (i, v) in values.iter().enumerate() {
         // How many are strictly below, plus the ties, counted once.
         let below = values.iter().filter(|o| *o < v).count();
-        let ties = values.iter().filter(|o| (*o - v).abs() < f64::EPSILON).count();
+        let ties = values
+            .iter()
+            .filter(|o| (*o - v).abs() < f64::EPSILON)
+            .count();
         #[allow(clippy::cast_precision_loss)]
         let rank = (below + ties) as f64 / n as f64;
         out[i] = rank;
@@ -746,8 +749,14 @@ mod tests {
     #[test]
     fn an_infeasible_item_scores_zero_however_valuable_it_is() {
         let slate = vec![
-            (item("impossible", Source::Contradiction), inputs(99.0, 1.0, 0.0, 0.1)),
-            (item("ordinary", Source::CharterSeed), inputs(1.0, 1.0, 1.0, 1.0)),
+            (
+                item("impossible", Source::Contradiction),
+                inputs(99.0, 1.0, 0.0, 0.1),
+            ),
+            (
+                item("ordinary", Source::CharterSeed),
+                inputs(1.0, 1.0, 1.0, 1.0),
+            ),
         ];
         let scored = score(&slate);
         assert!(scored[0].raw.total.abs() < 1e-12);
@@ -763,8 +772,14 @@ mod tests {
     #[test]
     fn a_question_already_answered_is_not_drawn_as_a_detour() {
         let slate = vec![
-            (item("best", Source::CharterSeed), inputs(2.0, 1.0, 1.0, 1.0)),
-            (item("asked before", Source::CharterSeed), inputs(2.0, 0.0, 1.0, 1.0)),
+            (
+                item("best", Source::CharterSeed),
+                inputs(2.0, 1.0, 1.0, 1.0),
+            ),
+            (
+                item("asked before", Source::CharterSeed),
+                inputs(2.0, 0.0, 1.0, 1.0),
+            ),
         ];
         let scored = score(&slate);
         assert!(!scored[1].explorable());
@@ -780,14 +795,20 @@ mod tests {
     #[test]
     fn a_user_item_is_taken_without_being_drawn() {
         let slate = vec![
-            (item("scored high", Source::Contradiction), inputs(9.0, 1.0, 1.0, 0.1)),
+            (
+                item("scored high", Source::Contradiction),
+                inputs(9.0, 1.0, 1.0, 0.1),
+            ),
             (item("asked for", Source::User), inputs(0.1, 0.1, 1.0, 9.0)),
         ];
         let scored = score(&slate);
         let s = select(&scored, 0.15, 1).expect("a choice");
         assert_eq!(s.chosen, scored[1].item);
         assert!(!s.exploration);
-        assert!((s.propensity - 1.0).abs() < 1e-12, "it was asked for, not drawn");
+        assert!(
+            (s.propensity - 1.0).abs() < 1e-12,
+            "it was asked for, not drawn"
+        );
         assert!(s.rationale.contains("asked for"));
     }
 
@@ -886,7 +907,12 @@ mod tests {
     #[test]
     fn the_same_seed_replays_the_same_choice() {
         let slate: Vec<(AgendaItem, Inputs)> = (0..5)
-            .map(|n| (item(&format!("q{n}"), Source::CharterSeed), inputs(f64::from(n) + 1.0, 1.0, 1.0, 1.0)))
+            .map(|n| {
+                (
+                    item(&format!("q{n}"), Source::CharterSeed),
+                    inputs(f64::from(n) + 1.0, 1.0, 1.0, 1.0),
+                )
+            })
             .collect();
         let scored = score(&slate);
         // Both ids are fixed. The second half of this test asserts that two
@@ -900,12 +926,19 @@ mod tests {
         for seq in 0..10 {
             let a = select(&scored, 0.3, seed_for(session, seq)).expect("a choice");
             let b = select(&scored, 0.3, seed_for(session, seq)).expect("a choice");
-            assert_eq!(a, b, "the draw is not reproducible, so its propensity is a claim");
+            assert_eq!(
+                a, b,
+                "the draw is not reproducible, so its propensity is a claim"
+            );
         }
         // And two sessions do not march in step.
         let other = Uuid::from_u128(0x5E55_1074_0000_0000_0000_0000_0000_0003);
         let mine: Vec<Uuid> = (0..10)
-            .map(|s| select(&scored, 0.3, seed_for(session, s)).expect("a").chosen)
+            .map(|s| {
+                select(&scored, 0.3, seed_for(session, s))
+                    .expect("a")
+                    .chosen
+            })
             .collect();
         let theirs: Vec<Uuid> = (0..10)
             .map(|s| select(&scored, 0.3, seed_for(other, s)).expect("a").chosen)
@@ -916,7 +949,12 @@ mod tests {
     #[test]
     fn the_propensities_of_the_two_branches_sum_to_one() {
         let slate: Vec<(AgendaItem, Inputs)> = (0..4)
-            .map(|n| (item(&format!("q{n}"), Source::CharterSeed), inputs(f64::from(n) + 1.0, 1.0, 1.0, 1.0)))
+            .map(|n| {
+                (
+                    item(&format!("q{n}"), Source::CharterSeed),
+                    inputs(f64::from(n) + 1.0, 1.0, 1.0, 1.0),
+                )
+            })
             .collect();
         let scored = score(&slate);
         let share = 0.2;
@@ -951,7 +989,11 @@ mod tests {
         assert_eq!(set[0]["not_estimated"][0], "cost");
         // The rationale says it out loud rather than presenting a bare number.
         let s = select(&scored, 0.15, 7).expect("a choice");
-        assert!(s.rationale.contains("not estimated: cost"), "{}", s.rationale);
+        assert!(
+            s.rationale.contains("not estimated: cost"),
+            "{}",
+            s.rationale
+        );
     }
 
     #[test]
@@ -970,9 +1012,18 @@ mod tests {
         // The argument for normalising cost: without it, a $9,000 item makes
         // every other total look identical next to it.
         let slate = vec![
-            (item("cheap", Source::CharterSeed), inputs(1.0, 1.0, 1.0, 1.0)),
-            (item("also cheap", Source::CharterSeed), inputs(1.0, 1.0, 1.0, 2.0)),
-            (item("enormous", Source::CharterSeed), inputs(1.0, 1.0, 1.0, 9000.0)),
+            (
+                item("cheap", Source::CharterSeed),
+                inputs(1.0, 1.0, 1.0, 1.0),
+            ),
+            (
+                item("also cheap", Source::CharterSeed),
+                inputs(1.0, 1.0, 1.0, 2.0),
+            ),
+            (
+                item("enormous", Source::CharterSeed),
+                inputs(1.0, 1.0, 1.0, 9000.0),
+            ),
         ];
         let scored = score(&slate);
         let cheap = scored[0].normalised.total;
@@ -994,7 +1045,10 @@ mod tests {
         assert_eq!(fresh.provenance, Provenance::Measured { n: 0 });
         let asked = novelty_from_prior(20);
         assert!(asked.raw < fresh.raw);
-        assert!(asked.raw > 0.0, "a repeated question is worth less, never nothing");
+        assert!(
+            asked.raw > 0.0,
+            "a repeated question is worth less, never nothing"
+        );
         assert!(novelty_from_prior(200).raw < asked.raw);
         // Monotone, which is the only property the ranking depends on.
         let mut last = f64::INFINITY;

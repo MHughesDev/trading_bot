@@ -41,7 +41,13 @@ pub fn funding_as_of(
     as_of: DateTime<Utc>,
 ) -> Option<Decimal> {
     obs.iter()
-        .filter(|o| o.instrument_id == instrument && o.venue_id == venue && o.kind == kind && o.settlement_time == settlement && o.knowledge_time <= as_of)
+        .filter(|o| {
+            o.instrument_id == instrument
+                && o.venue_id == venue
+                && o.kind == kind
+                && o.settlement_time == settlement
+                && o.knowledge_time <= as_of
+        })
         .max_by_key(|o| o.knowledge_time)
         .map(|o| o.rate)
 }
@@ -58,10 +64,20 @@ pub struct ListingMembership {
 /// The tradable universe on a venue at `at`, as known by `as_of`. Delisted coins are
 /// kept in the history — excluding them is survivorship bias.
 #[must_use]
-pub fn listed_at(rows: &[ListingMembership], venue: VenueKey, at: DateTime<Utc>, as_of: DateTime<Utc>) -> Vec<InstrumentKey> {
+pub fn listed_at(
+    rows: &[ListingMembership],
+    venue: VenueKey,
+    at: DateTime<Utc>,
+    as_of: DateTime<Utc>,
+) -> Vec<InstrumentKey> {
     let mut v: Vec<InstrumentKey> = rows
         .iter()
-        .filter(|r| r.venue_id == venue && r.knowledge_time <= as_of && r.listed_from <= at && r.delisted_at.is_none_or(|d| at < d))
+        .filter(|r| {
+            r.venue_id == venue
+                && r.knowledge_time <= as_of
+                && r.listed_from <= at
+                && r.delisted_at.is_none_or(|d| at < d)
+        })
         .map(|r| r.instrument_id)
         .collect();
     v.sort();
@@ -100,7 +116,11 @@ impl Default for ConsolidationRule {
 
 /// Volume-weighted price across eligible venues known and fresh at `as_of`.
 #[must_use]
-pub fn consolidated_price(quotes: &[VenueQuote], rule: &ConsolidationRule, as_of: DateTime<Utc>) -> Option<Decimal> {
+pub fn consolidated_price(
+    quotes: &[VenueQuote],
+    rule: &ConsolidationRule,
+    as_of: DateTime<Utc>,
+) -> Option<Decimal> {
     let fresh = |q: &&VenueQuote| {
         q.quality_tier <= rule.max_quality_tier
             && q.knowledge_time <= as_of
@@ -110,7 +130,9 @@ pub fn consolidated_price(quotes: &[VenueQuote], rule: &ConsolidationRule, as_of
     let (num, den) = quotes
         .iter()
         .filter(fresh)
-        .fold((Decimal::ZERO, Decimal::ZERO), |(n, d), q| (n + q.price * q.volume, d + q.volume));
+        .fold((Decimal::ZERO, Decimal::ZERO), |(n, d), q| {
+            (n + q.price * q.volume, d + q.volume)
+        });
     (den > Decimal::ZERO).then(|| num / den)
 }
 
@@ -138,7 +160,12 @@ impl SeasonalProfile {
     /// Fit from `(time, |return|)` observations known by `as_of`. Returns `None` if
     /// there is too little data to populate the profile.
     #[must_use]
-    pub fn fit(venue_id: VenueKey, version: &str, obs: &[(DateTime<Utc>, f64)], as_of: DateTime<Utc>) -> Option<Self> {
+    pub fn fit(
+        venue_id: VenueKey,
+        version: &str,
+        obs: &[(DateTime<Utc>, f64)],
+        as_of: DateTime<Utc>,
+    ) -> Option<Self> {
         let mut sums: HashMap<u32, (f64, u32)> = HashMap::new();
         for (t, abs_ret) in obs.iter().filter(|(t, r)| *t <= as_of && r.is_finite()) {
             let e = sums.entry(season_slot(*t)).or_default();
@@ -148,7 +175,10 @@ impl SeasonalProfile {
         if sums.is_empty() {
             return None;
         }
-        let means: HashMap<u32, f64> = sums.into_iter().map(|(k, (s, n))| (k, s / f64::from(n))).collect();
+        let means: HashMap<u32, f64> = sums
+            .into_iter()
+            .map(|(k, (s, n))| (k, s / f64::from(n)))
+            .collect();
         let grand = means.values().sum::<f64>() / means.len() as f64;
         if grand <= 0.0 {
             return None;
@@ -166,7 +196,11 @@ impl SeasonalProfile {
     #[must_use]
     pub fn deflate(&self, t: DateTime<Utc>, ret: f64) -> f64 {
         let f = self.factors.get(&season_slot(t)).copied().unwrap_or(1.0);
-        if f > 0.0 { ret / f } else { ret }
+        if f > 0.0 {
+            ret / f
+        } else {
+            ret
+        }
     }
 }
 
@@ -184,18 +218,71 @@ mod tests {
     fn predicted_funding_is_visible_before_realized() {
         let s = t(16, 0);
         let obs = vec![
-            FundingObservation { instrument_id: InstrumentKey(1), venue_id: VenueKey(1), kind: FundingKind::Predicted, settlement_time: s, rate: dec!(0.0001), knowledge_time: t(8, 0) },
-            FundingObservation { instrument_id: InstrumentKey(1), venue_id: VenueKey(1), kind: FundingKind::Realized, settlement_time: s, rate: dec!(0.00012), knowledge_time: t(16, 1) },
+            FundingObservation {
+                instrument_id: InstrumentKey(1),
+                venue_id: VenueKey(1),
+                kind: FundingKind::Predicted,
+                settlement_time: s,
+                rate: dec!(0.0001),
+                knowledge_time: t(8, 0),
+            },
+            FundingObservation {
+                instrument_id: InstrumentKey(1),
+                venue_id: VenueKey(1),
+                kind: FundingKind::Realized,
+                settlement_time: s,
+                rate: dec!(0.00012),
+                knowledge_time: t(16, 1),
+            },
         ];
-        assert_eq!(funding_as_of(&obs, InstrumentKey(1), VenueKey(1), FundingKind::Predicted, s, t(12, 0)), Some(dec!(0.0001)));
-        assert_eq!(funding_as_of(&obs, InstrumentKey(1), VenueKey(1), FundingKind::Realized, s, t(12, 0)), None);
-        assert_eq!(funding_as_of(&obs, InstrumentKey(1), VenueKey(1), FundingKind::Realized, s, t(17, 0)), Some(dec!(0.00012)));
+        assert_eq!(
+            funding_as_of(
+                &obs,
+                InstrumentKey(1),
+                VenueKey(1),
+                FundingKind::Predicted,
+                s,
+                t(12, 0)
+            ),
+            Some(dec!(0.0001))
+        );
+        assert_eq!(
+            funding_as_of(
+                &obs,
+                InstrumentKey(1),
+                VenueKey(1),
+                FundingKind::Realized,
+                s,
+                t(12, 0)
+            ),
+            None
+        );
+        assert_eq!(
+            funding_as_of(
+                &obs,
+                InstrumentKey(1),
+                VenueKey(1),
+                FundingKind::Realized,
+                s,
+                t(17, 0)
+            ),
+            Some(dec!(0.00012))
+        );
     }
 
     #[test]
     fn delisted_coins_stay_in_history() {
-        let rows = vec![ListingMembership { instrument_id: InstrumentKey(3), venue_id: VenueKey(1), listed_from: t(0, 0), delisted_at: Some(t(10, 0)), knowledge_time: t(0, 0) }];
-        assert_eq!(listed_at(&rows, VenueKey(1), t(5, 0), t(23, 0)), vec![InstrumentKey(3)]);
+        let rows = vec![ListingMembership {
+            instrument_id: InstrumentKey(3),
+            venue_id: VenueKey(1),
+            listed_from: t(0, 0),
+            delisted_at: Some(t(10, 0)),
+            knowledge_time: t(0, 0),
+        }];
+        assert_eq!(
+            listed_at(&rows, VenueKey(1), t(5, 0), t(23, 0)),
+            vec![InstrumentKey(3)]
+        );
         assert!(listed_at(&rows, VenueKey(1), t(11, 0), t(23, 0)).is_empty());
     }
 
@@ -203,12 +290,39 @@ mod tests {
     fn consolidated_price_excludes_stale_and_low_tier() {
         let as_of = t(12, 0);
         let q = vec![
-            VenueQuote { venue_id: VenueKey(1), quality_tier: 1, price: dec!(100), volume: dec!(1), knowledge_time: as_of - Duration::seconds(10) },
-            VenueQuote { venue_id: VenueKey(2), quality_tier: 1, price: dec!(110), volume: dec!(3), knowledge_time: as_of - Duration::seconds(30) },
-            VenueQuote { venue_id: VenueKey(3), quality_tier: 1, price: dec!(999), volume: dec!(9), knowledge_time: as_of - Duration::seconds(600) },
-            VenueQuote { venue_id: VenueKey(4), quality_tier: 3, price: dec!(1), volume: dec!(50), knowledge_time: as_of },
+            VenueQuote {
+                venue_id: VenueKey(1),
+                quality_tier: 1,
+                price: dec!(100),
+                volume: dec!(1),
+                knowledge_time: as_of - Duration::seconds(10),
+            },
+            VenueQuote {
+                venue_id: VenueKey(2),
+                quality_tier: 1,
+                price: dec!(110),
+                volume: dec!(3),
+                knowledge_time: as_of - Duration::seconds(30),
+            },
+            VenueQuote {
+                venue_id: VenueKey(3),
+                quality_tier: 1,
+                price: dec!(999),
+                volume: dec!(9),
+                knowledge_time: as_of - Duration::seconds(600),
+            },
+            VenueQuote {
+                venue_id: VenueKey(4),
+                quality_tier: 3,
+                price: dec!(1),
+                volume: dec!(50),
+                knowledge_time: as_of,
+            },
         ];
-        assert_eq!(consolidated_price(&q, &ConsolidationRule::default(), as_of), Some(dec!(107.5)));
+        assert_eq!(
+            consolidated_price(&q, &ConsolidationRule::default(), as_of),
+            Some(dec!(107.5))
+        );
     }
 
     #[test]
@@ -223,9 +337,13 @@ mod tests {
                 }
             }
         }
-        let p = SeasonalProfile::fit(VenueKey(1), "v1", &obs, t(23, 59) + Duration::days(7)).unwrap();
+        let p =
+            SeasonalProfile::fit(VenueKey(1), "v1", &obs, t(23, 59) + Duration::days(7)).unwrap();
         let spike = p.deflate(t(16, 15), 0.004);
         let calm = p.deflate(t(16, 7), 0.001);
-        assert!((spike - calm).abs() < 1e-12, "deflated returns should be comparable: {spike} vs {calm}");
+        assert!(
+            (spike - calm).abs() < 1e-12,
+            "deflated returns should be comparable: {spike} vs {calm}"
+        );
     }
 }

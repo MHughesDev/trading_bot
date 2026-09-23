@@ -70,7 +70,7 @@ pub use fold::{fold, Anomaly, EventKind, Folded, SessionEvent, SessionState};
 pub use replenish::{absorb, on_drain, Drain, Replenished, SurveyReport};
 pub use select::{
     novelty_from, precheck_factor, Declared, Inputs, PolicyField, PrecheckFactor, Provenance,
-    Scored, SelectionPolicy, Selection, Signal,
+    Scored, Selection, SelectionPolicy, Signal,
 };
 pub use sources::{ingest, Fired, Ingest, World};
 pub use stall::{detect, Amendment, Diagnosis, FinishedRun, Precheck, Rule, Tripped};

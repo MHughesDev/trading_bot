@@ -35,8 +35,7 @@ fn migration() -> String {
         .and_then(Path::parent)
         .expect("crates/<name> sits two below the root")
         .join("migrations/0122_semantic_memory.sql");
-    std::fs::read_to_string(&p)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", p.display()))
+    std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("cannot read {}: {e}", p.display()))
 }
 
 /// The quoted strings inside the `IN (...)` list that follows `column IN (`.
@@ -135,8 +134,14 @@ fn every_validate_rule_has_a_constraint_behind_it() {
     let required: [(&str, &str); 7] = [
         ("EntryError::NoProvenance", "prov_run_id TEXT NOT NULL"),
         ("EntryError::NoProvenance", "prov_tool TEXT NOT NULL"),
-        ("EntryError::NoProvenance", "prov_tool_version TEXT NOT NULL"),
-        ("EntryError::NoProvenance", "prov_template_hash TEXT NOT NULL"),
+        (
+            "EntryError::NoProvenance",
+            "prov_tool_version TEXT NOT NULL",
+        ),
+        (
+            "EntryError::NoProvenance",
+            "prov_template_hash TEXT NOT NULL",
+        ),
         ("EntryError::ClaimTooLong", "char_length(claim) <= 300"),
         ("EntryError::EmptySubject", "btrim(subject) <> ''"),
         ("EntryError::NoWindow", "window_start DATE NOT NULL"),
@@ -207,7 +212,11 @@ fn the_retrieval_slot_check_lists_exactly_the_rust_slots() {
     })
     .collect();
     let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-    assert_mirrors(&migration_named("0124_memory_retrievals.sql"), "slot", &refs);
+    assert_mirrors(
+        &migration_named("0124_memory_retrievals.sql"),
+        "slot",
+        &refs,
+    );
 }
 
 /// `agent_turn_summaries.outcome` lists the outcomes the loop actually reaches.

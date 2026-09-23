@@ -31,7 +31,9 @@ fn map_err(e: JobStoreError) -> axum::response::Response {
         JobStoreError::Invalid(_) => (StatusCode::UNPROCESSABLE_ENTITY, "invalid_request"),
         JobStoreError::Json(_) => (StatusCode::UNPROCESSABLE_ENTITY, "invalid_json"),
         JobStoreError::Sqlx(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
-        JobStoreError::Ledger(ledger::LedgerError::Backend(_)) => (StatusCode::INTERNAL_SERVER_ERROR, "ledger_unavailable"),
+        JobStoreError::Ledger(ledger::LedgerError::Backend(_)) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, "ledger_unavailable")
+        }
         JobStoreError::Ledger(_) => (StatusCode::UNPROCESSABLE_ENTITY, "trial_refused"),
     };
     (

@@ -204,7 +204,11 @@ mod tests {
         let b = series(500, 100.0);
         let r = check(&a, &b, &cfg());
         assert_eq!(r.outcome, Outcome::Pass, "{}", r.detail);
-        assert!(r.metric.unwrap() < 1.0, "identical series deviate by ~0 bp: {:?}", r.metric);
+        assert!(
+            r.metric.unwrap() < 1.0,
+            "identical series deviate by ~0 bp: {:?}",
+            r.metric
+        );
     }
 
     /// The failure Phase 1 is most likely to introduce: a backfilled window that

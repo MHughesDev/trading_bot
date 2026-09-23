@@ -35,11 +35,7 @@ const KNOWN_UNWIRED: &[&str] = &["ReconciliationMismatch", "HardDataStaleness"];
 
 /// The variants the scan was written for. If the scan stops finding these, it is
 /// broken rather than satisfied.
-const EXPECTED_VARIANTS: &[&str] = &[
-    "ReconciliationMismatch",
-    "LeaseLost",
-    "HardDataStaleness",
-];
+const EXPECTED_VARIANTS: &[&str] = &["ReconciliationMismatch", "LeaseLost", "HardDataStaleness"];
 
 fn crate_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()

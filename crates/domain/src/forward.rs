@@ -148,7 +148,9 @@ impl ObservationWindow {
     #[must_use]
     pub fn days(&self) -> u32 {
         let span = (self.last_bar.date_naive() - self.first_bar.date_naive()).num_days();
-        u32::try_from(span.max(0)).unwrap_or(u32::MAX).saturating_add(1)
+        u32::try_from(span.max(0))
+            .unwrap_or(u32::MAX)
+            .saturating_add(1)
     }
 }
 
@@ -181,7 +183,9 @@ pub struct Gate15Evidence {
 pub enum EvidenceError {
     #[error("no observed-knowledge forward observations; {backfilled} backfilled rows were excluded (D-T1)")]
     NoObservedRows { backfilled: usize },
-    #[error("observations span more than one numeraire ({left} and {right}); they are not one series")]
+    #[error(
+        "observations span more than one numeraire ({left} and {right}); they are not one series"
+    )]
     MixedNumeraire { left: Numeraire, right: Numeraire },
 }
 

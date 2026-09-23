@@ -27,8 +27,14 @@ fn the_shipped_config_parses() {
 #[test]
 fn the_shipped_config_matches_the_specs_boundaries() {
     let cfg = QcConfig::from_toml(&shipped()).unwrap();
-    assert!((cfg.coverage.b_max_missing - 0.005).abs() < f64::EPSILON, "B is 0.5%");
-    assert!((cfg.coverage.d_min_missing - 0.05).abs() < f64::EPSILON, "D is 5%");
+    assert!(
+        (cfg.coverage.b_max_missing - 0.005).abs() < f64::EPSILON,
+        "B is 0.5%"
+    );
+    assert!(
+        (cfg.coverage.d_min_missing - 0.05).abs() < f64::EPSILON,
+        "D is 5%"
+    );
     assert!((cfg.bad_ticks.sigma_multiple - 8.0).abs() < f64::EPSILON);
     assert!((cfg.bad_ticks.reversal_fraction - 0.8).abs() < f64::EPSILON);
     assert!((cfg.volume.spike_multiple - 20.0).abs() < f64::EPSILON);
@@ -46,7 +52,10 @@ fn every_collected_timeframe_has_its_own_stale_threshold() {
             "{tf} has no stale-run threshold and would fall back to `default`"
         );
     }
-    assert!(cfg.stale.runs.contains_key("default"), "the fallback must exist");
+    assert!(
+        cfg.stale.runs.contains_key("default"),
+        "the fallback must exist"
+    );
 }
 
 /// The shipped file and the compiled defaults must agree, or a deployment that

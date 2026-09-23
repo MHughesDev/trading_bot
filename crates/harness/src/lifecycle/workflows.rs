@@ -78,7 +78,12 @@ const INVESTIGATE: Skeleton = Skeleton {
         Stage::Run,
         Stage::Closed,
     ],
-    skippable: &[Stage::Refine, Stage::Compare, Stage::Reproduce, Stage::Propose],
+    skippable: &[
+        Stage::Refine,
+        Stage::Compare,
+        Stage::Reproduce,
+        Stage::Propose,
+    ],
     verdicts: &["supported", "refuted", "inconclusive", "blocked"],
     spends_trials: true,
 };
@@ -215,10 +220,7 @@ pub enum TransitionError {
         "`{workflow:?}` requires `{skipped:?}` and this transition skips it. \
          Skipping a stage is allowed only where the skeleton says so."
     )]
-    SkipsRequired {
-        workflow: Workflow,
-        skipped: Stage,
-    },
+    SkipsRequired { workflow: Workflow, skipped: Stage },
     #[error("`{workflow:?}` has no `{stage:?}` stage")]
     NotInWorkflow { workflow: Workflow, stage: Stage },
     #[error("a run does not move backwards: `{from:?}` is after `{to:?}`")]
@@ -252,14 +254,13 @@ fn position(stage: Stage) -> usize {
 /// # Errors
 /// [`TransitionError`] naming the stage that was skipped, or the stage that is
 /// not part of this workflow at all.
-pub fn may_transition(
-    workflow: Workflow,
-    from: Stage,
-    to: Stage,
-) -> Result<(), TransitionError> {
+pub fn may_transition(workflow: Workflow, from: Stage, to: Stage) -> Result<(), TransitionError> {
     let sk = skeleton(workflow);
     if !sk.required.contains(&to) && !sk.skippable.contains(&to) {
-        return Err(TransitionError::NotInWorkflow { workflow, stage: to });
+        return Err(TransitionError::NotInWorkflow {
+            workflow,
+            stage: to,
+        });
     }
     let (a, b) = (position(from), position(to));
     if b <= a {
@@ -318,8 +319,8 @@ mod tests {
         assert!(sk.required.contains(&Stage::Preregister));
 
         // Explore straight to Run jumps the registration.
-        let err = may_transition(Workflow::Falsify, Stage::Explore, Stage::Run)
-            .expect_err("refused");
+        let err =
+            may_transition(Workflow::Falsify, Stage::Explore, Stage::Run).expect_err("refused");
         assert_eq!(
             err,
             TransitionError::SkipsRequired {

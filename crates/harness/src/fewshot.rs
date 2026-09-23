@@ -83,10 +83,7 @@ pub fn block(namespaces: &[String], want: u32) -> Option<Block> {
         if chosen.len() >= want {
             break;
         }
-        if let Some(e) = EXAMPLES
-            .iter()
-            .find(|e| e.namespace == Some(ns.as_str()))
-        {
+        if let Some(e) = EXAMPLES.iter().find(|e| e.namespace == Some(ns.as_str())) {
             chosen.push(e);
         }
     }

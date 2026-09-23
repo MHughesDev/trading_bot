@@ -233,12 +233,7 @@ fn layout_rank(kind: RecordKind) -> u8 {
 /// Under [`SelectionMode::Chronological`] this is a no-op returning every live
 /// record in order, which is Part I's behaviour exactly.
 #[must_use]
-pub fn select(
-    store: &RunStore,
-    query: &Query,
-    budget: u32,
-    policy: &ContextPolicy,
-) -> Selection {
+pub fn select(store: &RunStore, query: &Query, budget: u32, policy: &ContextPolicy) -> Selection {
     let live: Vec<&Record> = store
         .live()
         .filter(|r| !query.excluded.contains(&r.id))
@@ -252,8 +247,7 @@ pub fn select(
     if policy.selection == SelectionMode::Chronological {
         // The control. Everything, in arrival order; Part I's assembler does the
         // fitting, so nothing here degrades or drops.
-        let candidates: Vec<Candidate<'_>> =
-            live.iter().map(|r| Candidate::new(r, 1.0)).collect();
+        let candidates: Vec<Candidate<'_>> = live.iter().map(|r| Candidate::new(r, 1.0)).collect();
         report.selected = live.iter().map(|r| r.id).collect();
         report.bound_by.push("policy v1: no selection".into());
         return Selection {
@@ -329,9 +323,10 @@ pub fn select(
                 .then_with(|| (live[*a].step, live[*a].id).cmp(&(live[*b].step, live[*b].id)))
         });
         remaining.truncate(MMR_CANDIDATES);
-        report
-            .bound_by
-            .push(format!("scored the top {MMR_CANDIDATES} of {} candidates", live.len()));
+        report.bound_by.push(format!(
+            "scored the top {MMR_CANDIDATES} of {} candidates",
+            live.len()
+        ));
     }
     let all_indices: Vec<usize> = (0..live.len()).filter(|i| !must.contains(i)).collect();
 
@@ -343,9 +338,10 @@ pub fn select(
             policy.admit_threshold
         };
         if score < threshold {
-            report
-                .bound_by
-                .push(format!("below the {} threshold", if sticky { "drop" } else { "admit" }));
+            report.bound_by.push(format!(
+                "below the {} threshold",
+                if sticky { "drop" } else { "admit" }
+            ));
             break;
         }
         final_scores[pick] = score;
@@ -364,7 +360,9 @@ pub fn select(
             {
                 chosen.push(i);
                 remaining.retain(|j| *j != i);
-                report.bound_by.push(format!("floor: one {}", kind.as_str()));
+                report
+                    .bound_by
+                    .push(format!("floor: one {}", kind.as_str()));
             }
         }
     }
@@ -510,14 +508,8 @@ fn best(
         .iter()
         .map(|i| {
             let r = live[*i];
-            let overlap: f32 = chosen
-                .iter()
-                .map(|j| redundancy(r, live[*j]))
-                .sum::<f32>();
-            (
-                *i,
-                base[*i] - overlap * policy.weights.redundancy_penalty,
-            )
+            let overlap: f32 = chosen.iter().map(|j| redundancy(r, live[*j])).sum::<f32>();
+            (*i, base[*i] - overlap * policy.weights.redundancy_penalty)
         })
         // `(step asc, id asc)` on a tie, never map order: a `HashMap` iteration
         // order would render one store as two different prompts.
@@ -580,9 +572,10 @@ fn mentions_tool(r: &Record, query: &Query) -> bool {
 }
 
 fn signals(r: &Record, q: &Query, policy: &ContextPolicy) -> Signals {
-    let focus_hit = q.focus.as_ref().is_some_and(|f| {
-        r.subject.label().contains(f.as_str()) || r.source == *f
-    });
+    let focus_hit = q
+        .focus
+        .as_ref()
+        .is_some_and(|f| r.subject.label().contains(f.as_str()) || r.source == *f);
     let id_overlap = r
         .ids
         .values()
@@ -661,7 +654,10 @@ fn percentile_rank(raw: &[Signals]) -> Vec<Signals> {
 fn reason_for(r: &Record, s: &Signals, must: bool, q: &Query) -> String {
     if must {
         if r.kind == RecordKind::Correction {
-            return format!("a correction for {}", q.active_tool.as_deref().unwrap_or("a planned tool"));
+            return format!(
+                "a correction for {}",
+                q.active_tool.as_deref().unwrap_or("a planned tool")
+            );
         }
         return "carries an id the next step needs".into();
     }
@@ -790,12 +786,22 @@ mod tests {
         // One correction and one finding, both about something else and both
         // scoring worse than the ten.
         s.insert(
-            Draft::new(1, RecordKind::Correction, "validate_strategy", Body::text("bad name"))
-                .with_subject(Subject::instrument("ETH-USD")),
+            Draft::new(
+                1,
+                RecordKind::Correction,
+                "validate_strategy",
+                Body::text("bad name"),
+            )
+            .with_subject(Subject::instrument("ETH-USD")),
         );
         s.insert(
-            Draft::new(2, RecordKind::Finding, "record_finding", Body::text("eth funding"))
-                .with_subject(Subject::instrument("ETH-USD")),
+            Draft::new(
+                2,
+                RecordKind::Finding,
+                "record_finding",
+                Body::text("eth funding"),
+            )
+            .with_subject(Subject::instrument("ETH-USD")),
         );
         let sel = select(&s, &q(12), 10_000, &ContextPolicy::v2());
         let kinds: Vec<RecordKind> = sel
@@ -819,8 +825,13 @@ mod tests {
         let mut s = store_with(20, "BTC-USD");
         // Ancient, off-subject, uncited — it loses on every signal.
         let needed = s.insert(
-            Draft::new(0, RecordKind::ToolResult, "run_backtest", Body::text("x".repeat(200)))
-                .with_id("experiment_id", "exp_42"),
+            Draft::new(
+                0,
+                RecordKind::ToolResult,
+                "run_backtest",
+                Body::text("x".repeat(200)),
+            )
+            .with_id("experiment_id", "exp_42"),
         );
         let query = q(40).requiring("exp_42");
         let sel = select(&s, &query, 200, &ContextPolicy::v2());
@@ -828,7 +839,11 @@ mod tests {
             sel.ids().contains(&needed),
             "the record that produced the id the step needs is not a candidate"
         );
-        assert!(sel.report.bound_by.iter().any(|b| b.contains("required id")));
+        assert!(sel
+            .report
+            .bound_by
+            .iter()
+            .any(|b| b.contains("required id")));
     }
 
     /// A correction for the *upcoming* tool survives a squeeze (§24.7).
@@ -858,17 +873,30 @@ mod tests {
         let mut s = RunStore::new();
         let subject = Subject::instrument("BTC-USD");
         let a = s.insert(
-            Draft::new(2, RecordKind::ToolResult, "source_a", Body::text("sharpe 1.42"))
-                .with_subject(subject.clone())
-                .measuring(Measurement::new("sharpe", 1.42).with_se(0.05)),
+            Draft::new(
+                2,
+                RecordKind::ToolResult,
+                "source_a",
+                Body::text("sharpe 1.42"),
+            )
+            .with_subject(subject.clone())
+            .measuring(Measurement::new("sharpe", 1.42).with_se(0.05)),
         );
         let b = s.insert(
-            Draft::new(6, RecordKind::ToolResult, "source_b", Body::text("sharpe 2.40"))
-                .with_subject(subject)
-                .measuring(Measurement::new("sharpe", 2.40).with_se(0.05)),
+            Draft::new(
+                6,
+                RecordKind::ToolResult,
+                "source_b",
+                Body::text("sharpe 2.40"),
+            )
+            .with_subject(subject)
+            .measuring(Measurement::new("sharpe", 2.40).with_se(0.05)),
         );
         let sel = select(&s, &q(7), 10_000, &ContextPolicy::v2());
-        assert!(sel.ids().contains(&a) && sel.ids().contains(&b), "both render");
+        assert!(
+            sel.ids().contains(&a) && sel.ids().contains(&b),
+            "both render"
+        );
         assert!(
             sel.disagreements.contains(&(a, b)) || sel.disagreements.contains(&(b, a)),
             "and the disagreement is named: {:?}",
@@ -897,8 +925,13 @@ mod tests {
             );
         }
         s.insert(
-            Draft::new(3, RecordKind::Finding, "record_finding", Body::text("a finding"))
-                .with_subject(Subject::instrument("BTC-USD")),
+            Draft::new(
+                3,
+                RecordKind::Finding,
+                "record_finding",
+                Body::text("a finding"),
+            )
+            .with_subject(Subject::instrument("BTC-USD")),
         );
         let sel = select(&s, &q(4), 4_000, &ContextPolicy::v2());
         let untrusted: u32 = sel
@@ -923,9 +956,21 @@ mod tests {
     #[test]
     fn an_unbounded_signal_does_not_swamp_the_weights() {
         let raw = vec![
-            Signals { citations: 400.0, recency: 1.0, ..Signals::default() },
-            Signals { citations: 1.0, recency: 0.9, ..Signals::default() },
-            Signals { citations: 0.0, recency: 0.8, ..Signals::default() },
+            Signals {
+                citations: 400.0,
+                recency: 1.0,
+                ..Signals::default()
+            },
+            Signals {
+                citations: 1.0,
+                recency: 0.9,
+                ..Signals::default()
+            },
+            Signals {
+                citations: 0.0,
+                recency: 0.8,
+                ..Signals::default()
+            },
         ];
         let ranked = percentile_rank(&raw);
         for s in &ranked {
@@ -972,14 +1017,38 @@ mod tests {
     #[test]
     fn winners_are_re_sorted_into_the_stable_layout() {
         let mut s = RunStore::new();
-        s.insert(Draft::new(9, RecordKind::Correction, "t", Body::text("late correction")));
-        s.insert(Draft::new(1, RecordKind::Finding, "record_finding", Body::text("early finding")));
-        s.insert(Draft::new(5, RecordKind::Memory, "memory", Body::text("brief")));
+        s.insert(Draft::new(
+            9,
+            RecordKind::Correction,
+            "t",
+            Body::text("late correction"),
+        ));
+        s.insert(Draft::new(
+            1,
+            RecordKind::Finding,
+            "record_finding",
+            Body::text("early finding"),
+        ));
+        s.insert(Draft::new(
+            5,
+            RecordKind::Memory,
+            "memory",
+            Body::text("brief"),
+        ));
         let sel = select(&s, &q(10), 10_000, &ContextPolicy::v2());
-        let kinds: Vec<RecordKind> = sel.ids().iter().filter_map(|id| s.get(*id)).map(|r| r.kind).collect();
+        let kinds: Vec<RecordKind> = sel
+            .ids()
+            .iter()
+            .filter_map(|id| s.get(*id))
+            .map(|r| r.kind)
+            .collect();
         assert_eq!(
             kinds,
-            vec![RecordKind::Memory, RecordKind::Finding, RecordKind::Correction],
+            vec![
+                RecordKind::Memory,
+                RecordKind::Finding,
+                RecordKind::Correction
+            ],
             "the correction sits last, closest to the task"
         );
     }
@@ -993,10 +1062,7 @@ mod tests {
         assert!(!rendered.is_empty());
         for (id, head, _) in &rendered {
             assert!(head.contains(&id.to_string()));
-            assert!(
-                head.contains(" — "),
-                "no reason clause on {id}: {head}"
-            );
+            assert!(head.contains(" — "), "no reason clause on {id}: {head}");
         }
     }
 

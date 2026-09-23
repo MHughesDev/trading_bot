@@ -141,7 +141,9 @@ pub fn numeraire_of(symbol: &str) -> Option<String> {
     }
     // Suffix forms (`BTCUSDT`). Longest first, so `USDT` is not read as `USD`
     // with a stray T.
-    const QUOTES: &[&str] = &["USDT", "USDC", "TUSD", "USD", "EUR", "GBP", "JPY", "BTC", "ETH"];
+    const QUOTES: &[&str] = &[
+        "USDT", "USDC", "TUSD", "USD", "EUR", "GBP", "JPY", "BTC", "ETH",
+    ];
     let upper = symbol.to_ascii_uppercase();
     for q in QUOTES {
         if upper.len() > q.len() && upper.ends_with(q) {
@@ -573,7 +575,10 @@ mod tests {
     #[test]
     fn an_unparseable_symbol_does_not_join_someone_elses_numeraire() {
         let e = Exposure::from_run(&run(
-            vec![trade("MYSTERY", 0, 10.0, 50.0, 5.0), trade("BTC-USD", 0, 10.0, 50.0, 5.0)],
+            vec![
+                trade("MYSTERY", 0, 10.0, 50.0, 5.0),
+                trade("BTC-USD", 0, 10.0, 50.0, 5.0),
+            ],
             vec![],
         ))
         .expect("has trades");
@@ -609,7 +614,10 @@ mod tests {
     fn a_costless_run_yields_no_ladder_rather_than_a_flat_one() {
         let e = Exposure::from_run(&run(vec![trade("BTC-USD", 0, 10.0, 100.0, 0.0)], vec![]))
             .expect("has trades");
-        assert_eq!(cost_ladder(&e, COST_MULTIPLES), Err(Missing::NoCostsCharged));
+        assert_eq!(
+            cost_ladder(&e, COST_MULTIPLES),
+            Err(Missing::NoCostsCharged)
+        );
         assert_eq!(breakeven_cost_multiple(&e), Err(Missing::NoCostsCharged));
     }
 
@@ -638,7 +646,10 @@ mod tests {
             })
             .collect();
         let interpolated = breakeven_multiple(&rungs).expect("the ladder crosses zero");
-        assert!((interpolated - scalar).abs() < 1e-6, "{interpolated} vs {scalar}");
+        assert!(
+            (interpolated - scalar).abs() < 1e-6,
+            "{interpolated} vs {scalar}"
+        );
     }
 
     #[test]
@@ -676,17 +687,26 @@ mod tests {
     /// measuring the fix, not the strategy.
     #[test]
     fn a_statistic_is_refused_across_an_engine_boundary() {
-        assert_eq!(one_engine(["sim@1+exits", "sim@1+exits"]).as_deref(), Ok("sim@1+exits"));
+        assert_eq!(
+            one_engine(["sim@1+exits", "sim@1+exits"]).as_deref(),
+            Ok("sim@1+exits")
+        );
         assert!(matches!(
             one_engine(["sim@1", "sim@1+exits"]),
             Err(Missing::MixedEngineVersions(_))
         ));
-        assert!(matches!(one_engine([]), Err(Missing::MixedEngineVersions(_))));
+        assert!(matches!(
+            one_engine([]),
+            Err(Missing::MixedEngineVersions(_))
+        ));
     }
 
     #[test]
     fn a_flat_return_series_has_no_sharpe_basis() {
-        assert_eq!(SharpeBasis::measure(&[0.001; 200], 1.0), Err(Missing::NoSharpe));
+        assert_eq!(
+            SharpeBasis::measure(&[0.001; 200], 1.0),
+            Err(Missing::NoSharpe)
+        );
         assert_eq!(SharpeBasis::measure(&[], 1.0), Err(Missing::NoSharpe));
     }
 

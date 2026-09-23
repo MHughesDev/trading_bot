@@ -73,8 +73,12 @@ impl Outcome {
 impl From<crate::contract::Violation> for Outcome {
     fn from(v: crate::contract::Violation) -> Self {
         match v.blames() {
-            Side::Input => Self::BadInput { detail: v.to_string() },
-            Side::Output => Self::BrokeContract { detail: v.to_string() },
+            Side::Input => Self::BadInput {
+                detail: v.to_string(),
+            },
+            Side::Output => Self::BrokeContract {
+                detail: v.to_string(),
+            },
         }
     }
 }
@@ -189,43 +193,82 @@ mod tests {
     fn a_bad_payload_is_not_held_against_the_skill() {
         let mut s = SkillStats::default();
         for _ in 0..50 {
-            s.record(&Outcome::BadInput { detail: "missing x".into() }, 1);
+            s.record(
+                &Outcome::BadInput {
+                    detail: "missing x".into(),
+                },
+                1,
+            );
         }
         s.record(&Outcome::Ok, 10);
 
         assert_eq!(s.runs, 51);
         assert_eq!(s.bad_input, 50);
         assert_eq!(s.failures, 0);
-        assert_eq!(s.reliability(), Some(1.0), "the skill worked every time it was asked properly");
+        assert_eq!(
+            s.reliability(),
+            Some(1.0),
+            "the skill worked every time it was asked properly"
+        );
     }
 
     #[test]
     fn a_runner_failure_is_not_evidence_about_the_code_it_did_not_run() {
         let mut s = SkillStats::default();
-        s.record(&Outcome::RunnerFailed { detail: "no interpreter".into() }, 0);
+        s.record(
+            &Outcome::RunnerFailed {
+                detail: "no interpreter".into(),
+            },
+            0,
+        );
         assert_eq!(s.runner_failed, 1);
         assert_eq!(s.failures, 0);
-        assert_eq!(s.reliability(), None, "nothing attributable has happened yet");
+        assert_eq!(
+            s.reliability(),
+            None,
+            "nothing attributable has happened yet"
+        );
     }
 
     #[test]
     fn every_other_failure_counts_against_the_skill() {
         let mut s = SkillStats::default();
-        s.record(&Outcome::Raised { exception: "KeyError".into() }, 5);
-        s.record(&Outcome::BrokeContract { detail: "no `sharpe`".into() }, 5);
+        s.record(
+            &Outcome::Raised {
+                exception: "KeyError".into(),
+            },
+            5,
+        );
+        s.record(
+            &Outcome::BrokeContract {
+                detail: "no `sharpe`".into(),
+            },
+            5,
+        );
         s.record(&Outcome::TimedOut { limit_secs: 30 }, 30_000);
-        s.record(&Outcome::Killed { reason: "memory".into() }, 900);
+        s.record(
+            &Outcome::Killed {
+                reason: "memory".into(),
+            },
+            900,
+        );
         assert_eq!(s.failures, 4);
         assert_eq!(s.reliability(), Some(0.0));
     }
 
     #[test]
     fn a_violation_becomes_the_outcome_that_blames_the_right_side() {
-        let input: Outcome = Violation::MissingInputs { missing: vec!["a".into()] }.into();
+        let input: Outcome = Violation::MissingInputs {
+            missing: vec!["a".into()],
+        }
+        .into();
         assert!(matches!(input, Outcome::BadInput { .. }));
         assert!(!input.is_about_the_skill());
 
-        let output: Outcome = Violation::MissingOutputs { missing: vec!["b".into()] }.into();
+        let output: Outcome = Violation::MissingOutputs {
+            missing: vec!["b".into()],
+        }
+        .into();
         assert!(matches!(output, Outcome::BrokeContract { .. }));
         assert!(output.is_about_the_skill());
     }
@@ -265,7 +308,12 @@ mod tests {
             s.record(&Outcome::Ok, 1);
         }
         for _ in 0..20 {
-            s.record(&Outcome::Raised { exception: "x".into() }, 1);
+            s.record(
+                &Outcome::Raised {
+                    exception: "x".into(),
+                },
+                1,
+            );
         }
         assert_eq!(s.confidence(), "mostly works");
 
@@ -274,7 +322,12 @@ mod tests {
             bad.record(&Outcome::Ok, 1);
         }
         for _ in 0..90 {
-            bad.record(&Outcome::Raised { exception: "x".into() }, 1);
+            bad.record(
+                &Outcome::Raised {
+                    exception: "x".into(),
+                },
+                1,
+            );
         }
         assert_eq!(bad.confidence(), "unreliable");
     }
@@ -291,12 +344,22 @@ mod tests {
     fn outcome_codes_are_stable_and_distinct() {
         let all = [
             Outcome::Ok,
-            Outcome::BadInput { detail: String::new() },
-            Outcome::Raised { exception: String::new() },
-            Outcome::BrokeContract { detail: String::new() },
+            Outcome::BadInput {
+                detail: String::new(),
+            },
+            Outcome::Raised {
+                exception: String::new(),
+            },
+            Outcome::BrokeContract {
+                detail: String::new(),
+            },
             Outcome::TimedOut { limit_secs: 1 },
-            Outcome::Killed { reason: String::new() },
-            Outcome::RunnerFailed { detail: String::new() },
+            Outcome::Killed {
+                reason: String::new(),
+            },
+            Outcome::RunnerFailed {
+                detail: String::new(),
+            },
         ];
         let codes: std::collections::BTreeSet<_> = all.iter().map(Outcome::code).collect();
         assert_eq!(codes.len(), all.len(), "codes must be distinct");

@@ -28,8 +28,8 @@ pub use result::{ComputeCost, Flag, InstrumentStat, RunResult, RunStatus, Side, 
 pub use store::{InMemoryRunStore, PutOutcome, RunStore};
 
 use ledger::{
-    DispatchContext, LedgerError, OutcomeVector, Registration, TerminalReason, TrialEvent, TrialLedger, TrialState,
-    TrialSubject,
+    DispatchContext, LedgerError, OutcomeVector, Registration, TerminalReason, TrialEvent,
+    TrialLedger, TrialState, TrialSubject,
 };
 
 /// Engine version stamped on every `RunResult.produced_by`. Two runs from the
@@ -75,10 +75,16 @@ pub fn outcome_of(result: &RunResult) -> OutcomeVector {
 /// The terminal ledger event for an executed Run. Every path sets censoring.
 #[must_use]
 pub fn terminal_event(result: &RunResult) -> TrialEvent {
-    let detail = result.integrity_flags.first().map(|f| format!("{}: {}", f.code, f.detail)).unwrap_or_default();
+    let detail = result
+        .integrity_flags
+        .first()
+        .map(|f| format!("{}: {}", f.code, f.detail))
+        .unwrap_or_default();
     match result.status {
         RunStatus::Ok => TrialEvent::completed(result.run_id.as_str(), Some(outcome_of(result))),
-        RunStatus::RejectedIntegrity => TrialEvent::failed(TerminalReason::IntegrityRejected, detail),
+        RunStatus::RejectedIntegrity => {
+            TrialEvent::failed(TerminalReason::IntegrityRejected, detail)
+        }
         // The reason is part of the status (ADR-P2-30). There is nothing to infer
         // here, and so nothing that a reworded message can change.
         RunStatus::Failed(reason) => TrialEvent::failed(reason, detail),
@@ -97,13 +103,23 @@ pub struct RunDispatch<'a> {
 impl<'a> RunDispatch<'a> {
     #[must_use]
     pub fn new(ctx: &'a DispatchContext, cfg: &'a RunConfig, propensity: f64) -> Self {
-        Self { ctx, cfg, propensity: Some(propensity), exploration_flag: false }
+        Self {
+            ctx,
+            cfg,
+            propensity: Some(propensity),
+            exploration_flag: false,
+        }
     }
 
     /// No propensity: accepted by the ledger only under the legacy marker.
     #[must_use]
     pub fn unlogged(ctx: &'a DispatchContext, cfg: &'a RunConfig) -> Self {
-        Self { ctx, cfg, propensity: None, exploration_flag: false }
+        Self {
+            ctx,
+            cfg,
+            propensity: None,
+            exploration_flag: false,
+        }
     }
 
     #[must_use]
@@ -133,7 +149,11 @@ pub enum RunOrigin {
 
 impl<S: RunStore, E: RunExecutor, L: TrialLedger> Backtest<S, E, L> {
     pub fn new(store: S, executor: E, ledger: L) -> Self {
-        Self { store, executor, ledger }
+        Self {
+            store,
+            executor,
+            ledger,
+        }
     }
 
     pub fn store(&self) -> &S {
@@ -176,14 +196,19 @@ impl<S: RunStore, E: RunExecutor, L: TrialLedger> Backtest<S, E, L> {
         if let Some(cached) = self.store.get(&cfg.run_id) {
             // Dedup must name the trial whose artifact it reuses. If the ledger has no
             // such trial, lineage cannot be proven, so the run executes instead.
-            if let Some(prior) = self.ledger.prior_trial(&d.ctx.tenant_id, cfg.run_id.as_str()) {
+            if let Some(prior) = self
+                .ledger
+                .prior_trial(&d.ctx.tenant_id, cfg.run_id.as_str())
+            {
                 let trial_id = ticket.trial_id();
-                self.ledger.settle(ticket, TrialEvent::deduplicated(prior, cfg.run_id.as_str()))?;
+                self.ledger
+                    .settle(ticket, TrialEvent::deduplicated(prior, cfg.run_id.as_str()))?;
                 return Ok((cached, RunOrigin::CacheHit, trial_id));
             }
         }
 
-        self.ledger.transition(&mut ticket, TrialEvent::to(TrialState::Running))?;
+        self.ledger
+            .transition(&mut ticket, TrialEvent::to(TrialState::Running))?;
         let result = self.executor.execute(cfg, &ticket);
         debug_assert_eq!(result.run_id, cfg.run_id, "executor must echo run_id");
         self.store.put(result.clone());
@@ -218,8 +243,8 @@ impl<S: RunStore, E: RunExecutor, L: TrialLedger> Backtest<S, E, L> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ledger::{DispatchContext, InMemoryLedger};
     use crate::run::executor::{daily_curve, map_sim_result};
+    use ledger::{DispatchContext, InMemoryLedger};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -338,7 +363,9 @@ mod tests {
         let ledger = InMemoryLedger::new();
         let bt = Backtest::new(
             InMemoryRunStore::new(),
-            ClosureExecutor(|c: &RunConfig| RunResult::failed(c, TerminalReason::DependencyFailure, "boom", ENGINE_VERSION)),
+            ClosureExecutor(|c: &RunConfig| {
+                RunResult::failed(c, TerminalReason::DependencyFailure, "boom", ENGINE_VERSION)
+            }),
             ledger,
         );
         let ctx = ctx();
@@ -349,7 +376,8 @@ mod tests {
         let (state, cens) = bt.ledger().state_of(rows[0].trial_id).unwrap();
         assert_eq!(state, ledger::TrialState::Failed);
         assert_eq!(
-            cens, ledger::Censoring::Failed,
+            cens,
+            ledger::Censoring::Failed,
             "INV-17: every terminal transition sets censoring"
         );
     }

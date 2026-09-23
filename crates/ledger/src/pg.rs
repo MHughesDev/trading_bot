@@ -14,12 +14,15 @@ use sqlx::{PgPool, Postgres, Row, Transaction};
 use tokio::runtime::Handle;
 use uuid::Uuid;
 
-use crate::anchor::{self, AnchorDocument, AnchorError, AnchorRow, AnchorSigner, DecisionRow, VerificationReport, WormStore};
+use crate::anchor::{
+    self, AnchorDocument, AnchorError, AnchorRow, AnchorSigner, DecisionRow, VerificationReport,
+    WormStore,
+};
 use crate::holdout::{claimed_without_result, HoldoutClaim};
 use crate::neff::{NEff, ReturnSeries};
 use crate::{
-    mint, Decision, DecisionLog, DispatchContext, EventRow, LedgerError, OutcomeVector, Registration, TrialEvent,
-    TrialLedger, TrialRow, TrialState, TrialTicket,
+    mint, Decision, DecisionLog, DispatchContext, EventRow, LedgerError, OutcomeVector,
+    Registration, TrialEvent, TrialLedger, TrialRow, TrialState, TrialTicket,
 };
 
 pub struct PgTrialLedger {
@@ -35,22 +38,34 @@ fn be(e: impl std::fmt::Display) -> LedgerError {
 ///
 /// # Errors
 /// Backend failures.
-pub async fn tenant_tx<'a>(pool: &'a PgPool, tenant_id: &str) -> Result<Transaction<'a, Postgres>, sqlx::Error> {
+pub async fn tenant_tx<'a>(
+    pool: &'a PgPool,
+    tenant_id: &str,
+) -> Result<Transaction<'a, Postgres>, sqlx::Error> {
     let mut tx = pool.begin().await?;
-    sqlx::query("SELECT set_config('app.tenant_id', $1, true)").bind(tenant_id).execute(&mut *tx).await?;
+    sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+        .bind(tenant_id)
+        .execute(&mut *tx)
+        .await?;
     Ok(tx)
 }
-
 
 /// Register a trial inside a caller's transaction, so the trial and whatever it
 /// authorizes (a job row, say) commit or roll back together.
 ///
 /// # Errors
 /// Refused registrations and backend failures.
-pub async fn register_in_tx(tx: &mut Transaction<'_, Postgres>, reg: &Registration<'_>) -> Result<TrialTicket, LedgerError> {
+pub async fn register_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    reg: &Registration<'_>,
+) -> Result<TrialTicket, LedgerError> {
     reg.validate()?;
-    sqlx::query("SELECT set_config('app.tenant_id', $1, true)").bind(&reg.ctx.tenant_id).execute(&mut **tx).await.map_err(be)?;
-        let trial_id: Uuid = sqlx::query_scalar(
+    sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+        .bind(&reg.ctx.tenant_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(be)?;
+    let trial_id: Uuid = sqlx::query_scalar(
             "INSERT INTO mlops.trial (
                  seq, prev_hash, row_hash, tenant_id, campaign_id, experiment_id, parent_trial_id,
                  config_hash, config, dataset_id, split_spec_id, code_hash, image_digest, seed_set,
@@ -90,9 +105,12 @@ pub async fn register_in_tx(tx: &mut Transaction<'_, Postgres>, reg: &Registrati
         .fetch_one(&mut **tx)
         .await
         .map_err(be)?;
-    Ok(mint(trial_id, reg.ctx.tenant_id.clone(), reg.subject.config_hash.clone()))
+    Ok(mint(
+        trial_id,
+        reg.ctx.tenant_id.clone(),
+        reg.subject.config_hash.clone(),
+    ))
 }
-
 
 /// Append a lifecycle event to an existing trial inside a caller's transaction,
 /// validating against the trial's current state as stored. Used where the trial's
@@ -106,12 +124,17 @@ pub async fn append_event_in_tx(
     trial_id: Uuid,
     event: &TrialEvent,
 ) -> Result<TrialState, LedgerError> {
-    sqlx::query("SELECT set_config('app.tenant_id', $1, true)").bind(tenant_id).execute(&mut **tx).await.map_err(be)?;
-    let state: Option<String> = sqlx::query_scalar("SELECT state FROM mlops.trial_state WHERE trial_id = $1")
-        .bind(trial_id)
-        .fetch_optional(&mut **tx)
+    sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+        .bind(tenant_id)
+        .execute(&mut **tx)
         .await
         .map_err(be)?;
+    let state: Option<String> =
+        sqlx::query_scalar("SELECT state FROM mlops.trial_state WHERE trial_id = $1")
+            .bind(trial_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(be)?;
     let from = state
         .as_deref()
         .and_then(TrialState::parse)
@@ -125,13 +148,22 @@ pub async fn append_event_in_tx(
 ///
 /// # Errors
 /// Backend failure.
-pub async fn state_in_tx(tx: &mut Transaction<'_, Postgres>, tenant_id: &str, trial_id: Uuid) -> Result<Option<TrialState>, LedgerError> {
-    sqlx::query("SELECT set_config('app.tenant_id', $1, true)").bind(tenant_id).execute(&mut **tx).await.map_err(be)?;
-    let state: Option<String> = sqlx::query_scalar("SELECT state FROM mlops.trial_state WHERE trial_id = $1")
-        .bind(trial_id)
-        .fetch_optional(&mut **tx)
+pub async fn state_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    tenant_id: &str,
+    trial_id: Uuid,
+) -> Result<Option<TrialState>, LedgerError> {
+    sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+        .bind(tenant_id)
+        .execute(&mut **tx)
         .await
         .map_err(be)?;
+    let state: Option<String> =
+        sqlx::query_scalar("SELECT state FROM mlops.trial_state WHERE trial_id = $1")
+            .bind(trial_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(be)?;
     Ok(state.as_deref().and_then(TrialState::parse))
 }
 
@@ -142,11 +174,15 @@ async fn insert_event(
     to: TrialState,
     event: &TrialEvent,
 ) -> Result<(), LedgerError> {
-    sqlx::query("SELECT set_config('app.tenant_id', $1, true)").bind(tenant_id).execute(&mut **tx).await.map_err(be)?;
+    sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+        .bind(tenant_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(be)?;
     // A composite whose fields are all NULL *is* NULL in SQL; normalize so the
     // digest check never disagrees with the column.
     let o = event.outcome.filter(|o| *o != OutcomeVector::default());
-        sqlx::query(
+    sqlx::query(
             "INSERT INTO mlops.trial_event (
                  trial_id, tenant_id, event_seq, state, censoring, terminal_reason, censor_at_step, run_id,
                  deduplicated_of, outcome, outcome_digest, gate_profile, gate_results, gpu_seconds, cpu_seconds,
@@ -215,7 +251,10 @@ async fn insert_event(
 impl PgTrialLedger {
     #[must_use]
     pub fn new(pool: PgPool) -> Self {
-        Self { pool, handle: Handle::try_current().ok() }
+        Self {
+            pool,
+            handle: Handle::try_current().ok(),
+        }
     }
 
     #[must_use]
@@ -224,7 +263,9 @@ impl PgTrialLedger {
     }
 
     fn block<F: std::future::Future>(&self, fut: F) -> F::Output {
-        let handle = self.handle.as_ref().expect("PgTrialLedger: synchronous call outside a Tokio runtime; use the *_async methods");
+        let handle = self.handle.as_ref().expect(
+            "PgTrialLedger: synchronous call outside a Tokio runtime; use the *_async methods",
+        );
         tokio::task::block_in_place(|| handle.block_on(fut))
     }
 
@@ -244,25 +285,37 @@ impl PgTrialLedger {
     ///
     /// # Errors
     /// Unknown or terminal trials, and backend failures.
-    pub async fn resume_ticket_async(&self, tenant_id: &str, trial_id: Uuid) -> Result<TrialTicket, LedgerError> {
+    pub async fn resume_ticket_async(
+        &self,
+        tenant_id: &str,
+        trial_id: Uuid,
+    ) -> Result<TrialTicket, LedgerError> {
         let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
-        let row: Option<(String, String, bool)> =
-            sqlx::query_as("SELECT config_hash, state, terminal FROM mlops.trial_state WHERE trial_id = $1")
-                .bind(trial_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(be)?;
+        let row: Option<(String, String, bool)> = sqlx::query_as(
+            "SELECT config_hash, state, terminal FROM mlops.trial_state WHERE trial_id = $1",
+        )
+        .bind(trial_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(be)?;
         tx.commit().await.map_err(be)?;
         let (config_hash, state, terminal) = row.ok_or(LedgerError::UnknownTrial(trial_id))?;
         if terminal {
-            return Err(LedgerError::Invalid(format!("trial {trial_id} is already terminal ({state})")));
+            return Err(LedgerError::Invalid(format!(
+                "trial {trial_id} is already terminal ({state})"
+            )));
         }
         let mut t = mint(trial_id, tenant_id.to_string(), config_hash);
-        t.state = TrialState::parse(&state).ok_or_else(|| LedgerError::Invalid(format!("unknown state {state}")))?;
+        t.state = TrialState::parse(&state)
+            .ok_or_else(|| LedgerError::Invalid(format!("unknown state {state}")))?;
         Ok(t)
     }
 
-    async fn append(&self, ticket: &TrialTicket, event: &TrialEvent) -> Result<TrialState, LedgerError> {
+    async fn append(
+        &self,
+        ticket: &TrialTicket,
+        event: &TrialEvent,
+    ) -> Result<TrialState, LedgerError> {
         let to = event.validate(ticket.state)?;
         let mut tx = self.pool.begin().await.map_err(be)?;
         insert_event(&mut tx, &ticket.tenant_id, ticket.trial_id, to, event).await?;
@@ -273,9 +326,15 @@ impl PgTrialLedger {
     ///
     /// # Errors
     /// Illegal transitions and backend failures.
-    pub async fn transition_async(&self, ticket: &mut TrialTicket, event: TrialEvent) -> Result<(), LedgerError> {
+    pub async fn transition_async(
+        &self,
+        ticket: &mut TrialTicket,
+        event: TrialEvent,
+    ) -> Result<(), LedgerError> {
         if event.state.is_some_and(TrialState::is_terminal) {
-            return Err(LedgerError::Invalid("terminal transitions go through settle()".into()));
+            return Err(LedgerError::Invalid(
+                "terminal transitions go through settle()".into(),
+            ));
         }
         ticket.state = self.append(ticket, &event).await?;
         Ok(())
@@ -284,9 +343,15 @@ impl PgTrialLedger {
     ///
     /// # Errors
     /// Illegal transitions and backend failures.
-    pub async fn settle_async(&self, ticket: TrialTicket, event: TrialEvent) -> Result<(), LedgerError> {
+    pub async fn settle_async(
+        &self,
+        ticket: TrialTicket,
+        event: TrialEvent,
+    ) -> Result<(), LedgerError> {
         if !event.state.is_some_and(TrialState::is_terminal) {
-            return Err(LedgerError::Invalid("settle() requires a terminal state".into()));
+            return Err(LedgerError::Invalid(
+                "settle() requires a terminal state".into(),
+            ));
         }
         self.append(&ticket, &event).await?;
         Ok(())
@@ -295,7 +360,11 @@ impl PgTrialLedger {
     ///
     /// # Errors
     /// Backend failures.
-    pub async fn prior_trial_async(&self, tenant_id: &str, config_hash: &str) -> Result<Option<Uuid>, LedgerError> {
+    pub async fn prior_trial_async(
+        &self,
+        tenant_id: &str,
+        config_hash: &str,
+    ) -> Result<Option<Uuid>, LedgerError> {
         let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
         let id = sqlx::query_scalar(
             "SELECT trial_id FROM mlops.trial_state
@@ -360,7 +429,11 @@ impl PgTrialLedger {
     ///
     /// # Errors
     /// Backend failures.
-    pub async fn event_rows_async(&self, tenant_id: &str, trial_id: Uuid) -> Result<Vec<EventRow>, LedgerError> {
+    pub async fn event_rows_async(
+        &self,
+        tenant_id: &str,
+        trial_id: Uuid,
+    ) -> Result<Vec<EventRow>, LedgerError> {
         self.events_where(tenant_id, Some(trial_id)).await
     }
 
@@ -368,11 +441,18 @@ impl PgTrialLedger {
     ///
     /// # Errors
     /// Backend failures.
-    pub async fn all_event_rows_async(&self, tenant_id: &str) -> Result<Vec<EventRow>, LedgerError> {
+    pub async fn all_event_rows_async(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Vec<EventRow>, LedgerError> {
         self.events_where(tenant_id, None).await
     }
 
-    async fn events_where(&self, tenant_id: &str, trial_id: Option<Uuid>) -> Result<Vec<EventRow>, LedgerError> {
+    async fn events_where(
+        &self,
+        tenant_id: &str,
+        trial_id: Option<Uuid>,
+    ) -> Result<Vec<EventRow>, LedgerError> {
         let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
         let rows = sqlx::query(
             "SELECT event_id, trial_id, event_seq, state, censoring, terminal_reason, censor_at_step, run_id,
@@ -480,7 +560,11 @@ impl PgTrialLedger {
     ///
     /// # Errors
     /// Validation and backend failures.
-    pub async fn log_decision_async(&self, ctx: &DispatchContext, d: &Decision) -> Result<Uuid, LedgerError> {
+    pub async fn log_decision_async(
+        &self,
+        ctx: &DispatchContext,
+        d: &Decision,
+    ) -> Result<Uuid, LedgerError> {
         d.validate(ctx)?;
         let mut tx = tenant_tx(&self.pool, &ctx.tenant_id).await.map_err(be)?;
         let id: Uuid = sqlx::query_scalar(
@@ -522,7 +606,11 @@ impl PgTrialLedger {
     ///
     /// # Errors
     /// Malformed series, a second write for the trial, and backend failures.
-    pub async fn persist_returns_async(&self, ticket: &TrialTicket, series: &ReturnSeries) -> Result<String, LedgerError> {
+    pub async fn persist_returns_async(
+        &self,
+        ticket: &TrialTicket,
+        series: &ReturnSeries,
+    ) -> Result<String, LedgerError> {
         series.validate()?;
         let mut tx = tenant_tx(&self.pool, &ticket.tenant_id).await.map_err(be)?;
         sqlx::query("INSERT INTO mlops.trial_return_series (trial_id, tenant_id, ts, returns, series_digest) VALUES ($1,$2,$3,$4,$5)")
@@ -535,7 +623,10 @@ impl PgTrialLedger {
             .await
             .map_err(be)?;
         tx.commit().await.map_err(be)?;
-        Ok(format!("pg://mlops.trial_return_series/{}", ticket.trial_id))
+        Ok(format!(
+            "pg://mlops.trial_return_series/{}",
+            ticket.trial_id
+        ))
     }
 
     /// `N_eff` over every stored series on the tenant's ledger.
@@ -558,13 +649,14 @@ impl PgTrialLedger {
         cutoff: chrono::DateTime<chrono::Utc>,
     ) -> Result<NEff, LedgerError> {
         let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
-        let trials: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM mlops.trial WHERE tenant_id = $1 AND created_at < $2")
-                .bind(tenant_id)
-                .bind(cutoff)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(be)?;
+        let trials: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM mlops.trial WHERE tenant_id = $1 AND created_at < $2",
+        )
+        .bind(tenant_id)
+        .bind(cutoff)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(be)?;
         let rows: Vec<(Vec<chrono::DateTime<chrono::Utc>>, Vec<f64>)> = sqlx::query_as(
             "SELECT s.ts, s.returns FROM mlops.trial_return_series s
                JOIN mlops.trial t ON t.trial_id = s.trial_id
@@ -577,17 +669,24 @@ impl PgTrialLedger {
         .await
         .map_err(be)?;
         tx.commit().await.map_err(be)?;
-        let series: Vec<ReturnSeries> = rows.into_iter().map(|(timestamps, returns)| ReturnSeries { timestamps, returns }).collect();
+        let series: Vec<ReturnSeries> = rows
+            .into_iter()
+            .map(|(timestamps, returns)| ReturnSeries {
+                timestamps,
+                returns,
+            })
+            .collect();
         Ok(NEff::compute(usize::try_from(trials).unwrap_or(0), &series))
     }
 
     pub async fn n_eff_async(&self, tenant_id: &str) -> Result<NEff, LedgerError> {
         let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
-        let trials: i64 = sqlx::query_scalar("SELECT count(*) FROM mlops.trial WHERE tenant_id = $1")
-            .bind(tenant_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(be)?;
+        let trials: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM mlops.trial WHERE tenant_id = $1")
+                .bind(tenant_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(be)?;
         let rows: Vec<(Vec<chrono::DateTime<chrono::Utc>>, Vec<f64>)> =
             sqlx::query_as("SELECT ts, returns FROM mlops.trial_return_series WHERE tenant_id = $1 ORDER BY trial_id")
                 .bind(tenant_id)
@@ -595,7 +694,13 @@ impl PgTrialLedger {
                 .await
                 .map_err(be)?;
         tx.commit().await.map_err(be)?;
-        let series: Vec<ReturnSeries> = rows.into_iter().map(|(timestamps, returns)| ReturnSeries { timestamps, returns }).collect();
+        let series: Vec<ReturnSeries> = rows
+            .into_iter()
+            .map(|(timestamps, returns)| ReturnSeries {
+                timestamps,
+                returns,
+            })
+            .collect();
         Ok(NEff::compute(usize::try_from(trials).unwrap_or(0), &series))
     }
 }
@@ -604,7 +709,12 @@ impl PgTrialLedger {
 impl PgTrialLedger {
     /// # Errors
     /// A lineage claimed without a recorded result, and backend failures.
-    pub async fn claim_sealed_holdout_async(&self, tenant_id: &str, lineage: &str, requested_by: &str) -> Result<HoldoutClaim, LedgerError> {
+    pub async fn claim_sealed_holdout_async(
+        &self,
+        tenant_id: &str,
+        lineage: &str,
+        requested_by: &str,
+    ) -> Result<HoldoutClaim, LedgerError> {
         let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
         let prior: Option<(Uuid, chrono::DateTime<chrono::Utc>, serde_json::Value)> = sqlx::query_as(
             "SELECT trial_id, called_at, result FROM mlops.sealed_holdout_call WHERE tenant_id = $1 AND strategy_lineage_id = $2",
@@ -634,14 +744,24 @@ impl PgTrialLedger {
         }
         tx.commit().await.map_err(be)?;
         Ok(match prior {
-            Some((first_trial, called_at, result)) => HoldoutClaim::Repeat { first_trial, called_at, result },
+            Some((first_trial, called_at, result)) => HoldoutClaim::Repeat {
+                first_trial,
+                called_at,
+                result,
+            },
             None => HoldoutClaim::First,
         })
     }
 
     /// # Errors
     /// A second result for the lineage, and backend failures.
-    pub async fn record_sealed_holdout_async(&self, tenant_id: &str, lineage: &str, trial_id: Uuid, result: &serde_json::Value) -> Result<(), LedgerError> {
+    pub async fn record_sealed_holdout_async(
+        &self,
+        tenant_id: &str,
+        lineage: &str,
+        trial_id: Uuid,
+        result: &serde_json::Value,
+    ) -> Result<(), LedgerError> {
         let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
         sqlx::query("INSERT INTO mlops.sealed_holdout_call (tenant_id, strategy_lineage_id, trial_id, result) VALUES ($1,$2,$3,$4)")
             .bind(tenant_id)
@@ -663,13 +783,19 @@ impl PgTrialLedger {
     /// # Errors
     /// Backend failures.
     pub async fn tenants_async(&self) -> Result<Vec<String>, LedgerError> {
-        sqlx::query_scalar("SELECT t FROM mlops.ledger_tenants() AS t ORDER BY t").fetch_all(&self.pool).await.map_err(be)
+        sqlx::query_scalar("SELECT t FROM mlops.ledger_tenants() AS t ORDER BY t")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(be)
     }
 
     ///
     /// # Errors
     /// Backend failures.
-    pub async fn decision_rows_async(&self, tenant_id: &str) -> Result<Vec<DecisionRow>, LedgerError> {
+    pub async fn decision_rows_async(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Vec<DecisionRow>, LedgerError> {
         let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
         let rows = sqlx::query(
             "SELECT decision_id, tenant_id, seq, decision_kind, actor_kind, actor_id, context_hash,
@@ -762,9 +888,18 @@ impl PgTrialLedger {
         crate::verify_trials(&trials).map_err(AnchorError::Broken)?;
         anchor::verify_decisions(&decisions).map_err(AnchorError::Broken)?;
         let body = anchor::body_for(tenant_id, date, &trials, &decisions);
-        let doc = AnchorDocument { signature: signer.sign(&body), key_id: signer.key_id().to_string(), body };
-        let bytes = serde_json::to_vec_pretty(&doc).map_err(|e| AnchorError::Worm(e.to_string()))?;
-        let key = format!("ledger-anchors/{}/{}.json", hex::encode(tenant_id.as_bytes()), date);
+        let doc = AnchorDocument {
+            signature: signer.sign(&body),
+            key_id: signer.key_id().to_string(),
+            body,
+        };
+        let bytes =
+            serde_json::to_vec_pretty(&doc).map_err(|e| AnchorError::Worm(e.to_string()))?;
+        let key = format!(
+            "ledger-anchors/{}/{}.json",
+            hex::encode(tenant_id.as_bytes()),
+            date
+        );
         let uri = worm.put_once(&key, &bytes)?;
         let sbe = |e: sqlx::Error| AnchorError::Backend(e.to_string());
         let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(sbe)?;
@@ -809,7 +944,9 @@ impl PgTrialLedger {
         }
         let decisions = self.decision_rows_async(tenant_id).await?;
         let anchors = self.anchor_rows_async(tenant_id).await?;
-        let report = anchor::verify_all(tenant_id, &trials, &events, &decisions, &anchors, keys, worm);
+        let report = anchor::verify_all(
+            tenant_id, &trials, &events, &decisions, &anchors, keys, worm,
+        );
         let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
         sqlx::query(
             "INSERT INTO mlops.ledger_verification (tenant_id, ok, trials, events, decisions, anchors, failures)
@@ -844,18 +981,26 @@ impl TrialLedger for PgTrialLedger {
     }
 
     fn prior_trial(&self, tenant_id: &str, config_hash: &str) -> Option<Uuid> {
-        self.block(self.prior_trial_async(tenant_id, config_hash)).ok().flatten()
+        self.block(self.prior_trial_async(tenant_id, config_hash))
+            .ok()
+            .flatten()
     }
 
     fn trial_count(&self, tenant_id: &str) -> usize {
-        self.block(self.trial_count_async(tenant_id)).map_or(0, |n| n.max(0) as usize)
+        self.block(self.trial_count_async(tenant_id))
+            .map_or(0, |n| n.max(0) as usize)
     }
 
     fn exploration_fraction(&self, tenant_id: &str) -> f64 {
-        self.block(self.exploration_fraction_async(tenant_id)).unwrap_or(0.0)
+        self.block(self.exploration_fraction_async(tenant_id))
+            .unwrap_or(0.0)
     }
 
-    fn persist_returns(&self, ticket: &TrialTicket, series: &ReturnSeries) -> Result<String, LedgerError> {
+    fn persist_returns(
+        &self,
+        ticket: &TrialTicket,
+        series: &ReturnSeries,
+    ) -> Result<String, LedgerError> {
         self.block(self.persist_returns_async(ticket, series))
     }
 
@@ -863,11 +1008,22 @@ impl TrialLedger for PgTrialLedger {
         self.block(self.n_eff_async(tenant_id))
     }
 
-    fn claim_sealed_holdout(&self, tenant_id: &str, lineage: &str, requested_by: &str) -> Result<HoldoutClaim, LedgerError> {
+    fn claim_sealed_holdout(
+        &self,
+        tenant_id: &str,
+        lineage: &str,
+        requested_by: &str,
+    ) -> Result<HoldoutClaim, LedgerError> {
         self.block(self.claim_sealed_holdout_async(tenant_id, lineage, requested_by))
     }
 
-    fn record_sealed_holdout(&self, tenant_id: &str, lineage: &str, trial_id: Uuid, result: &serde_json::Value) -> Result<(), LedgerError> {
+    fn record_sealed_holdout(
+        &self,
+        tenant_id: &str,
+        lineage: &str,
+        trial_id: Uuid,
+        result: &serde_json::Value,
+    ) -> Result<(), LedgerError> {
         self.block(self.record_sealed_holdout_async(tenant_id, lineage, trial_id, result))
     }
 
@@ -1033,17 +1189,23 @@ impl PgTrialLedger {
         audit_id: Uuid,
     ) -> Result<Option<(crate::audit::AuditRequest, crate::audit::PreAudit)>, LedgerError> {
         let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
-        let row: Option<(String, String, String, String, Option<String>, serde_json::Value)> =
-            sqlx::query_as(
-                "SELECT action, envelope, actor_kind, actor_id, on_behalf_of, request
+        let row: Option<(
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            serde_json::Value,
+        )> = sqlx::query_as(
+            "SELECT action, envelope, actor_kind, actor_id, on_behalf_of, request
                    FROM mlops.audit_event
                   WHERE audit_id = $1 AND tenant_id = $2 AND record_phase = 'pre'",
-            )
-            .bind(audit_id)
-            .bind(tenant_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(be)?;
+        )
+        .bind(audit_id)
+        .bind(tenant_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(be)?;
         tx.commit().await.map_err(be)?;
         let Some((action, envelope, actor_kind, actor_id, on_behalf_of, request)) = row else {
             return Ok(None);
@@ -1141,9 +1303,11 @@ impl PgTrialLedger {
                 .await
                 .map_err(be)?;
         tx.commit().await.map_err(be)?;
-        Ok(row.map_or_else(crate::internal::SeedHoldout::unfrozen, |(ids,)| {
-            crate::internal::SeedHoldout::from_stored(ids)
-        }))
+        Ok(
+            row.map_or_else(crate::internal::SeedHoldout::unfrozen, |(ids,)| {
+                crate::internal::SeedHoldout::from_stored(ids)
+            }),
+        )
     }
 
     /// Freeze the tenant's seed holdout: the first `SEED_HOLDOUT_SIZE` trials in
@@ -1520,7 +1684,10 @@ impl PgTrialLedger {
         let evidence = TrialEvidence {
             cost_ladder: cost
                 .into_iter()
-                .map(|(multiple, net_metric)| CostRung { multiple, net_metric })
+                .map(|(multiple, net_metric)| CostRung {
+                    multiple,
+                    net_metric,
+                })
                 .collect(),
             capacity_base: base.map(|(base_aum_usd, single_venue)| CapacityBase {
                 base_aum_usd,
@@ -1552,16 +1719,22 @@ impl PgTrialLedger {
                 .collect(),
             neighbourhood: neighbourhood
                 .into_iter()
-                .map(|(param, param_value, metric, is_center)| NeighbourhoodPoint {
-                    param,
-                    param_value,
-                    metric,
-                    is_center,
-                })
+                .map(
+                    |(param, param_value, metric, is_center)| NeighbourhoodPoint {
+                        param,
+                        param_value,
+                        metric,
+                        is_center,
+                    },
+                )
                 .collect(),
             factors: factors
                 .into_iter()
-                .map(|(factor, ts, returns)| FactorSeries { factor, ts, returns })
+                .map(|(factor, ts, returns)| FactorSeries {
+                    factor,
+                    ts,
+                    returns,
+                })
                 .collect(),
             produced_by: produced_by.map(|(p,)| p).unwrap_or_default(),
         };
@@ -1647,15 +1820,17 @@ impl PgTrialLedger {
         trial_id: Uuid,
     ) -> Result<Option<crate::neff::ReturnSeries>, LedgerError> {
         let mut tx = tenant_tx(&self.pool, tenant_id).await.map_err(be)?;
-        let row: Option<(Vec<chrono::DateTime<chrono::Utc>>, Vec<f64>)> = sqlx::query_as(
-            "SELECT ts, returns FROM mlops.trial_return_series WHERE trial_id = $1",
-        )
-        .bind(trial_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(be)?;
+        let row: Option<(Vec<chrono::DateTime<chrono::Utc>>, Vec<f64>)> =
+            sqlx::query_as("SELECT ts, returns FROM mlops.trial_return_series WHERE trial_id = $1")
+                .bind(trial_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(be)?;
         tx.commit().await.map_err(be)?;
-        Ok(row.map(|(timestamps, returns)| crate::neff::ReturnSeries { timestamps, returns }))
+        Ok(row.map(|(timestamps, returns)| crate::neff::ReturnSeries {
+            timestamps,
+            returns,
+        }))
     }
 
     /// Every candidate's return series for one experiment, oldest first.
@@ -1769,7 +1944,9 @@ impl PgTrialLedger {
                 .map_err(be)?;
         tx.commit().await.map_err(be)?;
         row.map(|r| r.0).ok_or_else(|| {
-            LedgerError::Invalid(format!("campaign {campaign_id} is not defined for this tenant"))
+            LedgerError::Invalid(format!(
+                "campaign {campaign_id} is not defined for this tenant"
+            ))
         })
     }
 
@@ -1838,7 +2015,11 @@ impl PgTrialLedger {
                         "campaign event state `{state}` is not a phase this build knows"
                     ))
                 })?;
-                Ok(crate::phase::CampaignEvent { phase, detail, occurred_at })
+                Ok(crate::phase::CampaignEvent {
+                    phase,
+                    detail,
+                    occurred_at,
+                })
             })
             .collect()
     }
@@ -1969,22 +2150,40 @@ impl PgTrialLedger {
         .map_err(be)?;
         tx.commit().await.map_err(be)?;
         let (recent_decided, recent_passed, baseline_decided, baseline_passed) = row;
-        Ok(crate::gates::PassRate { recent_decided, recent_passed, baseline_decided, baseline_passed })
+        Ok(crate::gates::PassRate {
+            recent_decided,
+            recent_passed,
+            baseline_decided,
+            baseline_passed,
+        })
     }
 }
 
 impl crate::gates::GateLog for PgTrialLedger {
-    fn record_gate(&self, tenant_id: &str, record: &crate::gates::GateRecord) -> Result<Uuid, LedgerError> {
+    fn record_gate(
+        &self,
+        tenant_id: &str,
+        record: &crate::gates::GateRecord,
+    ) -> Result<Uuid, LedgerError> {
         self.block(self.record_gate_async(tenant_id, record))
     }
 
-    fn pass_rate(&self, tenant_id: &str, profile_id: &str, window_days: i64) -> Result<crate::gates::PassRate, LedgerError> {
+    fn pass_rate(
+        &self,
+        tenant_id: &str,
+        profile_id: &str,
+        window_days: i64,
+    ) -> Result<crate::gates::PassRate, LedgerError> {
         self.block(self.pass_rate_async(tenant_id, profile_id, window_days))
     }
 }
 
 impl DecisionLog for PgTrialLedger {
-    fn log_decision(&self, ctx: &DispatchContext, decision: &Decision) -> Result<Uuid, LedgerError> {
+    fn log_decision(
+        &self,
+        ctx: &DispatchContext,
+        decision: &Decision,
+    ) -> Result<Uuid, LedgerError> {
         self.block(self.log_decision_async(ctx, decision))
     }
 }

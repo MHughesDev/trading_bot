@@ -64,13 +64,12 @@ pub async fn get(
     token: BearerToken,
     Path(ticket): Path<String>,
 ) -> impl IntoResponse {
-    let row: Result<Option<(Value,)>, sqlx::Error> = sqlx::query_as(
-        "SELECT body FROM mlops.dossier WHERE tenant_id = $1 AND ticket = $2",
-    )
-    .bind(token.user_id().to_string())
-    .bind(&ticket)
-    .fetch_optional(&state.pg)
-    .await;
+    let row: Result<Option<(Value,)>, sqlx::Error> =
+        sqlx::query_as("SELECT body FROM mlops.dossier WHERE tenant_id = $1 AND ticket = $2")
+            .bind(token.user_id().to_string())
+            .bind(&ticket)
+            .fetch_optional(&state.pg)
+            .await;
 
     match row {
         Ok(Some((body,))) => (StatusCode::OK, Json(body)).into_response(),
@@ -111,23 +110,22 @@ pub async fn verify(
     .fetch_optional(&state.pg)
     .await;
 
-    let (body, stored_evidence, run_id) = match row {
-        Ok(Some(v)) => v,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "ok": false, "note": "there is no dossier with that ticket" })),
-            )
-                .into_response()
-        }
-        Err(e) => {
-            return (
+    let (body, stored_evidence, run_id) =
+        match row {
+            Ok(Some(v)) => v,
+            Ok(None) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({ "ok": false, "note": "there is no dossier with that ticket" })),
+                )
+                    .into_response()
+            }
+            Err(e) => return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "ok": false, "note": format!("the dossier could not be read: {e}") })),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     // The claim as the document states it, and how the document says it was
     // verified.
@@ -195,7 +193,7 @@ pub async fn verify(
                 "run_id": run_id,
             })),
         )
-            .into_response()
+            .into_response();
     };
 
     let redone = extract(&sentence, &[live.clone()]);
@@ -269,17 +267,25 @@ pub async fn comments(
     token: BearerToken,
     Path(ticket): Path<String>,
 ) -> impl IntoResponse {
-    let rows: Result<Vec<(uuid::Uuid, String, Option<String>, String, chrono::DateTime<chrono::Utc>)>, sqlx::Error> =
-        sqlx::query_as(
-            "SELECT comment_id, author, claim, body, created_at
+    let rows: Result<
+        Vec<(
+            uuid::Uuid,
+            String,
+            Option<String>,
+            String,
+            chrono::DateTime<chrono::Utc>,
+        )>,
+        sqlx::Error,
+    > = sqlx::query_as(
+        "SELECT comment_id, author, claim, body, created_at
                FROM mlops.dossier_comment
               WHERE tenant_id = $1 AND ticket = $2
               ORDER BY created_at",
-        )
-        .bind(token.user_id().to_string())
-        .bind(&ticket)
-        .fetch_all(&state.pg)
-        .await;
+    )
+    .bind(token.user_id().to_string())
+    .bind(&ticket)
+    .fetch_all(&state.pg)
+    .await;
 
     match rows {
         Ok(rows) => (

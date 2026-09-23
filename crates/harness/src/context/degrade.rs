@@ -175,9 +175,7 @@ fn fit_with(candidates: &[Candidate<'_>], budget: u32, loss_factor: f32, greedy:
         .collect();
     let mut out = Fit::default();
 
-    let total = |kept: &[Option<Fitted>]| -> u32 {
-        kept.iter().flatten().map(|f| f.tokens).sum()
-    };
+    let total = |kept: &[Option<Fitted>]| -> u32 { kept.iter().flatten().map(|f| f.tokens).sum() };
 
     // Bounded: every iteration either drops a record or walks one rung, and
     // both are finite per record.
@@ -244,12 +242,7 @@ fn fit_with(candidates: &[Candidate<'_>], budget: u32, loss_factor: f32, greedy:
 /// `from_tokens` in the marker stays the *original* size across repeated rungs:
 /// a record told it shrank by a little when it shrank by a lot makes `expand`
 /// look cheaper than it is.
-fn apply(
-    kept: &mut [Option<Fitted>],
-    out: &mut Fit,
-    candidates: &[Candidate<'_>],
-    cut: Cut,
-) {
+fn apply(kept: &mut [Option<Fitted>], out: &mut Fit, candidates: &[Candidate<'_>], cut: Cut) {
     out.value_lost += cut.loss;
     match cut.to {
         Some((body, tokens, how)) => {
@@ -430,7 +423,10 @@ mod tests {
         let junk: Vec<RecordId> = (0..6).map(|_| text_record(&mut s, 1200)).collect();
 
         let mut cands = vec![Candidate::new(s.get(valuable).unwrap(), 100.0)];
-        cands.extend(junk.iter().map(|id| Candidate::new(s.get(*id).unwrap(), 0.2)));
+        cands.extend(
+            junk.iter()
+                .map(|id| Candidate::new(s.get(*id).unwrap(), 0.2)),
+        );
 
         let full: u32 = cands.iter().map(|c| c.record.body.tokens()).sum();
         let budget = full * 2 / 5;

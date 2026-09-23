@@ -220,7 +220,10 @@ mod tests {
     fn a_stale_and_uncited_finding_archives_after_a_hundred_and_eighty_days() {
         let mut e = f("f_1");
         // Stale since 2026-09-28; last cited on its creation date.
-        assert_eq!(retention(&e, "2027-01-01", "2026-06-30"), Retention::Archived);
+        assert_eq!(
+            retention(&e, "2027-01-01", "2026-06-30"),
+            Retention::Archived
+        );
         apply(&mut e, Retention::Archived);
         assert!(e.archived, "out of retrieval");
         assert_eq!(e.id, "f_1", "still addressable by id");
@@ -268,7 +271,10 @@ mod tests {
         let mut old = latest.clone();
         old.id = "p_old".into();
         old.superseded_by = Some("p_now".into());
-        assert_eq!(retention(&old, "2026-08-01", "2026-06-30"), Retention::Stale);
+        assert_eq!(
+            retention(&old, "2026-08-01", "2026-06-30"),
+            Retention::Stale
+        );
         assert_eq!(
             retention(&old, "2026-12-01", "2026-06-30"),
             Retention::Archived

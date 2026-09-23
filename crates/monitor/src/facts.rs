@@ -298,10 +298,7 @@ mod tests {
         // dependency-blind halt would look identical on every test that only
         // checks "something happened".
         let actions = decide(&stale("BTC-USD"), &deps(), &[]);
-        let touched: Vec<String> = actions
-            .iter()
-            .map(|a| a.scope().to_string())
-            .collect();
+        let touched: Vec<String> = actions.iter().map(|a| a.scope().to_string()).collect();
         assert_eq!(touched, ["strategy:s-btc", "strategy:s-both"]);
     }
 
@@ -396,7 +393,9 @@ mod tests {
         let states = vec![("s-btc".to_owned(), StrategyState::Halted, HaltPolicy::Hold)];
         let actions = decide(&stale("BTC-USD"), &deps(), &states);
         assert!(
-            actions.iter().all(|a| a.scope() != Scope::strategy("s-btc")),
+            actions
+                .iter()
+                .all(|a| a.scope() != Scope::strategy("s-btc")),
             "a halted strategy is already refusing orders"
         );
     }

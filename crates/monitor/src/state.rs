@@ -242,7 +242,11 @@ mod tests {
     #[test]
     fn a_pnl_breach_halts_and_applies_the_policy() {
         for policy in [HaltPolicy::Hold, HaltPolicy::Flatten, HaltPolicy::Reduce] {
-            let t = on_sustained(StrategyState::Nominal, Severity::Breach(Family::Pnl), policy);
+            let t = on_sustained(
+                StrategyState::Nominal,
+                Severity::Breach(Family::Pnl),
+                policy,
+            );
             assert_eq!(t.to, StrategyState::Halted);
             assert_eq!(t.actions, vec![Action::Record, Action::Halt(policy)]);
         }
@@ -265,9 +269,7 @@ mod tests {
             vec![Action::Record, Action::Halt(HaltPolicy::Flatten)]
         );
         assert!(
-            !t.actions
-                .iter()
-                .any(|a| matches!(a, Action::ScaleTo(_))),
+            !t.actions.iter().any(|a| matches!(a, Action::ScaleTo(_))),
             "a quarter-size position priced off a dead feed is the same error at 25% of the size"
         );
     }
@@ -357,7 +359,10 @@ mod tests {
             Severity::Breach(Family::Behaviour),
             HaltPolicy::Hold,
         );
-        assert!(!t.changed(), "a repeated breach must not write a second trip record");
+        assert!(
+            !t.changed(),
+            "a repeated breach must not write a second trip record"
+        );
     }
 
     #[test]

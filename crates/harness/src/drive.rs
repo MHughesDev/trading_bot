@@ -55,8 +55,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 
-use crate::context::{self, Block, CompactionReport, Section};
 use crate::context::store::{RecordKind, Subject};
+use crate::context::{self, Block, CompactionReport, Section};
 use crate::hardware::{Admission, TaskDemand};
 use crate::policy::{self, ActionContext, Decision, Ruling};
 use crate::profile::{ExposureScope, Mode, Profile, SchemaStyle};
@@ -66,9 +66,8 @@ use crate::registry::{
     SEARCH_TOOLS, SELF_STATUS,
 };
 use crate::state::{
-    Steer,
-    BudgetView, Correction, Detail, FindingRef, GoalKind, Mode as RunMode, PlannedStep, StepKind,
-    Ring, StepStatus, WorkingState,
+    BudgetView, Correction, Detail, FindingRef, GoalKind, Mode as RunMode, PlannedStep, Ring,
+    Steer, StepKind, StepStatus, WorkingState,
 };
 use crate::validation::{self, Rejection, RetryBudget, Rung, ToolCall};
 
@@ -375,12 +374,7 @@ fn retryable_flag(detail: &str) -> Option<bool> {
 /// arguments are structured and the model already had to get them right for the
 /// call to run at all.
 fn subject_of(arguments: &serde_json::Map<String, Value>) -> Subject {
-    let get = |k: &str| {
-        arguments
-            .get(k)
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    };
+    let get = |k: &str| arguments.get(k).and_then(Value::as_str).map(str::to_string);
     Subject {
         instrument: get("instrument").or_else(|| get("symbol")),
         timeframe: get("timeframe").or_else(|| get("interval")),
@@ -1108,10 +1102,7 @@ impl Loop {
         // step must not be handed a kind that expects several.
         (working.kind, working.mode) = match task.demand {
             TaskDemand::SingleLookup => (GoalKind::Lookup, RunMode::Chat),
-            TaskDemand::MultiStep => (
-                GoalKind::classify(&task.goal, &[]),
-                RunMode::Research,
-            ),
+            TaskDemand::MultiStep => (GoalKind::classify(&task.goal, &[]), RunMode::Research),
         };
         // What the goal text says, even when the demand has pinned `Lookup`
         // (S-10.2).
@@ -1224,10 +1215,7 @@ impl Loop {
             focus: None,
             last_rendered: BTreeSet::new(),
             last_selection: None,
-            run_budget: context::budget::RunBudget::new(
-                profile_input_budget,
-                profile_max_steps,
-            ),
+            run_budget: context::budget::RunBudget::new(profile_input_budget, profile_max_steps),
             trial_spending_tools: BTreeSet::new(),
             paper_tools: BTreeSet::new(),
             previous_tool: None,
@@ -1335,7 +1323,11 @@ impl Loop {
     /// one case where an observation could be lost — a record saying "expand to
     /// read it" about a file that does not exist — so the driver hands it back
     /// rather than logging and moving on.
-    pub fn restore_spilled(&mut self, id: crate::context::store::RecordId, body: crate::context::body::Body) {
+    pub fn restore_spilled(
+        &mut self,
+        id: crate::context::store::RecordId,
+        body: crate::context::body::Body,
+    ) {
         self.store.restore(id, body);
     }
 
@@ -1533,19 +1525,32 @@ impl Loop {
         let selection = context::select::select(&self.store, &query, budget, &self.context_policy);
         let shown: std::collections::BTreeSet<_> = selection.ids().into_iter().collect();
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let manifest_budget =
-            (budget as f32 * self.context_policy.manifest_budget_share) as u32;
+        let manifest_budget = (budget as f32 * self.context_policy.manifest_budget_share) as u32;
         let manifest = context::manifest::render(&self.store, &shown, manifest_budget);
-        let blocks =
-            context::render::blocks(&self.store, &selection, &self.context_policy, &manifest.text);
+        let blocks = context::render::blocks(
+            &self.store,
+            &selection,
+            &self.context_policy,
+            &manifest.text,
+        );
         let (lines, lines_omitted) = selection_lines(&selection.report);
 
         self.last_selection = Some(Note::Selected {
             step: self.step,
             policy_version: selection.report.policy_version.clone(),
             candidates: selection.report.candidates,
-            selected: selection.report.selected.iter().map(ToString::to_string).collect(),
-            elided: selection.report.dropped.iter().map(ToString::to_string).collect(),
+            selected: selection
+                .report
+                .selected
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            elided: selection
+                .report
+                .dropped
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
             bound_by: selection.report.bound_by.clone(),
             reasons: lines,
             lines_omitted,
@@ -1899,8 +1904,12 @@ impl Loop {
         // `search_tools` is always in the enum even when routing did not expose it:
         // AGENT-008 §3.2 names it as the honest answer to "no tool fits", and a
         // planner that cannot say that has to guess instead.
-        let mut tools: Vec<String> =
-            self.registry.names().into_iter().map(str::to_string).collect();
+        let mut tools: Vec<String> = self
+            .registry
+            .names()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
         tools.push(SEARCH_TOOLS.to_string());
         tools.sort();
         tools.dedup();
@@ -2702,7 +2711,8 @@ impl Loop {
         );
         if two_step && !self.truncation_reask_used {
             self.truncation_reask_used = true;
-            self.max_tokens_override = Some(self.profile.context.reserve_for_output.saturating_mul(2));
+            self.max_tokens_override =
+                Some(self.profile.context.reserve_for_output.saturating_mul(2));
             fx.push(Effect::Note(Note::Degraded(Degradation::OutputTruncated {
                 reserve_for_output: self.profile.context.reserve_for_output,
             })));
@@ -3156,10 +3166,7 @@ impl Loop {
         }
         fx.push(Effect::Note(Note::CoreTool {
             name: REFLECT.to_string(),
-            detail: format!(
-                "reflection {} of {cap}: {doubt}",
-                self.reflections_used
-            ),
+            detail: format!("reflection {} of {cap}: {doubt}", self.reflections_used),
         }));
 
         // The same step, re-rendered. The doubt is now on the card, so the next
@@ -3197,8 +3204,12 @@ impl Loop {
             Steer::Constraint => {
                 // Same question, smaller. The plan stands, and the constraint is
                 // recorded so a later step cannot quietly widen back out.
-                self.working
-                    .decide(format!("constraint: {text}"), "applied", "the user narrowed the task", self.step);
+                self.working.decide(
+                    format!("constraint: {text}"),
+                    "applied",
+                    "the user narrowed the task",
+                    self.step,
+                );
             }
             Steer::Redirection => {
                 let old_goal = self.working.goal.clone();
@@ -3293,8 +3304,7 @@ impl Loop {
         // differ by 0.31" would teach the model to stop doing arithmetic — it
         // labels the claim, so nothing downstream renders the model's own
         // arithmetic as an established fact.
-        let seen: BTreeSet<String> =
-            self.working.evidence.iter().map(|e| e.id.clone()).collect();
+        let seen: BTreeSet<String> = self.working.evidence.iter().map(|e| e.id.clone()).collect();
         let verdict =
             crate::memory::verify_finding(&finding, &evidence, &seen, &self.results_by_id);
         let (confidence, why) = match verdict {
@@ -3302,7 +3312,9 @@ impl Loop {
                 self.reject_and_retry(Rejection::semantic_owned(code, correction), fx);
                 return;
             }
-            crate::memory::FindingVerdict::Accepted { confidence, why, .. } => (confidence, why),
+            crate::memory::FindingVerdict::Accepted {
+                confidence, why, ..
+            } => (confidence, why),
         };
 
         // Recording something already established is not progress, and allowing it
@@ -3603,7 +3615,12 @@ impl Loop {
         // cannot read a file. The handle is, though, and `read_file` is one of
         // the agent's own tools — so the answer is the path rather than a
         // refusal that leaves the model with nowhere to go (§26.3).
-        if let context::body::Body::Elsewhere { handle, tokens, summary } = &record.body {
+        if let context::body::Body::Elsewhere {
+            handle,
+            tokens,
+            summary,
+        } = &record.body
+        {
             let detail = format!(
                 "{id} is held in `{handle}` ({tokens} tokens): {summary}. Read it with                  read_file when you need it."
             );
@@ -3653,7 +3670,9 @@ impl Loop {
             240,
             None,
             RecordKind::Note,
-            self.store.get(id).map_or_else(Subject::default, |r| r.subject.clone()),
+            self.store
+                .get(id)
+                .map_or_else(Subject::default, |r| r.subject.clone()),
         );
         // A turn, not a step.
         self.route(fx);
@@ -3964,8 +3983,11 @@ impl Loop {
         // direction of the disagreement is the dangerous one: a 32 KiB cap against
         // 8 KiB of remaining body admits one result that evicts the whole working
         // state, findings included.
-        let (capped, truncated) =
-            context::cap_tool_result_within(&self.profile, output, Some(self.remaining_body_bytes()));
+        let (capped, truncated) = context::cap_tool_result_within(
+            &self.profile,
+            output,
+            Some(self.remaining_body_bytes()),
+        );
 
         self.tools_attempted += 1;
         self.step_learned_something = true;
@@ -4458,7 +4480,11 @@ mod tests {
             policy_version: "v2".into(),
             candidates: scores.len(),
             selected: scores.iter().filter(|l| l.selected).map(|l| l.id).collect(),
-            dropped: scores.iter().filter(|l| !l.selected).map(|l| l.id).collect(),
+            dropped: scores
+                .iter()
+                .filter(|l| !l.selected)
+                .map(|l| l.id)
+                .collect(),
             scores,
             bound_by: vec!["body budget".into()],
         }
@@ -4477,7 +4503,10 @@ mod tests {
         assert!(
             !lines[0].selected && !lines[1].selected,
             "the elided records are not first: {:?}",
-            lines.iter().map(|l| (&l.id, l.selected)).collect::<Vec<_>>()
+            lines
+                .iter()
+                .map(|l| (&l.id, l.selected))
+                .collect::<Vec<_>>()
         );
         assert!(lines[2].selected && lines[3].selected);
     }
@@ -4734,9 +4763,7 @@ mod tests {
         let questions: Vec<&crate::memory::Entry> = fx
             .iter()
             .filter_map(|e| match e {
-                Effect::Remember(entry)
-                    if entry.kind == crate::memory::Kind::OpenQuestion =>
-                {
+                Effect::Remember(entry) if entry.kind == crate::memory::Kind::OpenQuestion => {
                     Some(&**entry)
                 }
                 _ => None,
@@ -4863,8 +4890,8 @@ mod tests {
         // and is a different test.
         task.goal = "find whether we hold 1m bars for BTC-USD".into();
         task.namespaces = vec!["data".into(), "strategy".into(), "portfolio".into()];
-        let mut l = Loop::new(local(), ringed_registry(), task)
-            .with_paper_tools(["arm_automation"]);
+        let mut l =
+            Loop::new(local(), ringed_registry(), task).with_paper_tools(["arm_automation"]);
         l.next(Input::Admission(Admission::Admit));
 
         assert_eq!(l.working().mode, RunMode::Chat);
@@ -4893,8 +4920,8 @@ mod tests {
         // A lookup, so the turn proceeds; see the test above.
         task.goal = "find whether we hold 1m bars for BTC-USD".into();
         task.namespaces = vec!["data".into()];
-        let mut l = Loop::new(local(), ringed_registry(), task)
-            .with_paper_tools(["arm_automation"]);
+        let mut l =
+            Loop::new(local(), ringed_registry(), task).with_paper_tools(["arm_automation"]);
         l.next(Input::Admission(Admission::Admit));
 
         l.next(Input::ModelReply {
@@ -4923,8 +4950,8 @@ mod tests {
     fn a_research_run_may_write_platform_artifacts_and_not_reach_paper() {
         let mut task = task();
         task.namespaces = vec!["strategy".into(), "portfolio".into()];
-        let mut l = Loop::new(local(), ringed_registry(), task)
-            .with_paper_tools(["arm_automation"]);
+        let mut l =
+            Loop::new(local(), ringed_registry(), task).with_paper_tools(["arm_automation"]);
         l.next(Input::Admission(Admission::Admit));
 
         assert_eq!(l.working().ring, Ring::PlatformArtifacts);
@@ -5027,7 +5054,8 @@ mod tests {
         l.next(Input::ToolResult {
             output: "ts,close
 1,100
-2,101".into(),
+2,101"
+                .into(),
             source: "platform.data".into(),
         })
     }
@@ -5192,7 +5220,8 @@ mod tests {
             });
             let fx = l.next(Input::ToolResult {
                 output: "ts,close
-1,100".into(),
+1,100"
+                    .into(),
                 source: "platform.data".into(),
             });
             spills += fx
@@ -5231,7 +5260,8 @@ mod tests {
             });
             let fx = l.next(Input::ToolResult {
                 output: "ts,close
-1,100".into(),
+1,100"
+                    .into(),
                 source: "platform.data".into(),
             });
             assert!(
@@ -5258,7 +5288,8 @@ mod tests {
             });
             l.next(Input::ToolResult {
                 output: "ts,close
-1,100".into(),
+1,100"
+                    .into(),
                 source: "platform.data".into(),
             });
         }
@@ -5802,7 +5833,10 @@ mod tests {
         assert!(detail.contains("Trials have no cap here"), "{detail}");
         // And it does not invent a monitor state it has not seen.
         assert!(detail.contains("not visible from here"), "{detail}");
-        assert!(detail.contains("no tool has tripped its breaker"), "{detail}");
+        assert!(
+            detail.contains("no tool has tripped its breaker"),
+            "{detail}"
+        );
     }
 
     /// A routing miss costs one turn, not one step of the task's budget, and it never
@@ -5970,10 +6004,9 @@ mod tests {
         for fx in [
             Loop::new(frontier_fixture(), registry(), task())
                 .next(Input::Admission(Admission::Admit)),
-            Loop::new(frontier_fixture(), registry(), task())
-                .next(Input::JobAccepted {
-                    job_id: "job_1".into(),
-                }),
+            Loop::new(frontier_fixture(), registry(), task()).next(Input::JobAccepted {
+                job_id: "job_1".into(),
+            }),
         ] {
             for effect in &fx {
                 assert!(
@@ -6211,7 +6244,10 @@ mod tests {
             .as_array()
             .unwrap();
         assert!(tools.iter().any(|v| v == "read_bars"));
-        assert!(tools.iter().any(|v| v == SEARCH_TOOLS), "the escape hatch is always offered");
+        assert!(
+            tools.iter().any(|v| v == SEARCH_TOOLS),
+            "the escape hatch is always offered"
+        );
         assert!(!tools.iter().any(|v| v == "nonsense"));
     }
 
@@ -6232,10 +6268,7 @@ mod tests {
             matches!(e, Effect::Note(Note::Rejected { code, .. }) if &**code == "drive.plan_step_is_not_a_tool")
         });
         assert!(rejected, "an unbindable step is rejected at parse: {fx:?}");
-        assert!(
-            l.working.plan.is_empty(),
-            "and no plan is accepted from it"
-        );
+        assert!(l.working.plan.is_empty(), "and no plan is accepted from it");
     }
 
     // ── Flat schemas round-trip ─────────────────────────────────────────────

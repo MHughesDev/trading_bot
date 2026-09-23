@@ -89,8 +89,13 @@ pub fn check(
     skew: f64,
     kurtosis: f64,
 ) -> (PowerCheck, Verdict) {
-    let required =
-        backtest::stats::min_track_record_length(delta_practical, 0.0, skew, kurtosis, POWER_CONFIDENCE);
+    let required = backtest::stats::min_track_record_length(
+        delta_practical,
+        0.0,
+        skew,
+        kurtosis,
+        POWER_CONFIDENCE,
+    );
     let check = PowerCheck {
         delta_practical,
         confidence: POWER_CONFIDENCE,

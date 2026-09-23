@@ -236,11 +236,7 @@ async fn load(state: &AppState, id: Uuid) -> Result<Option<Preregistration>, Str
     }))
 }
 
-async fn store(
-    state: &AppState,
-    p: &Preregistration,
-    _token: &BearerToken,
-) -> Result<(), String> {
+async fn store(state: &AppState, p: &Preregistration, _token: &BearerToken) -> Result<(), String> {
     sqlx::query(
         "INSERT INTO agent_lifecycle.preregistration (
              prereg_id, run_id, objective, benchmark, delta_practical, window_start,
@@ -442,7 +438,10 @@ pub async fn bind_design(
     else {
         return bad_request(
             "unknown_timeframe",
-            format!("`{}` is not a bar size this platform serves", body.timeframe),
+            format!(
+                "`{}` is not a bar size this platform serves",
+                body.timeframe
+            ),
             "one of 1m, 5m, 15m, 30m, 1h, 4h, 1d",
         )
         .into_response();
@@ -520,12 +519,13 @@ pub async fn bind_design(
 /// tier's value costs at most one extra amendment, and `prereg::amend` still
 /// refuses past three.
 async fn amendment_cap(state: &AppState, run_id: Uuid) -> u32 {
-    let model: Option<String> = sqlx::query_scalar("SELECT model FROM agent_runs WHERE run_id = $1")
-        .bind(run_id)
-        .fetch_optional(&state.pg)
-        .await
-        .ok()
-        .flatten();
+    let model: Option<String> =
+        sqlx::query_scalar("SELECT model FROM agent_runs WHERE run_id = $1")
+            .bind(run_id)
+            .fetch_optional(&state.pg)
+            .await
+            .ok()
+            .flatten();
     model
         .and_then(|m| state.profiles.get(&m).map(|p| p.max_prereg_amendments))
         .unwrap_or(prereg::MAX_PREREG_AMENDMENTS)
@@ -757,8 +757,8 @@ pub struct ProposedLimit {
 /// # Errors
 /// The field and why, so the refusal is actionable at the moment it is cheap.
 pub fn check_proposed_limit(payload: &Value) -> Result<(), String> {
-    let limit: ProposedLimit = serde_json::from_value(payload.clone())
-        .map_err(|e| format!("this is not a limit: {e}"))?;
+    let limit: ProposedLimit =
+        serde_json::from_value(payload.clone()).map_err(|e| format!("this is not a limit: {e}"))?;
     if limit.declared_from.trim().is_empty() {
         return Err("declared_from must name the backtest or paper run the baseline came                     from: a baseline whose provenance is unrecorded is a number somebody                     typed"
             .to_string());

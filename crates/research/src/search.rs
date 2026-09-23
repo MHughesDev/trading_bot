@@ -184,9 +184,7 @@ pub fn select_searcher(
     } else {
         (
             Searcher::Tpe,
-            format!(
-                "mixed or conditional space of {dims} dimensions at budget {budget}: TPE"
-            ),
+            format!("mixed or conditional space of {dims} dimensions at budget {budget}: TPE"),
         )
     };
 
@@ -201,7 +199,12 @@ pub fn select_searcher(
     };
 
     Answer {
-        value: SearchPlan { searcher, asha, rationale, beyond_supported_budget: beyond },
+        value: SearchPlan {
+            searcher,
+            asha,
+            rationale,
+            beyond_supported_budget: beyond,
+        },
         rung,
         evidence,
     }
@@ -235,7 +238,11 @@ impl RungMetric {
     /// that is not a guess.
     #[must_use]
     pub fn score(self, observations: &[f64]) -> Option<f64> {
-        let finite: Vec<f64> = observations.iter().copied().filter(|v| v.is_finite()).collect();
+        let finite: Vec<f64> = observations
+            .iter()
+            .copied()
+            .filter(|v| v.is_finite())
+            .collect();
         if finite.is_empty() {
             return None;
         }
@@ -245,7 +252,11 @@ impl RungMetric {
                 // result survives its own bad tail, not that its average is good.
                 let mut v = finite;
                 v.sort_by(f64::total_cmp);
-                #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                #[allow(
+                    clippy::cast_precision_loss,
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss
+                )]
                 let idx = ((v.len() as f64 * 0.05).ceil() as usize).saturating_sub(1);
                 v.get(idx).copied()
             }
@@ -296,7 +307,12 @@ impl AshaLadder {
     /// A cold-start ladder: plain ASHA, one full rung of grace.
     #[must_use]
     pub fn cold_start(metric: RungMetric) -> Self {
-        Self { metric, eta: DEFAULT_ETA, grace_rungs: 1, epsilon: 0.0 }
+        Self {
+            metric,
+            eta: DEFAULT_ETA,
+            grace_rungs: 1,
+            epsilon: 0.0,
+        }
     }
 
     /// A ladder calibrated from the ledger.
@@ -310,7 +326,11 @@ impl AshaLadder {
             metric,
             eta: DEFAULT_ETA,
             grace_rungs: grace_rungs.max(1),
-            epsilon: if epsilon.is_finite() && epsilon > 0.0 { epsilon } else { 0.0 },
+            epsilon: if epsilon.is_finite() && epsilon > 0.0 {
+                epsilon
+            } else {
+                0.0
+            },
         }
     }
 
@@ -340,7 +360,9 @@ impl AshaLadder {
         let mut sorted: Vec<&RungEntry> = entries.iter().collect();
         sorted.sort_by(|a, b| b.score.total_cmp(&a.score));
 
-        let keep = (entries.len() as f64 / f64::from(self.eta.max(1))).ceil().max(1.0) as usize;
+        let keep = (entries.len() as f64 / f64::from(self.eta.max(1)))
+            .ceil()
+            .max(1.0) as usize;
         let cut = sorted[keep.min(sorted.len()) - 1].score;
 
         sorted
@@ -371,7 +393,11 @@ impl AshaLadder {
     pub fn needs_reseed(entries: &[RungEntry]) -> Vec<String> {
         let mut sorted: Vec<&RungEntry> = entries.iter().collect();
         sorted.sort_by(|a, b| b.score.total_cmp(&a.score));
-        sorted.iter().take(RESEED_TOP_N).map(|e| e.candidate.clone()).collect()
+        sorted
+            .iter()
+            .take(RESEED_TOP_N)
+            .map(|e| e.candidate.clone())
+            .collect()
     }
 }
 
@@ -387,7 +413,9 @@ pub enum StopDecision {
     /// Stop. **Terminal and `right_asha`** — a stopped trial is a censored
     /// observation, not a failure. Counting it as a failure is how a search that
     /// works starts looking like one that does not.
-    Stop { reason: String },
+    Stop {
+        reason: String,
+    },
 }
 
 impl StopDecision {
@@ -426,7 +454,9 @@ impl EarlyStopper {
     /// rule-versus-learned comparison free.
     #[must_use]
     pub fn with_posterior(p_beats_incumbent: f64) -> Self {
-        Self { posterior: p_beats_incumbent.is_finite().then_some(p_beats_incumbent) }
+        Self {
+            posterior: p_beats_incumbent.is_finite().then_some(p_beats_incumbent),
+        }
     }
 
     /// Decide, and say at what tier.
@@ -442,7 +472,8 @@ impl EarlyStopper {
         peers_at_this_step: &[f64],
         curves_observed: i64,
     ) -> Answer<StopDecision> {
-        let (mut rung, evidence) = choose_rung("M3", curves_observed, None, self.posterior.is_some(), false);
+        let (mut rung, evidence) =
+            choose_rung("M3", curves_observed, None, self.posterior.is_some(), false);
 
         if let Some(p) = self.posterior {
             rung = Rung::Learned;
@@ -455,14 +486,26 @@ impl EarlyStopper {
             } else {
                 StopDecision::Continue
             };
-            return Answer { value: decision, rung, evidence };
+            return Answer {
+                value: decision,
+                rung,
+                evidence,
+            };
         }
 
-        let finite: Vec<f64> = peers_at_this_step.iter().copied().filter(|v| v.is_finite()).collect();
+        let finite: Vec<f64> = peers_at_this_step
+            .iter()
+            .copied()
+            .filter(|v| v.is_finite())
+            .collect();
         if finite.is_empty() || !current.is_finite() {
             // Nothing to compare against. Continuing costs compute; stopping
             // costs the answer, and only one of those is recoverable.
-            return Answer { value: StopDecision::Continue, rung, evidence };
+            return Answer {
+                value: StopDecision::Continue,
+                rung,
+                evidence,
+            };
         }
         let mut sorted = finite;
         sorted.sort_by(f64::total_cmp);
@@ -484,7 +527,11 @@ impl EarlyStopper {
         } else {
             StopDecision::Continue
         };
-        Answer { value: decision, rung, evidence }
+        Answer {
+            value: decision,
+            rung,
+            evidence,
+        }
     }
 }
 
@@ -498,7 +545,11 @@ mod tests {
     fn a_tiny_budget_does_not_search_at_all() {
         let p = select_searcher(6, 4, 1, SpaceShape::MixedOrConditional, true);
         assert_eq!(p.value.searcher, Searcher::PortfolioReplay);
-        assert!(p.value.rationale.contains("too few trials"), "{}", p.value.rationale);
+        assert!(
+            p.value.rationale.contains("too few trials"),
+            "{}",
+            p.value.rationale
+        );
         assert!(!p.value.asha);
     }
 
@@ -506,7 +557,11 @@ mod tests {
     fn a_small_budget_draws_rather_than_models() {
         let p = select_searcher(20, 6, 2, SpaceShape::Continuous, false);
         assert_eq!(p.value.searcher, Searcher::PriorWeightedRandom);
-        assert!(p.value.rationale.contains("fitting noise"), "{}", p.value.rationale);
+        assert!(
+            p.value.rationale.contains("fitting noise"),
+            "{}",
+            p.value.rationale
+        );
     }
 
     #[test]
@@ -526,7 +581,11 @@ mod tests {
 
         let strategy = select_searcher(80, 6, 4, SpaceShape::Continuous, true);
         assert_eq!(strategy.value.searcher, Searcher::Tpe);
-        assert!(strategy.value.rationale.contains("deferred"), "{}", strategy.value.rationale);
+        assert!(
+            strategy.value.rationale.contains("deferred"),
+            "{}",
+            strategy.value.rationale
+        );
     }
 
     #[test]
@@ -537,8 +596,16 @@ mod tests {
 
     #[test]
     fn asha_joins_when_the_parallelism_is_there() {
-        assert!(!select_searcher(80, 5, 7, SpaceShape::MixedOrConditional, true).value.asha);
-        assert!(select_searcher(80, 5, 8, SpaceShape::MixedOrConditional, true).value.asha);
+        assert!(
+            !select_searcher(80, 5, 7, SpaceShape::MixedOrConditional, true)
+                .value
+                .asha
+        );
+        assert!(
+            select_searcher(80, 5, 8, SpaceShape::MixedOrConditional, true)
+                .value
+                .asha
+        );
     }
 
     /// The arm this platform does not run is a *visible* revisit trigger rather
@@ -548,7 +615,11 @@ mod tests {
         let p = select_searcher(500, 5, 16, SpaceShape::MixedOrConditional, true);
         assert!(p.value.beyond_supported_budget);
         assert_eq!(p.value.searcher, Searcher::Tpe, "it still searches");
-        assert!(p.value.rationale.contains("revisit trigger"), "{}", p.value.rationale);
+        assert!(
+            p.value.rationale.contains("revisit trigger"),
+            "{}",
+            p.value.rationale
+        );
     }
 
     #[test]
@@ -566,12 +637,18 @@ mod tests {
     fn a_rung_is_never_scored_on_one_observation() {
         let obs = [0.9, 0.1, 0.5, 0.4, 0.6, 0.2, 0.8, 0.3, 0.7, 0.05];
         let robust = RungMetric::WorstCaseRobust.score(&obs).unwrap();
-        assert!((robust - 0.05).abs() < 1e-12, "the worst tail, not the last value: {robust}");
+        assert!(
+            (robust - 0.05).abs() < 1e-12,
+            "the worst tail, not the last value: {robust}"
+        );
 
         let curve = [1.0, 0.8, 0.6, 0.4, 0.2];
         let mean3 = RungMetric::LastThreeMean.score(&curve).unwrap();
         assert!((mean3 - 0.4).abs() < 1e-12, "{mean3}");
-        assert!(mean3 > *curve.last().unwrap(), "one lucky step cannot carry the rung");
+        assert!(
+            mean3 > *curve.last().unwrap(),
+            "one lucky step cannot carry the rung"
+        );
     }
 
     #[test]
@@ -583,7 +660,11 @@ mod tests {
     fn entries(scores: &[(&str, f64)], replicates: usize) -> Vec<RungEntry> {
         scores
             .iter()
-            .map(|(c, s)| RungEntry { candidate: (*c).to_string(), score: *s, replicates })
+            .map(|(c, s)| RungEntry {
+                candidate: (*c).to_string(),
+                score: *s,
+                replicates,
+            })
             .collect()
     }
 
@@ -593,7 +674,11 @@ mod tests {
     fn the_grace_period_protects_an_unfinished_rung() {
         let l = AshaLadder::cold_start(RungMetric::WorstCaseRobust);
         let e = entries(&[("a", 1.0), ("b", 0.9), ("c", 0.1)], 1);
-        assert_eq!(l.survivors(0, &e).len(), 3, "rung 0 is inside the grace period");
+        assert_eq!(
+            l.survivors(0, &e).len(),
+            3,
+            "rung 0 is inside the grace period"
+        );
         assert_eq!(l.survivors(1, &e).len(), 1);
     }
 
@@ -605,12 +690,22 @@ mod tests {
 
         // eta = 3 over four candidates keeps the top two.
         let plain = AshaLadder::cold_start(RungMetric::WorstCaseRobust);
-        assert_eq!(plain.survivors(2, &e), vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(
+            plain.survivors(2, &e),
+            vec!["a".to_string(), "b".to_string()]
+        );
 
         let soft = AshaLadder::calibrated(RungMetric::WorstCaseRobust, 1, 0.05);
         let kept = soft.survivors(2, &e);
-        assert_eq!(kept.len(), 3, "a, b and c are within the swap gap: {kept:?}");
-        assert!(!kept.contains(&"d".to_string()), "d is distinguishably worse");
+        assert_eq!(
+            kept.len(),
+            3,
+            "a, b and c are within the swap gap: {kept:?}"
+        );
+        assert!(
+            !kept.contains(&"d".to_string()),
+            "d is distinguishably worse"
+        );
     }
 
     #[test]
@@ -619,7 +714,10 @@ mod tests {
         assert!((l.epsilon() - 0.0).abs() < f64::EPSILON);
         // A nonsensical calibration falls back to plain ASHA rather than to a
         // number nobody measured.
-        assert!((AshaLadder::calibrated(RungMetric::LastThreeMean, 1, f64::NAN).epsilon()).abs() < f64::EPSILON);
+        assert!(
+            (AshaLadder::calibrated(RungMetric::LastThreeMean, 1, f64::NAN).epsilon()).abs()
+                < f64::EPSILON
+        );
     }
 
     /// With fewer than three replicates the signed-rank test cannot reject at any
@@ -637,11 +735,20 @@ mod tests {
     /// on seeds the search never saw, before one of them is crowned.
     #[test]
     fn the_top_three_are_reseeded_before_an_incumbent_is_crowned() {
-        let e = entries(&[("a", 0.5), ("b", 0.9), ("c", 0.7), ("d", 0.8), ("e", 0.1)], 3);
-        assert_eq!(AshaLadder::needs_reseed(&e), vec!["b".to_string(), "d".to_string(), "c".to_string()]);
+        let e = entries(
+            &[("a", 0.5), ("b", 0.9), ("c", 0.7), ("d", 0.8), ("e", 0.1)],
+            3,
+        );
+        assert_eq!(
+            AshaLadder::needs_reseed(&e),
+            vec!["b".to_string(), "d".to_string(), "c".to_string()]
+        );
         // A shorter field reseeds everything it has, best first, rather than
         // refusing.
-        assert_eq!(AshaLadder::needs_reseed(&e[..2]), vec!["b".to_string(), "a".to_string()]);
+        assert_eq!(
+            AshaLadder::needs_reseed(&e[..2]),
+            vec!["b".to_string(), "a".to_string()]
+        );
     }
 
     // ── 2.10 ────────────────────────────────────────────────────────────────
@@ -684,11 +791,17 @@ mod tests {
     #[test]
     fn a_posterior_answers_through_the_same_interface() {
         let hopeless = EarlyStopper::with_posterior(0.01).decide(0.9, &[0.1], 5_000);
-        assert!(hopeless.value.stops(), "a leader with no posterior support still stops");
+        assert!(
+            hopeless.value.stops(),
+            "a leader with no posterior support still stops"
+        );
         assert_eq!(hopeless.rung, Rung::Learned);
 
         let promising = EarlyStopper::with_posterior(0.4).decide(0.1, &[0.9], 5_000);
-        assert!(!promising.value.stops(), "a laggard the posterior believes in continues");
+        assert!(
+            !promising.value.stops(),
+            "a laggard the posterior believes in continues"
+        );
         assert_eq!(promising.rung, Rung::Learned);
     }
 }

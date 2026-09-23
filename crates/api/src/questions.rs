@@ -161,7 +161,11 @@ mod tests {
     fn any_cited_id_is_a_candidate_whatever_its_role() {
         let e = finding(
             "f_1",
-            &[("experiment_id", "exp_7"), ("question_id", "q_1"), ("answers", "q_2")],
+            &[
+                ("experiment_id", "exp_7"),
+                ("question_id", "q_1"),
+                ("answers", "q_2"),
+            ],
         );
         let cited: Vec<String> = e.evidence_ids.values().cloned().collect();
         assert!(cited.contains(&"q_1".to_string()));

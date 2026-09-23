@@ -428,11 +428,7 @@ impl RealisedSeriesBuilder {
     // flags any line carrying both a float and a money word, and `mark: Price`
     // beside `-> Result<f64, ..>` would read as exactly the mistake the check
     // exists to catch. The float here is a *ratio's* denominator, not money.
-    fn mark_to(
-        &self,
-        mark: Price,
-        bar: DateTime<Utc>,
-    ) -> Result<f64, ForwardError> {
+    fn mark_to(&self, mark: Price, bar: DateTime<Utc>) -> Result<f64, ForwardError> {
         let marked = self.cash + self.position * mark.inner();
         let value = marked.to_f64().unwrap_or(f64::NAN);
         if !value.is_finite() || value <= 0.0 {
@@ -587,7 +583,9 @@ mod tests {
         t.max_abs_return_divergence = 0.0;
         assert!(matches!(
             t.validate(),
-            Err(ForwardError::UndeclaredThreshold("max_abs_return_divergence"))
+            Err(ForwardError::UndeclaredThreshold(
+                "max_abs_return_divergence"
+            ))
         ));
         let mut t = thresholds();
         t.max_cum_return_divergence = f64::INFINITY;

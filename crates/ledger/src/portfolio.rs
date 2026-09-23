@@ -68,7 +68,11 @@ impl Portfolio {
 /// Stops early when no remaining candidate covers anything new — a member that
 /// adds nothing is a run every future asset pays for and no one reads.
 #[must_use]
-pub fn select(candidates: &[Candidate], universe: &BTreeSet<(i32, i32)>, target: usize) -> Portfolio {
+pub fn select(
+    candidates: &[Candidate],
+    universe: &BTreeSet<(i32, i32)>,
+    target: usize,
+) -> Portfolio {
     let target = target.clamp(COLD_START_SIZE, MAX_SIZE);
     let mut covered: BTreeSet<(i32, i32)> = BTreeSet::new();
     let mut members: Vec<String> = Vec::new();
@@ -96,7 +100,11 @@ pub fn select(candidates: &[Candidate], universe: &BTreeSet<(i32, i32)>, target:
     }
 
     let reached = universe.intersection(&covered).count();
-    Portfolio { members, covered: reached, uncovered: universe.len() - reached }
+    Portfolio {
+        members,
+        covered: reached,
+        uncovered: universe.len() - reached,
+    }
 }
 
 #[cfg(test)]
@@ -104,7 +112,10 @@ mod tests {
     use super::*;
 
     fn candidate(hash: &str, cells: &[(i32, i32)]) -> Candidate {
-        Candidate { config_hash: hash.into(), covers: cells.iter().copied().collect() }
+        Candidate {
+            config_hash: hash.into(),
+            covers: cells.iter().copied().collect(),
+        }
     }
 
     fn universe(cells: &[(i32, i32)]) -> BTreeSet<(i32, i32)> {
@@ -116,7 +127,16 @@ mod tests {
     /// everyone already covers.
     #[test]
     fn coverage_beats_individual_excellence() {
-        let u = universe(&[(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (2, 1), (3, 0), (3, 1)]);
+        let u = universe(&[
+            (0, 0),
+            (0, 1),
+            (1, 0),
+            (1, 1),
+            (2, 0),
+            (2, 1),
+            (3, 0),
+            (3, 1),
+        ]);
         let mut cands = vec![
             candidate("broad", &[(0, 0), (0, 1), (1, 0), (1, 1)]),
             candidate("corner", &[(0, 0)]),
@@ -135,10 +155,17 @@ mod tests {
     #[test]
     fn the_selection_is_reproducible() {
         let u = universe(&[(0, 0), (1, 1)]);
-        let c = vec![candidate("a", &[(0, 0)]), candidate("b", &[(0, 0)]), candidate("z", &[(1, 1)])];
+        let c = vec![
+            candidate("a", &[(0, 0)]),
+            candidate("b", &[(0, 0)]),
+            candidate("z", &[(1, 1)]),
+        ];
         let first = select(&c, &u, COLD_START_SIZE);
         let second = select(&c, &u, COLD_START_SIZE);
-        assert_eq!(first, second, "a portfolio that moves between runs is no basis");
+        assert_eq!(
+            first, second,
+            "a portfolio that moves between runs is no basis"
+        );
     }
 
     /// A member that covers nothing new is a run every future asset pays for and
@@ -146,7 +173,9 @@ mod tests {
     #[test]
     fn growth_stops_when_nothing_new_is_reachable() {
         let u = universe(&[(0, 0)]);
-        let c: Vec<Candidate> = (0..20).map(|i| candidate(&format!("c{i}"), &[(0, 0)])).collect();
+        let c: Vec<Candidate> = (0..20)
+            .map(|i| candidate(&format!("c{i}"), &[(0, 0)]))
+            .collect();
         let p = select(&c, &u, MAX_SIZE);
         assert_eq!(p.members.len(), 1);
         assert!((p.coverage() - 1.0).abs() < f64::EPSILON);
@@ -166,7 +195,9 @@ mod tests {
     #[test]
     fn the_size_is_clamped_to_the_declared_range() {
         let u = universe(&(0..40).map(|i| (i, 0)).collect::<Vec<_>>());
-        let c: Vec<Candidate> = (0..40).map(|i| candidate(&format!("c{i}"), &[(i, 0)])).collect();
+        let c: Vec<Candidate> = (0..40)
+            .map(|i| candidate(&format!("c{i}"), &[(i, 0)]))
+            .collect();
         assert_eq!(select(&c, &u, 1).members.len(), COLD_START_SIZE);
         assert_eq!(select(&c, &u, 1_000).members.len(), MAX_SIZE);
     }

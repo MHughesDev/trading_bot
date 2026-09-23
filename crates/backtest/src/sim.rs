@@ -229,7 +229,11 @@ impl SimPosition {
         }
         match *pos {
             None => {
-                *pos = Some(Self { side, qty, entry: fill });
+                *pos = Some(Self {
+                    side,
+                    qty,
+                    entry: fill,
+                });
                 NetEffect::Reopened { side, entry: fill }
             }
             Some(mut open) if open.side == side => {
@@ -237,7 +241,10 @@ impl SimPosition {
                 open.entry = (open.entry * open.qty + fill * qty) / total;
                 open.qty = total;
                 *pos = Some(open);
-                NetEffect::Reopened { side, entry: open.entry }
+                NetEffect::Reopened {
+                    side,
+                    entry: open.entry,
+                }
             }
             Some(mut open) => match qty.cmp(&open.qty) {
                 std::cmp::Ordering::Less => {
@@ -252,7 +259,11 @@ impl SimPosition {
                 // A reversal is an exit and a new entry, and the new position's
                 // stop is measured from the new entry.
                 std::cmp::Ordering::Greater => {
-                    *pos = Some(Self { side, qty: qty - open.qty, entry: fill });
+                    *pos = Some(Self {
+                        side,
+                        qty: qty - open.qty,
+                        entry: fill,
+                    });
                     NetEffect::Reopened { side, entry: fill }
                 }
             },
@@ -293,7 +304,6 @@ fn fill_rate(schedule: &FeeSchedule, taker: bool) -> Decimal {
     };
     dec_from(bps) / Decimal::from(10_000)
 }
-
 
 /// Formats a `Decimal` with exactly `precision` fractional digits.
 fn dec_str(d: Decimal, precision: u32) -> String {
@@ -416,7 +426,13 @@ fn build_setup(inputs: &SimulationInputs) -> anyhow::Result<Setup> {
 
     let exits: ExitLog = Arc::new(Mutex::new(Vec::new()));
     let handler = build_handler(inputs, order_specs, size_precision, Arc::clone(&exits))?;
-    Ok(Setup { spec, bars: engine_bars, handler, exits, schedule })
+    Ok(Setup {
+        spec,
+        bars: engine_bars,
+        handler,
+        exits,
+        schedule,
+    })
 }
 
 /// A spot pair that charges the resolved schedule.
@@ -506,7 +522,12 @@ pub fn run_simulation(
     inputs: SimulationInputs,
     control: &Arc<SimulationControl>,
 ) -> anyhow::Result<SimulationReport> {
-    let Setup { spec, bars: engine_bars, handler, .. } = build_setup(&inputs)?;
+    let Setup {
+        spec,
+        bars: engine_bars,
+        handler,
+        ..
+    } = build_setup(&inputs)?;
     let BarSimulationSpec {
         venue,
         preset,
@@ -564,7 +585,13 @@ pub fn run_simulation_detailed(
     inputs: SimulationInputs,
     control: &Arc<SimulationControl>,
 ) -> anyhow::Result<DetailedOutcome> {
-    let Setup { spec, bars: engine_bars, handler, exits, schedule } = build_setup(&inputs)?;
+    let Setup {
+        spec,
+        bars: engine_bars,
+        handler,
+        exits,
+        schedule,
+    } = build_setup(&inputs)?;
     let BarSimulationSpec {
         venue,
         preset,
@@ -653,7 +680,9 @@ pub fn run_simulation_detailed(
     // Re-price the exits the declared policy caused. The engine filled them at
     // the bar's close, which for a stop is at least as good as the level the
     // order rested at; `conservative_exit_fill` refuses the better of the two.
-    let exit_fills = exits.lock().map_or_else(|e| e.into_inner().clone(), |g| g.clone());
+    let exit_fills = exits
+        .lock()
+        .map_or_else(|e| e.into_inner().clone(), |g| g.clone());
     apply_exit_fills(&mut trades, &exit_fills);
     if let Some(total) = stats
         .get("total_positions")
@@ -710,7 +739,10 @@ fn apply_exit_fills(trades: &mut [Trade], fills: &[ExitFill]) {
         // reports `quantity` zero, and an adjustment multiplied by that is an
         // adjustment that silently does not happen.
         let delta = (fill.charged - trade.exit_price) * fill.qty * sign;
-        debug_assert!(delta <= Decimal::ZERO, "the conservative fill never improves a trade");
+        debug_assert!(
+            delta <= Decimal::ZERO,
+            "the conservative fill never improves a trade"
+        );
         trade.pnl += delta;
         trade.exit_price = fill.charged;
     }
@@ -724,7 +756,13 @@ fn base_position_id(id: &str) -> &str {
         return id;
     }
     let (head, tail) = id.split_at(id.len() - UUID_LEN);
-    let is_uuid = tail.char_indices().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { c == '-' } else { c.is_ascii_hexdigit() });
+    let is_uuid = tail.char_indices().all(|(i, c)| {
+        if matches!(i, 8 | 13 | 18 | 23) {
+            c == '-'
+        } else {
+            c.is_ascii_hexdigit()
+        }
+    });
     match head.strip_suffix('-') {
         Some(base) if is_uuid => base,
         _ => id,
@@ -987,7 +1025,12 @@ fn build_handler(
         .iter()
         .map(|f| Ok((f.name.clone(), features::runtime::feature(&f.name)?)))
         .collect::<Result<_, features::FeatureError>>()?;
-    let keep = indicators.iter().map(|(_, f)| f.def().lookback_bars as usize).max().unwrap_or(1).max(1);
+    let keep = indicators
+        .iter()
+        .map(|(_, f)| f.def().lookback_bars as usize)
+        .max()
+        .unwrap_or(1)
+        .max(1);
     let mut rows: Vec<features::FeatureRow> = Vec::with_capacity(keep * 2);
 
     let mut feature_values: HashMap<String, f64> = HashMap::new();
@@ -1068,11 +1111,8 @@ fn build_handler(
                                 side: flattening_side(open.side),
                                 quantity: qty,
                             });
-                            let charged = conservative_exit_fill(
-                                open.side,
-                                triggered.price,
-                                close_value,
-                            );
+                            let charged =
+                                conservative_exit_fill(open.side, triggered.price, close_value);
                             let fill = ExitFill {
                                 ts,
                                 rule: triggered.rule.clone(),
@@ -1159,10 +1199,22 @@ mod tests {
 
     #[test]
     fn base_position_id_strips_only_a_snapshot_uuid_suffix() {
-        assert_eq!(base_position_id("BTC-USDT.BINANCE-EMA-001-3f2b8c1e-9a4d-4e2b-8c7f-1a2b3c4d5e6f"), "BTC-USDT.BINANCE-EMA-001");
-        assert_eq!(base_position_id("BTC-USDT.BINANCE-EMA-001"), "BTC-USDT.BINANCE-EMA-001");
-        assert_eq!(base_position_id("P-zzzzzzzz-9a4d-4e2b-8c7f-1a2b3c4d5e6f"), "P-zzzzzzzz-9a4d-4e2b-8c7f-1a2b3c4d5e6f");
-        assert_eq!(base_position_id("3f2b8c1e-9a4d-4e2b-8c7f-1a2b3c4d5e6f"), "3f2b8c1e-9a4d-4e2b-8c7f-1a2b3c4d5e6f");
+        assert_eq!(
+            base_position_id("BTC-USDT.BINANCE-EMA-001-3f2b8c1e-9a4d-4e2b-8c7f-1a2b3c4d5e6f"),
+            "BTC-USDT.BINANCE-EMA-001"
+        );
+        assert_eq!(
+            base_position_id("BTC-USDT.BINANCE-EMA-001"),
+            "BTC-USDT.BINANCE-EMA-001"
+        );
+        assert_eq!(
+            base_position_id("P-zzzzzzzz-9a4d-4e2b-8c7f-1a2b3c4d5e6f"),
+            "P-zzzzzzzz-9a4d-4e2b-8c7f-1a2b3c4d5e6f"
+        );
+        assert_eq!(
+            base_position_id("3f2b8c1e-9a4d-4e2b-8c7f-1a2b3c4d5e6f"),
+            "3f2b8c1e-9a4d-4e2b-8c7f-1a2b3c4d5e6f"
+        );
     }
 
     #[test]

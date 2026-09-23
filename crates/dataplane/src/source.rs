@@ -131,7 +131,8 @@ impl SourceDecl {
             name: "tradier_rest",
             kind: SourceKind::RestHistory,
             declared_lag: Duration::from_secs(900),
-            notes: "Tradier documents a 15-minute delay on sandbox data and on production index data",
+            notes:
+                "Tradier documents a 15-minute delay on sandbox data and on production index data",
         }
     }
 
@@ -161,17 +162,30 @@ impl SourceDecl {
     /// [`KnowledgeError::ObservedBeforeEvent`] if a receipt precedes the event it
     /// claims to observe. Nothing is observed before it happens, and a clock skew
     /// that says otherwise must surface rather than be written.
-    pub fn knowledge_for(&self, event_time: DateTime<Utc>, how: Collection) -> Result<Knowledge, KnowledgeError> {
+    pub fn knowledge_for(
+        &self,
+        event_time: DateTime<Utc>,
+        how: Collection,
+    ) -> Result<Knowledge, KnowledgeError> {
         match how {
             Collection::Forward { received_at } => {
                 if received_at < event_time {
-                    return Err(KnowledgeError::ObservedBeforeEvent { received_at, event_time, source_name: self.name });
+                    return Err(KnowledgeError::ObservedBeforeEvent {
+                        received_at,
+                        event_time,
+                        source_name: self.name,
+                    });
                 }
                 Ok(Knowledge::Observed { at: received_at })
             }
             Collection::Historical => {
-                let lag = chrono::Duration::from_std(self.declared_lag).unwrap_or_else(|_| chrono::Duration::zero());
-                Ok(Knowledge::Derived { at: event_time + lag, from_event_time: event_time, declared_lag: self.declared_lag })
+                let lag = chrono::Duration::from_std(self.declared_lag)
+                    .unwrap_or_else(|_| chrono::Duration::zero());
+                Ok(Knowledge::Derived {
+                    at: event_time + lag,
+                    from_event_time: event_time,
+                    declared_lag: self.declared_lag,
+                })
             }
         }
     }
@@ -199,7 +213,11 @@ pub enum KnowledgeError {
     // `source_name`, not `source`: thiserror treats a field called `source` as the
     // error's cause and demands it implement `StdError`.
     #[error("source {source_name}: receipt {received_at} precedes the event {event_time} it claims to observe")]
-    ObservedBeforeEvent { received_at: DateTime<Utc>, event_time: DateTime<Utc>, source_name: &'static str },
+    ObservedBeforeEvent {
+        received_at: DateTime<Utc>,
+        event_time: DateTime<Utc>,
+        source_name: &'static str,
+    },
 }
 
 /// When the platform could first have known a fact — and, inseparably, whether that
@@ -215,7 +233,12 @@ pub enum Knowledge {
     /// The platform watched this arrive. `at` is receipt.
     Observed { at: DateTime<Utc> },
     /// The platform inferred when it could have known. Carries the sentinel.
-    Derived { at: DateTime<Utc>, from_event_time: DateTime<Utc>, #[serde(with = "secs")] declared_lag: Duration },
+    Derived {
+        at: DateTime<Utc>,
+        from_event_time: DateTime<Utc>,
+        #[serde(with = "secs")]
+        declared_lag: Duration,
+    },
 }
 
 impl Knowledge {
@@ -284,7 +307,12 @@ mod tests {
 
     #[test]
     fn a_live_stream_observes_its_knowledge_time() {
-        let live = SourceDecl { name: "kraken_ws", kind: SourceKind::LiveStream, declared_lag: Duration::ZERO, notes: "live" };
+        let live = SourceDecl {
+            name: "kraken_ws",
+            kind: SourceKind::LiveStream,
+            declared_lag: Duration::ZERO,
+            notes: "live",
+        };
         let recv = t(1) + chrono::Duration::milliseconds(40);
         let k = live.knowledge_for(t(1), fwd(recv)).unwrap();
         assert!(!k.is_derived());
@@ -302,12 +330,25 @@ mod tests {
         let src = SourceDecl::kraken_futures_ticker();
         let recv = t(5) + chrono::Duration::minutes(40);
         let k = src.knowledge_for(t(5), fwd(recv)).unwrap();
-        assert!(!k.is_derived(), "a poll the platform watched arrive is observed, whatever the transport");
-        assert!(k.is_forward_evidence(), "this is the leg that feeds Gate 15");
+        assert!(
+            !k.is_derived(),
+            "a poll the platform watched arrive is observed, whatever the transport"
+        );
+        assert!(
+            k.is_forward_evidence(),
+            "this is the leg that feeds Gate 15"
+        );
         assert_eq!(k.quality_flags(), QualityFlags::NONE);
-        assert_eq!(k.time(), recv, "the real receipt is kept, not replaced by a sentinel");
+        assert_eq!(
+            k.time(),
+            recv,
+            "the real receipt is kept, not replaced by a sentinel"
+        );
         let sentinel = src.knowledge_for(t(5), Collection::Historical).unwrap();
-        assert!(sentinel.time() > recv, "the sentinel would have post-dated the real receipt");
+        assert!(
+            sentinel.time() > recv,
+            "the sentinel would have post-dated the real receipt"
+        );
     }
 
     /// The original bug, as a test. A row pulled from a history endpoint has no
@@ -317,9 +358,18 @@ mod tests {
         let src = SourceDecl::kraken_futures_funding_history();
         let k = src.knowledge_for(t(1), Collection::Historical).unwrap();
         assert!(k.is_derived());
-        assert!(!k.is_forward_evidence(), "the sentinel must never reach Gate 15's evidence (D-P3)");
-        assert!(k.quality_flags().contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
-        assert_eq!(k.time(), t(2), "derived knowledge is event_time + the declared lag");
+        assert!(
+            !k.is_forward_evidence(),
+            "the sentinel must never reach Gate 15's evidence (D-P3)"
+        );
+        assert!(k
+            .quality_flags()
+            .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
+        assert_eq!(
+            k.time(),
+            t(2),
+            "derived knowledge is event_time + the declared lag"
+        );
     }
 
     /// Adversarial: nothing is observed before it happens. A receipt that precedes
@@ -360,7 +410,9 @@ mod tests {
     #[test]
     fn one_source_supplies_both_legs() {
         let src = SourceDecl::kraken_futures_ticker();
-        let forward = src.knowledge_for(t(5), fwd(t(5) + chrono::Duration::minutes(1))).unwrap();
+        let forward = src
+            .knowledge_for(t(5), fwd(t(5) + chrono::Duration::minutes(1)))
+            .unwrap();
         let history = src.knowledge_for(t(5), Collection::Historical).unwrap();
         assert!(forward.is_forward_evidence());
         assert!(!history.is_forward_evidence());
@@ -368,14 +420,24 @@ mod tests {
 
     #[test]
     fn declared_lags_match_the_documented_source() {
-        assert_eq!(SourceDecl::tradier_chain().declared_lag, Duration::from_secs(900));
-        assert_eq!(SourceDecl::kraken_futures_ticker().declared_lag, Duration::from_secs(3600));
+        assert_eq!(
+            SourceDecl::tradier_chain().declared_lag,
+            Duration::from_secs(900)
+        );
+        assert_eq!(
+            SourceDecl::kraken_futures_ticker().declared_lag,
+            Duration::from_secs(3600)
+        );
         for s in [
             SourceDecl::kraken_futures_ticker(),
             SourceDecl::kraken_futures_funding_history(),
             SourceDecl::tradier_chain(),
         ] {
-            assert!(!s.notes.is_empty(), "{} declares a lag with no stated reason", s.name);
+            assert!(
+                !s.notes.is_empty(),
+                "{} declares a lag with no stated reason",
+                s.name
+            );
         }
     }
 
@@ -386,4 +448,3 @@ mod tests {
         assert_eq!(k.implied_lag(t(1)), Duration::from_secs(900));
     }
 }
-

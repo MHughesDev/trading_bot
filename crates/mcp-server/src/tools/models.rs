@@ -140,14 +140,12 @@ pub async fn train_model(
 
     // ── 1. Find or create ───────────────────────────────────────────────────
     let existing = api.get("/api/models").await.ok().and_then(|v| {
-        v.get("models")
-            .and_then(Value::as_array)
-            .and_then(|arr| {
-                arr.iter()
-                    .find(|m| m.get("slug").and_then(Value::as_str) == Some(slug))
-                    .and_then(|m| m.get("model_id").and_then(Value::as_str))
-                    .map(str::to_string)
-            })
+        v.get("models").and_then(Value::as_array).and_then(|arr| {
+            arr.iter()
+                .find(|m| m.get("slug").and_then(Value::as_str) == Some(slug))
+                .and_then(|m| m.get("model_id").and_then(Value::as_str))
+                .map(str::to_string)
+        })
     });
 
     let model_id = match existing {
@@ -196,7 +194,10 @@ pub async fn train_model(
         }
     });
     let run_id = match api
-        .post(&format!("/api/models/{}/train", urlencode(&model_id)), train_body)
+        .post(
+            &format!("/api/models/{}/train", urlencode(&model_id)),
+            train_body,
+        )
         .await
     {
         Ok(v) => match v.get("run_id").and_then(Value::as_str) {
@@ -234,10 +235,7 @@ pub async fn train_model(
                 if let Some(tx) = &progress {
                     let _ = tx
                         .send(ProgressUpdate {
-                            progress: snap
-                                .get("progress")
-                                .and_then(Value::as_f64)
-                                .unwrap_or(0.0),
+                            progress: snap.get("progress").and_then(Value::as_f64).unwrap_or(0.0),
                             message: format!("training {slug} — {status}"),
                         })
                         .await;

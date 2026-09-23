@@ -208,8 +208,7 @@ pub fn review(draft: &Draft) -> Critique {
     {
         findings.push(Finding {
             check: Check::NullComparisonRan,
-            detail: "no null comparison ran, so the result is not better than anything"
-                .to_string(),
+            detail: "no null comparison ran, so the result is not better than anything".to_string(),
             blocking: true,
         });
     }

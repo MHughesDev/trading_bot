@@ -239,7 +239,10 @@ mod tests {
         for gate in [8, 14] {
             let naked = GateRecord::measured("strict_v1", gate, "sig", true, 0.01, 0.05, "d")
                 .for_experiment("e");
-            assert!(naked.validate().is_err(), "gate {gate} accepted without N_eff");
+            assert!(
+                naked.validate().is_err(),
+                "gate {gate} accepted without N_eff"
+            );
             assert!(naked.with_significance(12.0, 300).validate().is_ok());
         }
     }

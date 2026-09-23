@@ -79,14 +79,21 @@ pub struct CrossSourceThresholds {
 impl Default for CoverageThresholds {
     fn default() -> Self {
         // DATA-005 §7: B keeps gaps under 0.5%, D begins at 5%.
-        Self { b_max_missing: 0.005, d_min_missing: 0.05 }
+        Self {
+            b_max_missing: 0.005,
+            d_min_missing: 0.05,
+        }
     }
 }
 
 impl Default for BadTickThresholds {
     fn default() -> Self {
         // `abs(log return) > 8·σ_rolling` reversing ≥ 80% on the next bar.
-        Self { sigma_multiple: 8.0, reversal_fraction: 0.8, sigma_window: 50 }
+        Self {
+            sigma_multiple: 8.0,
+            reversal_fraction: 0.8,
+            sigma_window: 50,
+        }
     }
 }
 
@@ -111,7 +118,11 @@ impl Default for StaleThresholds {
 
 impl Default for VolumeThresholds {
     fn default() -> Self {
-        Self { max_zero_share: 0.10, spike_multiple: 20.0, median_window: 50 }
+        Self {
+            max_zero_share: 0.10,
+            spike_multiple: 20.0,
+            median_window: 50,
+        }
     }
 }
 
@@ -167,8 +178,14 @@ mod tests {
     #[test]
     fn the_defaults_are_the_specs_numbers() {
         let c = QcConfig::default();
-        assert!((c.coverage.b_max_missing - 0.005).abs() < f64::EPSILON, "B keeps gaps under 0.5%");
-        assert!((c.coverage.d_min_missing - 0.05).abs() < f64::EPSILON, "D begins at 5%");
+        assert!(
+            (c.coverage.b_max_missing - 0.005).abs() < f64::EPSILON,
+            "B keeps gaps under 0.5%"
+        );
+        assert!(
+            (c.coverage.d_min_missing - 0.05).abs() < f64::EPSILON,
+            "D begins at 5%"
+        );
         assert!((c.bad_ticks.sigma_multiple - 8.0).abs() < f64::EPSILON);
         assert!((c.bad_ticks.reversal_fraction - 0.8).abs() < f64::EPSILON);
         assert!((c.volume.spike_multiple - 20.0).abs() < f64::EPSILON);
@@ -212,7 +229,10 @@ mod tests {
     #[test]
     fn an_unknown_key_is_refused_rather_than_ignored() {
         let err = QcConfig::from_toml("[coverage]\nb_max_missng = 0.005\n").unwrap_err();
-        assert!(err.contains("b_max_missng") || err.contains("unknown"), "{err}");
+        assert!(
+            err.contains("b_max_missng") || err.contains("unknown"),
+            "{err}"
+        );
     }
 
     #[test]

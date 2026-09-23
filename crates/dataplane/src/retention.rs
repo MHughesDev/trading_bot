@@ -67,12 +67,18 @@ impl RetentionPolicy {
     pub fn validate(self, cadence_secs: u32) -> Result<(), RetentionError> {
         match self {
             Self::None => Ok(()),
-            Self::Downsample { after_days, to_secs } => {
+            Self::Downsample {
+                after_days,
+                to_secs,
+            } => {
                 if to_secs == 0 || after_days == 0 {
                     return Err(RetentionError::IncompletePolicy);
                 }
                 if to_secs < cadence_secs {
-                    return Err(RetentionError::Refines { to_secs, cadence_secs });
+                    return Err(RetentionError::Refines {
+                        to_secs,
+                        cadence_secs,
+                    });
                 }
                 Ok(())
             }
@@ -114,12 +120,17 @@ pub fn retention_action(spec: &ForwardSeriesSpec, used_bytes: u64) -> RetentionA
         return RetentionAction::Keep;
     }
     match spec.retention {
-        RetentionPolicy::Downsample { after_days, to_secs } => {
-            RetentionAction::Downsample { older_than_days: after_days, to_secs }
-        }
-        RetentionPolicy::None => {
-            RetentionAction::BudgetExceededNeedsDecision { used_bytes, budget_bytes: spec.disk_budget_bytes }
-        }
+        RetentionPolicy::Downsample {
+            after_days,
+            to_secs,
+        } => RetentionAction::Downsample {
+            older_than_days: after_days,
+            to_secs,
+        },
+        RetentionPolicy::None => RetentionAction::BudgetExceededNeedsDecision {
+            used_bytes,
+            budget_bytes: spec.disk_budget_bytes,
+        },
     }
 }
 
@@ -166,13 +177,21 @@ impl Alarm {
 /// but note that disabling one is still a decision to accept a permanent hole, and
 /// `dataplane.forward_series.enabled` records who made it.
 #[must_use]
-pub fn alarm(spec: &ForwardSeriesSpec, last_row_at: Option<DateTime<Utc>>, now: DateTime<Utc>) -> Alarm {
+pub fn alarm(
+    spec: &ForwardSeriesSpec,
+    last_row_at: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> Alarm {
     let cadence = i64::from(spec.cadence_secs.max(1));
     let deadline_secs = cadence * i64::from(spec.alarm_after_cadences.max(1));
 
     let Some(last) = last_row_at else {
         return Alarm {
-            state: if spec.enabled { AlarmState::NeverCollected } else { AlarmState::Ok },
+            state: if spec.enabled {
+                AlarmState::NeverCollected
+            } else {
+                AlarmState::Ok
+            },
             overdue_secs: 0,
             rows_missed: 0,
         };
@@ -181,17 +200,29 @@ pub fn alarm(spec: &ForwardSeriesSpec, last_row_at: Option<DateTime<Utc>>, now: 
     let age = (now - last).num_seconds();
     let overdue_secs = age - deadline_secs;
     if !spec.enabled || overdue_secs <= 0 {
-        return Alarm { state: AlarmState::Ok, overdue_secs, rows_missed: 0 };
+        return Alarm {
+            state: AlarmState::Ok,
+            overdue_secs,
+            rows_missed: 0,
+        };
     }
     // Rows that should have arrived since the last one and did not. The row at
     // `last` itself arrived, so the count is over the elapsed cadences beyond it.
     let rows_missed = u64::try_from(age / cadence).unwrap_or(0).saturating_sub(1);
-    Alarm { state: AlarmState::Stale, overdue_secs, rows_missed }
+    Alarm {
+        state: AlarmState::Stale,
+        overdue_secs,
+        rows_missed,
+    }
 }
 
 /// Time until a healthy series would trip the alarm. `None` once it already has.
 #[must_use]
-pub fn time_to_alarm(spec: &ForwardSeriesSpec, last_row_at: Option<DateTime<Utc>>, now: DateTime<Utc>) -> Option<Duration> {
+pub fn time_to_alarm(
+    spec: &ForwardSeriesSpec,
+    last_row_at: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> Option<Duration> {
     let a = alarm(spec, last_row_at, now);
     if a.is_firing() {
         return None;
@@ -231,7 +262,12 @@ mod tests {
         // Healthy right up to the deadline.
         for h in 0..=3 {
             let a = alarm(&spec, Some(last), t(h));
-            assert_eq!(a.state, AlarmState::Ok, "hour {h} is inside the {}-cadence deadline", spec.alarm_after_cadences);
+            assert_eq!(
+                a.state,
+                AlarmState::Ok,
+                "hour {h} is inside the {}-cadence deadline",
+                spec.alarm_after_cadences
+            );
             assert!(!a.is_firing());
         }
         // One second past it, it fires.
@@ -249,7 +285,10 @@ mod tests {
         let spec = hourly();
         let a = alarm(&spec, Some(t(0)), t(48));
         assert_eq!(a.state, AlarmState::Stale);
-        assert_eq!(a.rows_missed, 47, "47 hourly observations that no backfill can recover");
+        assert_eq!(
+            a.rows_missed, 47,
+            "47 hourly observations that no backfill can recover"
+        );
         assert_eq!(a.overdue_secs, (48 - 3) * 3600);
     }
 
@@ -267,7 +306,10 @@ mod tests {
 
     #[test]
     fn a_disabled_series_does_not_fire() {
-        let spec = ForwardSeriesSpec { enabled: false, ..hourly() };
+        let spec = ForwardSeriesSpec {
+            enabled: false,
+            ..hourly()
+        };
         assert_eq!(alarm(&spec, Some(t(0)), t(1000)).state, AlarmState::Ok);
         assert_eq!(alarm(&spec, None, t(1000)).state, AlarmState::Ok);
     }
@@ -276,8 +318,15 @@ mod tests {
     fn headroom_is_reported_while_healthy() {
         let spec = hourly();
         let left = time_to_alarm(&spec, Some(t(0)), t(1)).unwrap();
-        assert_eq!(left.num_hours(), 2, "three cadences of deadline, one hour elapsed");
-        assert!(time_to_alarm(&spec, Some(t(0)), t(10)).is_none(), "already firing has no headroom");
+        assert_eq!(
+            left.num_hours(),
+            2,
+            "three cadences of deadline, one hour elapsed"
+        );
+        assert!(
+            time_to_alarm(&spec, Some(t(0)), t(10)).is_none(),
+            "already firing has no headroom"
+        );
     }
 
     // ── retention ────────────────────────────────────────────────────────────
@@ -290,7 +339,10 @@ mod tests {
         let spec = hourly();
         let action = retention_action(&spec, spec.disk_budget_bytes * 2);
         match action {
-            RetentionAction::BudgetExceededNeedsDecision { used_bytes, budget_bytes } => {
+            RetentionAction::BudgetExceededNeedsDecision {
+                used_bytes,
+                budget_bytes,
+            } => {
                 assert_eq!(budget_bytes, spec.disk_budget_bytes);
                 assert!(used_bytes > budget_bytes);
             }
@@ -299,21 +351,29 @@ mod tests {
         // The type itself admits no delete. If a `Delete` variant is ever added
         // this match stops compiling, which is the intended tripwire.
         match action {
-            RetentionAction::Keep | RetentionAction::Downsample { .. } | RetentionAction::BudgetExceededNeedsDecision { .. } => {}
+            RetentionAction::Keep
+            | RetentionAction::Downsample { .. }
+            | RetentionAction::BudgetExceededNeedsDecision { .. } => {}
         }
     }
 
     #[test]
     fn downsampling_starts_at_the_high_water_mark_not_at_the_limit() {
         let spec = ForwardSeriesSpec {
-            retention: RetentionPolicy::Downsample { after_days: 30, to_secs: 86_400 },
+            retention: RetentionPolicy::Downsample {
+                after_days: 30,
+                to_secs: 86_400,
+            },
             disk_budget_bytes: 1_000,
             ..hourly()
         };
         assert_eq!(retention_action(&spec, 799), RetentionAction::Keep);
         assert_eq!(
             retention_action(&spec, 800),
-            RetentionAction::Downsample { older_than_days: 30, to_secs: 86_400 },
+            RetentionAction::Downsample {
+                older_than_days: 30,
+                to_secs: 86_400
+            },
             "acting only at 100% means acting after writes have already failed"
         );
     }
@@ -323,32 +383,67 @@ mod tests {
     #[test]
     fn a_policy_that_refines_instead_of_coarsening_is_refused() {
         let cadence = 3600;
-        let bad = RetentionPolicy::Downsample { after_days: 30, to_secs: 60 };
-        assert_eq!(bad.validate(cadence), Err(RetentionError::Refines { to_secs: 60, cadence_secs: 3600 }));
+        let bad = RetentionPolicy::Downsample {
+            after_days: 30,
+            to_secs: 60,
+        };
+        assert_eq!(
+            bad.validate(cadence),
+            Err(RetentionError::Refines {
+                to_secs: 60,
+                cadence_secs: 3600
+            })
+        );
 
-        let good = RetentionPolicy::Downsample { after_days: 30, to_secs: 86_400 };
+        let good = RetentionPolicy::Downsample {
+            after_days: 30,
+            to_secs: 86_400,
+        };
         assert!(good.validate(cadence).is_ok());
         // Equal is fine: a no-op coarsening is harmless.
-        assert!(RetentionPolicy::Downsample { after_days: 1, to_secs: cadence }.validate(cadence).is_ok());
+        assert!(RetentionPolicy::Downsample {
+            after_days: 1,
+            to_secs: cadence
+        }
+        .validate(cadence)
+        .is_ok());
         assert!(RetentionPolicy::None.validate(cadence).is_ok());
     }
 
     #[test]
     fn an_incomplete_policy_is_refused() {
         assert_eq!(
-            RetentionPolicy::Downsample { after_days: 0, to_secs: 86_400 }.validate(3600),
+            RetentionPolicy::Downsample {
+                after_days: 0,
+                to_secs: 86_400
+            }
+            .validate(3600),
             Err(RetentionError::IncompletePolicy)
         );
         assert_eq!(
-            RetentionPolicy::Downsample { after_days: 30, to_secs: 0 }.validate(3600),
+            RetentionPolicy::Downsample {
+                after_days: 30,
+                to_secs: 0
+            }
+            .validate(3600),
             Err(RetentionError::IncompletePolicy)
         );
     }
 
     #[test]
     fn the_seeded_series_validate_against_their_own_cadence() {
-        for spec in [hourly(), ForwardSeriesSpec { series_id: "kraken_futures.open_interest".into(), ..hourly() }] {
-            assert!(spec.retention.validate(spec.cadence_secs).is_ok(), "{} has an invalid policy", spec.series_id);
+        for spec in [
+            hourly(),
+            ForwardSeriesSpec {
+                series_id: "kraken_futures.open_interest".into(),
+                ..hourly()
+            },
+        ] {
+            assert!(
+                spec.retention.validate(spec.cadence_secs).is_ok(),
+                "{} has an invalid policy",
+                spec.series_id
+            );
         }
     }
 }

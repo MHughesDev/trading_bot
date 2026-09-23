@@ -38,9 +38,7 @@ use rust_decimal::Decimal;
 use domain::{order::OrderIntent, RiskRejection, TrustTier};
 use execution::paper::PaperTradingEngine;
 use reconciliation::freshness::is_within_trading_hours;
-use risk::{
-    GateContext, InstrumentLimits, Measured, RateKey, RateSource, RiskContextProvider,
-};
+use risk::{GateContext, InstrumentLimits, Measured, RateKey, RateSource, RiskContextProvider};
 
 use crate::instrument_meta::InstrumentMetaCache;
 

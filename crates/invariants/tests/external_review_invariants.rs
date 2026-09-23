@@ -77,8 +77,10 @@ fn strip_line_comments(src: &str, marker: &str) -> String {
             None => l.to_string(),
         })
         .collect::<Vec<_>>()
-        .join("
-")
+        .join(
+            "
+",
+        )
 }
 
 /// Rust sources with comments blanked, and this suite itself excluded — a scan
@@ -123,12 +125,19 @@ fn intrabar_policy_has_no_optimistic_variant() {
     let enum_start = body
         .find("pub enum IntrabarPolicy")
         .unwrap_or_else(|| panic!("{path}: IntrabarPolicy is gone"));
-    let enum_body = &body[enum_start..enum_start
-        + body[enum_start..]
-            .find('}')
-            .expect("IntrabarPolicy must be a braced enum")];
+    let enum_body = &body[enum_start
+        ..enum_start
+            + body[enum_start..]
+                .find('}')
+                .expect("IntrabarPolicy must be a braced enum")];
 
-    for banned in ["Optimistic", "BestFirst", "Favourable", "Favorable", "Configurable"] {
+    for banned in [
+        "Optimistic",
+        "BestFirst",
+        "Favourable",
+        "Favorable",
+        "Configurable",
+    ] {
         assert!(
             !enum_body.contains(banned),
             "{path}: `IntrabarPolicy::{banned}` resolves a bar that breached both the stop and \
@@ -138,7 +147,10 @@ fn intrabar_policy_has_no_optimistic_variant() {
     }
 
     let variants = enum_body.matches("    ").count();
-    assert!(variants > 0, "{path}: no variants found; the scan is looking at the wrong text");
+    assert!(
+        variants > 0,
+        "{path}: no variants found; the scan is looking at the wrong text"
+    );
     assert!(
         enum_body.contains("WorstFirst") && enum_body.contains("CloseOnly"),
         "{path}: both documented variants must still be present"
@@ -156,10 +168,20 @@ fn the_default_intrabar_policy_is_the_pessimistic_one() {
         .expect("the exit tracker must exist");
     // Inside the enum body: the name also appears in the module docs above it,
     // and the doc comment is not where a `#[default]` attribute would be.
-    let start = body.find("pub enum IntrabarPolicy").expect("IntrabarPolicy must exist");
-    let enum_body = &body[start..start + body[start..].find("
-}").expect("braced enum")];
-    let idx = enum_body.find("WorstFirst").expect("WorstFirst must be a variant");
+    let start = body
+        .find("pub enum IntrabarPolicy")
+        .expect("IntrabarPolicy must exist");
+    let enum_body = &body[start
+        ..start
+            + body[start..]
+                .find(
+                    "
+}",
+                )
+                .expect("braced enum")];
+    let idx = enum_body
+        .find("WorstFirst")
+        .expect("WorstFirst must be a variant");
     let before = &enum_body[..idx];
     assert!(
         before.contains("#[default]"),
@@ -324,7 +346,9 @@ fn no_kill_class_names_a_performance_threshold() {
         .find(|(p, _)| p.ends_with("ledger/src/falsification.rs"))
         .expect("the falsification types must exist");
 
-    let start = body.find("pub enum KillClass").expect("KillClass must exist");
+    let start = body
+        .find("pub enum KillClass")
+        .expect("KillClass must exist");
     let enum_body = &body[start..start + body[start..].find("\n}").expect("braced enum")];
 
     for banned in [
@@ -403,7 +427,10 @@ fn the_agent_cannot_verify_its_own_falsification_reports() {
          report earns its score, and a reporter that can verify itself makes the ordering in \
          falsification_score decorative. Got: {grant}. ADR-P6-06."
     );
-    assert!(grant.contains("INSERT"), "{path}: the agent must still be able to file a report");
+    assert!(
+        grant.contains("INSERT"),
+        "{path}: the agent must still be able to file a report"
+    );
 }
 
 // ── ADR-P6-04: the authoring store is no longer destructive ──────────────────
@@ -419,12 +446,14 @@ fn saving_a_strategy_appends_a_revision_before_it_moves_the_pointer() {
 
     let rev = body
         .find("INSERT INTO strategy_revision")
-        .unwrap_or_else(|| panic!(
-            "{path}: saving a strategy must append an immutable revision. Without it the \
+        .unwrap_or_else(|| {
+            panic!(
+                "{path}: saving a strategy must append an immutable revision. Without it the \
              definition a live instance runs is reconstructable from nothing, and two runs \
              sharing a `strategy_version` are only comparable if nobody saved in between. \
              ADR-P6-04."
-        ));
+            )
+        });
     let ptr = body
         .find("INSERT INTO strategy_definitions")
         .unwrap_or_else(|| panic!("{path}: the pointer write is gone"));
@@ -450,7 +479,9 @@ fn the_canonicaliser_never_sorts_arrays() {
         .find(|(p, _)| p.ends_with("domain/src/strategy_def/revision.rs"))
         .expect("the canonicaliser must exist");
 
-    let start = body.find("fn write_canonical").expect("write_canonical must exist");
+    let start = body
+        .find("fn write_canonical")
+        .expect("write_canonical must exist");
     let array_arm = body[start..]
         .find("Value::Array(items)")
         .map(|i| &body[start + i..start + i + 400])

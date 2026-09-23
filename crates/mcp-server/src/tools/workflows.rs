@@ -430,11 +430,7 @@ impl Ran {
         self.detail
             .get("detail")
             .and_then(|d| d.get(name))
-            .or_else(|| {
-                self.detail
-                    .get("summary_fields")
-                    .and_then(|d| d.get(name))
-            })
+            .or_else(|| self.detail.get("summary_fields").and_then(|d| d.get(name)))
             .or_else(|| self.detail.get(name))
     }
 
@@ -587,7 +583,10 @@ fn should_run(step: &Step, params: &Value, done: &[Ran]) -> Result<(), String> {
                 Err(format!("`{flag}` was not set, so this step does not apply"))
             }
         }
-        When::IfEarlier { step: earlier, field } => {
+        When::IfEarlier {
+            step: earlier,
+            field,
+        } => {
             let held = done
                 .iter()
                 .find(|r| r.label == earlier)
@@ -631,7 +630,11 @@ pub async fn run(ctx: &crate::McpContext, wf: &'static Workflow, params: &Value)
                 wf.owed()
                     .iter()
                     .map(|(l, n)| format!("{l} (needs {n})"))
-                    .chain(wf.missing_tools().iter().map(|t| format!("{t} (not in the catalogue)")))
+                    .chain(
+                        wf.missing_tools()
+                            .iter()
+                            .map(|t| format!("{t} (not in the catalogue)"))
+                    )
                     .collect::<Vec<_>>()
                     .join("; ")
             ),
@@ -647,7 +650,10 @@ pub async fn run(ctx: &crate::McpContext, wf: &'static Workflow, params: &Value)
     // one check that was supposed to cover them.
     for stage in wf.stages {
         let Stage::Owed {
-            label, needs, why, when,
+            label,
+            needs,
+            why,
+            when,
         } = stage
         else {
             continue;
@@ -659,9 +665,7 @@ pub async fn run(ctx: &crate::McpContext, wf: &'static Workflow, params: &Value)
         // question for an owed stage, with no earlier steps to read.
         let applies = match when {
             When::Always => true,
-            When::IfArgument(flag) => {
-                params.get(*flag).and_then(Value::as_bool).unwrap_or(false)
-            }
+            When::IfArgument(flag) => params.get(*flag).and_then(Value::as_bool).unwrap_or(false),
             // An owed stage cannot depend on an earlier step's finding: there is
             // no step to have found it. Declaring one would be a stage that can
             // never apply, which is a stage that is never refused.
@@ -925,7 +929,11 @@ mod tests {
             for step in w.calls() {
                 let spec = crate::spec::find(step.tool)
                     .unwrap_or_else(|| panic!("`{}` step `{}` names no tool", w.name, step.label));
-                assert!(spec.status.is_active(), "`{}` calls a deprecated tool", w.name);
+                assert!(
+                    spec.status.is_active(),
+                    "`{}` calls a deprecated tool",
+                    w.name
+                );
             }
         }
         for s in specs() {
@@ -1008,7 +1016,10 @@ mod tests {
             "no battery exercises the conditional-owed rule"
         );
         for name in conditional {
-            assert!(offered.contains(&name), "`{name}` is owed only conditionally and is hidden");
+            assert!(
+                offered.contains(&name),
+                "`{name}` is owed only conditionally and is hidden"
+            );
         }
     }
 
@@ -1018,9 +1029,20 @@ mod tests {
     fn every_owed_stage_names_what_it_needs() {
         for w in all() {
             for stage in w.stages {
-                if let Stage::Owed { label, needs, why, .. } = stage {
-                    assert!(!needs.trim().is_empty(), "`{}`/{label} needs nothing?", w.name);
-                    assert!(!why.trim().is_empty(), "`{}`/{label} gives no reason", w.name);
+                if let Stage::Owed {
+                    label, needs, why, ..
+                } = stage
+                {
+                    assert!(
+                        !needs.trim().is_empty(),
+                        "`{}`/{label} needs nothing?",
+                        w.name
+                    );
+                    assert!(
+                        !why.trim().is_empty(),
+                        "`{}`/{label} gives no reason",
+                        w.name
+                    );
                 }
             }
         }
@@ -1167,8 +1189,7 @@ mod tests {
             let v = (w.verdict)(&failed);
             assert!(w.verdicts.contains(&v.value));
             assert_ne!(
-                v.value,
-                w.verdicts[0],
+                v.value, w.verdicts[0],
                 "`{}` returns its clean verdict when every step failed",
                 w.name
             );
@@ -1250,12 +1271,16 @@ mod tests {
                 .arguments
                 .iter()
                 .find(|(n, _, _)| *n == w.subject)
-                .unwrap_or_else(|| panic!("`{}` files against `{}`, which it does not ask for", w.name, w.subject));
+                .unwrap_or_else(|| {
+                    panic!(
+                        "`{}` files against `{}`, which it does not ask for",
+                        w.name, w.subject
+                    )
+                });
             assert!(
                 declared.2,
                 "`{}` files against `{}`, which is optional",
-                w.name,
-                w.subject
+                w.name, w.subject
             );
         }
     }

@@ -303,13 +303,13 @@ fn every_set_master_counts_its_own_set() {
         let done = done_task_count_for_set(set);
 
         let Some(line) = text.lines().find(|l| l.starts_with("**Completion:")) else {
-            wrong.push(format!("{set}/MASTER.md has no `**Completion:` line at all"));
+            wrong.push(format!(
+                "{set}/MASTER.md has no `**Completion:` line at all"
+            ));
             continue;
         };
         let Some((d, total)) = first_fraction(line) else {
-            wrong.push(format!(
-                "{set}/MASTER.md states no `d / t` pair: {line}"
-            ));
+            wrong.push(format!("{set}/MASTER.md states no `d / t` pair: {line}"));
             continue;
         };
         if d != done || total != t.tasks {
@@ -536,9 +536,15 @@ fn print_the_tables() {
         "\n=== ALL LIVE SETS: units={:.0} done={:.0} partial={:.0} ===",
         all.units, all.done, all.partial
     );
-    println!("  strict   (only DONE counts): {:.0}% left", all.strict_pct());
+    println!(
+        "  strict   (only DONE counts): {:.0}% left",
+        all.strict_pct()
+    );
     println!("  headline (PARTIAL is half):  {:.0}% left", all.left_pct());
-    println!("  generous (PARTIAL is done):  {:.0}% left", all.generous_pct());
+    println!(
+        "  generous (PARTIAL is done):  {:.0}% left",
+        all.generous_pct()
+    );
 }
 
 /// Today, for the printed header. Not a dependency: the date is decoration on a

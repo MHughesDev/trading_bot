@@ -177,13 +177,19 @@ pub struct CampaignEvent {
 impl CampaignEvent {
     #[must_use]
     pub fn new(phase: CampaignPhase, detail: serde_json::Value) -> Self {
-        Self { phase, detail, occurred_at: Utc::now() }
+        Self {
+            phase,
+            detail,
+            occurred_at: Utc::now(),
+        }
     }
 
     /// The child job this event dispatched, if it recorded one.
     #[must_use]
     pub fn child_job_id(&self) -> Option<&str> {
-        self.detail.get("job_id").and_then(serde_json::Value::as_str)
+        self.detail
+            .get("job_id")
+            .and_then(serde_json::Value::as_str)
     }
 }
 
@@ -376,7 +382,12 @@ mod tests {
     #[test]
     fn replay_is_identical_and_keys_the_same_child() {
         let id = Uuid::new_v4();
-        let log = vec![ev(Define), with_job(Baseline, "job_1"), ev(Diagnose), ev(Hypothesize)];
+        let log = vec![
+            ev(Define),
+            with_job(Baseline, "job_1"),
+            ev(Diagnose),
+            ev(Hypothesize),
+        ];
         let before = fold(&log).unwrap();
         let after = fold(&log.clone()).unwrap();
         assert_eq!(before, after);
@@ -386,10 +397,19 @@ mod tests {
             "the same log must key the same child job or a restart runs the phase twice"
         );
         // A different campaign, phase or position is a different key.
-        assert_ne!(before.child_key(id, Experiment), before.child_key(Uuid::new_v4(), Experiment));
-        assert_ne!(before.child_key(id, Experiment), before.child_key(id, Compare));
+        assert_ne!(
+            before.child_key(id, Experiment),
+            before.child_key(Uuid::new_v4(), Experiment)
+        );
+        assert_ne!(
+            before.child_key(id, Experiment),
+            before.child_key(id, Compare)
+        );
         let advanced = fold(&[log.clone(), vec![ev(Experiment)]].concat()).unwrap();
-        assert_ne!(before.child_key(id, Experiment), advanced.child_key(id, Experiment));
+        assert_ne!(
+            before.child_key(id, Experiment),
+            advanced.child_key(id, Experiment)
+        );
     }
 
     #[test]
@@ -415,7 +435,10 @@ mod tests {
         for p in CampaignPhase::ALL {
             assert_eq!(
                 p.has_child_job(),
-                matches!(p, Baseline | Diagnose | Hypothesize | Experiment | Compare | Gate),
+                matches!(
+                    p,
+                    Baseline | Diagnose | Hypothesize | Experiment | Compare | Gate
+                ),
                 "{p:?}"
             );
         }

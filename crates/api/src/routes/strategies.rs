@@ -80,12 +80,11 @@ async fn actor_kind_for(
     tx: &mut sqlx::PgConnection,
     token: &BearerToken,
 ) -> Result<ActorKind, String> {
-    let kind: Option<String> =
-        sqlx::query_scalar("SELECT kind FROM sessions WHERE token = $1")
-            .bind(&token.token)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?;
+    let kind: Option<String> = sqlx::query_scalar("SELECT kind FROM sessions WHERE token = $1")
+        .bind(&token.token)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let Some(kind) = kind else {
         return Err("the session carries no kind row".into());
@@ -157,16 +156,17 @@ pub async fn create_strategy(
             // Both writes are one transaction: a revision with nothing pointing
             // at it is harmless, but a pointer to a revision that was rolled
             // back is a dangling head.
-            let revision = match domain::strategy_def::revision::RevisionHash::of(&inner) {
-                Ok(h) => h,
-                Err(e) => {
-                    return (
+            let revision =
+                match domain::strategy_def::revision::RevisionHash::of(&inner) {
+                    Ok(h) => h,
+                    Err(e) => return (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({ "error": "canonicalisation_failed", "message": e.to_string() })),
+                        Json(
+                            json!({ "error": "canonicalisation_failed", "message": e.to_string() }),
+                        ),
                     )
-                        .into_response()
-                }
-            };
+                        .into_response(),
+                };
             let canonical = domain::strategy_def::revision::canonical_json(&def_json);
 
             let mut tx = match state.pg.begin().await {
@@ -218,22 +218,21 @@ pub async fn create_strategy(
             // row as "this is a first version" — an absent measurement recorded
             // as a reading, in the one column whose whole job is to say what
             // came before.
-            let own_head: Option<String> = match sqlx::query_scalar(
-                "SELECT head_revision FROM strategy_definitions WHERE strategy_id = $1",
-            )
-            .bind(&inner.strategy_id)
-            .fetch_optional(&mut *tx)
-            .await
-            {
-                Ok(v) => v.flatten(),
-                Err(e) => {
-                    return (
+            let own_head: Option<String> =
+                match sqlx::query_scalar(
+                    "SELECT head_revision FROM strategy_definitions WHERE strategy_id = $1",
+                )
+                .bind(&inner.strategy_id)
+                .fetch_optional(&mut *tx)
+                .await
+                {
+                    Ok(v) => v.flatten(),
+                    Err(e) => return (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({ "error": "parent_lookup_failed", "message": e.to_string() })),
                     )
-                        .into_response()
-                }
-            };
+                        .into_response(),
+                };
 
             // The case the slug rule cannot express: a definition derived from a
             // *different* lineage. Resolved to that strategy's head, and refused
@@ -618,8 +617,8 @@ pub async fn stop_strategy(
     // Stop evaluating first, then release lane demand.  In that order a stop
     // cannot leave a window where the strategy is still live but its data feed
     // has been torn down.
-    let removed = strategy_runtime::live::global()
-        .deregister_all_for(&req.user_id, &req.instrument_id);
+    let removed =
+        strategy_runtime::live::global().deregister_all_for(&req.user_id, &req.instrument_id);
 
     if let Ok(mut manager) = state.instance_manager.lock() {
         manager.stop(&req.user_id, &req.instrument_id);
@@ -774,7 +773,15 @@ mod tests {
     /// refusal rather than picking the friendlier of the two.
     #[test]
     fn an_unrecognised_session_kind_classifies_as_nothing() {
-        for kind in ["", "Web", "SERVICE", "scheduler", "import", "bot", "unknown"] {
+        for kind in [
+            "",
+            "Web",
+            "SERVICE",
+            "scheduler",
+            "import",
+            "bot",
+            "unknown",
+        ] {
             assert_eq!(
                 ActorKind::from_session_kind(kind),
                 None,

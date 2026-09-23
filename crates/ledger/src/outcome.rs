@@ -41,14 +41,38 @@ pub struct OutcomeVector {
 
 /// Field names, in the column order of `mlops.outcome_vector`.
 pub const OUTCOME_FIELDS: &[&str] = &[
-    "auc", "logloss", "brier", "ece", "ic", "ic_ir", "sharpe_net", "sortino_net", "calmar", "psr", "dsr", "pbo",
-    "max_dd", "dd_duration_days", "turnover_annual", "capacity_usd", "breakeven_cost_multiple", "seed_sharpe_std",
-    "regime_pnl_hhi", "cpcv_p05_sharpe", "bootstrap_p05_sharpe", "param_cliff_score", "alpha_t_stat", "factor_r2",
-    "inference_latency_p99_ms", "model_bytes", "train_gpu_seconds",
+    "auc",
+    "logloss",
+    "brier",
+    "ece",
+    "ic",
+    "ic_ir",
+    "sharpe_net",
+    "sortino_net",
+    "calmar",
+    "psr",
+    "dsr",
+    "pbo",
+    "max_dd",
+    "dd_duration_days",
+    "turnover_annual",
+    "capacity_usd",
+    "breakeven_cost_multiple",
+    "seed_sharpe_std",
+    "regime_pnl_hhi",
+    "cpcv_p05_sharpe",
+    "bootstrap_p05_sharpe",
+    "param_cliff_score",
+    "alpha_t_stat",
+    "factor_r2",
+    "inference_latency_p99_ms",
+    "model_bytes",
+    "train_gpu_seconds",
 ];
 
 /// Names that would reintroduce a scalar "this is optimal" column (AT-34).
-pub const FORBIDDEN_SCALAR_FIELDS: &[&str] = &["score", "fitness", "objective_value", "reward", "rank"];
+pub const FORBIDDEN_SCALAR_FIELDS: &[&str] =
+    &["score", "fitness", "objective_value", "reward", "rank"];
 
 impl OutcomeVector {
     /// Digest chained into `mlops.trial_event.outcome_digest`. Canonical JSON over
@@ -59,7 +83,8 @@ impl OutcomeVector {
     /// Never: every field is JSON-representable (non-finite values serialize as null).
     #[must_use]
     pub fn digest(&self) -> String {
-        let bytes = serde_json::to_vec(&serde_json::to_value(self).expect("outcome serializes")).expect("outcome serializes");
+        let bytes = serde_json::to_vec(&serde_json::to_value(self).expect("outcome serializes"))
+            .expect("outcome serializes");
         format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
     }
 
@@ -84,13 +109,19 @@ mod tests {
         }
         assert_eq!(keys.len(), OUTCOME_FIELDS.len());
         for bad in FORBIDDEN_SCALAR_FIELDS {
-            assert!(!keys.contains(bad), "{bad} would scalarize the outcome (AT-34)");
+            assert!(
+                !keys.contains(bad),
+                "{bad} would scalarize the outcome (AT-34)"
+            );
         }
     }
 
     #[test]
     fn digest_is_stable_and_sensitive() {
-        let a = OutcomeVector { sharpe_net: Some(1.25), ..Default::default() };
+        let a = OutcomeVector {
+            sharpe_net: Some(1.25),
+            ..Default::default()
+        };
         let mut b = a;
         assert_eq!(a.digest(), b.digest());
         b.sharpe_net = Some(1.250_000_000_000_000_2);

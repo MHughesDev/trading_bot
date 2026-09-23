@@ -107,7 +107,11 @@ pub async fn load_warm_state(
 /// returns the last emitted value for each feature name.
 pub fn run_indicators(bars: &[LoadedBar], requirements: &DataRequirements) -> HashMap<String, f64> {
     let rows: Vec<features::FeatureRow> = bars.iter().map(feature_row).collect();
-    let names: Vec<String> = requirements.features.iter().map(|f| f.name.clone()).collect();
+    let names: Vec<String> = requirements
+        .features
+        .iter()
+        .map(|f| f.name.clone())
+        .collect();
     features::runtime::latest(&names, &rows)
         .map(|m| m.into_iter().filter_map(|(k, v)| Some((k, v?))).collect())
         .unwrap_or_default()

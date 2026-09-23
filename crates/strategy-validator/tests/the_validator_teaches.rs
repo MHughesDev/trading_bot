@@ -59,9 +59,15 @@ fn every_real_rejection_carries_a_fix() {
         // Two nodes with one id.
         GOOD.replace("\"id\": \"n2\"", "\"id\": \"n1\""),
         // A version nothing parses.
-        GOOD.replace("\"definition_version\": \"1.0\"", "\"definition_version\": \"9.9\""),
+        GOOD.replace(
+            "\"definition_version\": \"1.0\"",
+            "\"definition_version\": \"9.9\"",
+        ),
         // No slug.
-        GOOD.replace("\"strategy_id\": \"teach_base_v1\"", "\"strategy_id\": \"\""),
+        GOOD.replace(
+            "\"strategy_id\": \"teach_base_v1\"",
+            "\"strategy_id\": \"\"",
+        ),
     ];
 
     let mut seen = 0;

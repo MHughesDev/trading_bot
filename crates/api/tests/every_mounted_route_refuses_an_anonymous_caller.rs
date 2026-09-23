@@ -471,7 +471,13 @@ fn every_public_row_says_why() {
             "`{path}` is exempt with the reason {because:?}, which is too short to be a reason. \
              An empty justification is a failure, not a default."
         );
-        for shrug in ["harmless", "no data", "nothing sensitive", "it's fine", "public data"] {
+        for shrug in [
+            "harmless",
+            "no data",
+            "nothing sensitive",
+            "it's fine",
+            "public data",
+        ] {
             assert!(
                 !because.to_lowercase().contains(shrug),
                 "`{path}` is exempt because it {shrug:?}. That is the argument that shipped \

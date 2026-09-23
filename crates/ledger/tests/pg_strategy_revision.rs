@@ -82,7 +82,10 @@ async fn begin() -> (PgPool, Transaction<'static, Postgres>) {
 /// aborted` instead of the constraint it meant to check — a test that would
 /// pass on `is_err()` while checking nothing.
 async fn probe(conn: &mut PgConnection) {
-    sqlx::query("SAVEPOINT probe").execute(conn).await.expect("savepoint");
+    sqlx::query("SAVEPOINT probe")
+        .execute(conn)
+        .await
+        .expect("savepoint");
 }
 
 async fn undo(conn: &mut PgConnection) {
@@ -145,7 +148,12 @@ async fn a_revision_hash_must_be_sixty_four_lowercase_hex_characters() {
     let (_pool, mut tx) = begin().await;
     let s = strategy_id();
 
-    for bad in ["not-a-hash", &"A".repeat(64), &"a".repeat(63), &"g".repeat(64)] {
+    for bad in [
+        "not-a-hash",
+        &"A".repeat(64),
+        &"a".repeat(63),
+        &"g".repeat(64),
+    ] {
         probe(&mut tx).await;
         assert!(
             insert_revision(&mut tx, bad, &s, None).await.is_err(),
@@ -182,7 +190,9 @@ async fn a_revision_cannot_be_edited_or_deleted() {
     let (_pool, mut tx) = begin().await;
     let s = strategy_id();
     let h = hash(&s);
-    insert_revision(&mut tx, &h, &s, None).await.expect("inserted");
+    insert_revision(&mut tx, &h, &s, None)
+        .await
+        .expect("inserted");
 
     probe(&mut tx).await;
     let err = sqlx::query("UPDATE strategy_revision SET definition_json = '{\"x\":1}'::jsonb WHERE revision_hash = $1")
@@ -229,15 +239,22 @@ async fn the_chain_is_assigned_by_the_database_and_links_each_row_to_the_last() 
     panic!("TEMPORARY: deliberate panic to prove the rollback runs on the unwind path");
     #[allow(unreachable_code)]
     {
-    assert_eq!(rows.len(), 2);
-    let seq_a: i64 = rows[0].get("seq");
-    let seq_b: i64 = rows[1].get("seq");
-    assert_eq!(seq_b, seq_a + 1, "the trigger assigns consecutive sequence numbers");
+        assert_eq!(rows.len(), 2);
+        let seq_a: i64 = rows[0].get("seq");
+        let seq_b: i64 = rows[1].get("seq");
+        assert_eq!(
+            seq_b,
+            seq_a + 1,
+            "the trigger assigns consecutive sequence numbers"
+        );
 
-    let row_a: Vec<u8> = rows[0].get("row_hash");
-    let prev_b: Vec<u8> = rows[1].get("prev_hash");
-    assert_eq!(prev_b, row_a, "each row's prev_hash is the previous row's row_hash");
-    assert_eq!(row_a.len(), 32, "sha256");
+        let row_a: Vec<u8> = rows[0].get("row_hash");
+        let prev_b: Vec<u8> = rows[1].get("prev_hash");
+        assert_eq!(
+            prev_b, row_a,
+            "each row's prev_hash is the previous row's row_hash"
+        );
+        assert_eq!(row_a.len(), 32, "sha256");
     }
 }
 
@@ -258,11 +275,12 @@ async fn the_same_document_twice_is_one_revision() {
     );
     undo(&mut tx).await;
 
-    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM strategy_revision WHERE strategy_id = $1")
-        .bind(&s)
-        .fetch_one(&mut *tx)
-        .await
-        .expect("count");
+    let n: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM strategy_revision WHERE strategy_id = $1")
+            .bind(&s)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("count");
     assert_eq!(n, 1);
 }
 
@@ -276,7 +294,9 @@ async fn a_definition_cannot_point_at_another_strategys_revision() {
     let (_pool, mut tx) = begin().await;
     let (mine, theirs) = (strategy_id(), strategy_id());
     let h = hash(&theirs);
-    insert_revision(&mut tx, &h, &theirs, None).await.expect("theirs");
+    insert_revision(&mut tx, &h, &theirs, None)
+        .await
+        .expect("theirs");
 
     probe(&mut tx).await;
     let err = sqlx::query(
@@ -300,12 +320,16 @@ async fn an_instance_cannot_bind_to_another_strategys_revision() {
     let (_pool, mut tx) = begin().await;
     let (a, b) = (strategy_id(), strategy_id());
     let h = hash(&b);
-    insert_revision(&mut tx, &h, &b, None).await.expect("b's revision");
+    insert_revision(&mut tx, &h, &b, None)
+        .await
+        .expect("b's revision");
 
     // Each definition points at its own head. Since 0140 there is no other way
     // to write one — see `a_definition_with_no_head_is_refused`.
     let own_a = hash(&a);
-    insert_revision(&mut tx, &own_a, &a, None).await.expect("a's revision");
+    insert_revision(&mut tx, &own_a, &a, None)
+        .await
+        .expect("a's revision");
     for (s, head) in [(&a, &own_a), (&b, &h)] {
         sqlx::query(
             "INSERT INTO strategy_definitions (strategy_id, asset_class, definition_json, head_revision)
@@ -466,11 +490,12 @@ async fn the_suite_gives_the_database_back_unchanged() {
     );
 
     // And nothing bearing this file's marker survived, on any path.
-    let marked: i64 = sqlx::query_scalar("SELECT count(*) FROM strategy_revision WHERE actor_id = $1")
-        .bind(TEST_ACTOR_ID)
-        .fetch_one(&fresh)
-        .await
-        .expect("count marked");
+    let marked: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM strategy_revision WHERE actor_id = $1")
+            .bind(TEST_ACTOR_ID)
+            .fetch_one(&fresh)
+            .await
+            .expect("count marked");
     assert_eq!(marked, 0, "a marked fixture row survived the rollback");
 }
 

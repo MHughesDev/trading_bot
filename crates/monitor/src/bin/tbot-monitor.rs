@@ -16,8 +16,7 @@ use sqlx::postgres::PgPoolOptions;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -31,12 +30,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // The holder id names *this* instance. A second monitor taking the lease is a
     // takeover rather than a duplicate, and the holder is how the loser finds out.
-    let holder = std::env::var("MONITOR_INSTANCE_ID").unwrap_or_else(|_| {
-        format!(
-            "tbot-monitor-{}",
-            std::process::id()
-        )
-    });
+    let holder = std::env::var("MONITOR_INSTANCE_ID")
+        .unwrap_or_else(|_| format!("tbot-monitor-{}", std::process::id()));
 
     // A small pool on purpose: the monitor's job is a handful of short statements
     // per cadence, and a monitor that can exhaust the database's connections is a

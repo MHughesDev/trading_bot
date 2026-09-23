@@ -293,12 +293,19 @@ pub enum SuiteVerdict {
         /// Empty for a replay suite: there is nothing to estimate.
         interval: Option<(f64, f64)>,
     },
-    Improved { delta: f64 },
+    Improved {
+        delta: f64,
+    },
     Unchanged,
     /// Not enough n to decide its own margin (§4). Reported, does not gate.
-    Underpowered { n: usize, needed: usize },
+    Underpowered {
+        n: usize,
+        needed: usize,
+    },
     /// Flakiness above the ceiling (§4.1). Excluded from gating.
-    Unstable { flakiness: f64 },
+    Unstable {
+        flakiness: f64,
+    },
     /// First measurement of this profile. Establishes a baseline, gates nothing.
     Baseline,
 }
@@ -769,16 +776,33 @@ mod tests {
     #[test]
     fn a_regression_on_the_7b_blocks_even_when_the_frontier_improves() {
         let base = vec![
-            card("qwen2.5-7b", "degraded", vec![replay("routing", 10, 10, &[])]),
-            card("claude-opus-5", "frontier", vec![replay("routing", 8, 10, &["r/x", "r/y"])]),
+            card(
+                "qwen2.5-7b",
+                "degraded",
+                vec![replay("routing", 10, 10, &[])],
+            ),
+            card(
+                "claude-opus-5",
+                "frontier",
+                vec![replay("routing", 8, 10, &["r/x", "r/y"])],
+            ),
         ];
         let cand = vec![
             card(
                 "qwen2.5-7b",
                 "degraded",
-                vec![replay("routing", 9, 10, &["routing/searched_tool_keeps_its_slot"])],
+                vec![replay(
+                    "routing",
+                    9,
+                    10,
+                    &["routing/searched_tool_keeps_its_slot"],
+                )],
             ),
-            card("claude-opus-5", "frontier", vec![replay("routing", 10, 10, &[])]),
+            card(
+                "claude-opus-5",
+                "frontier",
+                vec![replay("routing", 10, 10, &[])],
+            ),
         ];
         let v = gate(&base, &cand);
         assert!(v.blocked, "{:#?}", v);
@@ -796,7 +820,11 @@ mod tests {
     #[test]
     fn one_newly_failing_replay_case_blocks_with_no_threshold() {
         let base = vec![card("p", "t", vec![replay("routing", 100, 100, &[])])];
-        let cand = vec![card("p", "t", vec![replay("routing", 99, 100, &["routing/c1"])])];
+        let cand = vec![card(
+            "p",
+            "t",
+            vec![replay("routing", 99, 100, &["routing/c1"])],
+        )];
         assert!(gate(&base, &cand).blocked);
     }
 
@@ -887,7 +915,11 @@ mod tests {
         let cand = vec![card("p", "degraded", vec![replay("routing", 10, 10, &[])])];
         let v = gate(&base, &cand);
         assert!(v.blocked);
-        assert!(v.reasons[0].contains("refusing to compare"), "{:?}", v.reasons);
+        assert!(
+            v.reasons[0].contains("refusing to compare"),
+            "{:?}",
+            v.reasons
+        );
     }
 
     #[test]

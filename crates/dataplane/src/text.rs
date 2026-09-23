@@ -272,11 +272,13 @@ mod tests {
         assert_eq!(rows[1].revision, 1);
         assert_eq!(rows[0].item_id, rows[1].item_id);
 
-        let midday = item_as_of(&rows, "alpaca:1001", t(2024, 5, 1, 15)).expect("published at 13:00");
+        let midday =
+            item_as_of(&rows, "alpaca:1001", t(2024, 5, 1, 15)).expect("published at 13:00");
         assert_eq!(midday.headline, "Acme beats estimates");
         assert_eq!(midday.revision, 0);
 
-        let evening = item_as_of(&rows, "alpaca:1001", t(2024, 5, 1, 19)).expect("corrected at 17:00");
+        let evening =
+            item_as_of(&rows, "alpaca:1001", t(2024, 5, 1, 19)).expect("corrected at 17:00");
         assert_eq!(evening.headline, "Correction: Acme misses estimates");
         assert_eq!(evening.revision, 1);
     }
@@ -300,7 +302,10 @@ mod tests {
             t(2024, 5, 1, 13),
             900_000,
         );
-        assert_eq!(item.available_time, t(2024, 5, 1, 13) + chrono::Duration::minutes(15));
+        assert_eq!(
+            item.available_time,
+            t(2024, 5, 1, 13) + chrono::Duration::minutes(15)
+        );
         assert!(item_as_of(std::slice::from_ref(&item), "alpaca:2", t(2024, 5, 1, 13)).is_none());
     }
 

@@ -41,7 +41,6 @@ fn ensure_journal() {
     ));
 }
 
-
 const STRATEGY: &str = "sma-cross-1";
 const BAR: i64 = 60;
 
@@ -162,7 +161,10 @@ async fn a_fill_reaches_the_forward_record_within_one_bar() {
     // recorder here rather than on a later sync. That is the honest ordering —
     // the fill happened — and it is why the assertion above is placed before
     // the submit rather than after it.
-    assert!(submitted.fill.is_some(), "the mock fills this market order at once");
+    assert!(
+        submitted.fill.is_some(),
+        "the mock fills this market order at once"
+    );
     assert_eq!(
         recorder.position(),
         dec("10"),
@@ -190,12 +192,7 @@ async fn a_fill_reaches_the_forward_record_within_one_bar() {
 
     // Bar 2 closes: the observation exists, within one bar of the fill.
     let (observation, verdict) = recorder
-        .close_bar(
-            at(2 * BAR),
-            px("101"),
-            flat(),
-            ObservationSource::Observed,
-        )
+        .close_bar(at(2 * BAR), px("101"), flat(), ObservationSource::Observed)
         .unwrap();
 
     assert!(!verdict.is_halted(), "{verdict:?}");
@@ -272,20 +269,14 @@ async fn the_realised_series_compares_element_wise_with_a_stored_backtest_series
     recorder.open(at(BAR), px("100")).unwrap();
     for i in 2..=5 {
         recorder
-            .close_bar(
-                at(i * BAR),
-                px("100"),
-                flat(),
-                ObservationSource::Observed,
-            )
+            .close_bar(at(i * BAR), px("100"), flat(), ObservationSource::Observed)
             .unwrap();
     }
     let realised = recorder.realised_series();
 
     // What the ledger stores for a backtest: `ReturnSeries::from_equity` over
     // the same bar grid. Built here exactly as `persist_returns` receives it.
-    let curve: Vec<(DateTime<Utc>, f64)> =
-        (1..=5).map(|i| (at(i * BAR), 10_000.0_f64)).collect();
+    let curve: Vec<(DateTime<Utc>, f64)> = (1..=5).map(|i| (at(i * BAR), 10_000.0_f64)).collect();
     let backtest = RealisedSeries {
         numeraire: Numeraire::Usd,
         bar_seconds: BAR,
@@ -311,22 +302,20 @@ async fn the_realised_series_compares_element_wise_with_a_stored_backtest_series
 async fn a_usdt_deployment_is_not_summed_as_usd() {
     ensure_journal();
     let halts = Arc::new(StrategyHaltRegistry::new());
-    let recorder =
-        ForwardRecorder::new(spec(Numeraire::of("USDT")), dec("10000"), Arc::clone(&halts)).unwrap();
+    let recorder = ForwardRecorder::new(
+        spec(Numeraire::of("USDT")),
+        dec("10000"),
+        Arc::clone(&halts),
+    )
+    .unwrap();
     recorder.open(at(BAR), px("100")).unwrap();
     for i in 2..=3 {
         recorder
-            .close_bar(
-                at(i * BAR),
-                px("100"),
-                flat(),
-                ObservationSource::Observed,
-            )
+            .close_bar(at(i * BAR), px("100"), flat(), ObservationSource::Observed)
             .unwrap();
     }
 
-    let curve: Vec<(DateTime<Utc>, f64)> =
-        (1..=3).map(|i| (at(i * BAR), 10_000.0_f64)).collect();
+    let curve: Vec<(DateTime<Utc>, f64)> = (1..=3).map(|i| (at(i * BAR), 10_000.0_f64)).collect();
     let usd_backtest = RealisedSeries {
         numeraire: Numeraire::Usd,
         bar_seconds: BAR,
@@ -370,7 +359,10 @@ async fn observations_become_gate_15_evidence_and_backfill_does_not() {
     rows.push(planted);
 
     let evidence = Gate15Evidence::from_observations(&rows).unwrap();
-    assert_eq!(evidence.observations, 6, "the backfilled row is not evidence");
+    assert_eq!(
+        evidence.observations, 6,
+        "the backfilled row is not evidence"
+    );
     assert_eq!(evidence.observed_days, 6);
     assert_eq!(evidence.model_attributable_rejects, 0);
     assert!((evidence.signal_match - 1.0).abs() < 1e-12);

@@ -183,12 +183,19 @@ pub fn build_aligned_training_frame(
     // subset to the rows that survived the NaN drop. Computing them over the
     // surviving rows alone would understate concurrency: a dropped warm-up row's
     // label still overlaps the ones that follow it.
-    let intervals = dataplane::label::horizon_intervals(clock.len(), horizon_bars_u32(horizon_bars));
+    let intervals =
+        dataplane::label::horizon_intervals(clock.len(), horizon_bars_u32(horizon_bars));
     let weights = dataplane::label::uniqueness_weights(&intervals, clock.len().max(1));
     frame.sample_weight = frame
         .ts_ns
         .iter()
-        .map(|ts| tick_index.get(ts).and_then(|i| weights.get(*i)).copied().unwrap_or(1.0))
+        .map(|ts| {
+            tick_index
+                .get(ts)
+                .and_then(|i| weights.get(*i))
+                .copied()
+                .unwrap_or(1.0)
+        })
         .collect();
 
     frame.age_minutes = Vec::with_capacity(frame.feature_names.len());
@@ -437,8 +444,9 @@ mod tests {
     /// to treat them as sixty independent facts will believe it.
     #[test]
     fn overlapping_labels_are_downweighted_and_disjoint_ones_are_not() {
-        let bars: Vec<crate::align::BarObs> =
-            (0..600).map(|i| obs(i, 100.0 + (i as f64 * 0.11).sin())).collect();
+        let bars: Vec<crate::align::BarObs> = (0..600)
+            .map(|i| obs(i, 100.0 + (i as f64 * 0.11).sin()))
+            .collect();
         let names = vec!["close".to_string()];
 
         let short = build_aligned_training_frame(&bars, &names, 1, 60_000_000_000);
@@ -471,7 +479,11 @@ mod tests {
     #[test]
     fn an_unaligned_frame_carries_no_weights() {
         let rows: Vec<OhlcvRow> = (0..200)
-            .map(|i| OhlcvRow { ts_ns: i * 60_000_000_000, close: 100.0 + i as f64, ..OhlcvRow::default() })
+            .map(|i| OhlcvRow {
+                ts_ns: i * 60_000_000_000,
+                close: 100.0 + i as f64,
+                ..OhlcvRow::default()
+            })
             .collect();
         let f = build_training_frame(&rows, &["close".to_string()], 1);
         assert!(f.sample_weight.is_empty());

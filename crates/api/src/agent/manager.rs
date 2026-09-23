@@ -278,13 +278,15 @@ impl AgentManager {
             };
             let rows: Vec<super::resume::LogRow> = rows
                 .into_iter()
-                .map(|(seq, direction, kind, payload, harness_version)| super::resume::LogRow {
-                    seq,
-                    direction,
-                    kind,
-                    payload,
-                    harness_version,
-                })
+                .map(
+                    |(seq, direction, kind, payload, harness_version)| super::resume::LogRow {
+                        seq,
+                        direction,
+                        kind,
+                        payload,
+                        harness_version,
+                    },
+                )
                 .collect();
 
             match super::resume::decide(&rows, super::local_driver::HARNESS_VERSION) {
@@ -311,7 +313,6 @@ impl AgentManager {
             }
         }
     }
-
 
     /// Stop accepting turns, and wait for the ones in flight to reach a boundary
     /// (§10.1, S-2.15).
@@ -593,8 +594,7 @@ impl AgentManager {
 
         if let Some(profile) = local {
             // Per-kind (§21), from the same classifier the loop uses.
-            let charter =
-                prompt::charter_for(harness::state::GoalKind::classify(text, &[]));
+            let charter = prompt::charter_for(harness::state::GoalKind::classify(text, &[]));
             // The slice the previous turn ended with, so this one appends to it
             // rather than re-choosing an order (§21). A cached prefix matches by
             // bytes, so the same tools in a different order is a miss.
@@ -636,10 +636,7 @@ impl AgentManager {
                 // whether the turn continued it; a conversation paying more than
                 // one cold prefix is a defect, and this is where it becomes
                 // visible rather than showing up only as a bill.
-                let used = exposure_out
-                    .lock()
-                    .map(|s| s.clone())
-                    .unwrap_or_default();
+                let used = exposure_out.lock().map(|s| s.clone()).unwrap_or_default();
                 let continuity = manager
                     .prefixes
                     .lock()
@@ -871,7 +868,11 @@ impl AgentManager {
     /// it would be two answers to "is this run over", which is exactly the shape
     /// of the `ended == "succeeded"` defect: a branch keyed on a word the column
     /// never takes.
-    async fn owned_status(&self, user_id: Uuid, run_id: Uuid) -> Result<Option<String>, sqlx::Error> {
+    async fn owned_status(
+        &self,
+        user_id: Uuid,
+        run_id: Uuid,
+    ) -> Result<Option<String>, sqlx::Error> {
         let row: Option<(String,)> =
             sqlx::query_as("SELECT status FROM agent_runs WHERE run_id = $1 AND user_id = $2")
                 .bind(run_id)

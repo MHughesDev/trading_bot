@@ -196,7 +196,11 @@ async fn an_entry_shown_repeatedly_and_never_cited_is_findable() {
     }
 
     let dead = store.never_cited(3).await.expect("the query runs");
-    assert_eq!(dead.len(), 1, "one entry is shown often and never used: {dead:?}");
+    assert_eq!(
+        dead.len(),
+        1,
+        "one entry is shown often and never used: {dead:?}"
+    );
     assert_eq!(dead[0].0, "f_useless");
     assert_eq!(dead[0].1, 5, "shown in all five runs");
 }

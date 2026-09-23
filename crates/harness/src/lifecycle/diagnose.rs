@@ -280,7 +280,10 @@ mod tests {
             plant(&mut b);
             let d = diagnose(&b).expect("a fired diagnostic produces a class");
             assert_eq!(d.class, class);
-            assert_eq!(d.ticket_id, ticket, "the class names the ticket that made it");
+            assert_eq!(
+                d.ticket_id, ticket,
+                "the class names the ticket that made it"
+            );
             assert!(!d.detail.is_empty(), "in the diagnostic's own words");
         }
     }
@@ -323,10 +326,7 @@ mod tests {
         let mut b = bundle();
         b.prereg_amendments = 3;
         b.cost_floor = Some(Finding::fired("t_cost", "under the floor"));
-        assert_eq!(
-            diagnose(&b).unwrap().class,
-            FailureClass::ProtocolUnstable
-        );
+        assert_eq!(diagnose(&b).unwrap().class, FailureClass::ProtocolUnstable);
     }
 
     /// Every diagnostic clear is `None`, and that is a real answer.
@@ -381,8 +381,16 @@ mod tests {
         b.cost_floor = Some(Finding::fired("t_cost", "under the floor"));
         b.contradictions = vec!["mem_41 says costs cleared on this pair in April".into()];
         let d = diagnose(&b).unwrap();
-        assert_eq!(d.class, FailureClass::CostsDominate, "the class is unchanged");
-        assert_eq!(d.contradictions.len(), 1, "and the disagreement travels with it");
+        assert_eq!(
+            d.class,
+            FailureClass::CostsDominate,
+            "the class is unchanged"
+        );
+        assert_eq!(
+            d.contradictions.len(),
+            1,
+            "and the disagreement travels with it"
+        );
     }
 
     /// The agent has no way to name a class.

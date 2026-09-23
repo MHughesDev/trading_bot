@@ -66,9 +66,14 @@ async fn a_paused_loop_spends_nothing_until_somebody_resumes_it() {
     // Let it get going, so "no steps" below is a hold rather than a slow start.
     tokio::time::sleep(Duration::from_millis(40)).await;
     let before = steps.load(Ordering::SeqCst);
-    assert!(before > 0, "the stand-in loop never ran, so it proves nothing");
+    assert!(
+        before > 0,
+        "the stand-in loop never ran, so it proves nothing"
+    );
 
-    control.pause(PauseWindow::default()).expect("pause granted");
+    control
+        .pause(PauseWindow::default())
+        .expect("pause granted");
     // One in-flight step may still land after the pause is set — the loop is
     // held at the *next* boundary, not interrupted mid-step, which is the same
     // contract cancel has and the reason a tool is never killed mid-write.
@@ -109,7 +114,9 @@ async fn an_expired_pause_stops_the_run_and_the_loop_is_what_notices() {
     let loop_task = tokio::spawn(drive(Arc::clone(&control), Arc::clone(&steps)));
     tokio::time::sleep(Duration::from_millis(30)).await;
 
-    control.pause(PauseWindow::default()).expect("pause granted");
+    control
+        .pause(PauseWindow::default())
+        .expect("pause granted");
     // The floor on a real pause is ten seconds, which is longer than a test
     // should sit still for. `expire_now` brings the deadline forward — the one
     // direction that cannot widen the bound — so what follows is exactly the
@@ -222,7 +229,9 @@ fn pause_and_resume_are_mounted_and_escalate_is_not() {
 fn neither_control_answers_a_caller_who_is_nobody() {
     let src = read(&crate_src().join("agent/routes.rs"));
     for handler in ["pub async fn pause_run(", "pub async fn resume_run("] {
-        let at = src.find(handler).unwrap_or_else(|| panic!("{handler} is gone"));
+        let at = src
+            .find(handler)
+            .unwrap_or_else(|| panic!("{handler} is gone"));
         let signature = &src[at..at + 400.min(src.len() - at)];
         assert!(
             signature.contains("token: BearerToken"),
@@ -230,7 +239,6 @@ fn neither_control_answers_a_caller_who_is_nobody() {
         );
     }
 }
-
 
 // ── 4. A pause a reader can find ─────────────────────────────────────────────
 //
@@ -282,8 +290,10 @@ fn the_run_reads_report_the_pause_rather_than_only_the_pause_reply() {
     // To the end of the serialiser, not a fixed window: the run row is wide and
     // a window short enough to be safe would miss the fields being asserted.
     let end = src[at..]
-        .find("
-pub async fn list_runs")
+        .find(
+            "
+pub async fn list_runs",
+        )
         .map_or(src.len(), |o| at + o);
     let body = &src[at..end];
     assert!(
@@ -331,14 +341,12 @@ fn an_expired_pause_says_so_on_the_run_row_in_both_drivers() {
     );
     let local = read(&crate_src().join("agent/local_driver.rs"));
     assert!(
-        local.contains("rec.stop_reason = Some(reason)")
-            && local.contains("self.stop_reason"),
+        local.contains("rec.stop_reason = Some(reason)") && local.contains("self.stop_reason"),
         "agent/local_driver.rs routes its stop through the governor's one `Cancel` \
          input (correctly) but never carries the reason to `finish`, so an expired \
          pause and a Stop write byte-identical rows"
     );
 }
-
 
 // ── 5. The status words, checked rather than assumed ─────────────────────────
 
@@ -364,7 +372,9 @@ fn the_terminal_list_holds_every_status_the_drivers_write() {
     let at = local
         .find("let (status, summary, error) = match outcome {")
         .expect("the local driver's outcome→status mapping is gone");
-    let end = local[at..].find("\n        };").map_or(local.len(), |o| at + o);
+    let end = local[at..]
+        .find("\n        };")
+        .map_or(local.len(), |o| at + o);
     // Prose first: the arms' other string literals are sentences, and the
     // comments quote status words on purpose.
     let arms: String = local[at..end]
@@ -382,11 +392,7 @@ fn the_terminal_list_holds_every_status_the_drivers_write() {
         rest = &rest[close + 1..];
         // A status is one bare word. Everything else in these arms is a
         // sentence, a format template or a field path.
-        if !lit.is_empty()
-            && lit
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c == '_')
-        {
+        if !lit.is_empty() && lit.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
             found.push(lit.to_string());
         }
     }

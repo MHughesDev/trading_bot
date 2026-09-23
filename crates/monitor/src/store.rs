@@ -5,8 +5,8 @@
 //! thing it may be halting.
 
 use chrono::{DateTime, NaiveDate, Utc};
-use rust_decimal::Decimal;
 use risk::Scope;
+use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -276,11 +276,7 @@ impl MonitorStore {
     ///
     /// [gt]: crate::facts::GateTable
     /// [r]: crate::service::LeaseWatcher::refresh
-    pub async fn carry_out_fact(
-        &self,
-        fact: &Fact,
-        action: &FactAction,
-    ) -> Result<(), StoreError> {
+    pub async fn carry_out_fact(&self, fact: &Fact, action: &FactAction) -> Result<(), StoreError> {
         let reason = fact.reason();
         let event = MonitorEvent::new(
             action.scope(),
@@ -440,13 +436,14 @@ impl MonitorStore {
     /// between the two records all answer "halted". A process that cannot determine
     /// whether it was stopped must not decide it was not.
     pub async fn global_halted_at_boot(&self) -> bool {
-        let scoped: Option<bool> =
-            sqlx::query("SELECT state = 'halted' AS halted FROM monitor.kill_switch WHERE scope = 'global'")
-                .fetch_optional(&self.pg)
-                .await
-                .ok()
-                .flatten()
-                .map(|r| r.get("halted"));
+        let scoped: Option<bool> = sqlx::query(
+            "SELECT state = 'halted' AS halted FROM monitor.kill_switch WHERE scope = 'global'",
+        )
+        .fetch_optional(&self.pg)
+        .await
+        .ok()
+        .flatten()
+        .map(|r| r.get("halted"));
 
         let legacy: Option<bool> =
             sqlx::query("SELECT NOT trading_enabled AS halted FROM global_risk_config LIMIT 1")
@@ -491,7 +488,10 @@ impl MonitorStore {
     }
 
     /// The most recent events, newest first.
-    pub async fn recent_events(&self, limit: i64) -> Result<Vec<(Uuid, String, String, String)>, StoreError> {
+    pub async fn recent_events(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<(Uuid, String, String, String)>, StoreError> {
         let rows = sqlx::query(
             "SELECT event_id, scope, family, kind FROM monitor.events
               ORDER BY occurred_at DESC LIMIT $1",
@@ -610,8 +610,15 @@ impl MonitorStore {
     /// [hp]: crate::state::HaltPolicy
     pub async fn strategy_runtime_states(
         &self,
-    ) -> Result<Vec<(String, crate::state::StrategyState, u8, crate::state::HaltPolicy)>, StoreError>
-    {
+    ) -> Result<
+        Vec<(
+            String,
+            crate::state::StrategyState,
+            u8,
+            crate::state::HaltPolicy,
+        )>,
+        StoreError,
+    > {
         let rows = sqlx::query(
             "SELECT strategy_id, state, scale_pct, halt_policy FROM monitor.strategy_state",
         )
@@ -959,7 +966,11 @@ fn parse_order_state(s: &str) -> Result<domain::order::OrderState, StoreError> {
         "filled" => S::Filled,
         "cancelled" => S::Cancelled,
         "rejected" => S::Rejected,
-        other => return Err(StoreError::Invalid(format!("unknown order state {other:?}"))),
+        other => {
+            return Err(StoreError::Invalid(format!(
+                "unknown order state {other:?}"
+            )))
+        }
     })
 }
 
@@ -972,7 +983,11 @@ fn parse_method(s: &str) -> Result<LimitMethod, StoreError> {
         "declared_absolute" => LimitMethod::DeclaredAbsolute,
         "mc_p95_drawdown" => LimitMethod::McP95Drawdown,
         "cusum" => LimitMethod::Cusum,
-        other => return Err(StoreError::Invalid(format!("unknown limit method {other:?}"))),
+        other => {
+            return Err(StoreError::Invalid(format!(
+                "unknown limit method {other:?}"
+            )))
+        }
     })
 }
 
@@ -1101,7 +1116,11 @@ mod tests {
         // the refusal is checked before a statement is prepared, over every scope
         // shape that can refuse an order.
         let store = unreachable_store();
-        for scope in [Scope::Global, Scope::venue("kraken"), Scope::strategy("s-1")] {
+        for scope in [
+            Scope::Global,
+            Scope::venue("kraken"),
+            Scope::strategy("s-1"),
+        ] {
             let err = store
                 .end_drill(&scope)
                 .await

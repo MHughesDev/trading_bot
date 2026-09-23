@@ -125,7 +125,13 @@ impl Reproduction {
             return Err(FalsificationError::NoSteps);
         }
 
-        Ok(Self { artifact_ref, seed, expected, observed, steps })
+        Ok(Self {
+            artifact_ref,
+            seed,
+            expected,
+            observed,
+            steps,
+        })
     }
 
     #[must_use]
@@ -396,9 +402,22 @@ mod tests {
 
     #[test]
     fn the_score_order_is_total_and_fixed() {
-        let mut all = vec![Score::Promotion, Score::Zero, Score::EvaluatorDefect, Score::Kill];
+        let mut all = vec![
+            Score::Promotion,
+            Score::Zero,
+            Score::EvaluatorDefect,
+            Score::Kill,
+        ];
         all.sort();
-        assert_eq!(all, vec![Score::Zero, Score::Kill, Score::Promotion, Score::EvaluatorDefect]);
+        assert_eq!(
+            all,
+            vec![
+                Score::Zero,
+                Score::Kill,
+                Score::Promotion,
+                Score::EvaluatorDefect
+            ]
+        );
     }
 
     // ── the degenerate policy is blocked at the constructor ──────────────────
@@ -426,7 +445,8 @@ mod tests {
             FalsificationError::NoSteps
         );
         assert_eq!(
-            Reproduction::replayed("run_1", 1, "a", "b", vec!["  ".to_string(), String::new()]).unwrap_err(),
+            Reproduction::replayed("run_1", 1, "a", "b", vec!["  ".to_string(), String::new()])
+                .unwrap_err(),
             FalsificationError::NoSteps
         );
     }
@@ -517,7 +537,10 @@ mod tests {
             let s = serde_json::to_string(&c).unwrap();
             assert_eq!(serde_json::from_str::<KillClass>(&s).unwrap(), c);
             for banned in ["sharpe", "return", "underperform", "score", "worse"] {
-                assert!(!s.to_lowercase().contains(banned), "{s} names a threshold, not a defect");
+                assert!(
+                    !s.to_lowercase().contains(banned),
+                    "{s} names a threshold, not a defect"
+                );
             }
         }
     }

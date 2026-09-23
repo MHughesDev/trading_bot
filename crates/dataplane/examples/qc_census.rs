@@ -234,12 +234,9 @@ fn main() -> Result<(), String> {
         // absence at the ends — stated rather than glossed, because it makes
         // these coverage numbers optimistic.
         let period = s.period_secs;
-        let expected = bars
-            .first()
-            .zip(bars.last())
-            .map_or(s.bars, |(f, l)| {
-                (((l.event_ns - f.event_ns) / 1_000_000_000 / period) + 1).max(1) as u64
-            });
+        let expected = bars.first().zip(bars.last()).map_or(s.bars, |(f, l)| {
+            (((l.event_ns - f.event_ns) / 1_000_000_000 / period) + 1).max(1) as u64
+        });
 
         let subject = QcSubject {
             instrument_id: s.instrument.clone(),

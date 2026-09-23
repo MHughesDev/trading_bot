@@ -85,7 +85,10 @@ impl AnchorSigner {
     /// # Errors
     /// Anything other than 64 hex characters.
     pub fn from_hex_seed(seed_hex: &str) -> Result<Self, AnchorError> {
-        let bytes: [u8; 32] = hex::decode(seed_hex.trim()).ok().and_then(|b| b.try_into().ok()).ok_or(AnchorError::BadKey)?;
+        let bytes: [u8; 32] = hex::decode(seed_hex.trim())
+            .ok()
+            .and_then(|b| b.try_into().ok())
+            .ok_or(AnchorError::BadKey)?;
         let key = SigningKey::from_bytes(&bytes);
         let key_id = key_id_of(&key.verifying_key());
         Ok(Self { key, key_id })
@@ -110,14 +113,26 @@ impl AnchorSigner {
 /// `ed25519:` + the first 16 hex characters of sha256(public key).
 #[must_use]
 pub fn key_id_of(key: &VerifyingKey) -> String {
-    format!("ed25519:{}", &hex::encode(Sha256::digest(key.as_bytes()))[..16])
+    format!(
+        "ed25519:{}",
+        &hex::encode(Sha256::digest(key.as_bytes()))[..16]
+    )
 }
 
 /// Check one signature against the set of accepted keys.
 #[must_use]
-pub fn signature_valid(body: &AnchorBody, signature: &[u8], key_id: &str, keys: &[VerifyingKey]) -> bool {
-    let Ok(sig) = Signature::from_slice(signature) else { return false };
-    keys.iter().filter(|k| key_id_of(k) == key_id).any(|k| k.verify(&body.canonical_bytes(), &sig).is_ok())
+pub fn signature_valid(
+    body: &AnchorBody,
+    signature: &[u8],
+    key_id: &str,
+    keys: &[VerifyingKey],
+) -> bool {
+    let Ok(sig) = Signature::from_slice(signature) else {
+        return false;
+    };
+    keys.iter()
+        .filter(|k| key_id_of(k) == key_id)
+        .any(|k| k.verify(&body.canonical_bytes(), &sig).is_ok())
 }
 
 /// A store that accepts each object exactly once.
@@ -147,29 +162,46 @@ impl FsWorm {
 
 impl WormStore for FsWorm {
     fn put_once(&self, key: &str, bytes: &[u8]) -> Result<String, AnchorError> {
-        if key.split('/').any(|seg| seg.is_empty() || seg == "." || seg == "..") {
+        if key
+            .split('/')
+            .any(|seg| seg.is_empty() || seg == "." || seg == "..")
+        {
             return Err(AnchorError::Worm(format!("invalid key {key}")));
         }
         let path = self.root.join(key);
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| AnchorError::Worm(e.to_string()))?;
         }
-        let mut f = match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+        let mut f = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
             Ok(f) => f,
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                return Err(AnchorError::Worm(format!("{} already exists", path.display())));
+                return Err(AnchorError::Worm(format!(
+                    "{} already exists",
+                    path.display()
+                )));
             }
             Err(e) => return Err(AnchorError::Worm(e.to_string())),
         };
-        f.write_all(bytes).and_then(|()| f.sync_all()).map_err(|e| AnchorError::Worm(e.to_string()))?;
-        let mut perms = f.metadata().map_err(|e| AnchorError::Worm(e.to_string()))?.permissions();
+        f.write_all(bytes)
+            .and_then(|()| f.sync_all())
+            .map_err(|e| AnchorError::Worm(e.to_string()))?;
+        let mut perms = f
+            .metadata()
+            .map_err(|e| AnchorError::Worm(e.to_string()))?
+            .permissions();
         perms.set_readonly(true);
         std::fs::set_permissions(&path, perms).map_err(|e| AnchorError::Worm(e.to_string()))?;
         Ok(format!("file://{}", path.display()).replace('\\', "/"))
     }
 
     fn get(&self, uri: &str) -> Result<Option<Vec<u8>>, AnchorError> {
-        let path = uri.strip_prefix("file://").ok_or_else(|| AnchorError::Worm(format!("not a file uri: {uri}")))?;
+        let path = uri
+            .strip_prefix("file://")
+            .ok_or_else(|| AnchorError::Worm(format!("not a file uri: {uri}")))?;
         match std::fs::read(path) {
             Ok(b) => Ok(Some(b)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -229,7 +261,11 @@ impl DecisionRow {
         if let Some(p) = self.propensity {
             h.update(p.to_be_bytes());
         }
-        h.update(if self.exploration_flag { "true" } else { "false" });
+        h.update(if self.exploration_flag {
+            "true"
+        } else {
+            "false"
+        });
         h.update(&self.decision_tier);
         h.finalize().to_vec()
     }
@@ -242,7 +278,11 @@ impl DecisionRow {
 pub fn verify_decisions(rows: &[DecisionRow]) -> Result<usize, ChainBreak> {
     let mut prev = GENESIS_HASH.to_vec();
     for (i, r) in rows.iter().enumerate() {
-        let brk = |reason: String| ChainBreak { id: r.decision_id, seq: r.seq, reason };
+        let brk = |reason: String| ChainBreak {
+            id: r.decision_id,
+            seq: r.seq,
+            reason,
+        };
         if r.seq != i as i64 {
             return Err(brk(format!("expected seq {i}, found {}", r.seq)));
         }
@@ -272,19 +312,30 @@ fn head_at(hashes: &[Vec<u8>], max_seq: i64) -> Option<Vec<u8>> {
     if max_seq < 0 {
         return Some(GENESIS_HASH.to_vec());
     }
-    usize::try_from(max_seq).ok().and_then(|i| hashes.get(i).cloned())
+    usize::try_from(max_seq)
+        .ok()
+        .and_then(|i| hashes.get(i).cloned())
 }
 
 /// Compute the body an anchor would attest to right now.
 #[must_use]
-pub fn body_for(tenant_id: &str, date: NaiveDate, trials: &[TrialRow], decisions: &[DecisionRow]) -> AnchorBody {
+pub fn body_for(
+    tenant_id: &str,
+    date: NaiveDate,
+    trials: &[TrialRow],
+    decisions: &[DecisionRow],
+) -> AnchorBody {
     AnchorBody {
         tenant_id: tenant_id.to_string(),
         anchor_date: date,
         trial_max_seq: trials.len() as i64 - 1,
-        trial_head: trials.last().map_or_else(|| GENESIS_HASH.to_vec(), |t| t.row_hash.clone()),
+        trial_head: trials
+            .last()
+            .map_or_else(|| GENESIS_HASH.to_vec(), |t| t.row_hash.clone()),
         decision_max_seq: decisions.len() as i64 - 1,
-        decision_head: decisions.last().map_or_else(|| GENESIS_HASH.to_vec(), |d| d.row_hash.clone()),
+        decision_head: decisions
+            .last()
+            .map_or_else(|| GENESIS_HASH.to_vec(), |d| d.row_hash.clone()),
     }
 }
 
@@ -316,19 +367,25 @@ pub fn verify_all(
     keys: &[VerifyingKey],
     worm: Option<&dyn WormStore>,
 ) -> VerificationReport {
-    let mut r = VerificationReport { tenant_id: tenant_id.to_string(), ..VerificationReport::default() };
+    let mut r = VerificationReport {
+        tenant_id: tenant_id.to_string(),
+        ..VerificationReport::default()
+    };
     match verify_trials(trials) {
         Ok(n) => r.trials = n,
         Err(b) => r.failures.push(format!("trial chain: {b}")),
     }
-    let by_id: std::collections::HashMap<Uuid, &TrialRow> = trials.iter().map(|t| (t.trial_id, t)).collect();
+    let by_id: std::collections::HashMap<Uuid, &TrialRow> =
+        trials.iter().map(|t| (t.trial_id, t)).collect();
     for (trial_id, evs) in events {
         match by_id.get(trial_id) {
             Some(t) => match verify_events(t, evs) {
                 Ok(n) => r.events += n,
                 Err(b) => r.failures.push(format!("event chain of {trial_id}: {b}")),
             },
-            None => r.failures.push(format!("events for unknown trial {trial_id}")),
+            None => r
+                .failures
+                .push(format!("events for unknown trial {trial_id}")),
         }
     }
     match verify_decisions(decisions) {
@@ -340,20 +397,34 @@ pub fn verify_all(
     for a in anchors {
         let label = format!("anchor {} ({})", a.body.anchor_date, a.anchor_id);
         if head_at(&trial_hashes, a.body.trial_max_seq).as_ref() != Some(&a.body.trial_head) {
-            r.failures.push(format!("{label}: trial head no longer matches the chain"));
+            r.failures
+                .push(format!("{label}: trial head no longer matches the chain"));
         }
-        if head_at(&decision_hashes, a.body.decision_max_seq).as_ref() != Some(&a.body.decision_head) {
-            r.failures.push(format!("{label}: decision head no longer matches the chain"));
+        if head_at(&decision_hashes, a.body.decision_max_seq).as_ref()
+            != Some(&a.body.decision_head)
+        {
+            r.failures.push(format!(
+                "{label}: decision head no longer matches the chain"
+            ));
         }
         if !signature_valid(&a.body, &a.signature, &a.key_id, keys) {
-            r.failures.push(format!("{label}: signature does not verify under any accepted key"));
+            r.failures.push(format!(
+                "{label}: signature does not verify under any accepted key"
+            ));
         }
         if let Some(w) = worm {
             match w.get(&a.worm_uri) {
                 Ok(Some(bytes)) => match serde_json::from_slice::<AnchorDocument>(&bytes) {
-                    Ok(doc) if doc.body == a.body && doc.signature == a.signature && doc.key_id == a.key_id => {}
-                    Ok(_) => r.failures.push(format!("{label}: database row disagrees with the WORM copy")),
-                    Err(e) => r.failures.push(format!("{label}: WORM copy unreadable: {e}")),
+                    Ok(doc)
+                        if doc.body == a.body
+                            && doc.signature == a.signature
+                            && doc.key_id == a.key_id => {}
+                    Ok(_) => r.failures.push(format!(
+                        "{label}: database row disagrees with the WORM copy"
+                    )),
+                    Err(e) => r
+                        .failures
+                        .push(format!("{label}: WORM copy unreadable: {e}")),
                 },
                 Ok(None) => r.failures.push(format!("{label}: WORM copy missing")),
                 Err(e) => r.failures.push(format!("{label}: {e}")),
@@ -397,7 +468,12 @@ mod tests {
         other_day.anchor_date = NaiveDate::from_ymd_opt(2026, 9, 13).unwrap();
         assert!(!signature_valid(&other_day, &sig, s.key_id(), &keys));
         let stranger = AnchorSigner::from_hex_seed(&"08".repeat(32)).unwrap();
-        assert!(!signature_valid(&b, &sig, s.key_id(), &[stranger.verifying_key()]));
+        assert!(!signature_valid(
+            &b,
+            &sig,
+            s.key_id(),
+            &[stranger.verifying_key()]
+        ));
     }
 
     #[test]
@@ -428,12 +504,31 @@ mod tests {
         let s = signer();
         let b = body();
         let sig = s.sign(&b);
-        let row = AnchorRow { anchor_id: Uuid::nil(), body: b.clone(), signature: sig, key_id: s.key_id().into(), worm_uri: String::new() };
-        let ok = verify_all("t", &[], &[], &[], std::slice::from_ref(&row), &[s.verifying_key()], None);
+        let row = AnchorRow {
+            anchor_id: Uuid::nil(),
+            body: b.clone(),
+            signature: sig,
+            key_id: s.key_id().into(),
+            worm_uri: String::new(),
+        };
+        let ok = verify_all(
+            "t",
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&row),
+            &[s.verifying_key()],
+            None,
+        );
         assert!(ok.ok(), "{:?}", ok.failures);
         let mut forged = row;
         forged.body.trial_head = vec![1; 32];
         let bad = verify_all("t", &[], &[], &[], &[forged], &[s.verifying_key()], None);
-        assert_eq!(bad.failures.len(), 2, "head mismatch and signature failure: {:?}", bad.failures);
+        assert_eq!(
+            bad.failures.len(),
+            2,
+            "head mismatch and signature failure: {:?}",
+            bad.failures
+        );
     }
 }

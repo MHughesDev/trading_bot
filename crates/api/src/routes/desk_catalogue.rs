@@ -143,7 +143,10 @@ pub async fn exposure(
         let reason = if registry.get(name).is_some_and(|t| t.core) {
             "core: the loop does not work without it, and it counts against the budget".to_string()
         } else if pinned.contains(name) {
-            format!("your goal's search hit it directly (top {})", harness::registry::ToolRegistry::GOAL_HITS)
+            format!(
+                "your goal's search hit it directly (top {})",
+                harness::registry::ToolRegistry::GOAL_HITS
+            )
         } else if let Some(ns) = registry.get(name).map(|t| t.namespace.clone()) {
             format!("namespace `{ns}`, which the goal's hits selected")
         } else {

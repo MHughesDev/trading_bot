@@ -57,7 +57,10 @@ impl Risk {
 /// (§2.7); exposure is what deprecation removes, not classification.
 #[must_use]
 pub fn taxonomy() -> Vec<(&'static str, &'static str, Risk)> {
-    crate::spec::catalog().iter().map(|s| (s.name, s.namespace, s.risk)).collect()
+    crate::spec::catalog()
+        .iter()
+        .map(|s| (s.name, s.namespace, s.risk))
+        .collect()
 }
 
 /// The namespace and risk for a tool, or `None` if it is unclassified.
@@ -102,7 +105,11 @@ mod tests {
             .collect();
         assert!(!names.is_empty());
 
-        let missing: Vec<&str> = names.iter().copied().filter(|n| classify(n).is_none()).collect();
+        let missing: Vec<&str> = names
+            .iter()
+            .copied()
+            .filter(|n| classify(n).is_none())
+            .collect();
         assert!(
             missing.is_empty(),
             "these tools have no namespace/risk classification: {missing:?}\n\
@@ -127,11 +134,13 @@ mod tests {
             .map(|(n, _, _)| *n)
             .filter(|n| {
                 // A deprecated tool is classified and not exposed, by design.
-                !names.contains(n)
-                    && crate::spec::find(n).is_some_and(|s| s.status.is_active())
+                !names.contains(n) && crate::spec::find(n).is_some_and(|s| s.status.is_active())
             })
             .collect();
-        assert!(stale.is_empty(), "classification for missing tools: {stale:?}");
+        assert!(
+            stale.is_empty(),
+            "classification for missing tools: {stale:?}"
+        );
     }
 
     #[test]
@@ -140,7 +149,11 @@ mod tests {
         let before = seen.len();
         seen.sort_unstable();
         seen.dedup();
-        assert_eq!(before, seen.len(), "a duplicate entry makes the risk ambiguous");
+        assert_eq!(
+            before,
+            seen.len(),
+            "a duplicate entry makes the risk ambiguous"
+        );
     }
 
     /// Nothing in this catalogue sends data outside the platform. If that ever
@@ -176,7 +189,12 @@ mod tests {
         destructive.sort_unstable();
         assert_eq!(
             destructive,
-            vec!["arm_automation", "choose_null", "delete_backtest", "discard_draft"]
+            vec![
+                "arm_automation",
+                "choose_null",
+                "delete_backtest",
+                "discard_draft"
+            ]
         );
     }
 
@@ -229,8 +247,10 @@ mod tests {
             "fs",
             "automation",
         ];
-        let rogue: Vec<&str> =
-            namespaces().into_iter().filter(|n| !CANONICAL.contains(n)).collect();
+        let rogue: Vec<&str> = namespaces()
+            .into_iter()
+            .filter(|n| !CANONICAL.contains(n))
+            .collect();
         assert!(
             rogue.is_empty(),
             "namespaces outside AGENT-006 §2.1: {rogue:?} — a namespace of one is \

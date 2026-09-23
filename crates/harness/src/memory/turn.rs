@@ -295,10 +295,10 @@ fn finding_line(f: &SummaryFinding) -> String {
 }
 
 fn negative_line(n: &SummaryNegative) -> String {
-    let retry = n
-        .retry_condition
-        .as_deref()
-        .map_or_else(|| " (no retry condition)".to_string(), |r| format!(" — {r}"));
+    let retry = n.retry_condition.as_deref().map_or_else(
+        || " (no retry condition)".to_string(),
+        |r| format!(" — {r}"),
+    );
     format!("- [{}, {}] {}{retry}", n.ticket_id, n.class, n.why)
 }
 
@@ -367,7 +367,10 @@ mod tests {
                 "the highest-confidence id must survive every budget ({budget}):\n{out}"
             );
             assert!(out.contains("exp_f_10000"), "{out}");
-            assert!(out.contains("tkt_00011122"), "a dead idea is the cheapest carry:\n{out}");
+            assert!(
+                out.contains("tkt_00011122"),
+                "a dead idea is the cheapest carry:\n{out}"
+            );
             assert!(
                 estimate_tokens(&out) <= budget,
                 "render must fit {budget}: {}",

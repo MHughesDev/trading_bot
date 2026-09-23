@@ -72,8 +72,10 @@ impl SkillHash {
     pub fn parse(s: impl Into<String>) -> Result<Self, SkillError> {
         let s = s.into();
         let ok = s.len() == 64
-            && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
-        ok.then_some(Self(s.clone())).ok_or(SkillError::MalformedHash(s))
+            && s.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        ok.then_some(Self(s.clone()))
+            .ok_or(SkillError::MalformedHash(s))
     }
 
     #[must_use]
@@ -218,17 +220,41 @@ pub fn is_valid_name(name: &str) -> bool {
 /// should be told "skills have no network, here is why" while it is still
 /// writing, not handed a connection error three minutes later.
 const DISCOURAGED_IMPORTS: &[(&str, &str)] = &[
-    ("socket", "skills run with no network; the fetch tools are the only way out"),
-    ("requests", "skills run with no network; use the web_search and fetch_url tools instead"),
+    (
+        "socket",
+        "skills run with no network; the fetch tools are the only way out",
+    ),
+    (
+        "requests",
+        "skills run with no network; use the web_search and fetch_url tools instead",
+    ),
     ("urllib.request", "skills run with no network"),
     ("httpx", "skills run with no network"),
     ("aiohttp", "skills run with no network"),
-    ("psycopg", "skills never touch the database; pass the rows in as input"),
-    ("psycopg2", "skills never touch the database; pass the rows in as input"),
-    ("sqlalchemy", "skills never touch the database; pass the rows in as input"),
-    ("clickhouse_driver", "skills never touch the database; pass the rows in as input"),
-    ("subprocess", "a skill is one transformation, not a process launcher"),
-    ("ctypes", "a skill is Python, not a way to call into the host"),
+    (
+        "psycopg",
+        "skills never touch the database; pass the rows in as input",
+    ),
+    (
+        "psycopg2",
+        "skills never touch the database; pass the rows in as input",
+    ),
+    (
+        "sqlalchemy",
+        "skills never touch the database; pass the rows in as input",
+    ),
+    (
+        "clickhouse_driver",
+        "skills never touch the database; pass the rows in as input",
+    ),
+    (
+        "subprocess",
+        "a skill is one transformation, not a process launcher",
+    ),
+    (
+        "ctypes",
+        "a skill is Python, not a way to call into the host",
+    ),
     ("multiprocessing", "the runner owns the process model"),
 ];
 
@@ -313,12 +339,7 @@ mod tests {
     }
 
     fn contract() -> Contract {
-        Contract::new(
-            ["values"],
-            ["mean"],
-            "Mean of a list of numbers.",
-        )
-        .unwrap()
+        Contract::new(["values"], ["mean"], "Mean of a list of numbers.").unwrap()
     }
 
     fn skill() -> Skill {
@@ -392,21 +413,36 @@ mod tests {
     /// cannot tell two of them apart.
     #[test]
     fn a_skill_needs_a_description_worth_reading() {
-        let err = Skill::author("x_skill", "helper", good_source(), contract(), None)
-            .unwrap_err();
+        let err = Skill::author("x_skill", "helper", good_source(), contract(), None).unwrap_err();
         assert!(err.to_string().contains("20 characters"), "{err}");
     }
 
     #[test]
     fn a_skill_name_must_be_a_usable_identifier() {
-        for bad in ["A_Skill", "has space", "hy-phen", "ab", "1starts_with_digit", &"x".repeat(65)] {
+        for bad in [
+            "A_Skill",
+            "has space",
+            "hy-phen",
+            "ab",
+            "1starts_with_digit",
+            &"x".repeat(65),
+        ] {
             assert!(
-                Skill::author(bad, "A description long enough to pass.", good_source(), contract(), None)
-                    .is_err(),
+                Skill::author(
+                    bad,
+                    "A description long enough to pass.",
+                    good_source(),
+                    contract(),
+                    None
+                )
+                .is_err(),
                 "{bad:?} should be refused"
             );
         }
-        for good in ["ok", "a_b", "skill_2", "compute_rolling_sharpe"].iter().skip(1) {
+        for good in ["ok", "a_b", "skill_2", "compute_rolling_sharpe"]
+            .iter()
+            .skip(1)
+        {
             assert!(is_valid_name(good), "{good:?} should be accepted");
         }
     }
@@ -416,7 +452,10 @@ mod tests {
     #[test]
     fn a_skill_without_a_run_function_is_refused_with_the_signature() {
         let err = validate_source("x = 1\n").unwrap_err();
-        assert!(err.to_string().contains("def run(payload: dict) -> dict"), "{err}");
+        assert!(
+            err.to_string().contains("def run(payload: dict) -> dict"),
+            "{err}"
+        );
     }
 
     /// Not the sandbox — a message at authoring time instead of a confusing
@@ -428,8 +467,8 @@ mod tests {
             let err = validate_source(&src).unwrap_err();
             assert!(err.to_string().contains(module), "{module}: {err}");
         }
-        let err = validate_source("from requests import get\ndef run(p):\n    return p\n")
-            .unwrap_err();
+        let err =
+            validate_source("from requests import get\ndef run(p):\n    return p\n").unwrap_err();
         assert!(err.to_string().contains("no network"), "{err}");
     }
 
@@ -445,7 +484,10 @@ mod tests {
     fn an_empty_or_enormous_skill_is_refused() {
         assert!(validate_source("   \n").is_err());
         let huge = format!("def run(p):\n    return p\n# {}", "x".repeat(300_000));
-        assert!(validate_source(&huge).unwrap_err().to_string().contains("Split it"));
+        assert!(validate_source(&huge)
+            .unwrap_err()
+            .to_string()
+            .contains("Split it"));
     }
 
     #[test]

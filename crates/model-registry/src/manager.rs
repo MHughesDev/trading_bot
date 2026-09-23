@@ -398,10 +398,19 @@ impl ModelManager {
         let mid = model_id.to_string();
         let version_note = req.version_note;
         tokio::spawn(async move {
-            if let Err(e) = manager.ledger.transition_async(&mut ticket, ledger::TrialEvent::to(ledger::TrialState::Running)).await {
+            if let Err(e) = manager
+                .ledger
+                .transition_async(
+                    &mut ticket,
+                    ledger::TrialEvent::to(ledger::TrialState::Running),
+                )
+                .await
+            {
                 tracing::warn!(error = %e, "could not mark training trial running");
             }
-            manager.drive_train(Arc::clone(&job), mid, definition, plan, version_note).await;
+            manager
+                .drive_train(Arc::clone(&job), mid, definition, plan, version_note)
+                .await;
             manager.settle_trial(ticket, &job).await;
         });
 
@@ -421,7 +430,8 @@ impl ModelManager {
                 .bind(model_id)
                 .fetch_optional(&self.pg)
                 .await?;
-        let (definition_json,) = row.ok_or_else(|| anyhow::anyhow!("model definition not found"))?;
+        let (definition_json,) =
+            row.ok_or_else(|| anyhow::anyhow!("model definition not found"))?;
         let mut definition: domain::model_def::ModelDefinition =
             serde_json::from_value(definition_json)
                 .map_err(|e| anyhow::anyhow!("definition parse error: {e}"))?;
@@ -450,8 +460,16 @@ impl ModelManager {
     /// no policy to take a propensity from. They register under the legacy marker —
     /// counted in N_eff, excluded from off-policy estimators — until they are moved
     /// behind campaigns (OQ-08, ADR-P0-10). A refused registration dispatches nothing.
-    async fn register_legacy(&self, user_id: Uuid, subject: &ledger::TrialSubject) -> anyhow::Result<ledger::TrialTicket> {
-        let ctx = ledger::DispatchContext::legacy(user_id.to_string(), ledger::ActorKind::Human, user_id.to_string());
+    async fn register_legacy(
+        &self,
+        user_id: Uuid,
+        subject: &ledger::TrialSubject,
+    ) -> anyhow::Result<ledger::TrialTicket> {
+        let ctx = ledger::DispatchContext::legacy(
+            user_id.to_string(),
+            ledger::ActorKind::Human,
+            user_id.to_string(),
+        );
         self.ledger
             .register_async(&ledger::Registration::unlogged(&ctx, subject))
             .await
@@ -465,9 +483,14 @@ impl ModelManager {
         let terminal = job.state.read().expect("job state lock poisoned").terminal;
         let event = match snap.status {
             RunStatus::Succeeded => ledger::TrialEvent::completed(snap.run_id.to_string(), None),
-            RunStatus::Cancelled => ledger::TrialEvent::failed(ledger::TerminalReason::Cancelled, "cancelled"),
+            RunStatus::Cancelled => {
+                ledger::TrialEvent::failed(ledger::TerminalReason::Cancelled, "cancelled")
+            }
             RunStatus::Failed | RunStatus::Queued | RunStatus::Running => {
-                let msg = snap.error.clone().unwrap_or_else(|| format!("run ended in {:?}", snap.status));
+                let msg = snap
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| format!("run ended in {:?}", snap.status));
                 // The reason travels with the failure (ADR-P2-30). A run still
                 // in `Queued`/`Running` when its driver returned never reached a
                 // failing path at all, so `dependency_failure` here is a
@@ -897,7 +920,9 @@ impl ModelManager {
 
         // Same ordering rule as training: the evaluation dataset is resolved and
         // hashed before the trial is registered (INV-12).
-        let definition = self.load_definition(model_id, &serde_json::Value::Null).await?;
+        let definition = self
+            .load_definition(model_id, &serde_json::Value::Null)
+            .await?;
         let window_end = Utc::now() - chrono::Duration::days(1);
         let window_start = window_end - chrono::Duration::days(29);
         let artifacts_prefix =
@@ -906,7 +931,12 @@ impl ModelManager {
             .datasets
             .plan(
                 &user_id.to_string(),
-                dataset_request(&definition, None, (window_start, window_end), &artifacts_prefix)?,
+                dataset_request(
+                    &definition,
+                    None,
+                    (window_start, window_end),
+                    &artifacts_prefix,
+                )?,
             )
             .await?;
 
@@ -924,10 +954,19 @@ impl ModelManager {
         let manager = Arc::clone(self);
         let mid = model_id.to_string();
         tokio::spawn(async move {
-            if let Err(e) = manager.ledger.transition_async(&mut ticket, ledger::TrialEvent::to(ledger::TrialState::Running)).await {
+            if let Err(e) = manager
+                .ledger
+                .transition_async(
+                    &mut ticket,
+                    ledger::TrialEvent::to(ledger::TrialState::Running),
+                )
+                .await
+            {
                 tracing::warn!(error = %e, "could not mark evaluation trial running");
             }
-            manager.drive_eval(Arc::clone(&job), mid, version, plan).await;
+            manager
+                .drive_eval(Arc::clone(&job), mid, version, plan)
+                .await;
             manager.settle_trial(ticket, &job).await;
         });
 
@@ -1403,7 +1442,10 @@ impl ModelManager {
         let dataset = match self.datasets.materialize(&plan).await {
             Ok(d) => d,
             Err(e) => {
-                job.fail(ledger::TerminalReason::DataError, format!("dataset materialization failed: {e}"));
+                job.fail(
+                    ledger::TerminalReason::DataError,
+                    format!("dataset materialization failed: {e}"),
+                );
                 self.broadcast_progress(&job.snapshot());
                 self.persist_run(&job).await;
                 return;
@@ -1436,9 +1478,14 @@ impl ModelManager {
             dataset.row_count as usize,
             &effective_cv,
             &features::walk_forward::embargo_inputs(
-                &features::resolve_feature_set(definition.feature_set_ref.as_deref().unwrap_or("fs_core_ohlcv_v3"))
-                    .map(|s| s.features.clone())
-                    .unwrap_or_default(),
+                &features::resolve_feature_set(
+                    definition
+                        .feature_set_ref
+                        .as_deref()
+                        .unwrap_or("fs_core_ohlcv_v3"),
+                )
+                .map(|s| s.features.clone())
+                .unwrap_or_default(),
                 horizon_bars,
             ),
         ) {
@@ -1623,7 +1670,10 @@ impl ModelManager {
                 .await;
             }
             Err(e) => {
-                job.fail(ledger::TerminalReason::DependencyFailure, format!("sidecar dispatch error: {e}"));
+                job.fail(
+                    ledger::TerminalReason::DependencyFailure,
+                    format!("sidecar dispatch error: {e}"),
+                );
                 let _ = sqlx::query(
                     "UPDATE ai_models SET status='failed', updated_at=now() WHERE model_id=$1",
                 )
@@ -1670,7 +1720,10 @@ impl ModelManager {
         .flatten();
 
         let Some((artifact_uri, artifact_hash, definition_json)) = artifact_row else {
-            job.fail(ledger::TerminalReason::DataError, "artifact not found for version");
+            job.fail(
+                ledger::TerminalReason::DataError,
+                "artifact not found for version",
+            );
             self.broadcast_progress(&job.snapshot());
             self.persist_eval(&job).await;
             return;
@@ -1680,7 +1733,10 @@ impl ModelManager {
             match serde_json::from_value(definition_json) {
                 Ok(d) => d,
                 Err(e) => {
-                    job.fail(ledger::TerminalReason::IntegrityRejected, format!("definition parse: {e}"));
+                    job.fail(
+                        ledger::TerminalReason::IntegrityRejected,
+                        format!("definition parse: {e}"),
+                    );
                     self.broadcast_progress(&job.snapshot());
                     self.persist_eval(&job).await;
                     return;
@@ -1753,19 +1809,23 @@ impl ModelManager {
                 embargo_bars: purge,
             }
         });
-        let fold_specs: Option<Vec<crate::sidecar::FoldSpec>> =
-            features::walk_forward_folds(
+        let fold_specs: Option<Vec<crate::sidecar::FoldSpec>> = features::walk_forward_folds(
             dataset.row_count as usize,
             &effective_cv,
             &features::walk_forward::embargo_inputs(
-                &features::resolve_feature_set(definition.feature_set_ref.as_deref().unwrap_or("fs_core_ohlcv_v3"))
-                    .map(|s| s.features.clone())
-                    .unwrap_or_default(),
+                &features::resolve_feature_set(
+                    definition
+                        .feature_set_ref
+                        .as_deref()
+                        .unwrap_or("fs_core_ohlcv_v3"),
+                )
+                .map(|s| s.features.clone())
+                .unwrap_or_default(),
                 horizon_bars,
             ),
         )
-                .ok()
-                .map(|folds| folds.iter().map(crate::sidecar::FoldSpec::from).collect());
+        .ok()
+        .map(|folds| folds.iter().map(crate::sidecar::FoldSpec::from).collect());
 
         // Dispatch to scoring sidecar (I-2.1 parity-preserving eval loop).
         job.set_phase(RunStatus::Running, "scoring");
@@ -1802,7 +1862,11 @@ impl ModelManager {
                     scorecard: None,
                     report: None,
                     error: Some(e.to_string()),
-                    terminal: Some(ledger::TerminalReason::DependencyFailure.as_str().to_string()),
+                    terminal: Some(
+                        ledger::TerminalReason::DependencyFailure
+                            .as_str()
+                            .to_string(),
+                    ),
                 }
             }
         };
@@ -2289,7 +2353,8 @@ fn training_subject(
     plan: &crate::datasets::DatasetPlan,
 ) -> ledger::TrialSubject {
     let config = serde_json::json!({ "kind": kind, "model_id": model_id, "hyperparameters": hyperparameters, "data": data });
-    let config_hash = dataplane::content_hash(&config).unwrap_or_else(|_| format!("unhashable:{model_id}"));
+    let config_hash =
+        dataplane::content_hash(&config).unwrap_or_else(|_| format!("unhashable:{model_id}"));
     ledger::TrialSubject {
         config_hash,
         config,
@@ -2381,7 +2446,9 @@ fn dataset_request(
     );
     if let Some(c) = cv {
         split_spec.train_window = match c.mode {
-            domain::model_def::cv::WindowMode::Expanding => dataplane::split::TrainWindow::Expanding,
+            domain::model_def::cv::WindowMode::Expanding => {
+                dataplane::split::TrainWindow::Expanding
+            }
             domain::model_def::cv::WindowMode::Rolling => {
                 dataplane::split::TrainWindow::Rolling(c.train_bars as usize)
             }

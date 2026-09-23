@@ -160,7 +160,9 @@ fn first_number(s: &str) -> Option<f64> {
         if starts {
             let mut j = i + 1;
             while j < bytes.len()
-                && (bytes[j].is_ascii_digit() || bytes[j] == b'.' || bytes[j] == b'e'
+                && (bytes[j].is_ascii_digit()
+                    || bytes[j] == b'.'
+                    || bytes[j] == b'e'
                     || bytes[j] == b'E'
                     || ((bytes[j] == b'-' || bytes[j] == b'+')
                         && matches!(bytes[j - 1], b'e' | b'E')))
@@ -700,11 +702,14 @@ mod tests {
     #[test]
     fn a_disagreement_is_a_conflict_not_a_verdict() {
         let mut e = complete(1.4);
-        e.measurements.get_mut("sharpe_after_costs").unwrap().push(Measurement {
-            value: -0.9,
-            ticket_id: "t2".into(),
-            se: Some(0.05),
-        });
+        e.measurements
+            .get_mut("sharpe_after_costs")
+            .unwrap()
+            .push(Measurement {
+                value: -0.9,
+                ticket_id: "t2".into(),
+                se: Some(0.05),
+            });
         assert_eq!(
             evaluate(&falsifier(), Role::Primary, &e).why(),
             Some(Why::EvidenceConflict),
@@ -717,11 +722,14 @@ mod tests {
     fn two_numbers_with_no_stated_error_are_not_a_conflict() {
         let mut e = complete(1.4);
         e.measurements.get_mut("sharpe_after_costs").unwrap()[0].se = None;
-        e.measurements.get_mut("sharpe_after_costs").unwrap().push(Measurement {
-            value: 1.1,
-            ticket_id: "t2".into(),
-            se: None,
-        });
+        e.measurements
+            .get_mut("sharpe_after_costs")
+            .unwrap()
+            .push(Measurement {
+                value: 1.1,
+                ticket_id: "t2".into(),
+                se: None,
+            });
         assert_eq!(
             evaluate(&falsifier(), Role::Primary, &e),
             Verdict::Supported,

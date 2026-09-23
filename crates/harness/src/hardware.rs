@@ -115,7 +115,11 @@ impl Hardware {
                 if *pooled {
                     devices.iter().map(Device::available_bytes).sum()
                 } else {
-                    devices.iter().map(Device::available_bytes).max().unwrap_or(0)
+                    devices
+                        .iter()
+                        .map(Device::available_bytes)
+                        .max()
+                        .unwrap_or(0)
                 }
             }
         }

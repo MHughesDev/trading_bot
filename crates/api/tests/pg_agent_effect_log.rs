@@ -78,7 +78,9 @@ fn url() -> String {
 }
 
 async fn pool() -> PgPool {
-    PgPool::connect(&url()).await.expect("the dev database is up")
+    PgPool::connect(&url())
+        .await
+        .expect("the dev database is up")
 }
 
 /// A pool and a transaction that must never be committed.
@@ -93,7 +95,10 @@ async fn begin() -> (PgPool, Transaction<'static, Postgres>) {
 /// reports `current transaction is aborted` rather than the constraint it meant
 /// to check — an `is_err()` that passes while checking nothing.
 async fn probe(conn: &mut PgConnection) {
-    sqlx::query("SAVEPOINT probe").execute(conn).await.expect("savepoint");
+    sqlx::query("SAVEPOINT probe")
+        .execute(conn)
+        .await
+        .expect("savepoint");
 }
 
 async fn undo(conn: &mut PgConnection) {
@@ -131,7 +136,14 @@ async fn a_run(conn: &mut PgConnection) -> Uuid {
     run_id
 }
 
-async fn append(conn: &mut PgConnection, run: Uuid, seq: i32, direction: &str, kind: &str, payload: &str) {
+async fn append(
+    conn: &mut PgConnection,
+    run: Uuid,
+    seq: i32,
+    direction: &str,
+    kind: &str,
+    payload: &str,
+) {
     sqlx::query(
         "INSERT INTO agent_effect_log (run_id, seq, direction, kind, payload_json, harness_version) \
          VALUES ($1, $2, $3, $4, $5::jsonb, $6)",
@@ -159,10 +171,24 @@ async fn an_effect_is_recorded_before_the_input_that_answers_it() {
     let (_pool, mut tx) = begin().await;
     let run = a_run(&mut tx).await;
 
-    append(&mut tx, run, 1, "effect", "ExecuteTool",
-        r#"{"step":1,"name":"create_experiment","arguments":{"slug":"ema_v1"},"idempotent":false}"#).await;
-    append(&mut tx, run, 2, "input", "ToolResult",
-        r#"{"output":"{\"experiment_id\":\"exp_1\"}","source":"platform"}"#).await;
+    append(
+        &mut tx,
+        run,
+        1,
+        "effect",
+        "ExecuteTool",
+        r#"{"step":1,"name":"create_experiment","arguments":{"slug":"ema_v1"},"idempotent":false}"#,
+    )
+    .await;
+    append(
+        &mut tx,
+        run,
+        2,
+        "input",
+        "ToolResult",
+        r#"{"output":"{\"experiment_id\":\"exp_1\"}","source":"platform"}"#,
+    )
+    .await;
 
     let rows = sqlx::query(
         "SELECT seq, direction, kind FROM agent_effect_log WHERE run_id = $1 ORDER BY seq",
@@ -194,11 +220,34 @@ async fn an_interrupted_write_is_visible_as_a_trailing_effect() {
     let (_pool, mut tx) = begin().await;
     let run = a_run(&mut tx).await;
 
-    append(&mut tx, run, 1, "effect", "CallModel", r#"{"step":1,"decode":"select_tool"}"#).await;
-    append(&mut tx, run, 2, "input", "ModelReply", r#"{"raw":"{\"name\":\"create_experiment\"}"}"#).await;
+    append(
+        &mut tx,
+        run,
+        1,
+        "effect",
+        "CallModel",
+        r#"{"step":1,"decode":"select_tool"}"#,
+    )
+    .await;
+    append(
+        &mut tx,
+        run,
+        2,
+        "input",
+        "ModelReply",
+        r#"{"raw":"{\"name\":\"create_experiment\"}"}"#,
+    )
+    .await;
     // Decided, and then the process died.
-    append(&mut tx, run, 3, "effect", "ExecuteTool",
-        r#"{"step":1,"name":"create_experiment","arguments":{"slug":"ema_v1"},"idempotent":false}"#).await;
+    append(
+        &mut tx,
+        run,
+        3,
+        "effect",
+        "ExecuteTool",
+        r#"{"step":1,"name":"create_experiment","arguments":{"slug":"ema_v1"},"idempotent":false}"#,
+    )
+    .await;
 
     let last = sqlx::query(
         "SELECT direction, kind, payload_json FROM agent_effect_log \
@@ -319,7 +368,10 @@ async fn a_row_that_is_neither_a_decision_nor_an_answer_is_refused() {
     .bind(TEST_HARNESS_VERSION)
     .execute(&mut *tx)
     .await;
-    assert!(bad.is_err(), "direction is effect | input | state and nothing else");
+    assert!(
+        bad.is_err(),
+        "direction is effect | input | state and nothing else"
+    );
     undo(&mut tx).await;
 }
 
@@ -356,9 +408,24 @@ async fn the_resume_decision_reads_an_interrupted_write_out_of_the_database() {
 
     let (_pool, mut tx) = begin().await;
     let run = a_run(&mut tx).await;
-    append(&mut tx, run, 1, "input", "Admission", r#"{"admission":"Admit"}"#).await;
-    append(&mut tx, run, 2, "effect", "ExecuteTool",
-        r#"{"step":1,"name":"create_experiment","arguments":{"slug":"ema_v1"},"idempotent":false}"#).await;
+    append(
+        &mut tx,
+        run,
+        1,
+        "input",
+        "Admission",
+        r#"{"admission":"Admit"}"#,
+    )
+    .await;
+    append(
+        &mut tx,
+        run,
+        2,
+        "effect",
+        "ExecuteTool",
+        r#"{"step":1,"name":"create_experiment","arguments":{"slug":"ema_v1"},"idempotent":false}"#,
+    )
+    .await;
 
     let rows: Vec<(i32, String, String, serde_json::Value, String)> = sqlx::query_as(
         "SELECT seq, direction, kind, payload_json, harness_version \
@@ -568,10 +635,14 @@ async fn the_suite_gives_the_database_back_unchanged() {
         .expect("count marked runs");
     assert_eq!(marked_runs, 0, "a marked fixture run survived the rollback");
 
-    let marked_users: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM users WHERE email LIKE 'test-fixture-%@test.invalid'")
-            .fetch_one(&fresh)
-            .await
-            .expect("count marked users");
-    assert_eq!(marked_users, 0, "a marked fixture user survived the rollback");
+    let marked_users: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM users WHERE email LIKE 'test-fixture-%@test.invalid'",
+    )
+    .fetch_one(&fresh)
+    .await
+    .expect("count marked users");
+    assert_eq!(
+        marked_users, 0,
+        "a marked fixture user survived the rollback"
+    );
 }

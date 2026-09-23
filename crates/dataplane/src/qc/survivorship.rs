@@ -81,7 +81,11 @@ pub fn check_universe(membership: &Membership) -> CheckResult {
                  over this universe is biased upward by an unknown amount."
             ),
         ),
-        Membership::Historical { members, departed, window_days } => {
+        Membership::Historical {
+            members,
+            departed,
+            window_days,
+        } => {
             if *departed == 0 && *window_days >= SUSPICIOUS_WINDOW_DAYS {
                 (
                     Outcome::Fail,
@@ -172,7 +176,10 @@ mod tests {
         assert_eq!(r.outcome, Outcome::InsufficientMetadata);
         assert!(!r.outcome.is_pass());
         assert!(r.detail.contains("This is not a pass"), "{}", r.detail);
-        assert!(r.detail.contains("Phase 4"), "it should say where the history comes from");
+        assert!(
+            r.detail.contains("Phase 4"),
+            "it should say where the history comes from"
+        );
     }
 
     #[test]
@@ -246,7 +253,11 @@ mod tests {
     fn a_retained_delisted_instrument_is_evidence_the_catalog_keeps_the_dead() {
         let r = check_instrument(ListingStatus::Delisted);
         assert_eq!(r.outcome, Outcome::Pass);
-        assert!(r.detail.contains("does not drop what stops trading"), "{}", r.detail);
+        assert!(
+            r.detail.contains("does not drop what stops trading"),
+            "{}",
+            r.detail
+        );
     }
 
     /// An active instrument is neither evidence of survivorship nor evidence
@@ -272,13 +283,21 @@ mod tests {
         for r in [
             check_universe(&Membership::Unknown),
             check_universe(&Membership::CurrentlyListed { members: 1 }),
-            check_universe(&Membership::Historical { members: 1, departed: 1, window_days: 10 }),
+            check_universe(&Membership::Historical {
+                members: 1,
+                departed: 1,
+                window_days: 10,
+            }),
             check_instrument(ListingStatus::Active),
             check_instrument(ListingStatus::Delisted),
             check_instrument(ListingStatus::Unknown),
         ] {
             assert_eq!(r.kind, CheckKind::Survivorship);
-            assert!(r.detail.len() > 40, "a grade with no reasons is unappealable: {}", r.detail);
+            assert!(
+                r.detail.len() > 40,
+                "a grade with no reasons is unappealable: {}",
+                r.detail
+            );
         }
     }
 
@@ -287,7 +306,11 @@ mod tests {
         for m in [
             Membership::Unknown,
             Membership::CurrentlyListed { members: 3 },
-            Membership::Historical { members: 3, departed: 1, window_days: 90 },
+            Membership::Historical {
+                members: 3,
+                departed: 1,
+                window_days: 90,
+            },
         ] {
             let s = serde_json::to_string(&m).unwrap();
             assert_eq!(serde_json::from_str::<Membership>(&s).unwrap(), m);

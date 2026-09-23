@@ -573,7 +573,11 @@ fn exec(
                 if a.is_nan() || b.is_nan() {
                     push!(f64::NAN);
                 } else {
-                    push!(if (a - b).abs() < f64::EPSILON { 1.0 } else { 0.0 });
+                    push!(if (a - b).abs() < f64::EPSILON {
+                        1.0
+                    } else {
+                        0.0
+                    });
                 }
             }
             Op::BangEq => {
@@ -1006,7 +1010,8 @@ mod tests {
     /// shape `strategy-lang` compiles `and` to.
     #[test]
     fn a_cross_conjoined_with_a_level_test_compiles_and_runs() {
-        let expr = "(crossed_above(feature('ema_7'), feature('ema_21'))) * ((feature('rsi_14') < 60))";
+        let expr =
+            "(crossed_above(feature('ema_7'), feature('ema_21'))) * ((feature('rsi_14') < 60))";
         let v = drive(
             expr,
             &[

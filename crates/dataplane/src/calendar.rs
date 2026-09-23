@@ -13,7 +13,10 @@ pub struct CalendarVersion {
 impl CalendarVersion {
     #[must_use]
     pub fn new(calendar_id: impl Into<String>, version: impl Into<String>) -> Self {
-        Self { calendar_id: calendar_id.into(), version: version.into() }
+        Self {
+            calendar_id: calendar_id.into(),
+            version: version.into(),
+        }
     }
 
     #[must_use]
@@ -24,7 +27,9 @@ impl CalendarVersion {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Calendar {
-    Continuous { version: CalendarVersion },
+    Continuous {
+        version: CalendarVersion,
+    },
     Sessions {
         version: CalendarVersion,
         /// UTC session window per trading day.
@@ -47,7 +52,12 @@ impl Calendar {
     pub fn is_open(&self, t: DateTime<Utc>) -> bool {
         match self {
             Self::Continuous { .. } => true,
-            Self::Sessions { open_utc, close_utc, holidays, .. } => {
+            Self::Sessions {
+                open_utc,
+                close_utc,
+                holidays,
+                ..
+            } => {
                 let d = t.date_naive();
                 !matches!(d.weekday(), Weekday::Sat | Weekday::Sun)
                     && !holidays.contains(&d)
@@ -75,7 +85,9 @@ mod tests {
         let sat = Utc.with_ymd_and_hms(2026, 1, 17, 15, 0, 0).unwrap();
         assert!(!nyse.is_open(mlk));
         assert!(!nyse.is_open(sat));
-        let crypto = Calendar::Continuous { version: CalendarVersion::crypto_24_7() };
+        let crypto = Calendar::Continuous {
+            version: CalendarVersion::crypto_24_7(),
+        };
         assert!(crypto.is_open(sat));
     }
 }

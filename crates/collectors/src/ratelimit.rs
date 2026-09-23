@@ -29,7 +29,10 @@ pub struct SystemClock;
 
 impl Clock for SystemClock {
     fn now_nanos(&self) -> u128 {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
     }
 }
 
@@ -102,7 +105,8 @@ impl VenueLimit {
             refill_tokens: 500,
             refill_window: Duration::from_secs(10),
             cost_per_request: 10,
-            source_quote: "For /derivatives endpoints, clients can spend up to 500 every 10 seconds.",
+            source_quote:
+                "For /derivatives endpoints, clients can spend up to 500 every 10 seconds.",
         }
     }
 
@@ -280,7 +284,16 @@ impl RateLimiter {
     pub fn with_clock(limit: VenueLimit, clock: Box<dyn Clock>) -> Self {
         let now = clock.now_nanos();
         let tokens = limit.capacity;
-        Self { limit, clock, bucket: Mutex::new(Bucket { tokens, last_refill_nanos: now, granted: 0, denied: 0 }) }
+        Self {
+            limit,
+            clock,
+            bucket: Mutex::new(Bucket {
+                tokens,
+                last_refill_nanos: now,
+                granted: 0,
+                denied: 0,
+            }),
+        }
     }
 
     #[must_use]
@@ -312,7 +325,11 @@ impl RateLimiter {
         }
         b.denied += 1;
         let short = cost - b.tokens;
-        Err(Denied { retry_after: self.time_to_accrue(short), available: b.tokens, needed: cost })
+        Err(Denied {
+            retry_after: self.time_to_accrue(short),
+            available: b.tokens,
+            needed: cost,
+        })
     }
 
     /// `(granted, denied)` since construction.
@@ -343,7 +360,8 @@ impl RateLimiter {
         if windows == 0 {
             return;
         }
-        let accrued = u64::try_from(windows.saturating_mul(u128::from(self.limit.refill_tokens))).unwrap_or(u64::MAX);
+        let accrued = u64::try_from(windows.saturating_mul(u128::from(self.limit.refill_tokens)))
+            .unwrap_or(u64::MAX);
         b.tokens = b.tokens.saturating_add(accrued).min(self.limit.capacity);
         b.last_refill_nanos += windows * window;
     }
@@ -353,7 +371,9 @@ impl RateLimiter {
             return Duration::MAX;
         }
         let windows = tokens.div_ceil(self.limit.refill_tokens);
-        self.limit.refill_window.saturating_mul(u32::try_from(windows).unwrap_or(u32::MAX))
+        self.limit
+            .refill_window
+            .saturating_mul(u32::try_from(windows).unwrap_or(u32::MAX))
     }
 }
 
@@ -383,19 +403,30 @@ mod tests {
         // Capacity 500, cost 10 ⇒ exactly 50 requests before the bucket is empty.
         let burst = limit.capacity / limit.cost_per_request;
         for i in 0..burst {
-            assert!(lim.try_acquire().is_ok(), "request {i} of the documented burst must be permitted");
+            assert!(
+                lim.try_acquire().is_ok(),
+                "request {i} of the documented burst must be permitted"
+            );
         }
-        let denied = lim.try_acquire().expect_err("request past the declared budget MUST be refused");
+        let denied = lim
+            .try_acquire()
+            .expect_err("request past the declared budget MUST be refused");
         assert_eq!(denied.available, 0);
         assert_eq!(denied.needed, limit.cost_per_request);
         assert!(denied.retry_after <= limit.refill_window);
         // And it keeps refusing while time stands still: a denial is not a retry
         // loop that eventually wears the limiter down.
         for _ in 0..1_000 {
-            assert!(lim.try_acquire().is_err(), "time has not moved; the limiter must keep refusing");
+            assert!(
+                lim.try_acquire().is_err(),
+                "time has not moved; the limiter must keep refusing"
+            );
         }
         let (granted, refused) = lim.counters();
-        assert_eq!(granted, burst, "exactly the documented burst was ever granted");
+        assert_eq!(
+            granted, burst,
+            "exactly the documented burst was ever granted"
+        );
         assert_eq!(refused, 1_001);
     }
 
@@ -416,8 +447,12 @@ mod tests {
         }
         // 100 tokens per 10 minutes = 144 windows a day = 14,400, plus the initial
         // full bucket of 100.
-        let ceiling = limit.capacity + limit.refill_tokens * (seconds / limit.refill_window.as_secs());
-        assert!(granted <= ceiling, "granted {granted} exceeds the documented ceiling {ceiling}");
+        let ceiling =
+            limit.capacity + limit.refill_tokens * (seconds / limit.refill_window.as_secs());
+        assert!(
+            granted <= ceiling,
+            "granted {granted} exceeds the documented ceiling {ceiling}"
+        );
         let observed_rps = granted as f64 / seconds as f64;
         assert!(
             observed_rps <= limit.sustained_rps() * 1.01,
@@ -437,7 +472,10 @@ mod tests {
         // Nine tenths of a window buys nothing: a partial window may not be rounded
         // up into free budget.
         clock.advance(Duration::from_secs(54));
-        assert!(lim.try_acquire().is_err(), "a partial refill window grants no tokens");
+        assert!(
+            lim.try_acquire().is_err(),
+            "a partial refill window grants no tokens"
+        );
         clock.advance(Duration::from_secs(6));
         assert!(lim.try_acquire().is_ok());
     }
@@ -447,7 +485,11 @@ mod tests {
         let limit = VenueLimit::tradier_sandbox();
         let (clock, lim) = manual(limit.clone());
         clock.advance(Duration::from_secs(60 * 60 * 24 * 30));
-        assert_eq!(lim.available(), limit.capacity, "idling for a month does not bank a month of burst");
+        assert_eq!(
+            lim.available(),
+            limit.capacity,
+            "idling for a month does not bank a month of burst"
+        );
     }
 
     /// Adversarial: a caller that asks for more than the bucket could *ever* hold
@@ -458,7 +500,9 @@ mod tests {
         let limit = VenueLimit::tradier_market_data();
         let (_clock, lim) = manual(limit.clone());
         let before = lim.available();
-        let denied = lim.try_acquire_n(limit.capacity + 1).expect_err("must refuse");
+        let denied = lim
+            .try_acquire_n(limit.capacity + 1)
+            .expect_err("must refuse");
         assert_eq!(denied.available, before, "a refused request spends nothing");
         assert_eq!(lim.available(), before);
     }
@@ -471,14 +515,22 @@ mod tests {
         let limit = VenueLimit::sec_edgar();
         let (clock, lim) = manual(limit.clone());
         for i in 0..10 {
-            assert!(lim.try_acquire().is_ok(), "request {i} is inside the SEC's published rate");
+            assert!(
+                lim.try_acquire().is_ok(),
+                "request {i} is inside the SEC's published rate"
+            );
         }
         // Still inside the same second.
         clock.advance(Duration::from_millis(999));
-        let denied = lim.try_acquire().expect_err("the eleventh request in one second MUST be refused");
+        let denied = lim
+            .try_acquire()
+            .expect_err("the eleventh request in one second MUST be refused");
         assert_eq!(denied.available, 0);
         clock.advance(Duration::from_millis(1));
-        assert!(lim.try_acquire().is_ok(), "the next second buys the next ten");
+        assert!(
+            lim.try_acquire().is_ok(),
+            "the next second buys the next ten"
+        );
         assert!((limit.sustained_rps() - 10.0).abs() < 1e-9);
     }
 
@@ -493,7 +545,11 @@ mod tests {
             VenueLimit::fred_api(),
             VenueLimit::alpaca_market_data(),
         ] {
-            assert!(!l.source_quote.is_empty(), "{} declares a limit with no documented source", l.venue);
+            assert!(
+                !l.source_quote.is_empty(),
+                "{} declares a limit with no documented source",
+                l.venue
+            );
             assert!(l.capacity > 0 && l.refill_tokens > 0 && l.cost_per_request > 0);
             assert!(l.sustained_rps() > 0.0);
         }
@@ -512,7 +568,9 @@ mod tests {
             );
         }
         assert!(
-            !VenueLimit::sec_edgar().source_quote.contains("self-imposed"),
+            !VenueLimit::sec_edgar()
+                .source_quote
+                .contains("self-imposed"),
             "the SEC publishes its ceiling; this one is a real quote"
         );
     }
@@ -522,6 +580,8 @@ mod tests {
         // 120 requests per minute is 2/s.
         assert!((VenueLimit::tradier_market_data().sustained_rps() - 2.0).abs() < 1e-9);
         // 100 tokens per 10 minutes at 1 token a request is one request every 6s.
-        assert!((VenueLimit::kraken_futures_history().sustained_rps() - 100.0 / 600.0).abs() < 1e-9);
+        assert!(
+            (VenueLimit::kraken_futures_history().sustained_rps() - 100.0 / 600.0).abs() < 1e-9
+        );
     }
 }

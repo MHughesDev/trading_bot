@@ -38,7 +38,8 @@ use serde_json::{json, Value};
 use tracing::{info, warn};
 
 use dataplane::backfill::{
-    BackfillKey, BackfillSource, BackfillStateStore, BackfillStatus, BarSink, PageRequest, StateError,
+    BackfillKey, BackfillSource, BackfillStateStore, BackfillStatus, BarSink, PageRequest,
+    StateError,
 };
 
 use ledger::TerminalReason;
@@ -107,7 +108,12 @@ impl BackfillManifest {
     /// behaviour that makes a resubmitted backfill free.
     #[must_use]
     pub fn manifest_hash(&self) -> String {
-        crate::manifest::hash(&self.to_value(), &[], "backfill", JobKind::Backfill.as_str())
+        crate::manifest::hash(
+            &self.to_value(),
+            &[],
+            "backfill",
+            JobKind::Backfill.as_str(),
+        )
     }
 
     /// Bar length in seconds for the platform's timeframe labels.
@@ -144,7 +150,12 @@ pub enum RunOutcome {
     Completed { pages: u64, rows: u64 },
     /// Waiting, not broken: rate limited, transiently unavailable, an archive
     /// that did not verify, or this run's page budget spent.
-    Paused { until: DateTime<Utc>, reason: String, pages: u64, rows: u64 },
+    Paused {
+        until: DateTime<Utc>,
+        reason: String,
+        pages: u64,
+        rows: u64,
+    },
     /// Terminal and human-facing.
     Failed { reason: String },
 }
@@ -181,7 +192,11 @@ impl BackfillPolicy {
     pub fn backoff(&self, attempts: i32, venue_asked_ms: Option<u64>) -> Duration {
         let shift = attempts.clamp(0, 8) as u32;
         let ours = self.backoff_base * 2_i32.saturating_pow(shift);
-        let ours = if ours > self.backoff_cap { self.backoff_cap } else { ours };
+        let ours = if ours > self.backoff_cap {
+            self.backoff_cap
+        } else {
+            ours
+        };
         match venue_asked_ms {
             Some(ms) => {
                 let asked = Duration::milliseconds(i64::try_from(ms).unwrap_or(i64::MAX));
@@ -206,8 +221,17 @@ pub struct BackfillEngine {
 
 impl BackfillEngine {
     #[must_use]
-    pub fn new(source: Arc<dyn BackfillSource>, sink: Arc<dyn BarSink>, state: Arc<dyn BackfillStateStore>) -> Self {
-        Self { source, sink, state, policy: BackfillPolicy::default() }
+    pub fn new(
+        source: Arc<dyn BackfillSource>,
+        sink: Arc<dyn BarSink>,
+        state: Arc<dyn BackfillStateStore>,
+    ) -> Self {
+        Self {
+            source,
+            sink,
+            state,
+            policy: BackfillPolicy::default(),
+        }
     }
 
     #[must_use]
@@ -223,7 +247,11 @@ impl BackfillEngine {
     /// an error: a rate limit is a normal event in a backfill's life and must
     /// not travel the same path as a bug.
     #[allow(clippy::too_many_lines)]
-    pub async fn run(&self, m: &BackfillManifest, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<RunOutcome, StateError> {
+    pub async fn run(
+        &self,
+        m: &BackfillManifest,
+        cancelled: &(dyn Fn() -> bool + Sync),
+    ) -> Result<RunOutcome, StateError> {
         let key = m.key();
         let period = match m.period_secs() {
             Ok(p) => p,
@@ -246,7 +274,9 @@ impl BackfillEngine {
                 if until > Utc::now() {
                     return Ok(RunOutcome::Paused {
                         until,
-                        reason: st.last_error.unwrap_or_else(|| "backoff not elapsed".into()),
+                        reason: st
+                            .last_error
+                            .unwrap_or_else(|| "backoff not elapsed".into()),
                         pages: 0,
                         rows: 0,
                     });
@@ -254,7 +284,9 @@ impl BackfillEngine {
             }
         }
         if st.status == BackfillStatus::Failed {
-            return Ok(RunOutcome::Failed { reason: st.last_error.unwrap_or_else(|| "failed".into()) });
+            return Ok(RunOutcome::Failed {
+                reason: st.last_error.unwrap_or_else(|| "failed".into()),
+            });
         }
 
         self.state.start(&key).await?;
@@ -270,15 +302,33 @@ impl BackfillEngine {
             }
             if cancelled() {
                 let until = Utc::now();
-                self.state.pause(&key, until, "cancelled; the window resumes where it stopped").await?;
-                return Ok(RunOutcome::Paused { until, reason: "cancelled".into(), pages, rows });
+                self.state
+                    .pause(
+                        &key,
+                        until,
+                        "cancelled; the window resumes where it stopped",
+                    )
+                    .await?;
+                return Ok(RunOutcome::Paused {
+                    until,
+                    reason: "cancelled".into(),
+                    pages,
+                    rows,
+                });
             }
             if pages >= self.policy.max_pages_per_run {
                 // Yield, not fail. The row stays claimable immediately; the point
                 // is fairness between instruments, not a cooldown.
                 let until = Utc::now();
-                self.state.pause(&key, until, "page budget for this run reached; resuming").await?;
-                return Ok(RunOutcome::Paused { until, reason: "page budget reached".into(), pages, rows });
+                self.state
+                    .pause(&key, until, "page budget for this run reached; resuming")
+                    .await?;
+                return Ok(RunOutcome::Paused {
+                    until,
+                    reason: "page budget reached".into(),
+                    pages,
+                    rows,
+                });
             }
 
             let page_end = std::cmp::min(cursor + self.policy.page_span, key.window_end);
@@ -301,11 +351,18 @@ impl BackfillEngine {
                     // it was the venue's decision and not ours.
                     self.state.pause(&key, until, &e.to_string()).await?;
                     warn!(instrument = %key.instrument, attempts, backoff_s = back.num_seconds(), error = %e, "backfill paused");
-                    return Ok(RunOutcome::Paused { until, reason: e.to_string(), pages, rows });
+                    return Ok(RunOutcome::Paused {
+                        until,
+                        reason: e.to_string(),
+                        pages,
+                        rows,
+                    });
                 }
                 Err(e) => {
                     self.state.fail(&key, &e.to_string()).await?;
-                    return Ok(RunOutcome::Failed { reason: e.to_string() });
+                    return Ok(RunOutcome::Failed {
+                        reason: e.to_string(),
+                    });
                 }
             };
 
@@ -323,7 +380,13 @@ impl BackfillEngine {
             if !bars.is_empty() {
                 match self
                     .sink
-                    .write_page(&key.source, &key.venue, &key.instrument, &key.timeframe, &bars)
+                    .write_page(
+                        &key.source,
+                        &key.venue,
+                        &key.instrument,
+                        &key.timeframe,
+                        &bars,
+                    )
                     .await
                 {
                     Ok(report) => rows += report.written(),
@@ -334,7 +397,12 @@ impl BackfillEngine {
                         attempts += 1;
                         let until = Utc::now() + self.policy.backoff(attempts, None);
                         self.state.pause(&key, until, &format!("sink: {e}")).await?;
-                        return Ok(RunOutcome::Paused { until, reason: format!("sink: {e}"), pages, rows });
+                        return Ok(RunOutcome::Paused {
+                            until,
+                            reason: format!("sink: {e}"),
+                            pages,
+                            rows,
+                        });
                     }
                 }
             }
@@ -351,12 +419,23 @@ impl BackfillEngine {
                 // A source that does not advance would spin forever, fetching
                 // the same page and writing nothing. Fail loudly: this is an
                 // adapter bug and it should read as one.
-                let reason = format!("source {} did not advance past {cursor}", self.source.source_name());
+                let reason = format!(
+                    "source {} did not advance past {cursor}",
+                    self.source.source_name()
+                );
                 self.state.fail(&key, &reason).await?;
                 return Ok(RunOutcome::Failed { reason });
             }
             let next = std::cmp::min(next, key.window_end);
-            self.state.advance(&key, next, i64::try_from(rows).unwrap_or(i64::MAX).min(i64::from(u32::MAX))).await?;
+            self.state
+                .advance(
+                    &key,
+                    next,
+                    i64::try_from(rows)
+                        .unwrap_or(i64::MAX)
+                        .min(i64::from(u32::MAX)),
+                )
+                .await?;
             cursor = next;
         }
     }
@@ -383,13 +462,15 @@ impl Worker for BackfillWorker {
     }
 
     async fn run(&self, ctx: &JobContext, manifest: &Value) -> Result<JobOutput, JobError> {
-        let m = BackfillManifest::from_value(manifest).map_err(|e| {
-            JobError::logic(TerminalReason::DataError, "invalid_manifest", e)
-        })?;
+        let m = BackfillManifest::from_value(manifest)
+            .map_err(|e| JobError::logic(TerminalReason::DataError, "invalid_manifest", e))?;
         ctx.progress(Progress {
             pct: Some(0.0),
             stage: Some("backfill".into()),
-            message: Some(format!("{} {} from {}", m.instrument, m.timeframe, m.source)),
+            message: Some(format!(
+                "{} {} from {}",
+                m.instrument, m.timeframe, m.source
+            )),
         })
         .await;
 
@@ -408,7 +489,12 @@ impl Worker for BackfillWorker {
             // it done with a hole in it. The `backfill_state` row says `paused`,
             // which is what an operator reads; the job says "retry", which is
             // what the scheduler needs. Both are true and neither is the other.
-            RunOutcome::Paused { until, reason, pages, rows } => {
+            RunOutcome::Paused {
+                until,
+                reason,
+                pages,
+                rows,
+            } => {
                 let mut e = JobError::infrastructure("backfill_paused");
                 e.fix = Some(format!(
                     "resumes at {until}: {reason} ({pages} pages, {rows} rows this run)"

@@ -107,14 +107,12 @@ fn numbers(text: &str) -> Vec<Num> {
         }
         // Walk back over a leading minus, but only when it is not a hyphen
         // joining two words (`BTC-USD`) or a range (`2026-04`).
-        let start = if i > 0
-            && bytes[i - 1] == '-'
-            && (i == 1 || !bytes[i - 2].is_ascii_alphanumeric())
-        {
-            i - 1
-        } else {
-            i
-        };
+        let start =
+            if i > 0 && bytes[i - 1] == '-' && (i == 1 || !bytes[i - 2].is_ascii_alphanumeric()) {
+                i - 1
+            } else {
+                i
+            };
         let mut j = i;
         while j < bytes.len() && bytes[j].is_ascii_digit() {
             j += 1;
