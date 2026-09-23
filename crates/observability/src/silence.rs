@@ -496,6 +496,27 @@ impl SilenceReport {
         }
         alarming.into_iter().map(|f| Page::Feed(Box::new(f.clone()))).collect()
     }
+
+    /// One report from several, for a pass that had to ask more than one store.
+    ///
+    /// The shared cause is **recomputed over the union**, not carried over from
+    /// the parts. This is the whole reason merging is a function rather than a
+    /// `Vec::extend`: a host, a disk or a writer process that dies takes several
+    /// stores with it, and each store's own report sees too few silent feeds to
+    /// call it. Two reports of two silent feeds each are four silent feeds and one
+    /// incident, and pasting the findings together without re-running
+    /// [`infer_shared_cause`] would page four times for it.
+    ///
+    /// `at` is the instant of the pass, supplied rather than inferred, because
+    /// merging nothing must still produce a report that is stamped — and one that
+    /// is **not** all-clear. `SilenceReport::merged(at, vec![])` has no findings,
+    /// so [`Self::all_clear`] is false: a pass that asked nothing learned nothing.
+    #[must_use]
+    pub fn merged(at: DateTime<Utc>, reports: Vec<Self>) -> Self {
+        let findings: Vec<Finding> = reports.into_iter().flat_map(|r| r.findings).collect();
+        let shared_cause = infer_shared_cause(&findings);
+        Self { taken_at: at, findings, shared_cause }
+    }
 }
 
 // ── Evaluation ───────────────────────────────────────────────────────────────
@@ -1322,6 +1343,73 @@ mod tests {
         let r = evaluate(std::slice::from_ref(&exp), &Census::Taken { at: now, beats });
         assert!(r.shared_cause.is_none());
         assert_eq!(r.pages().len(), 2);
+    }
+
+    /// The reason merging is a function and not `Vec::extend`.
+    ///
+    /// One process writes several stores. When it dies, each store's own report
+    /// sees two silent feeds — under the floor — and calls it two independent
+    /// failures. The union sees four and calls it one incident. Pasting the
+    /// findings together without re-running the inference pages four times for
+    /// one process death, which is how an alarm gets muted.
+    #[test]
+    fn a_cause_shared_across_two_stores_is_only_visible_in_the_union() {
+        let exp = FeedExpectation {
+            roster: Roster::Declared { instruments: vec!["A".into(), "B".into()] },
+            ..funding()
+        };
+        let other = FeedExpectation { roster: exp.roster.clone(), ..chains() };
+        let now = hours(300);
+        let dead = |e: &FeedExpectation| {
+            let beats = ["A", "B"].iter().map(|n| beat(e, n, hours(0), hours(0), 1)).collect();
+            evaluate(std::slice::from_ref(e), &Census::Taken { at: now, beats })
+        };
+        let one = dead(&exp);
+        let two = dead(&other);
+        assert!(one.shared_cause.is_none(), "two feeds is a coincidence");
+        assert!(two.shared_cause.is_none());
+        assert_eq!(one.pages().len() + two.pages().len(), 4, "separately, four pages");
+
+        let m = SilenceReport::merged(now, vec![one, two]);
+        assert_eq!(m.findings.len(), 4, "nothing is hidden by merging");
+        assert!(m.shared_cause.is_some(), "four of four judgeable feeds silent is one cause");
+        assert_eq!(m.pages().len(), 1, "one incident, one page");
+        assert_eq!(m.taken_at, now);
+    }
+
+    /// Merging nothing is not a clean bill of health. A pass that asked no store
+    /// anything learned nothing, and the report has to say so rather than come
+    /// back empty and green.
+    #[test]
+    fn a_merge_of_nothing_is_not_all_clear() {
+        let m = SilenceReport::merged(hours(1), Vec::new());
+        assert!(m.findings.is_empty());
+        assert!(!m.all_clear(), "zero feeds evaluated is not zero feeds broken");
+        assert_eq!(m.worst(), None);
+        assert!(m.pages().is_empty());
+    }
+
+    /// A merge must not launder a blind read into health either: a store that
+    /// could not be asked keeps its `Unobserved` findings alongside a second
+    /// store's clean ones, and the merged report is not all-clear.
+    #[test]
+    fn a_blind_store_survives_the_merge_next_to_a_healthy_one() {
+        let now = hours(300);
+        let blind = evaluate(
+            std::slice::from_ref(&funding()),
+            &Census::Failed { attempted_at: now, reason: "connection refused".into() },
+        );
+        let exp = chains();
+        let ok = evaluate(
+            std::slice::from_ref(&exp),
+            &Census::Taken { at: now, beats: vec![beat(&exp, "SPY", now, now, 1)] },
+        );
+        assert!(ok.all_clear());
+
+        let m = SilenceReport::merged(now, vec![blind, ok]);
+        assert!(!m.all_clear(), "one store unread is not every store healthy");
+        assert_eq!(m.worst(), Some(Severity::Warn));
+        assert_eq!(m.with_severity(Severity::Warn).len(), 1);
     }
 
     /// A deliberately disabled series is not health. It is a recorded decision to

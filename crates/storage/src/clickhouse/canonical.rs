@@ -118,55 +118,6 @@ fn ch_err(ctx: &str, e: impl std::fmt::Display) -> ChError {
     ChError::Client(format!("{ctx}: {e}"))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The SQL and the pure kernel must use the same grace window, or the repair of
-    /// existing rows and the stamping of new ones disagree about what a receipt is —
-    /// and the disagreement would only show up as rows that are observed in one path
-    /// and derived in the other.
-    #[test]
-    fn the_grace_window_matches_the_pure_kernel() {
-        assert_eq!(RECEIPT_GRACE_SECS, dataplane::bar::RECEIPT_GRACE.num_seconds());
-    }
-
-    /// The regression this module was fixed for. Provenance must not be keyed on the
-    /// source's transport, so the copy's knowledge expression must not consult
-    /// `src.live` at all. Naming the column here rather than in a comment means the
-    /// old rule cannot be reintroduced quietly.
-    #[test]
-    fn the_copy_does_not_decide_provenance_from_the_transport() {
-        let class = receipt_class_sql();
-        assert!(!class.contains("src.live"), "transport is not provenance: {class}");
-        assert!(!class.contains("kind"), "{class}");
-        assert!(class.contains("v.ingested_time"), "the axis is the row's receipt: {class}");
-    }
-
-    /// The three class codes the copy branches on, spelled out so a reordering of
-    /// `multiIf` cannot silently swap "observed" and "history pull".
-    #[test]
-    fn the_class_codes_are_observed_zero_history_one_impossible_two() {
-        let class = receipt_class_sql();
-        // Impossible is tested first and yields 2; the receipt window yields 0; the
-        // fallthrough is 1.
-        let impossible = class.find("v.ingested_time < v.event_time, 2").expect("impossible arm");
-        let receipt = class.find("SECOND, 0").expect("receipt arm");
-        assert!(impossible < receipt, "an impossible receipt must be caught before the window test");
-        assert!(class.trim_end().ends_with("1)"), "the fallthrough is a history pull: {class}");
-    }
-
-    /// A source the map does not know falls back to 60 s and `unknown_legacy`, which
-    /// is ADR-P2-24's answer for a row whose origin cannot be determined — never a
-    /// zero lag, which would read as "observed live".
-    #[test]
-    fn an_unknown_source_falls_back_to_the_declared_legacy_lag() {
-        assert_eq!(UNKNOWN_SOURCE_LAG_MS, 60_000);
-        assert_eq!(UNKNOWN_SOURCE_ID, 6);
-        assert!(source_lag_ms_sql().contains("60000"));
-    }
-}
-
 fn guess_class(symbol: &str, venue: &str) -> AssetClass {
     match venue {
         "alpaca" => AssetClass::Equity,
@@ -463,4 +414,53 @@ pub async fn migrate_to_canonical(ch_url: &str, pg: &PgPool) -> Result<Canonical
         );
     }
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The SQL and the pure kernel must use the same grace window, or the repair of
+    /// existing rows and the stamping of new ones disagree about what a receipt is —
+    /// and the disagreement would only show up as rows that are observed in one path
+    /// and derived in the other.
+    #[test]
+    fn the_grace_window_matches_the_pure_kernel() {
+        assert_eq!(RECEIPT_GRACE_SECS, dataplane::bar::RECEIPT_GRACE.num_seconds());
+    }
+
+    /// The regression this module was fixed for. Provenance must not be keyed on the
+    /// source's transport, so the copy's knowledge expression must not consult
+    /// `src.live` at all. Naming the column here rather than in a comment means the
+    /// old rule cannot be reintroduced quietly.
+    #[test]
+    fn the_copy_does_not_decide_provenance_from_the_transport() {
+        let class = receipt_class_sql();
+        assert!(!class.contains("src.live"), "transport is not provenance: {class}");
+        assert!(!class.contains("kind"), "{class}");
+        assert!(class.contains("v.ingested_time"), "the axis is the row's receipt: {class}");
+    }
+
+    /// The three class codes the copy branches on, spelled out so a reordering of
+    /// `multiIf` cannot silently swap "observed" and "history pull".
+    #[test]
+    fn the_class_codes_are_observed_zero_history_one_impossible_two() {
+        let class = receipt_class_sql();
+        // Impossible is tested first and yields 2; the receipt window yields 0; the
+        // fallthrough is 1.
+        let impossible = class.find("v.ingested_time < v.event_time, 2").expect("impossible arm");
+        let receipt = class.find("SECOND, 0").expect("receipt arm");
+        assert!(impossible < receipt, "an impossible receipt must be caught before the window test");
+        assert!(class.trim_end().ends_with("1)"), "the fallthrough is a history pull: {class}");
+    }
+
+    /// A source the map does not know falls back to 60 s and `unknown_legacy`, which
+    /// is ADR-P2-24's answer for a row whose origin cannot be determined — never a
+    /// zero lag, which would read as "observed live".
+    #[test]
+    fn an_unknown_source_falls_back_to_the_declared_legacy_lag() {
+        assert_eq!(UNKNOWN_SOURCE_LAG_MS, 60_000);
+        assert_eq!(UNKNOWN_SOURCE_ID, 6);
+        assert!(source_lag_ms_sql().contains("60000"));
+    }
 }

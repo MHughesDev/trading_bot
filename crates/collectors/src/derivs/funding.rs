@@ -298,13 +298,10 @@ pub fn parse_tickers(body: &str, received_at: DateTime<Utc>) -> Result<TickerSna
         if let Some(n) = &t.funding_rate {
             match dec("fundingRate", n) {
                 Ok(rate) => {
-                    let relative = match &t.relative_funding_rate {
-                        Some(r) => match dec("relativeFundingRate", r) {
-                            Ok(v) => Some(v),
-                            Err(_) => None,
-                        },
-                        None => None,
-                    };
+                    let relative = t
+                        .relative_funding_rate
+                        .as_ref()
+                        .and_then(|r| dec("relativeFundingRate", r).ok());
                     out.funding.push(FundingObservation {
                         venue: VENUE.into(),
                         instrument: t.symbol.clone(),

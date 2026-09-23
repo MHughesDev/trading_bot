@@ -1,6 +1,7 @@
 //! ClickHouse client + batched insert helpers.
 pub mod backfill;
 pub mod canonical;
+pub mod census;
 pub mod features;
 pub mod forward;
 pub mod migrate;
