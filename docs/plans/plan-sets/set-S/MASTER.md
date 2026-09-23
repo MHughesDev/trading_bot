@@ -1,6 +1,6 @@
 # The Agent Platform — Set S
 
-**Completion: 35% left (77 / 189 tasks). 77 done, 114 partial, 11 units blocked.**
+**Completion: 32% left (81 / 189 tasks). 81 done, 93 partial, 10 not started, 4 blocked upstream, 1 blocked on a human.**
 
 > This line read *"this header was wrong and is superseded by the per-phase
 > files"* until 2026-09-21. Deferring to the phase files was the right instinct
@@ -219,7 +219,7 @@ absorbs parts of four reserved sets. Recorded so the roadmap stays honest:
 | 1 | [Contracts](phase-1-contracts.md) | 20 | TC-01…TC-10, CA-01…CA-09, RP-01…RP-07 | three internal tracks | **17 / 20 done · 3 partial** |
 | 2 | [One runtime](phase-2-one-runtime.md) | 16 | AR-01…AR-16 | 6, 7 | **5 / 16 done · 9 partial** |
 | 3 | [The catalogue](phase-3-catalogue.md) | 19 | TC-11…TC-37 | 4, 5, 6, 7 | **7 / 19 done · 7 partial** |
-| 4 | [Memory and evaluation](phase-4-memory-and-evaluation.md) | 17 | RM-01…RM-15, EC-01…EC-13 | 3, 5, 6, 7 | **3 / 17 done · 13 partial** |
+| 4 | [Memory and evaluation](phase-4-memory-and-evaluation.md) | 17 | RM-01…RM-15, EC-01…EC-13 | 3, 5, 6, 7 | **7 / 17 done · 9 partial** |
 | 5 | [The language](phase-5-strategy-language.md) | 15 | SA-01…SA-16 | 3, 4, 6, 7 | **2 / 15 done · 3 partial** |
 | 6 | [The Research Desk](phase-6-research-desk.md) | 24 | DK-01…DK-24 | 2, 3, 4, 5, 7 | **2 / 24 done · 22 partial** |
 | 7 | [The monitor](phase-7-monitor.md) | 13 | MS-01…MS-14 | everything | **5 / 13 done · 7 partial** |

@@ -17,20 +17,20 @@ worse than no map, because people steer by it.
 
 ---
 
-## 1. Where we are — **41% left**
+## 1. Where we are — **40% left**
 
-Derived 2026-09-21 from the `### <TASK-ID>` headings and their status markers
+Derived 2026-09-23 from the `### <TASK-ID>` headings and their status markers
 across sets P, S and T. Size-weighted **S = 1, M = 2, L = 4**: 189 tasks of
 wildly different sizes averaged flat would flatter us.
 
 | counting rule | % of the work left |
 |---|---|
-| strict — only `DONE` counts | 65% |
-| **`PARTIAL` counts half** | **41%** |
+| strict — only `DONE` counts | 63% |
+| **`PARTIAL` counts half** | **40%** |
 | generous — `PARTIAL` counts done | 18% |
 
 Take the middle number and treat it as **±10**, not as a measurement. `PARTIAL`
-is 250 of 531 units and in this repository it spans "complete, one database test
+is 238 of 531 units and in this repository it spans "complete, one database test
 unwritten" to "the types exist and nothing calls them". The spread between the
 strict and generous rows *is* the uncertainty, and it is honest to show it rather
 than pick one and present it as precision.
@@ -39,7 +39,7 @@ than pick one and present it as precision.
 
 | set | subject | tasks | units | done | partial | % left |
 |---|---|---:|---:|---:|---:|---:|
-| **S** | The Agent Platform | 189 | 446 | 178 | 237 | **34%** |
+| **S** | The Agent Platform | 189 | 446 | 190 | 225 | **32%** |
 | **P** | Data Reach | 30 | 51 | 6 | 9 | **79%** |
 | **T** | Forward Evidence | 17 | 34 | 2 | 4 | **88%** |
 
@@ -72,15 +72,23 @@ discovered only after H-1 was spent.
 | 1 — Contracts | 20 | 34 | 29 | 5 | 0 | 0 | 7% |
 | 9 — Context as retrieval | 20 | 56 | 46 | 10 | 0 | 0 | 9% |
 | 8 — Integration and honesty | 9 | 24 | 18 | 6 | 0 | 0 | 12% |
+| **4 — Memory and evaluation** | 17 | 39 | 18 | 19 | 0 | 2 | **29%** |
 | 7 — The monitor | 13 | 29 | 10 | 18 | 0 | 1 | 34% |
 | **6 — The Research Desk** | 24 | **66** | 18 | 48 | 0 | 0 | **36%** |
 | 10 — Modes and the lifecycle | 16 | 41 | 11 | 30 | 0 | 0 | 37% |
 | 2 — One runtime | 16 | 32 | 9 | 19 | 4 | 0 | 42% |
-| 3 — The catalogue | 19 | 50 | 18 | 22 | 0 | **10** | 42% |
-| 4 — Memory and evaluation | 17 | 39 | 6 | 31 | 0 | 2 | 45% |
+| 3 — The catalogue | 19 | 50 | 18 | 22 | 2 | 8 | 42% |
 | 5 — The language | 15 | 36 | 12 | 15 | 9 | 0 | 46% |
-| 0 — Ground rules | 6 | 7 | 1 | 4 | 1 | 1 | 57% |
-| **11 — Continuous research** | 14 | 32 | 0 | 19 | 13 | 0 | **70%** |
+| 0 — Ground rules | 6 | 7 | 1 | 5 | 1 | 0 | 50% |
+| **11 — Continuous research** | 14 | 32 | 0 | 28 | 4 | 0 | **56%** |
+
+Phase 4 moved 45% → 29% on 2026-09-23: a second audit against acceptance
+criteria (not code presence) found four `PARTIAL` markers under-claimed
+(S-4.3, S-4.5, S-4.7, S-4.9) and four over-claimed, where the note asserted
+something false about the tree rather than merely an old date — see the phase
+file's 2026-09-23 addendum. Phases 0, 3 and 11 also moved since this table was
+last derived (2026-09-21) from prior sessions' landings that were never copied
+in here; this pass re-derives all of Set S, not just phase 4.
 
 The block that matters by *volume* is still **6 — the Research Desk (66
 units)**, but it moved 47% → 36% on 2026-09-21 **without anybody writing a
@@ -177,7 +185,7 @@ Ordered by *what unblocks what*, not by phase number.
 |---|---|---|---:|---|
 | 1.1 | **The strategy language** — `crates/strategy-lang` does not exist; S-5.5…5.9, 5.12, 5.13, 5.15 | 5 | ~24 | It is the capability ceiling. `crates/features` computes ~50 families and the simulator resolves them, but the agent cannot *express* a strategy beyond what the language allows. Everything downstream inherits that ceiling |
 | 1.2 | **The Research Desk** remainder | 6 | ~31 | The largest single block, and it is where every other phase becomes visible to a human. 62 of 24 tasks are `PARTIAL` — this is finishing, not starting |
-| 1.3 | Memory and evaluation | 4 | ~18 | Feeds DONE-2 and DONE-4 |
+| 1.3 | Memory and evaluation | 4 | ~12 | Feeds DONE-2 and DONE-4 |
 | 1.4 | The catalogue remainder | 3 | ~22 | 12 tasks not started; includes tools other phases assume |
 | 1.5 | Modes and the lifecycle | 10 | ~15 | 30 units partial; mostly finishing |
 | 1.6 | One runtime | 2 | ~14 | Includes deleting `driver.rs` (S-2.10) — one of two loops is still there |
@@ -333,6 +341,7 @@ Newest first. One line per closing, with the evidence.
 
 | date | what | evidence |
 |---|---|---|
+| 2026-09-23 | **This file was two days stale, and phase 4 was audited a second time against acceptance criteria rather than code presence.** §1's tables had not been re-derived since 2026-09-21 despite several closings landing on 09-22 (phase 11's five markers, the security fixes, the salvage of thirteen killed agents); re-running the derivation moved phases 0, 3 and 11 along with 4. Phase 4 itself: four `PARTIAL`s were under-claimed (S-4.3, S-4.5, S-4.7, S-4.9 — every clause held, with CI-running evidence, and the note hadn't caught up) and four were over-claimed, where the `PARTIAL` note asserted something false about the tree rather than merely being outdated — S-4.13 grepped `MultiStepEvidence` and missed the `multi_step_evidence` field that's still there; S-4.15 said two files didn't exist when both do, missing the real gap (`conflict::decide_write` has no caller, so `conflicts_with` is a column nothing will ever populate); S-4.17 said only a migration was missing when the sealed eval set actually runs on every PR today, the opposite of its own acceptance; S-4.8 said only a credential was missing when the query function it claimed was tested has zero callers and zero tests. Separately, the silence alarm (`storage::clickhouse::census`, landed 09-22) got its last wire: `health_jobs::run_once` now calls `census::silence_report` on an hourly tick, split from the tenant pass so a Postgres hiccup can't silence the silence alarm | phase 4: 45% → 29% left; Set S 34% → 32%; headline 41% → 40% (strict 63 / generous 18); `cargo test -p platform` 13/13, `cargo test -p storage --lib` 61/61 |
 | 2026-09-22 | **Three commits recovered from a worktree, and 26 worktrees retired without losing a line.** Only one of 30 had commits: gate-evidence sources for gates 3, 4, 10 and 12, stranded since 2026-09-15 — `capacity.rs`, `factors.rs`, `ledger/evidence.rs`, migration `0119`, none of which existed on main. One conflict needed a judgement rather than a side: `gate_worker` passed `factors: None` where the incoming commit **supplied** them, which was the commit's whole point. The other 29 held **no commits at all** — a week of agent output visible only as uncommitted edits, including Set P phase 3's collectors for tasks the plan calls unstarted. Each was committed to the branch it was already on, then removed: the worktree is a checkout, the branch is the record | 18 branches hold the preserved work; 22 GB reclaimed; `ledger`, `backtest`, `api` all compile |
 | 2026-09-22 | **A session limit killed thirteen agents mid-sentence and every one of them was salvageable.** Twelve crates compiled untouched; the thirteenth did not, and the break *was* the deliverable — `Yield::cost_usd` had been made unrepresentable as a bare float and the caller edits were never named. `dossier::Produced` carried that float into the stored document, which is how every dossier ever compiled came to claim **$0.00** in the one artefact a human reads to decide whether a strategy is worth money | harness 766, backtest 416, mcp-server-lib 266, research-session 211→276, dataplane 205, collectors 145, execution 130, features 109, strategy-runtime 101, storage 73, observability 39 |
 | 2026-09-22 | **Two security defects closed.** `/api/backtests/coverage` answered **200 with the platform's entire data inventory** to an anonymous caller — auth here is per-handler, so a route is public by omission and one handler of 234 was missing its extractor. And both WebSocket routes demanded a token neither verified: `ws/live` used the token string **as the user id**, so any non-empty string opened the live feed. The guard resolves every mounted route to its handler and **rejects the words “harmless”, “no data” and “nothing sensitive”** as public-list reasons | CI was running no integration tests at all — `--lib` skips them — so neither this guard nor the route-existence guard had ever run there. Both wired |

@@ -1,6 +1,8 @@
 # Phase 4 — Memory and evaluation
 
-**Completion: 18% (3 / 17 tasks) done, 13 `PARTIAL`, 1 `BLOCKED:HUMAN` — the harness half was built and tested, and now much of it persists.**
+**Completion: 41% (7 / 17 tasks) done, 9 `PARTIAL`, 1 `BLOCKED:HUMAN` — the harness half was built and tested, and now much of it persists.**
+
+> **Audited a second time, 2026-09-23, against acceptance criteria rather than against code presence.** Four `PARTIAL` markers were under-claimed (S-4.3, S-4.5, S-4.7, S-4.9): every clause held, with CI-running evidence, and the note just hadn't caught up. Moved to `DONE`. Four others were over-claimed: their `PARTIAL` note asserted something false about the tree — a file said not to exist that does, a caller said to exist that doesn't. Those stay `PARTIAL`, with the note corrected to name the real blocker (S-4.8, S-4.13, S-4.15, S-4.17). The remaining five `PARTIAL`s (S-4.6, S-4.10, S-4.11, S-4.12, S-4.16) were checked and found correctly `PARTIAL`, several with a sharper gap than the note previously stated.
 
 > **Updated 2026-09-16.** The sentence this header used to end with — "and nothing persists" — was true that morning and is no longer. Four tables exist and are verified against a live Postgres: `agent_memory.entry` (0122), `agent_turn_summaries` (0123), `memory_retrievals` (0124), and the stores over them. The carry between turns is structured rather than the model's own prose, and `assemble_brief` — 936 tested lines that had **no caller anywhere in the workspace** — now runs in the driver.
 >
@@ -157,7 +159,7 @@ refusal is asserted.
 **Traces:** AGENT-007 §3.1, P1; §8.1.
 
 ### S-4.3 The semantic schema — M
-`PARTIAL` 2026-09-16 — `migrations/0122_semantic_memory.sql` written: `agent_memory.entry` with all the shared fields, the seven kinds, and the constraints that make the acceptance real.
+`DONE` 2026-09-23 (was `PARTIAL` 2026-09-16, under-claimed) — `migrations/0122_semantic_memory.sql` written: `agent_memory.entry` with all the shared fields, the seven kinds, and the constraints that make the acceptance real.
 
 **Two corrections to this task's own text.** It names `0066`, which was taken long ago — the tree is at 0121 and Set S's declared ranges were allocated against a tree that has since moved, the same collision ADR-S3-08 records for S-3.7's `0079`. And it says "the six entry kinds": that count is from §2's summary row, written before AGENT-013 §9 added `open_question`. The spec's own §2.2 table and `memory::Kind` both carry seven, and they agree with each other.
 
@@ -171,7 +173,7 @@ Two constraints exist to stop a *future* writer: a `model_summary` can never be 
 
 `crates/api/tests/memory_store_round_trip.rs` covers what no unit test could: `MemoryStore::put` binds twenty-nine columns positionally, and a transposed pair is invisible to the compiler. Seventeen fields plus all five measurement parts survive the round trip, compared one at a time so a failure names the column.
 
-**What is still `PARTIAL`**: the whole-chain check. `0055_knowledge_plane.sql` does `CREATE EXTENSION vector` and this Postgres has no pgvector, so `db_invariants` — "every migration applies to an empty database" — still needs the `pgvector/pgvector` image. Both new suites apply the migration under test directly and substitute the embedding column's type, printing a loud note, because a pass there is not a full-fidelity apply. No constraint under test touches `embedding`.
+**Re-audited 2026-09-23: the pgvector blocker above is stale, and this is `DONE`.** CI's `platform-invariants-live` job already declares `image: pgvector/pgvector:pg16` (comment: "pgvector, not plain postgres") and already runs `cargo test -p invariants --test db_invariants -- --ignored` — the acceptance verbatim. The deployed stack runs the same image with `vector 0.8.6` installed, and `agent_memory.entry.embedding` is a genuine `udt_name=vector` there, not the `bytea` substitute the local-Postgres fallback used. The earlier note was true of the native PG 17.7 on port 5433 an earlier audit used, and false of both CI and the deployed stack. All four `prov_*` columns are confirmed `NOT NULL` with live `btrim(...) <> ''` CHECKs, read directly out of `pg_constraint`.
 
 Extend `migrations/0055_knowledge_plane.sql`'s tables with the shared fields (subject, claim,
 evidence_ids, n, se, confidence, evidence_class, data_window, valid_until, provenance,
@@ -211,7 +213,7 @@ being used to keep a dead idea alive.
 **Traces:** AGENT-007 §3.2; §8.3.
 
 ### S-4.5 The task brief, and the retrieval log — L
-`PARTIAL` 2026-09-16 — `memory/brief.rs` (936 lines, 14 tests) assembles the brief, and **the retrieval log now exists**: `migrations/0124_memory_retrievals.sql` (not 0067; the ADR-S3-08 collision), `crates/api/src/retrieval_store.rs`.
+`DONE` 2026-09-23 (was `PARTIAL` 2026-09-16, under-claimed) — `memory/brief.rs` (936 lines, 14 tests) assembles the brief, and **the retrieval log now exists**: `migrations/0124_memory_retrievals.sql` (not 0067; the ADR-S3-08 collision), `crates/api/src/retrieval_store.rs`.
 
 The acceptance's fourth clause is met and verified against a live Postgres: `cited` is set when a later act names the entry, and the recall share follows from it. Four decisions are written into the migration rather than left implicit — `None` and `Some(0.0)` stay different answers (a run with nothing to recall has not failed at recall); there is **no foreign key to the entry**, because §2.4 lets an uncited entry be deleted and a cascade would remove the misses while keeping the hits, so the metric would improve whenever the store was tidied; one row per `(run_id, entry_id)` so a re-planned run is not penalised for reassembling its brief; and `mark_cited` returns its count, because citing an id the brief never showed is a different failure from a low share and is otherwise invisible.
 
@@ -223,7 +225,7 @@ It is wired now. `Loop::with_brief` takes what the driver assembled — a builde
 
 `crates/api/tests/memory_reaches_the_run.rs` walks the whole chain against the live Postgres: written through `MemoryStore`, read as the driver reads, assembled as the driver assembles, the user's own words found in the rendered blocks, and the recall share moving from 0.0 to 1.0 as the entry is cited.
 
-**What keeps it `PARTIAL`**: the first three acceptance clauses are about what the brief *chooses* — two conflicting findings both retrieved and marked, a stale finding flagged, retrieval working with the embedding sidecar stopped. `brief.rs`'s own tests cover all three against fixtures, and now that the assembler runs in a real path they are worth re-asserting there; that needs findings in the store, which is OQ-18.
+**Re-audited 2026-09-23: this is `DONE`, and the note above was self-contradictory.** It said re-asserting the first three clauses "needs findings in the store, which is OQ-18" — while this file's own header says OQ-18 is resolved. All four clauses hold with CI-running evidence: `brief.rs:592` `both_sides_of_a_conflict_are_retrieved_and_marked`, `:666` `a_stale_finding_is_retrieved_and_flagged`, `:789` `retrieval_works_with_the_embedding_sidecar_stopped` (true by construction — `brief.rs` uses no embeddings at all today), and `:849` plus `RetrievalStore::mark_cited` plus migration 0124 for the fourth.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
@@ -247,7 +249,7 @@ when a later finding or `finish_task` names the entry.
 
 The acceptance's second half holds and is verified live: a deleted preference stops being returned, asserted on the *read* rather than on the `archived` flag, since a test of the flag would pass while the brief still showed it. This is also the one kind OQ-18 does not block — "the user said this" is true as of when they said it, so today-to-today is a fact rather than a guess, and `human` + `established` is the one combination needing no verification pass.
 
-**What keeps it `PARTIAL`**: the first half of the acceptance — "the agent stops re-asking a question the user has answered, demonstrated by a two-turn test" — needs the brief retrieving preferences into the run, which is the driver wiring S-4.5 also waits on.
+**What keeps it `PARTIAL`, re-checked 2026-09-23**: the driver wiring this note used to cite as the blocker is done — `local_driver.rs:1235` calls `assemble_brief`, `:1576` calls `with_brief` — so that reason is stale. The actual gap is narrower and still open: no test anywhere exercises two turns, so "the agent stops re-asking" is unasserted. The only re-asking hits in the tree (`state.rs:1279`, `one_working_state.rs:511`) are in-run question state, not a preference carried across turns.
 
 `ask_user` answers and "remember that…" turns become `user_preference` entries with a scope,
 retrieved into every brief for that scope at top rank, listable and deletable by the user.
@@ -258,7 +260,7 @@ two-turn test; the user can delete a preference and the next brief omits it.
 **Traces:** AGENT-007 §3.4.
 
 ### S-4.7 Instrument profiles by schedule — M
-`PARTIAL` 2026-09-16 — `memory::Kind::InstrumentProfile` and `jobs::JobKind::InstrumentProfile` exist, so the profile is a job kind that spends no trial: the acceptance's first clause holds by construction, since a job kind that registers no trial cannot spend one.
+`DONE` 2026-09-23 (was `PARTIAL` 2026-09-16, under-claimed) — `memory::Kind::InstrumentProfile` and `jobs::JobKind::InstrumentProfile` exist, so the profile is a job kind that spends no trial: the acceptance's first clause holds by construction, since a job kind that registers no trial cannot spend one.
 
 **The second clause is now built and verified**: `MemoryStore::supersede` writes the replacement and points the old row at it, leaving the old content untouched. `put` could not do this — it is `ON CONFLICT DO UPDATE`, right for a correction and wrong for a succession — and a profiler that overwrote would leave no way to ask what the instrument looked like last month, when "the profile changed" is often the finding.
 
@@ -266,7 +268,9 @@ The current view (`by_kind`, `for_subject`) excludes anything superseded, so one
 
 **Both acceptance clauses are now met and asserted.** The first — "the profiler spends no trial" — holds by construction: `JobKind::counts_trial` is the single place the platform decides and the counting happens inside the submission transaction, so a profiler that spent one could not do it quietly. `the_instrument_profiler_spends_no_trial` asserts it anyway, because it is cheap to lose by accident and expensive when lost, and a companion test pins the whole counting set so adding to it reads as the decision it is rather than a refactor.
 
-**What is described but not in the acceptance, and remains unbuilt**: the schedule. Nothing enqueues the profiler weekly per initialised asset — the job kind exists, the supersession it needs exists, and no scheduler fires it. Recorded as a gap rather than folded into the acceptance, since the acceptance does not ask for it.
+**Re-audited 2026-09-23: `DONE` on the acceptance as written.** Both clauses are met with CI-running evidence: `the_instrument_profiler_spends_no_trial` (`crates/jobs/src/types.rs:673`, a lib test) asserts the first over `counts_trial`; `MemoryStore::supersede` (`memory_store.rs:301`) with `by_kind`'s `AND superseded_by IS NULL` filter proves the second.
+
+**What is described but not in the acceptance, and remains unbuilt — real gap, kept open, does not block `DONE`**: the schedule. Nothing enqueues the profiler weekly per initialised asset — the job kind exists, the supersession it needs exists, and no scheduler fires it. `JobKind::InstrumentProfile` has no enqueue site and no worker anywhere in `crates/` or `apps/`; today it is an enum variant and a trial classification, not a running job. The acceptance under-specifies the task — it asks about what happens *if* the profiler runs, not whether anything makes it run — which is why this is `DONE` on its own text while the feature it describes is not live.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
@@ -292,7 +296,7 @@ overwritten.
 
 **ADR-P0-18's gap is closed**: core-tool notes are logged structurally. `search_tools`, `record_finding`, `reflect` and `finish_task` are never dispatched — the gate short-circuits them — so they never became `ExecuteTool` rows, and a trajectory without them cannot replay a run whose whole content was findings, which is what the `honesty` suite's cases are made of. They had been written as a debug string, and a field recovered by parsing one is a derive away from being gone.
 
-**What keeps it `PARTIAL`**: the acceptance itself, which needs live runs (gate H-2, S-4.14) and a nightly `is_replayable` sample over them. The machinery a replay needs now exists and is asserted against the real log producer, so what remains is the credential, not the code.
+**Re-audited 2026-09-23: the claim above overstated it.** "Asserted against the real log producer, so what remains is the credential, not the code" is false on both halves. `spans_for_run` — the only function that touches Postgres — has zero callers and zero tests; the three tests in `trace_from_effects.rs` exercise `event_for` on hand-built `json!` literals via `Span::new`, never the query. And no nightly `is_replayable` sampler exists anywhere. `harness::trace` went from no producer to a producer with no consumer — still `PARTIAL`, but on a different axis than the credential, and the credential (S-4.14) is not the only thing standing between this and `DONE`.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
@@ -309,7 +313,7 @@ returns true for a nightly sample of real runs.
 **Traces:** AGENT-009 §2, P1; §8.1.
 
 ### S-4.9 The replay suites — L
-`PARTIAL` 2026-09-16 — All four named cases exist in `eval/cases.rs` (1,270 lines, 8 tests): the alphabetical truncation, the truncated reply, `finish_task` eating the only step, and the unread `idempotent`. Not marked done because the budget suite's §2.2 arithmetic assertion was not re-verified in this audit.
+`DONE` 2026-09-23 (was `PARTIAL` 2026-09-16, under-claimed) — All four named cases exist in `eval/cases.rs` (1,270 lines, 8 tests): the alphabetical truncation, the truncated reply, `finish_task` eating the only step, and the unread `idempotent`. The prior audit withheld `DONE` only because the budget suite's §2.2 arithmetic assertion had not been re-verified — re-checked 2026-09-23 at `cases.rs:1180`, `the_budget_arithmetic_holds_on_every_call_of_every_case`, which rewrites every case's expectation to `Expect::BudgetArithmeticHolds`. It's a lib test, so it runs in CI's `cargo test --workspace --lib`. All five clauses met; the `PARTIAL` recorded an audit gap, not a build gap.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
@@ -323,7 +327,7 @@ replay cases; the budget suite asserts AGENT-005 §2.2 arithmetic holds on every
 **Traces:** AGENT-009 §3; §8.2.
 
 ### S-4.10 The honesty suite — M
-`PARTIAL` 2026-09-16 — The honesty suite exists with named cases (`honesty/the_evidence_correction_is_satisfiable`, `honesty/a_flat_tier_is_graded_against_its_own_schema`). Its acceptance — that each case fails loudly when its mechanism is removed — is a mutation claim this audit did not test, so it is not reported as met.
+`PARTIAL` 2026-09-16, re-checked 2026-09-23 and confirmed correctly `PARTIAL` — the mutation claim the first audit declined to test has now been checked directly. Exactly one of five honesty cases has a broken twin (`a_planted_oracle_rewarded_is_the_broken_version`, asserted by `the_honesty_suite_fails_when_its_mechanism_is_removed`); the other four have no such case. Worse, two of the five mechanisms this task's own body names have no case at all, broken or otherwise: no seeded-lookahead-caught-by-the-leakage-battery case, and no null-comparison-not-skippable-before-a-gate case.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
@@ -338,7 +342,7 @@ breaking the thing it guards.
 **Traces:** AGENT-009 §3; AGENT-006 §10.6.
 
 ### S-4.11 Scorecard and the non-inferiority gate — M
-`PARTIAL` 2026-09-16 — `eval/scorecard.rs` (880 lines, 15 tests) holds the scorecard and the non-inferiority gate. Whether a regressing PR is actually **blocked** depends on CI wiring that was not checked here.
+`PARTIAL` 2026-09-16, re-checked 2026-09-23 and confirmed correctly `PARTIAL` — `eval/scorecard.rs` (880 lines, 15 tests) holds the scorecard and the non-inferiority gate. The CI wiring the first audit deferred has now been checked and does not block a regressing PR. The deterministic half works: `every_case_passes_on_the_harness_it_was_written_against` runs under `cargo test --workspace --lib`. The stochastic half cannot run at all — `evals/results/` is empty, so no baseline scorecard has ever existed. CI's `eval-graders` job only runs `pytest evals/tests` (the gate's own arithmetic, not a scorecard) and a `--dry-run`. `check_gate` is never applied to a PR's actual scorecard, and the Rust `scorecard::gate` has exactly one production caller (`context/fit.rs:214`) — not CI.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
@@ -361,7 +365,7 @@ gate; a brand-new profile cannot pass by having nothing to regress against.
 **Traces:** AGENT-009 §4, P4; §8.3.
 
 ### S-4.12 Calibrate the estimator — M
-`PARTIAL` 2026-09-16 — `context::calibration_factor` is built, is p90 nearest-rank and refuses below ten samples (S-1.18). `migrations/0070_token_calibration.sql` does not exist, so there is no per-model row and no over-estimate rate to report.
+`PARTIAL` 2026-09-16, re-checked 2026-09-23 and confirmed correctly `PARTIAL`, understated — `context::calibration_factor` is built, is p90 nearest-rank and refuses below ten samples (S-1.18). `migrations/0070_token_calibration.sql` does not exist, and the gap is worse than "no table": `agent_token_calibration` appears in no migration and no Rust file anywhere in the tree — the identifier does not exist. `context::calibration_factor` (`context.rs:560`) has no caller outside its own unit tests, and over-estimate-rate reporting exists nowhere in `crates/harness/`.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
@@ -376,7 +380,7 @@ over-estimate rate and it stays ≥ 95%.
 **Traces:** AGENT-009 §5, P7; §8.5. AGENT-005 §7.
 
 ### S-4.13 Replace the prose profile claims with measurements — M
-`PARTIAL` 2026-09-16 — No file under `config/` contains `MultiStepEvidence` prose, so the first half of the acceptance holds. Pointing each local profile at a scorecard row needs the calibration table from S-4.12.
+`PARTIAL` 2026-09-16, re-audited 2026-09-23: the claim above is false, found by a grep that matched the wrong casing. `config/profiles/qwen2.5-7b-instruct.yaml:62` carries a `multi_step_evidence:` block — the snake_case serde field, not the CamelCase type name the first audit grepped for — whose `detail: >` is hand-written prose about one run (`trials: 10`, `recorded: "2026-09-12"`, one named GPU): exactly what this task says to replace. The other two clauses are also unmet: no profile names a scorecard row, and `profile.rs:743` hard-errors rather than loading with a warning and reporting `unmeasured` — and only for `Tier::Degraded`, so `qwen3.6-35b-a3b.yaml:30`'s `tool_calling: "multi_step"` is unevidenced and unchecked. Pointing each local profile at a scorecard row still needs the calibration table from S-4.12.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
@@ -408,7 +412,7 @@ fields populated and the first calibration rows written.
 alone).
 
 ### S-4.15 Contradiction detection — the memory-poisoning guard — M
-`PARTIAL` 2026-09-16 — `memory/conflict.rs` (479 lines, 8 tests) implements the detection including the subtle half — an overlapping interval is not flagged as disagreement. Neither named file exists, so nothing links two rows because there are no rows.
+`PARTIAL` 2026-09-16, re-audited 2026-09-23: the claim above is false. `memory/conflict.rs` (479 lines, 8 tests) implements the detection including the subtle half — an overlapping interval is not flagged as disagreement. But `crates/api/src/routes/memory.rs` **does** exist and is mounted, and migration 0122 **does** supply `conflicts_with` on `agent_memory.entry`. The real blocker is different and worse: `conflict::decide_write` has zero callers outside its own module, and `relate` likewise — the write path (`Effect::Remember` → `MemoryStore::put`) never consults either. `conflicts_with` is a column nothing will ever populate; a genuine contradiction between two `established` findings goes undetected and both enter the brief as agreeing evidence. Clauses 2 and 3 of the acceptance are met (asserted in `conflict.rs`'s own tests and in `brief.rs:592`); clause 1 fails at the system level, not the unit level.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
@@ -430,7 +434,7 @@ overlapping-interval disagreement is **not** flagged; both sides enter the brief
 **Traces:** AGENT-007 §2.2.1, P5; §8.4.
 
 ### S-4.16 Retention, and the same finding twice — M
-`PARTIAL` 2026-09-16 — `memory/retention.rs` (290 lines, 7 tests) has the archive rule and near-duplicate corroboration. An archived finding still resolving by id is a property of a store that does not exist yet.
+`PARTIAL` 2026-09-16, re-checked 2026-09-23 and confirmed correctly `PARTIAL`, with clause 1 now verified rather than assumed pending: `memory/retention.rs` (290 lines, 7 tests) has the archive rule and near-duplicate corroboration, and the "archived but still resolves by id" clause is met and CI-run (`brief.rs:907` `an_archived_entry_is_out_of_retrieval_but_the_id_still_exists`; `MemoryStore::get` carries no `archived` filter while `by_kind`/`for_subject` do). Two concrete gaps remain: near-duplicate corroboration is unreachable — `conflict::decide_write`'s `WriteAction::Corroborate` and `conflict::corroborate` have no caller, and `put` is `ON CONFLICT DO UPDATE` on `entry_id`, so a near-duplicate with a new id inserts instead of corroborating; and no monthly report exists — `RetrievalStore::never_cited` is the only ingredient built, and `memory::retention::retention` itself has no caller, so nothing ever actually archives a row today.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
@@ -454,7 +458,7 @@ size, archive rate and cited share.
 **Traces:** AGENT-007 §2.4, §2.5.
 
 ### S-4.17 Flakiness, and a holdout for the evals themselves — M
-`PARTIAL` 2026-09-16 — `eval/holdout.rs` (258 lines, 7 tests) seals the eval holdout, and `a_single_case_suite_seals_nothing_rather_than_sealing_everything` is the degenerate case handled. `migrations/0073_eval_holdout.sql` does not exist, so a re-draw cannot be recorded with the version that asked for it.
+`PARTIAL` 2026-09-16, re-audited 2026-09-23: the note above blamed only the missing migration, and understated it. `eval/holdout.rs` (258 lines, 7 tests) seals the eval holdout, and `a_single_case_suite_seals_nothing_rather_than_sealing_everything` is the degenerate case handled — clause 1 (`FLAKINESS_CEILING`, `SuiteVerdict::Unstable`, `can_gate`) is met and CI-run. But the acceptance's second clause is actively **violated**, not merely unmigrated: `eval::Holdout` has no caller anywhere — every `Holdout` hit in `crates/` is the unrelated backtest/ledger/dataplane holdout type — and CI's `every_case_passes_on_the_harness_it_was_written_against` iterates `cases::all()` with no seal filter. **The sealed set runs on every PR today**, the opposite of the acceptance. `the_open_set_a_pr_runs_excludes_every_sealed_case` is a unit test over a fabricated corpus, not over the set CI actually runs. `migrations/0073_eval_holdout.sql` still does not exist, so a re-draw also cannot be recorded with the version that asked for it.
 
 Audited 2026-09-16 against the source rather than against the plan, after S-4.2 was found implemented while this file said `NOT STARTED`. `crates/harness/src/memory/` and `crates/harness/src/eval/` are ~6,800 lines carrying 98 passing tests; **no migration this phase names exists** and `crates/api/src/routes/memory.rs` does not exist. So the harness computes and nothing persists.
 
