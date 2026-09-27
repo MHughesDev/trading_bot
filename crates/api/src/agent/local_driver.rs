@@ -1539,10 +1539,21 @@ pub async fn run(
             namespaces: params.namespaces.clone(),
         },
     )
-    // The four §15 envelopes. The list comes from the platform, which owns the
-    // classification; the loop pauses on them regardless of tier, attendance or
-    // session allowlist (ADR-P2-20).
-    .with_gated_actions(ledger::audit::gated_actions())
+    // The four §15 envelopes. The list *and the classification* come from the
+    // platform, which owns both; the loop pauses on them regardless of tier,
+    // attendance or session allowlist (ADR-P2-20).
+    //
+    // `gated_actions()` flattens the four envelope groups into one name list, so
+    // passing it alone discarded which envelope each action fell under — and the
+    // loop, having only the name, put the name in the card. Every approval a human
+    // has ever been shown read "`open_vault` falls under the `open_vault` approval
+    // envelope". `Envelope::for_action` is the platform's own answer and has been
+    // here all along; pairing it back up is the whole fix.
+    .with_gated_actions(
+        ledger::audit::gated_actions()
+            .into_iter()
+            .map(|a| (a, ledger::audit::Envelope::for_action(a).as_str())),
+    )
     // The previous turn's tool slice, so this turn appends to it rather than
     // re-choosing an order (§21; S-9.9). Empty on the first turn of a
     // conversation, which is the one turn that should pay a cold prefix.

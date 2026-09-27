@@ -1006,7 +1006,7 @@ pub struct Loop {
     /// Actions that require a human approval (SPEC §15). Supplied by the
     /// platform through [`Loop::with_gated_actions`]; empty by default, because
     /// a harness with no platform behind it gates nothing.
-    gated_actions: BTreeSet<String>,
+    gated_actions: BTreeMap<String, String>,
 
     /// Every observation this run made, addressable (AGENT-005 §14; S-9.1).
     ///
@@ -1209,7 +1209,7 @@ impl Loop {
             suspended_on: None,
             prior_provenance: Provenance::System,
             pending_provenance: Provenance::System,
-            gated_actions: BTreeSet::new(),
+            gated_actions: BTreeMap::new(),
             store: context::store::RunStore::new(),
             context_policy: context::policy::ContextPolicy::v1(),
             focus: None,
@@ -1223,25 +1223,45 @@ impl Loop {
         }
     }
 
-    /// Declare the actions that require a human approval (SPEC §15).
+    /// Declare the actions that require a human approval, **each with the
+    /// envelope it falls under** (SPEC §15).
     ///
-    /// The list comes from the platform (`ledger::audit::gated_actions`), which
-    /// owns the classification; this crate only honours it. A harness with no
-    /// platform behind it gates nothing, which is why the default is empty
-    /// rather than a copy of the list that would then have to be kept in step.
+    /// The pairs come from the platform (`ledger::audit::gated_actions` for the
+    /// names, `ledger::audit::Envelope::for_action` for the classification),
+    /// which owns both; this crate only honours them. A harness with no platform
+    /// behind it gates nothing, which is why the default is empty rather than a
+    /// copy of the list that would then have to be kept in step.
+    ///
+    /// # Why the envelope is passed in rather than derived here
+    ///
+    /// It used to be a bare list of names, and the card a human read said
+    /// "`open_vault` falls under the `open_vault` approval envelope" — the tool
+    /// name in both slots, because the name was the only thing this crate had.
+    /// The four envelopes are four very different decisions (a sealed holdout
+    /// look, a promotion, a spend, a tier-3 memory write) and collapsing them
+    /// asks for consent to a category nobody was shown.
+    ///
+    /// Derived at the call site and not here because this crate deliberately does
+    /// not depend on `ledger` — that would pull `sqlx` and `ed25519-dalek` behind
+    /// a four-variant enum, and the sans-IO rule exists to keep this loop
+    /// testable without either.
     #[must_use]
-    pub fn with_gated_actions<I, S>(mut self, actions: I) -> Self
+    pub fn with_gated_actions<I, N, E>(mut self, actions: I) -> Self
     where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
+        I: IntoIterator<Item = (N, E)>,
+        N: Into<String>,
+        E: Into<String>,
     {
-        self.gated_actions = actions.into_iter().map(Into::into).collect();
+        self.gated_actions = actions
+            .into_iter()
+            .map(|(name, envelope)| (name.into(), envelope.into()))
+            .collect();
         self
     }
 
-    /// The actions this loop will pause on.
+    /// The actions this loop will pause on, each with its envelope.
     #[must_use]
-    pub fn gated_actions(&self) -> &BTreeSet<String> {
+    pub fn gated_actions(&self) -> &BTreeMap<String, String> {
         &self.gated_actions
     }
 
@@ -3019,10 +3039,10 @@ impl Loop {
                 prior_provenance: self.prior_provenance,
                 user_present: self.profile.archetype != crate::profile::Archetype::Background,
                 session_allowlisted: false,
-                approval_envelope: self
-                    .gated_actions
-                    .contains(&call.name)
-                    .then(|| call.name.clone()),
+                // The envelope the platform classified this action under, not
+                // the action's own name. Passing the name here is what made every
+                // approval card read "`x` falls under the `x` approval envelope".
+                approval_envelope: self.gated_actions.get(&call.name).cloned(),
             },
         );
         fx.push(Effect::Note(Note::Ruled {
@@ -5808,7 +5828,7 @@ mod tests {
         t.namespaces = vec!["holdout".into()];
         let mut l = Loop::new(profile, vault_registry(), t);
         if gated {
-            l = l.with_gated_actions(["open_vault"]);
+            l = l.with_gated_actions([("open_vault", "sealed_holdout")]);
         }
         l.next(Input::Admission(Admission::Admit));
         let fx = if two_step {
@@ -5825,6 +5845,50 @@ mod tests {
             })
         };
         (l, fx)
+    }
+
+    /// The card names the **envelope**, not the tool.
+    ///
+    /// `policy::decide` renders "`{tool}` falls under the `{envelope}` approval
+    /// envelope", and the loop used to be handed a bare list of gated names — so
+    /// the only thing it could put in the envelope slot was the name again. Every
+    /// approval a human was ever shown read "`open_vault` falls under the
+    /// `open_vault` approval envelope": a tautology, in the one sentence whose job
+    /// is to say *what kind of thing* is being consented to.
+    ///
+    /// The four envelopes are four different decisions — a sealed-holdout look, a
+    /// promotion, a spend, a tier-3 memory write — and a human who cannot tell
+    /// which one they are answering is not giving informed consent to any of them.
+    /// `ledger::audit::Envelope::for_action` has always known the answer; nothing
+    /// carried it across the boundary.
+    #[test]
+    fn the_approval_card_names_the_envelope_and_not_the_tool_again() {
+        let (_, fx) = reaching_for_the_vault(frontier_fixture(), true);
+        let ruling = fx
+            .iter()
+            .find_map(|e| match e {
+                Effect::AskHuman { ruling, .. } => Some(ruling),
+                _ => None,
+            })
+            .expect("the run stops to ask about the holdout");
+
+        assert!(
+            ruling.reason.contains("`sealed_holdout`"),
+            "the card must name the envelope the platform classified this under;              got: {}",
+            ruling.reason
+        );
+        assert!(
+            !ruling.reason.contains("`open_vault` approval envelope"),
+            "the tool name is back in the envelope slot, which is the defect this              test exists for; got: {}",
+            ruling.reason
+        );
+        // The tool is still named — it is the subject of the sentence, and dropping
+        // it would trade one missing fact for another.
+        assert!(
+            ruling.reason.contains("open_vault"),
+            "the card must still say which tool asked; got: {}",
+            ruling.reason
+        );
     }
 
     /// S-2.12: `AskHuman` on a sealed-holdout action suspends a frontier run
