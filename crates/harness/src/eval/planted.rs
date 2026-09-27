@@ -925,15 +925,15 @@ mod tests {
         let false_positives = nulls_found as f64 / nulls as f64;
         assert!(
             power >= REFERENCE_POWER_FLOOR,
-            "a reference detector recovers only {power:.3} of {edges} planted edges — the              corpus is measuring nothing"
+            "a reference detector recovers only {power:.3} of {edges} planted edges — the corpus is measuring nothing"
         );
         assert!(
             false_positives <= REFERENCE_FALSE_POSITIVE_CEILING,
-            "a reference detector calls {false_positives:.3} of {nulls} planted nulls an edge              — the corpus fails every tier for free"
+            "a reference detector calls {false_positives:.3} of {nulls} planted nulls an edge — the corpus fails every tier for free"
         );
         assert!(
             power > false_positives + 0.4,
-            "power {power:.3} and false positives {false_positives:.3} are not separated: a              corpus that cannot be discriminated cannot discriminate between tiers"
+            "power {power:.3} and false positives {false_positives:.3} are not separated: a corpus that cannot be discriminated cannot discriminate between tiers"
         );
     }
 
@@ -995,7 +995,7 @@ mod tests {
         let rate = correct as f64 / pairs as f64;
         assert!(
             rate >= REFERENCE_RANKING_FLOOR,
-            "a reference ranking gets the planted winner right only {rate:.2} of the time              over {pairs} pairs — a pair a correct method cannot rank is a pair that fails              every tier for free"
+            "a reference ranking gets the planted winner right only {rate:.2} of the time over {pairs} pairs — a pair a correct method cannot rank is a pair that fails every tier for free"
         );
     }
 
@@ -1101,7 +1101,7 @@ mod tests {
         for token in ["Edge", "Null", "Leak", "Dominance", "rho", "winner"] {
             assert!(
                 keys.contains(token),
-                "{token:?} appears in neither the brief nor the key, so looking for it in the                  brief proved nothing"
+                "{token:?} appears in neither the brief nor the key, so looking for it in the brief proved nothing"
             );
         }
     }

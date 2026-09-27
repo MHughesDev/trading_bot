@@ -186,7 +186,7 @@ pub fn decide(profile: &Profile, ctx: &ActionContext) -> Ruling {
             return Ruling::ask(
                 "policy.cost_above_threshold",
                 format!(
-                    "{} is estimated at ${estimate:.2}, above the ${threshold:.2} threshold;                      {remaining} of the task budget remains",
+                    "{} is estimated at ${estimate:.2}, above the ${threshold:.2} threshold; {remaining} of the task budget remains",
                     ctx.tool
                 ),
                 "a human answers this one. Approve it, or narrow the call so it costs less",
@@ -293,7 +293,7 @@ mod tests {
         );
         assert!(
             r.reason.contains("$60.00"),
-            "and the remaining budget beside it — $42 is a different question with $60              left than with $45: {}",
+            "and the remaining budget beside it — $42 is a different question with $60 left than with $45: {}",
             r.reason
         );
     }

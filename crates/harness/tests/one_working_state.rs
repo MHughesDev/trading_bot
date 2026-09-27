@@ -727,7 +727,7 @@ fn the_system_the_schemas_and_the_body_fit_the_window_together() {
     let budget = p.input_budget_tokens() - schemas.min(p.input_budget_tokens());
     assert!(
         budget >= 3_500,
-        "the body was budgeted {budget} tokens after reserving {schemas} for schemas;          the 25% floor is 3,500"
+        "the body was budgeted {budget} tokens after reserving {schemas} for schemas; the 25% floor is 3,500"
     );
     let _ = fx;
 }

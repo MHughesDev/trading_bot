@@ -416,7 +416,7 @@ mod tests {
                 may_continue(&chain, 9, 0.0, 0.5, 0, 3).stop,
                 Some(Stop::SameClassTwice { .. })
             ),
-            "a run that hit costs, fixed them, regressed and hit them again has learned              something between the two"
+            "a run that hit costs, fixed them, regressed and hit them again has learned something between the two"
         );
     }
 

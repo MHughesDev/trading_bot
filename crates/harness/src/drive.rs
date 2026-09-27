@@ -2017,7 +2017,7 @@ impl Loop {
                 Rejection::semantic_owned(
                     "drive.plan_step_is_not_a_tool",
                     format!(
-                        "each step names a tool; if none fits, use {SEARCH_TOOLS}.                          These are not tools: {}",
+                        "each step names a tool; if none fits, use {SEARCH_TOOLS}. These are not tools: {}",
                         unbindable.join(", ")
                     ),
                 ),
@@ -2037,7 +2037,7 @@ impl Loop {
         if self.plans_accepted > self.profile.orchestration.max_replans_per_run {
             self.wrapping_up = true;
             self.directive = Some(format!(
-                "You have re-planned {} times, which is the limit. Stop and report what                  you established with the plans you had. What defeated the plan is a                  finding; say it plainly, cite the calls that showed it, and call                  finish_task. Do not plan again.",
+                "You have re-planned {} times, which is the limit. Stop and report what you established with the plans you had. What defeated the plan is a finding; say it plainly, cite the calls that showed it, and call finish_task. Do not plan again.",
                 self.plans_accepted - 1
             ));
             // The working state is kept deliberately: the findings are still true,
@@ -2100,7 +2100,7 @@ impl Loop {
         if self.barren_steps >= MAX_BARREN_STEPS && !self.wrapping_up {
             self.wrapping_up = true;
             self.directive = Some(format!(
-                "The last {} steps learned nothing new. Stop and report. Call                  finish_task with what you established, citing the calls that showed                  it. If the goal was not reached, say so plainly and say what you                  would need — do not report a result you cannot attribute.",
+                "The last {} steps learned nothing new. Stop and report. Call finish_task with what you established, citing the calls that showed it. If the goal was not reached, say so plainly and say what you would need — do not report a result you cannot attribute.",
                 self.barren_steps
             ));
             fx.push(Effect::Note(Note::Degraded(Degradation::NoProgress {
@@ -2129,7 +2129,7 @@ impl Loop {
             // is not a budget, it is a bug.
             self.wrapping_up = true;
             self.directive = Some(format!(
-                "Your step budget ({}) is spent. This is your last turn: call                  finish_task and report what you found, citing ONLY what you actually                  ran this session ({}). If you did not reach an answer, say so plainly                  and say why — do not report a result you cannot attribute to one of                  those calls.",
+                "Your step budget ({}) is spent. This is your last turn: call finish_task and report what you found, citing ONLY what you actually ran this session ({}). If you did not reach an answer, say so plainly and say why — do not report a result you cannot attribute to one of those calls.",
                 self.profile.orchestration.max_steps,
                 if self.evidence_candidates.is_empty() {
                     "no tool returned a result this session".to_string()
@@ -2349,7 +2349,7 @@ impl Loop {
                     fx.push(Effect::Note(Note::CoreTool {
                         name: "exposure_full".to_string(),
                         detail: format!(
-                            "the slice is full for this turn ({budget} tools); nothing was                              evicted to make room, because dropping a tool invalidates the                              cached prefix for the whole transcript behind it"
+                            "the slice is full for this turn ({budget} tools); nothing was evicted to make room, because dropping a tool invalidates the cached prefix for the whole transcript behind it"
                         ),
                     }));
                 }
@@ -2717,7 +2717,7 @@ impl Loop {
                 reserve_for_output: self.profile.context.reserve_for_output,
             })));
             self.directive = Some(
-                "Your last reply was cut off. Answer with the JSON object ONLY                  — no explanation before or after it, no code fence."
+                "Your last reply was cut off. Answer with the JSON object ONLY — no explanation before or after it, no code fence."
                     .to_string(),
             );
             if let Some(pending) = self.pending.take() {
@@ -2733,7 +2733,7 @@ impl Loop {
             reserve_for_output: self.profile.context.reserve_for_output,
         })));
         self.directive = Some(
-            "Your reply was cut off again. Answer much more briefly: a few sentences at              most, and do not restate what you already did."
+            "Your reply was cut off again. Answer much more briefly: a few sentences at most, and do not restate what you already did."
                 .to_string(),
         );
         self.pending = None;
@@ -2946,12 +2946,12 @@ impl Loop {
                 .cloned()
             {
                 let advice = if previous.failed {
-                    "It failed the same way before and will again with these arguments.                      Change them, choose a different tool, or call finish_task with what you have."
+                    "It failed the same way before and will again with these arguments. Change them, choose a different tool, or call finish_task with what you have."
                 } else {
-                    "Do not call it again. Use what you already have to answer the goal,                      or call finish_task."
+                    "Do not call it again. Use what you already have to answer the goal, or call finish_task."
                 };
                 let message = format!(
-                    "You already called {} with these arguments this session. The result,                      unchanged, was: {}. {advice}",
+                    "You already called {} with these arguments this session. The result, unchanged, was: {}. {advice}",
                     call.name, previous.payload
                 );
                 let question = format!("call {} with these arguments", call.name);
@@ -3144,7 +3144,7 @@ impl Loop {
                 Rejection::semantic_owned(
                     "drive.reflection_exhausted",
                     format!(
-                        "no reflections left ({} of {cap} used). Act on what you have:                          take the next step, or call {FINISH_TASK} and say what is unresolved.",
+                        "no reflections left ({} of {cap} used). Act on what you have: take the next step, or call {FINISH_TASK} and say what is unresolved.",
                         self.reflections_used
                     ),
                 ),
@@ -3172,7 +3172,7 @@ impl Loop {
         // The same step, re-rendered. The doubt is now on the card, so the next
         // decode reads it — which is the only way a reflection changes anything.
         self.directive = Some(format!(
-            "You stopped to reflect: \"{doubt}\". Answer it with the tools you have,              or say plainly that it cannot be answered and move on. Do not reflect again              on the same doubt."
+            "You stopped to reflect: \"{doubt}\". Answer it with the tools you have, or say plainly that it cannot be answered and move on. Do not reflect again on the same doubt."
         ));
         self.render(fx);
     }
@@ -3422,7 +3422,7 @@ impl Loop {
             fx.push(Effect::Note(Note::CoreTool {
                 name: RECORD_FINDING.to_string(),
                 detail: format!(
-                    "{finding} — held for this run only: none of the cited results says which                      period it covers, so there is no window to store it under"
+                    "{finding} — held for this run only: none of the cited results says which period it covers, so there is no window to store it under"
                 ),
             }));
             self.advance_plan();
@@ -3622,7 +3622,7 @@ impl Loop {
         } = &record.body
         {
             let detail = format!(
-                "{id} is held in `{handle}` ({tokens} tokens): {summary}. Read it with                  read_file when you need it."
+                "{id} is held in `{handle}` ({tokens} tokens): {summary}. Read it with read_file when you need it."
             );
             fx.push(Effect::Note(Note::CoreTool {
                 name: EXPAND.to_string(),
@@ -3658,7 +3658,7 @@ impl Loop {
             // drop something itself.
             self.store.note_expansion(id);
             format!(
-                "{id} is {cost} tokens and about {room} are free this step. It is not shown in                  full. Ask for a narrower part of it, or finish with what is here — nothing has                  been lost, and it stays in the CONTEXT list."
+                "{id} is {cost} tokens and about {room} are free this step. It is not shown in full. Ask for a narrower part of it, or finish with what is here — nothing has been lost, and it stays in the CONTEXT list."
             )
         };
         fx.push(Effect::Note(Note::CoreTool {
@@ -3703,7 +3703,7 @@ impl Loop {
             return;
         }
         let detail = format!(
-            "context is now chosen for `{subject}` until this plan step is done. Everything              already recorded is still in the CONTEXT list."
+            "context is now chosen for `{subject}` until this plan step is done. Everything already recorded is still in the CONTEXT list."
         );
         self.focus = Some(subject);
         fx.push(Effect::Note(Note::CoreTool {
@@ -3837,7 +3837,7 @@ impl Loop {
                     self.evidence_candidates.join(", ")
                 )
             } else {
-                "you have not run any tool yet, so there is nothing to cite: do the                  work first, or report that you could not and say why"
+                "you have not run any tool yet, so there is nothing to cite: do the work first, or report that you could not and say why"
                     .to_string()
             };
             self.reject_and_retry(
@@ -4102,7 +4102,7 @@ impl Loop {
                 Tagged::system(
                     "harness",
                     format!(
-                        "`{name}` has failed {failures} times in a row and has been withdrawn                          for the rest of this run. This is a platform fault, not yours. Do not                          wait for it: answer with the tools that work, or report what it                          prevented."
+                        "`{name}` has failed {failures} times in a row and has been withdrawn for the rest of this run. This is a platform fault, not yours. Do not wait for it: answer with the tools that work, or report what it prevented."
                     ),
                 ),
                 220,
@@ -4112,7 +4112,7 @@ impl Loop {
             );
             fx.push(Effect::Note(Note::Degraded(Degradation::BackendFailure {
                 detail: format!(
-                    "tool `{name}` withdrawn after {failures} consecutive failures                      (platform_defect candidate)"
+                    "tool `{name}` withdrawn after {failures} consecutive failures (platform_defect candidate)"
                 ),
             })));
         }
@@ -4151,7 +4151,7 @@ impl Loop {
         // ends unable to answer because the platform was broken.
         let advice = match retryable_flag(detail) {
             Some(false) => {
-                " This will fail again with these arguments. Change them, or use a                  different tool."
+                " This will fail again with these arguments. Change them, or use a different tool."
             }
             Some(true) => " This may be transient; one more attempt is reasonable.",
             None => "",
@@ -4774,7 +4774,7 @@ mod tests {
         assert_eq!(
             questions[0].confidence,
             crate::memory::Confidence::Suggestive,
-            "a question is not a claim, so it carries no confidence it could be read              as asserting"
+            "a question is not a claim, so it carries no confidence it could be read as asserting"
         );
         assert_eq!(questions[0].extra["status"], "open");
         assert!(
@@ -4782,7 +4782,7 @@ mod tests {
                 .as_str()
                 .unwrap()
                 .contains("not stated"),
-            "the stakes are not invented: `WorkingState` holds prose, and saying so is              what `lifecycle.open_question` exists to improve on"
+            "the stakes are not invented: `WorkingState` holds prose, and saying so is what `lifecycle.open_question` exists to improve on"
         );
     }
 
@@ -4994,7 +4994,7 @@ mod tests {
 
         assert!(
             !l.exposed().iter().any(|n| n == "run_sweep"),
-            "a survey that could spend a trial would be an investigation with a              cheaper-sounding name: {:?}",
+            "a survey that could spend a trial would be an investigation with a cheaper-sounding name: {:?}",
             l.exposed()
         );
         assert!(
@@ -5414,7 +5414,7 @@ mod tests {
 
         assert!(
             trial > lookup,
-            "a trial step and a re-read get identically sized bodies under Part I:              {trial} vs {lookup}"
+            "a trial step and a re-read get identically sized bodies under Part I: {trial} vs {lookup}"
         );
         // The scaling can only ever *free* tokens, never conjure them: 1.3x of a
         // window is still a window. What the multiplier buys is that the cheap
@@ -5765,6 +5765,138 @@ mod tests {
         assert!(done(&fx).is_none());
         assert_eq!(l.state(), State::AwaitingModel);
         assert_eq!(l.step(), 2);
+    }
+
+    // ── An envelope does not read the tier (S-2.12) ──────────────────────────
+
+    /// A `Read`-risk tool that nothing but its envelope would pause.
+    ///
+    /// The risk is the whole point of the fixture. A destructive tool pauses at
+    /// every tier for a reason that is not the envelope, so a cross-tier test
+    /// built on one would pass with the envelope doing nothing —
+    /// `the_same_action_ungated_runs_at_both_tiers` is what rules that out.
+    fn vault_registry() -> ToolRegistry {
+        let mut r = registry();
+        r.register(ToolDef {
+            name: "open_vault".into(),
+            namespace: "holdout".into(),
+            description: "Open the sealed holdout. Use it only when the protocol says to.".into(),
+            risk: Risk::Read,
+            core: false,
+            idempotent: true,
+            input_schema: json!({
+                "type": "object",
+                "properties": {"reason": {"type": "string"}},
+                "required": ["reason"],
+            }),
+        })
+        .unwrap();
+        r
+    }
+
+    /// Drive `profile` to the step that proposes `open_vault`, and hand back the
+    /// effects of that step.
+    ///
+    /// The two transports are the reason this is a helper: an unconstrained tier
+    /// answers a `Native` decode in one reply and a constrained one answers
+    /// `SelectTool` then `FillArguments` in two. Both arrive at the same gate, which
+    /// is S-2.2's guarantee and what makes the comparison below a comparison of
+    /// *tiers* rather than of transports.
+    fn reaching_for_the_vault(profile: Profile, gated: bool) -> (Loop, Vec<Effect>) {
+        let two_step = profile.output.constrained_decoding;
+        let mut t = task();
+        t.namespaces = vec!["holdout".into()];
+        let mut l = Loop::new(profile, vault_registry(), t);
+        if gated {
+            l = l.with_gated_actions(["open_vault"]);
+        }
+        l.next(Input::Admission(Admission::Admit));
+        let fx = if two_step {
+            l.next(Input::ModelReply {
+                raw: r#"{"name":"open_vault"}"#.into(),
+            });
+            l.next(Input::ModelReply {
+                raw: r#"{"reason":"the protocol says to"}"#.into(),
+            })
+        } else {
+            l.next(Input::ModelReply {
+                raw: r#"{"name":"open_vault","arguments":{"reason":"the protocol says to"}}"#
+                    .into(),
+            })
+        };
+        (l, fx)
+    }
+
+    /// S-2.12: `AskHuman` on a sealed-holdout action suspends a frontier run
+    /// **exactly as** it suspends a local one.
+    ///
+    /// The envelope gate is the first thing `policy::decide` consults after the
+    /// outbound cut, and it reads neither tier nor attendance. That was asserted
+    /// nowhere: `policy::envelope_tests::attendance_does_not_cover_an_envelope`
+    /// compares two *archetypes* of one profile and says nothing about tiers, and
+    /// the tier is what this acceptance clause is about — a local run is the one a
+    /// reader would expect to be treated as less trusted, or as too small to bother
+    /// asking about, and both readings are wrong in the same direction.
+    ///
+    /// Three things differ between the two profiles here and none of them may change
+    /// the answer: the tier (`Frontier` against `LocalMid`), attendance
+    /// (`Background` against `KnowledgeWorker`, so one run has no human at the
+    /// keyboard) and the transport (`native` against `select_fill`).
+    #[test]
+    fn an_enveloped_action_suspends_the_frontier_tier_exactly_as_it_suspends_a_local_one() {
+        let (frontier, frontier_fx) = reaching_for_the_vault(frontier_fixture(), true);
+        let (local_tier, local_fx) = reaching_for_the_vault(local(), true);
+
+        let mut codes = Vec::new();
+        for (tier, l, fx) in [
+            ("frontier", &frontier, &frontier_fx),
+            ("local", &local_tier, &local_fx),
+        ] {
+            let (tool, ruling) = fx
+                .iter()
+                .find_map(|e| match e {
+                    Effect::AskHuman { tool, ruling, .. } => Some((tool, ruling)),
+                    _ => None,
+                })
+                .unwrap_or_else(|| {
+                    panic!("the {tier} run did not stop to ask about the holdout: {fx:?}")
+                });
+            assert_eq!(tool, "open_vault", "{tier}");
+            assert_eq!(
+                l.state(),
+                State::AwaitingApproval,
+                "the {tier} run must be suspended, not merely noted at"
+            );
+            assert!(
+                !fx.iter().any(|e| matches!(e, Effect::ExecuteTool { .. })),
+                "the {tier} run opened the holdout before a human answered: {fx:?}"
+            );
+            codes.push(ruling.code);
+        }
+        assert_eq!(
+            codes,
+            ["policy.approval_envelope", "policy.approval_envelope"],
+            "both must pause for the envelope; a tier that paused for some other \
+             reason would satisfy the letter of this and none of it"
+        );
+    }
+
+    /// The control, and the reason the test above is about the envelope.
+    ///
+    /// Ungated, `open_vault` is a read that nothing else stops — at either tier,
+    /// attended or not. So the pause above is the envelope's doing, and a future
+    /// change that made the *tier* pause a read would fail here rather than quietly
+    /// keep the other test green.
+    #[test]
+    fn the_same_action_ungated_runs_at_both_tiers() {
+        for (tier, profile) in [("frontier", frontier_fixture()), ("local", local())] {
+            let (l, fx) = reaching_for_the_vault(profile, false);
+            assert!(
+                fx.iter().any(|e| matches!(e, Effect::ExecuteTool { .. })),
+                "{tier}: nothing but the envelope gates this call, so ungated it runs: {fx:?}"
+            );
+            assert_ne!(l.state(), State::AwaitingApproval, "{tier}");
+        }
     }
 
     // ── The escape hatch ────────────────────────────────────────────────────

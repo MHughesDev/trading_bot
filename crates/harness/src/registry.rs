@@ -375,7 +375,7 @@ impl ToolRegistry {
         reg.register(ToolDef {
             name: SEARCH_TOOLS.to_string(),
             namespace: "core".into(),
-            description: "Find a tool that is not available this step. Use it when the                           tool you need was not offered."
+            description: "Find a tool that is not available this step. Use it when the tool you need was not offered."
                 .into(),
             risk: Risk::Read,
             core: true,
@@ -395,7 +395,7 @@ impl ToolRegistry {
         reg.register(ToolDef {
             name: RECORD_FINDING.to_string(),
             namespace: "core".into(),
-            description: "Write down one thing you have established, with what showed                           it. Use it when a step is answered by what you already have                           rather than by another tool call."
+            description: "Write down one thing you have established, with what showed it. Use it when a step is answered by what you already have rather than by another tool call."
                 .into(),
             risk: Risk::Read,
             core: true,
@@ -409,7 +409,7 @@ impl ToolRegistry {
                     },
                     "evidence": {
                         "type": "string",
-                        "description": "The ids of the results that showed it,                                         comma-separated. A finding is kept beyond this                                         run only if one of them says which period it                                         covers."
+                        "description": "The ids of the results that showed it, comma-separated. A finding is kept beyond this run only if one of them says which period it covers."
                     }
                 },
                 "required": ["finding", "evidence"]
@@ -419,7 +419,7 @@ impl ToolRegistry {
         reg.register(ToolDef {
             name: REFLECT.to_string(),
             namespace: "core".into(),
-            description: "Stop and check the direction. Use it when two steps in a row                           did not move the goal, or when a result surprised you. It does                           not spend a step."
+            description: "Stop and check the direction. Use it when two steps in a row did not move the goal, or when a result surprised you. It does not spend a step."
                 .into(),
             risk: Risk::Read,
             core: true,
@@ -460,7 +460,7 @@ impl ToolRegistry {
         reg.register(ToolDef {
             name: FINISH_TASK.to_string(),
             namespace: "core".into(),
-            description: "End the task and report the result with its evidence. Use it                           when the acceptance criteria are met, or when they cannot be."
+            description: "End the task and report the result with its evidence. Use it when the acceptance criteria are met, or when they cannot be."
                 .into(),
             risk: Risk::Write,
             core: true,
@@ -481,7 +481,7 @@ impl ToolRegistry {
         reg.register(ToolDef {
             name: EXPAND.to_string(),
             namespace: "core".into(),
-            description: "Bring back a record listed in CONTEXT that is elided or shortened.                           Use the id shown on its line. It does not spend a step."
+            description: "Bring back a record listed in CONTEXT that is elided or shortened. Use the id shown on its line. It does not spend a step."
                 .into(),
             risk: Risk::Read,
             core: true,
@@ -510,7 +510,7 @@ impl ToolRegistry {
         reg.register(ToolDef {
             name: FOCUS.to_string(),
             namespace: "core".into(),
-            description: "Say what you are working on now, so context is chosen for it.                           Use it when you move to a different instrument, strategy or                           question. It does not spend a step."
+            description: "Say what you are working on now, so context is chosen for it. Use it when you move to a different instrument, strategy or question. It does not spend a step."
                 .into(),
             risk: Risk::Read,
             core: true,
@@ -1427,7 +1427,7 @@ mod flat_array_roundtrip {
         let flat = flatten(&rich);
         assert_eq!(
             flat["properties"]["definition_json"]["type"], "object",
-            "a document with no properties has nothing to lift, so collapsing it only              discards the grammar"
+            "a document with no properties has nothing to lift, so collapsing it only discards the grammar"
         );
         assert_eq!(flat["properties"]["note"]["type"], "string");
 

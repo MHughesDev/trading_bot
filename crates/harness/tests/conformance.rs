@@ -198,7 +198,7 @@ fn every_profile_field_is_enforced_somewhere() {
     );
     assert!(
         p.orchestration.max_replans_per_run <= 5,
-        "a run allowed more than a handful of plans is a run that plans instead of          working; {} is not a bound",
+        "a run allowed more than a handful of plans is a run that plans instead of working; {} is not a bound",
         p.orchestration.max_replans_per_run
     );
 
@@ -416,12 +416,12 @@ fn the_trifecta_decision_is_the_same_at_every_tier() {
     for id in set.ids() {
         assert!(
             set.get(id).unwrap().trifecta.outbound_channel,
-            "{id} claims the outbound leg is cut. It is not: the catalogue has two Outbound              tools. Declare it live and record how it is narrowed."
+            "{id} claims the outbound leg is cut. It is not: the catalogue has two Outbound tools. Declare it live and record how it is narrowed."
         );
         let p = set.get(id).unwrap();
         assert!(
             p.trifecta.mitigation.contains("egress"),
-            "{id}'s mitigation must name the mechanism that narrows the outbound leg, not              merely assert that one exists"
+            "{id}'s mitigation must name the mechanism that narrows the outbound leg, not merely assert that one exists"
         );
         assert!(
             !p.trifecta.mitigation.trim().is_empty(),
@@ -1703,4 +1703,143 @@ fn the_authoring_mode_and_the_amendment_cap_are_bounded_by_validation() {
         none.validate().is_err(),
         "a run that may never amend has to finish under a protocol it knows is wrong"
     );
+}
+
+// ── The prose the model is handed is the prose that was written ──────────────
+
+/// Every string literal in this crate reads as one written sentence.
+///
+/// A Rust literal spread over two source lines with no `\` continuation keeps the
+/// second line's indentation, so a sentence written to wrap at eighty columns
+/// arrives at the model as `"...Use it when the" + 27 spaces + "tool you need..."`.
+/// Forty-six literals in this crate were in that state, and the damage is
+/// concentrated exactly where it costs most: `search_tools`, `record_finding`,
+/// `reflect`, `finish_task`, `restore` and `set_focus`'s descriptions are the whole
+/// of what the model is told those tools are for, and the step-budget, barren-step,
+/// replan-cap and tool-breaker corrections are how the loop asks a run to stop.
+///
+/// It is asserted as a refusal rather than fixed once because the shape comes back:
+/// nothing in `rustfmt` joins the lines and nothing in `clippy` reads inside a
+/// literal, so the only thing standing between a wrapped sentence and a mangled
+/// prompt is a reader noticing. This notices.
+///
+/// Three or more spaces **between two non-space characters**, which is the joined-
+/// line signature and nothing else: a literal that is only indentation (`"\n    "`,
+/// a rendered nesting level) has a space on one side and is left alone, and two
+/// spaces after a full stop is a typographic choice rather than a swallowed break.
+#[test]
+fn no_string_literal_in_this_crate_carries_a_swallowed_line_break() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut offenders = Vec::new();
+    for file in rust_sources(&root.join("src")) {
+        let text = std::fs::read_to_string(&file).expect("a source file this crate ships");
+        for (n, line) in text.lines().enumerate() {
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            for literal in string_literals(line) {
+                if let Some(run) = swallowed_break(literal) {
+                    offenders.push(format!(
+                        "{}:{}  …{run}…",
+                        file.file_name().unwrap().to_string_lossy(),
+                        n + 1
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "these literals reach a model (or a reader) with a run of spaces where a \
+         line break was swallowed. Join the sentence, or end the source line with \
+         a backslash continuation:\n{}",
+        offenders.join("\n")
+    );
+}
+
+fn rust_sources(dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            out.extend(rust_sources(&path));
+        } else if path.extension().is_some_and(|x| x == "rs") {
+            out.push(path);
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The `"…"` spans on one line, escapes respected, raw strings and char literals
+/// left out — a scanner that mistook `r#"…"#` for a terminator would report the code
+/// between two unrelated literals as one.
+fn string_literals(line: &str) -> Vec<&str> {
+    let bytes = line.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'"' && !(i > 0 && (bytes[i - 1] == b'r' || bytes[i - 1] == b'#')) {
+            let start = i + 1;
+            let mut j = start;
+            while j < bytes.len() {
+                match bytes[j] {
+                    b'\\' => j += 2,
+                    b'"' => break,
+                    _ => j += 1,
+                }
+            }
+            if j < bytes.len() {
+                out.push(&line[start..j]);
+                i = j + 1;
+                continue;
+            }
+            return out;
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The offending run, with a little either side, or `None`.
+///
+/// A run that follows a `\n`, `\r` or `\t` is **indentation the author wrote**, not a
+/// swallowed break: `"\n    {}"` renders a nested line and is the one shape that
+/// looks identical to the defect from the outside. Excluded by what precedes it
+/// rather than by a whitelist, so a new rendered block does not have to be added
+/// here to be allowed.
+fn swallowed_break(literal: &str) -> Option<String> {
+    let bytes = literal.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b' ' {
+            let start = i;
+            while i < bytes.len() && bytes[i] == b' ' {
+                i += 1;
+            }
+            let long = i - start >= 3;
+            let after_escape = start >= 2
+                && bytes[start - 2] == b'\\'
+                && matches!(bytes[start - 1], b'n' | b'r' | b't');
+            let bounded = start > 0 && i < bytes.len() && !after_escape;
+            if long && bounded {
+                let from = literal[..start]
+                    .char_indices()
+                    .rev()
+                    .nth(14)
+                    .map_or(0, |c| c.0);
+                let to = literal[i..]
+                    .char_indices()
+                    .nth(15)
+                    .map_or(literal.len(), |c| i + c.0);
+                return Some(literal[from..to].to_string());
+            }
+        } else {
+            i += 1;
+        }
+    }
+    None
 }

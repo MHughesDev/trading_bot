@@ -1011,7 +1011,7 @@ impl ProfileSet {
                 requested: model_id.to_string(),
                 profile: fallback,
                 reason: format!(
-                    "no capability profile for {model_id:?}; the configured default                      {:?} is the most conservative tier available and no eval has                      justified anything wider",
+                    "no capability profile for {model_id:?}; the configured default {:?} is the most conservative tier available and no eval has justified anything wider",
                     fallback.model_id
                 ),
             },
