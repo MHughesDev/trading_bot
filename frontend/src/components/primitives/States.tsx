@@ -99,12 +99,21 @@ export function Skeleton({
   return <span className={cn('skel', className)} style={{ width, height, display: 'block', ...style }} />
 }
 
-/** Skeleton list matching the final layout's shape and height. */
+/** Skeleton list matching the final layout's shape and height.
+ *
+ * `height` is the row height in pixels, and it is applied rather than accepted
+ * and dropped, which is what it was doing: a skeleton whose rows are shorter
+ * than the content replacing them produces exactly the layout shift a skeleton
+ * exists to prevent. Omitted leaves the row to `.skel-row`'s own height. */
 export function SkeletonRows({ rows = 5, height }: { rows?: number; height?: number }) {
   return (
     <div>
       {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="skel-row">
+        <div
+          key={i}
+          className="skel-row"
+          style={height === undefined ? undefined : { height: `${height}px` }}
+        >
           <Skeleton width="34%" />
           <Skeleton width="18%" />
           <Skeleton width="22%" />

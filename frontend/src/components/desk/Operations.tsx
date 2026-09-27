@@ -6,7 +6,7 @@
 // placeholder number somebody might believe.
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Badge, type BadgeTone } from '@/components/primitives/Badge'
+import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
 import { Modal } from '@/components/primitives/Modal'
 import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'

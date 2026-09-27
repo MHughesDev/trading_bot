@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/primitives/Button'
 import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'
-import type { AwayDigest as AwayDigestData, DigestGap, DigestLine } from '@/api/desk'
+import type { AwayDigest as AwayDigestData } from '@/api/desk'
 import { ProvenanceBadge } from './Shared'
 import { blindSpots, hasSomethingToSay, writeLastVisit, shouldShowDigest, linesInGap, digestWindow } from './AwayDigest.helpers'
 

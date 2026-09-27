@@ -1,8 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { Search, Star } from 'lucide-react'
-import { assetApi } from '@/lib/api'
-import { getWsClient, wsBus } from '@/api/ws'
 import { useWatchlistStore } from '@/store/watchlist'
 import { assetClassChartColor, assetClassInfo, inferAssetClass, type PlatformAssetClass } from '@/lib/assetClass'
 import { DASH, price as fmtPrice, signedPct } from '@/lib/format'

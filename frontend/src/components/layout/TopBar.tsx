@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
-import { Bot, Command, ExternalLink, FlaskConical, Inbox, LayoutDashboard, Layers, LogOut, Monitor, Moon, Pin, Receipt, Rows3, Settings as SettingsIcon, Sun, Zap, Brain, Microscope } from 'lucide-react'
+import { Command, ExternalLink, LogOut, Moon, Pin, Rows3, Settings as Sun } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { useModeStore } from '@/store/mode'
 import { useThemeStore } from '@/store/theme'

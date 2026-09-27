@@ -20,8 +20,6 @@ import type {
   AgendaItem,
   AmendmentView,
   CharterView,
-  DeskCard,
-  Met,
   Mode,
   ToolCard,
   WorkingState,
@@ -29,7 +27,7 @@ import type {
 import type { CallCost, ExposureNote, ToolSearch } from '@/lib/desk/events'
 import { applyOrder, dropOnto, moveInColumn, reconcileOrder } from '@/lib/desk/agenda'
 import { toolsVisibleInMode, whyHidden } from '@/lib/desk/rings'
-import { BudgetMeter, EvidenceChip, ProvenanceBadge, RiskBadge, StageStrip, type IdResolver } from './Shared'
+import { BudgetMeter, EvidenceChip, RiskBadge, StageStrip, type IdResolver } from './Shared'
 import { acceptanceMark, waitingOn, absenceCopy } from './RightPanel.helpers'
 import { ago } from '@/components/desk/Shared.helpers'
 

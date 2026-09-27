@@ -17,7 +17,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { deskApi, type KillSwitchState } from '@/api/desk'
-import { KILL_SWITCH_QUERY_KEY, killSwitchTripped, killSwitchView } from './KillSwitchBanner.helpers'
+import { KILL_SWITCH_QUERY_KEY, killSwitchView } from './KillSwitchBanner.helpers'
 
 /**
  * What the chrome may claim about live trading, given what answered.

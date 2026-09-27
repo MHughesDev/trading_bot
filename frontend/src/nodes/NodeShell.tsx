@@ -1,13 +1,7 @@
 import type { ReactNode } from 'react'
 import {
-  Activity,
   AlertTriangle,
   Database,
-  GitMerge,
-  Shield,
-  Sparkles,
-  TrendingUp,
-  Waves,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FAMILIES } from './families'

@@ -10,7 +10,7 @@
 // The one thing that *does* disable Steer and Approve is a dropped event stream
 // (§14): they need the stream to land, and a button that silently does nothing is
 // worse than one that says why.
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/primitives/Button'
 import { ConfirmDialog } from '@/components/primitives/Modal'
 import { Tooltip } from '@/components/primitives/Overlay'

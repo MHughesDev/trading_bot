@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Bell, CandlestickChart, Columns2, Grid2x2, LayoutPanelTop, Plus, Square, Trash2 } from 'lucide-react'
+import { Bell, CandlestickChart, Plus, Trash2 } from 'lucide-react'
 import { MultiPaneChart, type IndicatorInstance, type IndicatorKind } from '@/components/charts/MultiPaneChart'
 import { useBars, TIMEFRAMES, timeframeLabel } from '@/hooks/useBars'
 import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'

@@ -1,4 +1,4 @@
-import type { Provenance, VerifyResult } from '@/api/desk'
+import type { VerifyResult } from '@/api/desk'
 import type { Dossier, DossierClaim } from './Dossier'
 
 /** True when any link in the chain was fetched rather than measured here. */

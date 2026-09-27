@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
 import { StaleBadge } from '@/components/primitives/States'
-import type { DeskCard, SessionDigestRef, ProvenanceMark, WorkingState } from '@/api/desk'
+import type { DeskCard, SessionDigestRef } from '@/api/desk'
 import {
   charterView,
   deskApi,
@@ -25,7 +25,7 @@ import { Composer, type ComposerHandle, type ComposerSubmission } from './Compos
 import { ControlsRow, type PauseState } from './ControlsRow'
 import { AgendaTab, CharterTab, CostTab, EvidenceTab, MemoryTab, RightPanel, StateTab, ToolsTab, type PanelTab, type StateAbsence } from './RightPanel'
 import { DigestCards } from './DigestCard'
-import { DayBudgetBar, StageStrip, TierBadge, type IdResolver } from './Shared'
+import { DayBudgetBar, StageStrip, TierBadge } from './Shared'
 import { staleAge, makeResolver } from './Conversation.helpers'
 import { isIrreversibleEnvelope } from '@/components/desk/Cards.helpers'
 import { useDeskKeymap } from '@/components/desk/useDeskKeymap'
