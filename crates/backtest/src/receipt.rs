@@ -298,7 +298,7 @@ mod tests {
                 r.strategy_version_hash = String::new();
             }),
             ("cost_model_version", |r| {
-                r.cost_model_version = String::new()
+                r.cost_model_version = String::new();
             }),
             ("seed_digest", |r| r.seed_digest = String::new()),
             ("harness_version", |r| r.harness_version = String::new()),

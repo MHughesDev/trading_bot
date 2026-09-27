@@ -40,6 +40,7 @@ use domain::strategy_def::StrategyDefinition;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
+use crate::perturb::{AppliedPerturbation, Perturbation, PerturbationSet};
 use crate::store::LoadedBar;
 
 /// One bar on which a signal became true.
@@ -99,6 +100,17 @@ pub struct SignalPreview {
     /// what `strategy_validator::teach` attaches a fix to.
     pub never_fires_code: Option<&'static str>,
     pub exit_policy: Option<String>,
+    /// Every input perturbation this run was computed under (S-3.10). Empty on
+    /// an ordinary preview, and **always serialized** — a caller that cannot see
+    /// the key is talking to an older server, which is a different fact from a
+    /// run that was not perturbed.
+    ///
+    /// Carried on the result and not only in the request because the comparison
+    /// this feeds is between two previews, and the reader has to be able to tell
+    /// which one it is holding. A perturbed run that looked ordinary would let a
+    /// diff of two unperturbed runs report "no lookahead detected".
+    #[serde(default)]
+    pub perturbations: Vec<crate::perturb::AppliedPerturbation>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -109,6 +121,8 @@ pub enum PreviewError {
     TooShort { have: usize, need: usize },
     #[error("{0}")]
     Requirements(String),
+    #[error("{0}")]
+    Perturbation(#[from] crate::perturb::PerturbationError),
 }
 
 /// The fewest bars worth previewing.
@@ -134,6 +148,43 @@ pub fn preview_signals(
     bars: &[LoadedBar],
     timeframe: Timeframe,
 ) -> Result<SignalPreview, PreviewError> {
+    preview_signals_perturbed(definition, bars, timeframe, &PerturbationSet::default())
+}
+
+/// The same walk, over deliberately corrupted feature columns (S-3.10).
+///
+/// This is the runtime half of `future_perturbation_test`: run once clean, run
+/// again with one column shifted forward, and diff. A strategy whose answer does
+/// not change when a column is handed values from bars it had not seen was
+/// already reading those bars.
+///
+/// # What the perturbation does and does not touch
+///
+/// Only the columns the set names. Every other feature is evaluated through the
+/// ordinary incremental path — the same `value_at` over the same growing window —
+/// so the unperturbed half of a perturbed run is byte-identical to a clean run,
+/// and a divergence can only have come from the column that was named. The
+/// perturbed columns are produced by `features::runtime::backfill_column` over
+/// the whole window and then indexed with the shift; INV-14
+/// (`features_versioned::backfill_and_incremental_serving_agree`) is what makes
+/// those two paths substitutable, and it is asserted in `crates/features`
+/// rather than assumed here.
+///
+/// `crates/features` is **unchanged** by this. See the module docs in
+/// [`crate::perturb`] for why a `shift` parameter does not belong inside
+/// `backfill_column`.
+///
+/// # Errors
+/// Everything [`preview_signals`] returns, plus
+/// [`PreviewError::Perturbation`] for a request whose no-divergence result would
+/// have been meaningless — an empty set, a zero-bar shift, a column the strategy
+/// does not read, or a shift wider than the window.
+pub fn preview_signals_perturbed(
+    definition: &StrategyDefinition,
+    bars: &[LoadedBar],
+    timeframe: Timeframe,
+    perturbations: &PerturbationSet,
+) -> Result<SignalPreview, PreviewError> {
     if bars.len() < MIN_BARS {
         return Err(PreviewError::TooShort {
             have: bars.len(),
@@ -156,6 +207,30 @@ pub fn preview_signals(
         .iter()
         .map(|n| Ok((n.clone(), features::runtime::feature(n)?)))
         .collect::<Result<_, features::FeatureError>>()?;
+
+    // Validated against the columns this strategy actually reads, not against
+    // the feature catalogue: a perturbation of a column nothing reads cannot
+    // change the answer, and its no-divergence result would be evidence about
+    // nothing. Validation is here, after `derive_requirements`, because that is
+    // the only place the real column list exists.
+    let perturbed: HashMap<String, Vec<Option<f64>>> = if perturbations.is_empty() {
+        HashMap::new()
+    } else {
+        let set = PerturbationSet::validate(
+            perturbations.items().to_vec(),
+            &names,
+            bars.len(),
+        )?;
+        let all_rows: Vec<features::FeatureRow> = bars.iter().map(feature_row).collect();
+        indicators
+            .iter()
+            .filter_map(|(name, f)| {
+                let p = set.get(name)?;
+                let column = features::runtime::backfill_column(f.as_ref(), &all_rows);
+                Some((name.clone(), crate::perturb::apply(p, &column)))
+            })
+            .collect()
+    };
 
     let warmup = indicators
         .iter()
@@ -200,18 +275,18 @@ pub fn preview_signals(
             rows.drain(..rows.len() + 1 - keep);
         }
         let close = bar.close.to_f64().unwrap_or(0.0);
-        rows.push(features::FeatureRow {
-            ts_ns: bar.ts_ns,
-            open: bar.open.to_f64().unwrap_or(0.0),
-            high: bar.high.to_f64().unwrap_or(0.0),
-            low: bar.low.to_f64().unwrap_or(0.0),
-            close,
-            volume: bar.volume.to_f64().unwrap_or(0.0),
-        });
+        rows.push(feature_row(bar));
         let decision = rows.len() - 1;
 
         for (name, feature) in &indicators {
-            match features::runtime::value_at(feature.as_ref(), &rows, decision) {
+            // A perturbed column is read out of the pre-computed column; every
+            // other feature takes the ordinary incremental path, so the
+            // unperturbed half of a perturbed run is the clean run.
+            let value = match perturbed.get(name) {
+                Some(column) => column.get(i).copied().flatten(),
+                None => features::runtime::value_at(feature.as_ref(), &rows, decision),
+            };
+            match value {
                 Some(v) => {
                     feature_values.insert(name.clone(), v);
                     *with_value.entry(name.clone()).or_default() += 1;
@@ -312,8 +387,35 @@ pub fn preview_signals(
             &feature_stats,
             &signals,
             &ordering,
+            perturbations,
         ))
     };
+
+    let applied: Vec<AppliedPerturbation> = perturbations
+        .items()
+        .iter()
+        .map(|p| {
+            let (shift_bars, perturbation_pct, seed) = match p {
+                Perturbation::ShiftColumn { shift_bars, .. } => (Some(*shift_bars), None, None),
+                Perturbation::MaskColumn { .. } => (None, None, None),
+                Perturbation::JitterColumn {
+                    perturbation_pct,
+                    seed,
+                    ..
+                } => (None, Some(*perturbation_pct), Some(*seed)),
+            };
+            AppliedPerturbation {
+                mode: p.mode(),
+                column: p.column().to_string(),
+                shift_bars,
+                perturbation_pct,
+                seed,
+                bars_with_value: perturbed
+                    .get(p.column())
+                    .map_or(0, |c| c.iter().filter(|v| v.is_some()).count()),
+            }
+        })
+        .collect();
 
     Ok(SignalPreview {
         n_bars: bars.len(),
@@ -327,7 +429,20 @@ pub fn preview_signals(
         never_fires_because: never.as_ref().map(|(_, why)| why.clone()),
         never_fires_code: never.as_ref().map(|(code, _)| *code),
         exit_policy: definition.exit_policy().map(|p| format!("{p:?}")),
+        perturbations: applied,
     })
+}
+
+/// One bar as the feature engine reads it.
+fn feature_row(bar: &LoadedBar) -> features::FeatureRow {
+    features::FeatureRow {
+        ts_ns: bar.ts_ns,
+        open: bar.open.to_f64().unwrap_or(0.0),
+        high: bar.high.to_f64().unwrap_or(0.0),
+        low: bar.low.to_f64().unwrap_or(0.0),
+        close: bar.close.to_f64().unwrap_or(0.0),
+        volume: bar.volume.to_f64().unwrap_or(0.0),
+    }
 }
 
 /// Why nothing fired — named, because a bare zero sends the author to change the
@@ -343,7 +458,30 @@ fn diagnose(
     features: &[FeatureStat],
     signals: &[SignalStat],
     ordering: &HashSet<&str>,
+    perturbations: &PerturbationSet,
 ) -> (&'static str, String) {
+    // Blame the perturbation before anything else, because it is the one cause
+    // the caller introduced on purpose. A masked column leaves every bar without
+    // a complete input set, which walks straight into the warm-up branch below
+    // and reports a window problem — sending a reader to widen a window that was
+    // never the reason, and, worse, letting a perturbed run that fired nothing be
+    // read as a run the perturbation did not reach.
+    if !perturbations.is_empty() {
+        if let Some(dead) = features.iter().find(|f| f.bars_with_value == 0) {
+            if perturbations.touches(&dead.name) {
+                return (
+                    "perturbed_column_has_no_value",
+                    format!(
+                        "`{}` was perturbed and has a value on no bar, so any condition naming it \
+                         is false everywhere and nothing could fire. This is the perturbation, not \
+                         the window or the thresholds — a divergence from the unperturbed run here \
+                         says only that the column was removed.",
+                        dead.name
+                    ),
+                );
+            }
+        }
+    }
     if (warmup as usize) >= n_bars {
         return (
             "warmup_exceeds_window",

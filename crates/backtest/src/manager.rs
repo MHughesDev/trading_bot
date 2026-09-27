@@ -24,7 +24,7 @@ use crate::collect::{collect_ranges, CollectorPlan};
 use crate::gaps::{self, ScheduleKind};
 use crate::requirements::derive_requirements;
 use crate::run::{DataSlice, EvalResolution, RunConfig, RunConfigBuilder};
-use crate::sim::{run_simulation, InstrumentPrecisions, SimulationInputs};
+use crate::sim::{run_simulation_detailed, InstrumentPrecisions, SimulationInputs};
 use crate::store::{BarCoverage, BarStore};
 use crate::types::{BacktestSnapshot, BacktestStatus, DataCoverage, ResolvedSpec, TimeframeExt};
 use ledger::pg::PgTrialLedger;
@@ -622,28 +622,39 @@ impl BacktestManager {
             features: requirements.features.clone(),
         };
         let control = Arc::clone(&job.control);
-        let report = tokio::task::spawn_blocking(move || run_simulation(inputs, &control))
-            .await
-            .map_err(|e| {
-                PhaseFailure::new(
+        // `run_simulation_detailed`, not `run_simulation`. The two differ in
+        // exactly one way that matters here: the aggregate path returns the SDK's
+        // `BacktestResult` and nothing else, and that document has no per-trade
+        // rows at any point. Every job this manager has ever completed was stored
+        // through it, which is why `/api/evidence/trades` — correct since
+        // `f8c097f` — had never returned a trade to anybody, and why
+        // `trade_reshuffle_bootstrap` and `cost_shock_curve` could not execute
+        // against a real run. The detailed path harvests the closed round trips
+        // out of the engine cache; it already existed here, serving the Set J
+        // suite executor only.
+        let outcome =
+            tokio::task::spawn_blocking(move || run_simulation_detailed(inputs, &control))
+                .await
+                .map_err(|e| {
+                    PhaseFailure::new(
+                        BacktestStatus::Simulating,
+                        TerminalReason::DependencyFailure,
+                        format!("simulation panicked: {e}"),
+                    )
+                })?
+                .map_err(fail(
                     BacktestStatus::Simulating,
                     TerminalReason::DependencyFailure,
-                    format!("simulation panicked: {e}"),
-                )
-            })?
-            .map_err(fail(
-                BacktestStatus::Simulating,
-                TerminalReason::DependencyFailure,
-            ))?;
+                ))?;
 
-        if report.cancelled || job.cancel.load(Ordering::Relaxed) {
+        if outcome.cancelled || job.cancel.load(Ordering::Relaxed) {
             job.set_status(BacktestStatus::Cancelled);
             return Ok(());
         }
 
         {
             let mut state = job.state.write().expect("job state lock poisoned");
-            state.result = Some(report.result);
+            state.result = Some(outcome.result_document());
             state.status = BacktestStatus::Completed;
             state.finished_at = Some(Utc::now());
         }
@@ -914,4 +925,42 @@ struct PersistedRun {
     started_at: Option<DateTime<Utc>>,
     finished_at: Option<DateTime<Utc>>,
     user_id: Option<Uuid>,
+}
+
+#[cfg(test)]
+mod tests {
+    /// The defect this guards was not a bug in any function; it was a call site
+    /// choosing the wrong one of two. `run_simulation` returns the SDK's
+    /// aggregate document and nothing else, and every job this manager completed
+    /// stored it — so `/api/evidence/trades` was correct and empty-handed, and
+    /// `trade_reshuffle_bootstrap` and `cost_shock_curve` shipped with 35 passing
+    /// tests and no run they could execute against.
+    ///
+    /// Nothing in a type or a unit test notices a return to it: both calls
+    /// compile, both produce a plausible `result` document, and the missing key
+    /// only shows up in a tool three crates away. So the assertion is about the
+    /// source, which is where the choice lives.
+    #[test]
+    fn the_job_path_does_not_take_the_trade_less_aggregate_simulation() {
+        const SRC: &str = include_str!("manager.rs");
+        let body = SRC
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the production half of this file");
+        assert!(
+            body.contains("run_simulation_detailed("),
+            "the job path must run the simulation that harvests per-trade rows"
+        );
+        for line in body.lines() {
+            let code = line.trim_start();
+            if code.starts_with("//") || code.starts_with("///") {
+                continue;
+            }
+            assert!(
+                !code.contains("run_simulation(")
+                    || code.contains("run_simulation_detailed("),
+                "a job stored through `run_simulation` has no trade rows: {code}"
+            );
+        }
+    }
 }

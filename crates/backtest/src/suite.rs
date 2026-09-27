@@ -629,6 +629,26 @@ struct Record {
     reconciliation: Option<ReconciliationVerdict>,
 }
 
+/// Where a Run came from: the Experiment that holds it and the slice it was
+/// drawn from. Returned by [`SuiteManager::experiment_of_run`].
+///
+/// The window is carried alongside the universe because a regime label is only
+/// meaningful over the span the Run was evaluated on; resolving the instrument
+/// and then labelling a different window would produce labels that look fine and
+/// describe another period.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunProvenance {
+    /// The UUID the REST surface keys this Experiment by.
+    pub record: Uuid,
+    /// The declared experiment id every trial's pre-registration is locked to.
+    pub experiment_id: String,
+    /// The research slice's symbol-set reference.
+    pub universe_ref: String,
+    pub eval_resolution: EvalResolution,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+}
+
 // ── manager ───────────────────────────────────────────────────────────────────
 
 /// In-memory, user-scoped orchestrator for the Backtest Suite (MASTER §8: every
@@ -990,6 +1010,44 @@ impl SuiteManager {
             .flat_map(|s| s.result.members().iter())
             .find(|m| m.as_str() == run_id)?;
         self.bt.store().get(rid)
+    }
+
+    /// Which Experiment a Run belongs to, and the research slice it was drawn
+    /// from — the same records → studies → members traversal
+    /// [`Self::run_result`] makes, returning the owning record instead of the
+    /// stored result.
+    ///
+    /// Needed by regime labelling: `by_regime` has been
+    /// `Unmeasured { NoLabelsSupplied }` on every bundle this platform has ever
+    /// served, and producing labels means resolving a market scope, which means
+    /// knowing which instrument the Run was about. The Run itself does not carry
+    /// one — a `RunConfig` names a `universe_ref`, and the universe is a
+    /// property of the Experiment's slice.
+    ///
+    /// Both ids are returned because they are not interchangeable and the
+    /// difference has bitten this codebase before: `record` is the UUID the REST
+    /// surface keys an Experiment by, and `experiment_id` is the declared
+    /// string that every trial's pre-registration is hash-locked against.
+    #[must_use]
+    pub fn experiment_of_run(&self, user_id: Uuid, run_id: &str) -> Option<RunProvenance> {
+        let records = self.records.read().expect("suite lock poisoned");
+        records
+            .values()
+            .filter(|r| r.user_id == user_id)
+            .find(|r| {
+                r.studies
+                    .iter()
+                    .flat_map(|s| s.result.members().iter())
+                    .any(|m| m.as_str() == run_id)
+            })
+            .map(|r| RunProvenance {
+                record: r.uuid,
+                experiment_id: r.exp.experiment_id.clone(),
+                universe_ref: r.research_slice.universe_ref.clone(),
+                eval_resolution: r.research_slice.eval_resolution,
+                start: r.research_slice.start,
+                end: r.research_slice.end,
+            })
     }
 
     /// **Sampler-facing** batch evaluation (FEAT-003 §7.3): run one

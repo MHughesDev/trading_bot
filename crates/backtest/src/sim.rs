@@ -832,6 +832,140 @@ impl DetailedOutcome {
     }
 }
 
+/// The key under which a stored result document carries per-trade rows.
+///
+/// Named once, here, because two readers depend on the spelling:
+/// `/api/evidence/trades` branches on its presence to tell a recording gap
+/// apart from a measured zero, and the path-risk tools read `pnl` and
+/// `costs_paid` out of its elements.
+pub const TRADES_KEY: &str = "trades";
+
+impl DetailedOutcome {
+    /// The document a completed job stores on `backtest_jobs.result`.
+    ///
+    /// # Why this exists at all
+    ///
+    /// [`run_simulation`] returns only `serde_json::to_value(engine.get_result())`
+    /// — the SDK's aggregate `BacktestResult`, which carries `total_orders`,
+    /// `total_positions`, `stats_returns`, `stats_pnls` and `summary` **and no
+    /// per-trade rows at any point**. The job manager stored exactly that, so
+    /// every row in `backtest_jobs` was written without a trade list, and every
+    /// tool that asks a run for its trades got a 422 from a route that was
+    /// working correctly. The rows were never missing from the engine: this
+    /// crate's own [`run_simulation_detailed`] has harvested them out of the
+    /// engine cache all along, for the Set J suite executor only. The loss was
+    /// one call site choosing the aggregate path — not the pinned SDK.
+    ///
+    /// # What it refuses to say
+    ///
+    /// An empty `trades` array is a claim: *this run took no round trips*. The
+    /// route reads it that way and says so ("a measured zero, not a missing
+    /// measurement"), and the path-risk tools compute over it. So when the
+    /// harvest came back empty from a run the engine says placed orders or
+    /// opened positions, the `trades` key is **omitted** and the reason is
+    /// recorded in its place. The route's `trades_not_recorded` refusal then
+    /// fires, which is the honest outcome, rather than a zero-trade path-risk
+    /// result over a run that traded.
+    ///
+    /// # What it does not pretend to know
+    ///
+    /// `engine_total_positions` is reported beside the harvest count rather
+    /// than compared against it. The SDK's count includes positions still open
+    /// when the window ended, so `harvested < total` is the *normal* shape of a
+    /// run holding a position at the close and cannot be told apart from a
+    /// truncated harvest by that number alone. Both numbers are published; the
+    /// inequality is not turned into a verdict it cannot support.
+    #[must_use]
+    pub fn result_document(&self) -> serde_json::Value {
+        use serde_json::{json, Map, Value};
+
+        // The aggregate document is the base, so every existing reader of
+        // `backtest_jobs.result` — the run page, `compare_backtests` — keeps the
+        // keys it reads. A non-object aggregate cannot be merged into, and
+        // dropping it to make room for trades would trade one recording gap for
+        // another, so it is nested instead of discarded.
+        let mut doc: Map<String, Value> = match &self.stats {
+            Value::Object(o) => o.clone(),
+            other => {
+                let mut m = Map::new();
+                m.insert("engine_stats".into(), other.clone());
+                m
+            }
+        };
+
+        let harvested = self.trades.len();
+        let u64_at = |key: &str| doc.get(key).and_then(Value::as_u64);
+        let total_positions = u64_at("total_positions");
+        let total_orders = u64_at("total_orders");
+
+        doc.insert("trade_rows_harvested".into(), json!(harvested));
+        doc.insert("engine_total_positions".into(), json!(total_positions));
+
+        // The aggregate is produced by the venue *before* the conservative exit
+        // re-pricing that `apply_exit_fills` performs, so on a run with declared
+        // exits the `stats_*` figures are an upper bound on the trade rows
+        // beside them. Two numbers in one document that were computed under
+        // different assumptions have to say so, or the next reader diffs them
+        // and reports a defect in the wrong place.
+        doc.insert(
+            "exit_repricing_applied".into(),
+            json!(self.exit_fills.len()),
+        );
+        if !self.exit_fills.is_empty() {
+            doc.insert(
+                "stats_precede_exit_repricing".into(),
+                json!(
+                    "the aggregate `stats_*` figures were produced by the venue before the \
+                     conservative exit re-pricing was applied to the trade rows, so on this run \
+                     they are an upper bound on the trade rows' own P&L rather than a second \
+                     opinion about it"
+                ),
+            );
+        }
+
+        let engine_did_something = total_positions.unwrap_or(0) > 0 || total_orders.unwrap_or(0) > 0;
+        if harvested == 0 && engine_did_something {
+            doc.insert(
+                "trades_not_harvested".into(),
+                json!({
+                    "reason": "no closed round trip was harvested from the engine cache, but the \
+                               engine reports orders or positions. An empty trade list would say \
+                               this run took no round trips, which is a different fact and not \
+                               this one.",
+                    "orders_recorded": total_orders,
+                    "positions_recorded": total_positions,
+                }),
+            );
+            return Value::Object(doc);
+        }
+
+        // A serialisation failure must not land as `[]`. `Trade` cannot fail to
+        // serialise today, which is exactly why the fallback has to be the
+        // refusal rather than the convenient value: the day it can, an empty
+        // array would read as a run that took no trades.
+        match serde_json::to_value(&self.trades) {
+            Ok(rows) => {
+                doc.insert(TRADES_KEY.into(), rows);
+            }
+            Err(e) => {
+                doc.insert(
+                    "trades_not_harvested".into(),
+                    json!({
+                        "reason": format!(
+                            "{harvested} trade rows were harvested and could not be serialised: \
+                             {e}. Omitting the list says nothing about them; an empty list would \
+                             have said there were none."
+                        ),
+                        "orders_recorded": total_orders,
+                        "positions_recorded": total_positions,
+                    }),
+                );
+            }
+        }
+        Value::Object(doc)
+    }
+}
+
 /// Maps a closed engine `Position` to the suite's `Trade`. Money/price values go
 /// through `Decimal` via keyword-free helpers so the money-f64 scanner stays green.
 ///
@@ -1189,6 +1323,181 @@ mod tests {
     use super::*;
     use crate::requirements::FeatureKind;
     use rust_decimal_macros::dec;
+
+    /// A `DetailedOutcome` with an arbitrary aggregate document and trade list,
+    /// built without the engine so the document rules are testable on their own.
+    fn outcome(stats: serde_json::Value, trades: Vec<Trade>) -> DetailedOutcome {
+        DetailedOutcome {
+            cancelled: false,
+            equity: Vec::new(),
+            trades,
+            stats,
+            exit_fills: Vec::new(),
+            fee_schedule: crate::costs::FeeBook::platform_default().resolve(None, None),
+        }
+    }
+
+    fn round_trip(pnl: Decimal, costs: Decimal) -> Trade {
+        Trade {
+            symbol: "BTC-USDT.BINANCE".into(),
+            side: TradeSide::Long,
+            entry_time: DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
+            exit_time: DateTime::from_timestamp(1_700_003_600, 0).unwrap(),
+            entry_price: dec!(100),
+            exit_price: dec!(101),
+            qty: dec!(2),
+            mae: 0.0,
+            mfe: 0.0,
+            holding_period_secs: 3_600,
+            costs_paid: costs,
+            pnl,
+        }
+    }
+
+    /// The whole point of the change: the rows the engine cache gave up have to
+    /// reach the document the job stores, under the key the route branches on.
+    #[test]
+    fn the_stored_document_carries_the_harvested_trade_rows() {
+        let doc = outcome(
+            serde_json::json!({ "total_orders": 2, "total_positions": 1 }),
+            vec![round_trip(dec!(1.5), dec!(0.25))],
+        )
+        .result_document();
+        let rows = doc
+            .get(TRADES_KEY)
+            .and_then(serde_json::Value::as_array)
+            .expect("the trade rows are present under the key the route reads");
+        assert_eq!(rows.len(), 1);
+        // The two fields the path-risk tools divide by. Read the way they read
+        // them — `Decimal` serialises as a string under `serde-with-str`, and
+        // both readers accept string or number.
+        assert_eq!(rows[0]["pnl"].as_str(), Some("1.5"));
+        assert_eq!(rows[0]["costs_paid"].as_str(), Some("0.25"));
+        assert_eq!(doc["trade_rows_harvested"], serde_json::json!(1));
+    }
+
+    /// The keys the run page and `compare_backtests` read are not displaced by
+    /// adding trades beside them.
+    #[test]
+    fn the_stored_document_keeps_every_aggregate_key_it_was_given() {
+        let stats = serde_json::json!({
+            "total_orders": 58,
+            "total_positions": 29,
+            "stats_returns": { "Sharpe Ratio (252 days)": 1.25 },
+            "stats_pnls": { "USDT": { "PnL (total)": 12.0 } },
+            "summary": { "orders.total": "58" },
+        });
+        let doc = outcome(stats.clone(), vec![round_trip(dec!(1), dec!(0.1))]).result_document();
+        for key in ["total_orders", "total_positions", "stats_returns", "stats_pnls", "summary"] {
+            assert_eq!(doc.get(key), stats.get(key), "{key} survived");
+        }
+    }
+
+    /// An empty list is a claim — "this run took no round trips" — and the route
+    /// reports it as a measured zero. A run the engine says placed orders may
+    /// not make that claim on the strength of an empty harvest.
+    #[test]
+    fn an_empty_harvest_from_a_run_that_placed_orders_refuses_to_claim_zero_trades() {
+        let doc = outcome(
+            serde_json::json!({ "total_orders": 58, "total_positions": 29 }),
+            Vec::new(),
+        )
+        .result_document();
+        assert!(
+            doc.get(TRADES_KEY).is_none(),
+            "no `trades` key, so the route refuses with `trades_not_recorded` \
+             rather than serving a zero-trade path-risk result"
+        );
+        let gap = doc
+            .get("trades_not_harvested")
+            .expect("the reason is recorded where the list would have been");
+        assert_eq!(gap["orders_recorded"], serde_json::json!(58));
+        assert_eq!(gap["positions_recorded"], serde_json::json!(29));
+    }
+
+    /// The other half of the same rule: a run that genuinely opened nothing did
+    /// measure zero, and must be allowed to say so.
+    #[test]
+    fn an_empty_harvest_from_a_run_that_placed_nothing_is_a_measured_zero() {
+        let doc = outcome(
+            serde_json::json!({ "total_orders": 0, "total_positions": 0 }),
+            Vec::new(),
+        )
+        .result_document();
+        assert_eq!(doc[TRADES_KEY], serde_json::json!([]));
+        assert!(doc.get("trades_not_harvested").is_none());
+    }
+
+    /// The aggregate is produced before the conservative exit re-pricing, so a
+    /// document carrying both has to say which of its numbers is which.
+    #[test]
+    fn a_repriced_run_says_its_aggregate_predates_the_repricing() {
+        let mut o = outcome(
+            serde_json::json!({ "total_orders": 2, "total_positions": 1 }),
+            vec![round_trip(dec!(1), dec!(0.1))],
+        );
+        o.exit_fills.push(ExitFill {
+            ts: DateTime::from_timestamp(1_700_003_600, 0).unwrap(),
+            rule: "stop_loss".into(),
+            side: ExitSide::Long,
+            level: dec!(98),
+            venue_fill: dec!(104),
+            charged: dec!(98),
+            bars_held: 3,
+            qty: dec!(2),
+        });
+        let doc = o.result_document();
+        assert_eq!(doc["exit_repricing_applied"], serde_json::json!(1));
+        assert!(doc.get("stats_precede_exit_repricing").is_some());
+
+        // And a run with no declared exits does not carry the caveat, because an
+        // assumption stated where it does not apply stops being read.
+        let clean = outcome(
+            serde_json::json!({ "total_orders": 2, "total_positions": 1 }),
+            vec![round_trip(dec!(1), dec!(0.1))],
+        )
+        .result_document();
+        assert_eq!(clean["exit_repricing_applied"], serde_json::json!(0));
+        assert!(clean.get("stats_precede_exit_repricing").is_none());
+    }
+
+    /// A non-object aggregate cannot be merged into. Dropping it to make room
+    /// for the trades would swap one recording gap for another.
+    #[test]
+    fn a_non_object_aggregate_is_kept_rather_than_discarded() {
+        let doc = outcome(
+            serde_json::Value::String("engine said nothing".into()),
+            vec![round_trip(dec!(1), dec!(0.1))],
+        )
+        .result_document();
+        assert_eq!(
+            doc["engine_stats"],
+            serde_json::json!("engine said nothing")
+        );
+        assert_eq!(
+            doc[TRADES_KEY].as_array().map(Vec::len),
+            Some(1),
+            "the trade rows still land"
+        );
+    }
+
+    /// The SDK's position count includes positions still open at the window's
+    /// end, so it is published beside the harvest rather than compared with it.
+    #[test]
+    fn the_engines_own_position_count_is_published_next_to_the_harvest() {
+        let doc = outcome(
+            serde_json::json!({ "total_orders": 4, "total_positions": 3 }),
+            vec![round_trip(dec!(1), dec!(0.1)), round_trip(dec!(2), dec!(0.1))],
+        )
+        .result_document();
+        assert_eq!(doc["trade_rows_harvested"], serde_json::json!(2));
+        assert_eq!(doc["engine_total_positions"], serde_json::json!(3));
+        assert!(
+            doc.get(TRADES_KEY).is_some(),
+            "a run holding a position at the close is the normal shape of \
+             harvested < total and is not a refusal"
+        );
+    }
 
     #[test]
     fn dec_str_pads_and_rounds() {
