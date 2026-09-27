@@ -308,12 +308,101 @@ impl ResearchManager {
         }
     }
 
-    /// Diagnostics for a Run the user reached through one of their Studies.
-    #[must_use]
-    pub fn diagnostics(&self, user_id: Uuid, run_id: &str) -> Option<DiagnosticBundle> {
-        self.suite
-            .run_result(user_id, run_id)
-            .map(|r| DiagnosticBundle::from_result(&r, &[]))
+    /// Diagnostics for a Run the user reached through one of their Studies,
+    /// including its regime attribution.
+    ///
+    /// # Why this is async now, and what it used to report
+    ///
+    /// It passed `&[]` for the labelled windows, so `by_regime` came back
+    /// `Unmeasured { NoLabelsSupplied }` on every bundle this platform has ever
+    /// served. Honest — `RegimeAttribution` has no accessor that hands back an
+    /// empty slice for the unmeasured case, so it never claimed a measurement —
+    /// and never measured.
+    ///
+    /// Supplying windows needs three reads: which experiment holds this run (for
+    /// its instrument and its evaluation window), that instrument's asset class,
+    /// and the causal labels for the market scope those resolve to. Hence the
+    /// database, and hence `async`.
+    ///
+    /// **Every failure along the way leaves `by_regime` unmeasured rather than
+    /// guessed.** An instrument with no configured scope, an ambiguous scope, a
+    /// scope with no labels over this window — each yields no windows, and the
+    /// bundle reports `Unmeasured` exactly as before. That is the same choice
+    /// `labels_as_of` makes one level down: an unlabelled observation is dropped
+    /// rather than assigned the nearest label, because nearest in that direction
+    /// is the future.
+    pub async fn diagnostics(&self, user_id: Uuid, run_id: &str) -> Option<DiagnosticBundle> {
+        let result = self.suite.run_result(user_id, run_id)?;
+        let windows = self.regime_windows(user_id, run_id, &result).await;
+        Some(DiagnosticBundle::from_result(&result, &windows))
+    }
+
+    /// The labelled windows covering a run's equity curve, or none.
+    ///
+    /// Returns an empty vec for every reason a scope cannot be resolved or a
+    /// label cannot be found. The caller turns that into `Unmeasured`, which is
+    /// the truthful answer in all of them.
+    async fn regime_windows(
+        &self,
+        user_id: Uuid,
+        run_id: &str,
+        result: &backtest::run::result::RunResult,
+    ) -> Vec<backtest::stats::diagnostics::RegimeWindow> {
+        use crate::knowledge::{
+            labels_as_of, windows_from_labels, RegimeScopeStore, RegimeStore, ScopeResolution,
+            LABEL_LOOKBEHIND_DAYS, RULE_MODEL_VERSION,
+        };
+
+        // The instants the attribution will run over. Windows are built against
+        // these and not against the label history, so they align to the curve by
+        // construction.
+        let times: Vec<_> = result.equity_curve.iter().map(|(t, _)| *t).collect();
+        if times.is_empty() {
+            return Vec::new();
+        }
+
+        let Some(provenance) = self.suite.experiment_of_run(user_id, run_id) else {
+            return Vec::new();
+        };
+
+        // The instrument's asset class, which the scope resolution needs and the
+        // run result does not carry.
+        let asset_class: Option<(String,)> =
+            sqlx::query_as("SELECT asset_class FROM asset_lifecycle WHERE symbol = $1")
+                .bind(&provenance.universe_ref)
+                .fetch_optional(&self.pg)
+                .await
+                .ok()
+                .flatten();
+        let Some((asset_class,)) = asset_class else {
+            return Vec::new();
+        };
+
+        let scope = match RegimeScopeStore::new(self.pg.clone())
+            .resolve(&asset_class, Some(&provenance.universe_ref))
+            .await
+        {
+            Ok(ScopeResolution::Scope(s)) => s,
+            // Ambiguous is not "pick one": several scopes claim this asset class
+            // and nothing said which market the run traded, so choosing would be
+            // the guess ADR-P3-07 refused to bake in as a default.
+            Ok(ScopeResolution::Ambiguous(_) | ScopeResolution::Unconfigured) | Err(_) => {
+                return Vec::new();
+            }
+        };
+
+        // Read from behind the window's start: the label in force on the first
+        // observation was written at an earlier bar's close.
+        let from = times[0] - chrono::Duration::days(LABEL_LOOKBEHIND_DAYS);
+        let to = *times.last().expect("non-empty");
+        let Ok(history) = RegimeStore::new(self.pg.clone())
+            .history(&scope.market_scope, RULE_MODEL_VERSION, from, to)
+            .await
+        else {
+            return Vec::new();
+        };
+
+        windows_from_labels(&times, &labels_as_of(&history, &times))
     }
 }
 

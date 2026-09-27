@@ -173,11 +173,7 @@ impl GateAdvanceWorker {
 }
 
 /// How far before a series' first observation the labeller's history is read.
-///
-/// A daily label in force on the first observation was written at an earlier
-/// bar's close. Sixty days is more than the labeller's 21-day window needs and
-/// costs one bounded read.
-const LABEL_LOOKBEHIND_DAYS: i64 = 60;
+use crate::knowledge::LABEL_LOOKBEHIND_DAYS;
 
 /// Where Gate 11's regimes came from, and why.
 struct LabelSource {

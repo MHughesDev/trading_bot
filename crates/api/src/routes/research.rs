@@ -89,7 +89,7 @@ pub async fn get_diagnostics(
     token: BearerToken,
     Path(run_id): Path<String>,
 ) -> impl IntoResponse {
-    match state.research.diagnostics(token.user_id(), &run_id) {
+    match state.research.diagnostics(token.user_id(), &run_id).await {
         Some(b) => Json(b).into_response(),
         None => (
             StatusCode::NOT_FOUND,

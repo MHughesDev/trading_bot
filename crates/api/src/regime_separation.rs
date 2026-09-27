@@ -80,11 +80,7 @@ pub const MIN_REGIMES: usize = 2;
 
 /// How far before a series' first observation the label history is read.
 ///
-/// The label in force on day one was written at an earlier bar's close, so a
-/// history starting at the first observation leaves the start of every series
-/// unlabelled. Sixty days is comfortably more than the labeller's 21-day window
-/// and costs one bounded read.
-const LABEL_LOOKBEHIND_DAYS: i64 = 60;
+use crate::knowledge::LABEL_LOOKBEHIND_DAYS;
 
 /// One strategy's out-of-sample series, already aligned to its causal labels.
 #[derive(Clone, Debug, PartialEq)]

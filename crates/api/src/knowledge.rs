@@ -301,6 +301,19 @@ pub struct RegimeStore {
     pg: PgPool,
 }
 
+/// How far behind a window's start to read labels.
+///
+/// The label in force on the first observation was written at an earlier bar's
+/// close, so a history starting at that observation leaves the beginning of every
+/// series unlabelled. Sixty days is comfortably more than the labeller's 21-day
+/// window needs and costs one bounded read.
+///
+/// One home, because this was declared privately in `gate_worker` and again in
+/// `regime_separation`, and a third copy for the diagnostics path would have made
+/// three answers to "how far back do we look" in one crate. Both now read it from
+/// here.
+pub const LABEL_LOOKBEHIND_DAYS: i64 = 60;
+
 /// The rule tier's model version.
 ///
 /// `model_version` is the fit date for a learned model (ADR-P3-02). The rule
