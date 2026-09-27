@@ -24,7 +24,8 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { GLOBAL_SCOPE, GlobalActionDialog, globalActionBody } from '../Operations'
+import { GlobalActionDialog } from '../Operations'
+import { GLOBAL_SCOPE, globalActionBody } from '@/components/desk/Operations.helpers'
 
 describe('the global reset asks for what the route requires', () => {
   it('refuses without a reason, which `ResetRequest::validate` refuses too', () => {

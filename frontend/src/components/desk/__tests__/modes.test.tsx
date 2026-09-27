@@ -9,8 +9,9 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ToolCard } from '@/api/desk'
 import { modeMaySeeTool, modeMaySpendTrials, toolsVisibleInMode, whyHidden } from '@/lib/desk/rings'
-import { Composer, classifyNeedsResearch, defaultWorkflow } from '../Composer'
+import { Composer } from '../Composer'
 import { ToolsTab } from '../RightPanel'
+import { classifyNeedsResearch, defaultWorkflow } from '@/components/desk/Composer.helpers'
 
 const tools: ToolCard[] = [
   { name: 'get_bars', namespace: 'data', risk: 'read', spends_trial: false, ring: 'research' },

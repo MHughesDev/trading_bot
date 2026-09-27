@@ -19,11 +19,6 @@ export interface TimerTrigger {
 
 export type TriggerSpec = OhlcvBarTrigger | TimerTrigger
 
-export const DEFAULT_TRIGGER: TriggerSpec = {
-  kind: 'ohlcv_bar',
-  timeframe: 'minutes1',
-}
-
 const TIMEFRAMES = [
   { value: 'minutes1', label: '1 minute' },
   { value: 'minutes5', label: '5 minutes' },

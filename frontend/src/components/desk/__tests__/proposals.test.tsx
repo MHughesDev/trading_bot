@@ -10,8 +10,8 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { inertNotice, ringLabel } from '../ProposalsQueue'
 import type { Proposal } from '@/api/desk'
+import { inertNotice, ringLabel } from '@/components/desk/ProposalsQueue.helpers'
 
 function proposal(over: Partial<Proposal>): Proposal {
   return {

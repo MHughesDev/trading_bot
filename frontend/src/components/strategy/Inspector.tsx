@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import type { Edge, Node } from '@xyflow/react'
 import { ArrowRight, Shield } from 'lucide-react'
 import { modelsApi } from '@/api/mlops'
-import { familyOf, INDICATOR_LABELS, CONDITION_LABELS, EXIT_LABELS, MARKET_DATA_LABELS } from '@/nodes'
+import { INDICATOR_LABELS, CONDITION_LABELS, EXIT_LABELS } from '@/nodes'
+import { familyOf } from '@/nodes/families'
 import type { ActionNodeData, AIInferenceNodeData, ConditionNodeData, ExitNodeData, IndicatorNodeData, LogicNodeData, MarketDataNodeData, SizeNodeData } from '@/nodes'
 import type { ConditionType, ExitType, IndicatorKind, SizeType } from '@/types/spec'
 import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'
@@ -16,6 +17,7 @@ import { EmptyState } from '@/components/primitives/States'
 import { Sparkline } from '@/components/charts/Primitives'
 import { DASH, pct, signedPct, ratio } from '@/lib/format'
 import { TIMEFRAMES } from '@/hooks/useBars'
+import { MARKET_DATA_LABELS } from '@/nodes/market-data-labels'
 
 /* Spec §4.3 — the inspector.
 

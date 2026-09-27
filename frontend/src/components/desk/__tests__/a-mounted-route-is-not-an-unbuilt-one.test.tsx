@@ -40,7 +40,8 @@ vi.mock('@/api/desk', () => ({
   },
 }))
 
-const { DossierReader, dossierCostLine, sampleCell, verdictOfRecheck } = await import('../Dossier')
+const { DossierReader } = await import('../Dossier')
+    const { dossierCostLine, sampleCell, verdictOfRecheck } = await import('../Dossier.helpers')
 
 function body(over: Record<string, unknown> = {}) {
   return {

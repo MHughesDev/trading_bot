@@ -36,6 +36,7 @@ const haltAll = vi.hoisted(() => vi.fn(() => Promise.resolve({ data: {} })))
 vi.mock('@/api/desk', () => ({ deskApi: { haltAll } }))
 
 import * as banner from '../KillSwitchBanner'
+import * as bannerHelpers from '../KillSwitchBanner.helpers'
 import { TheBook } from '../DeskHome'
 
 const kill = { kill_switch_active: false }
@@ -60,7 +61,11 @@ describe('the banner exports no mechanism it does not have', () => {
   })
 
   it('exports the query key instead, which is what actually moves the banner', () => {
-    expect(banner.KILL_SWITCH_QUERY_KEY).toEqual(['desk', 'kill-switch'])
+    // The key lives in the helpers sibling now: the component module holds the
+    // component, and everything testable without rendering moved out. The
+    // assertion is unchanged in substance — a shared key that both the banner and
+    // whoever halts can name, rather than an event name nobody dispatches.
+    expect(bannerHelpers.KILL_SWITCH_QUERY_KEY).toEqual(['desk', 'kill-switch'])
   })
 })
 

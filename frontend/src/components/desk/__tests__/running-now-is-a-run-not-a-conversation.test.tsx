@@ -33,7 +33,8 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { Conversation } from '@/api/agent'
 import type { DeskRunningRun } from '@/api/desk'
-import { RunningNow, runCount } from '../DeskHome'
+import { RunningNow } from '../DeskHome'
+import { runCount } from '@/components/desk/DeskHome.helpers'
 
 vi.mock('@/api/desk', () => ({
   deskApi: { cancel: vi.fn(() => Promise.resolve({ data: {} })), haltAll: vi.fn() },

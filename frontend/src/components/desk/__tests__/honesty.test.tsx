@@ -8,10 +8,12 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { DeskCard } from '@/api/desk'
-import { Card, statLine } from '../Cards'
+import { Card } from '../Cards'
 import { EvidenceChip, InertText } from '../Shared'
-import { makeResolver } from '../Conversation'
-import { chainTouchesUntrusted, dossierToMarkdown, type Dossier } from '../Dossier'
+import { type Dossier } from '../Dossier'
+import { statLine } from '@/components/desk/Cards.helpers'
+import { makeResolver } from '@/components/desk/Conversation.helpers'
+import { chainTouchesUntrusted, dossierToMarkdown } from '@/components/desk/Dossier.helpers'
 
 const KNOWN = 'exp_7f0c'
 const resolve = (id: string) => (id === KNOWN ? { label: 'an experiment', kind: 'experiment' } : null)

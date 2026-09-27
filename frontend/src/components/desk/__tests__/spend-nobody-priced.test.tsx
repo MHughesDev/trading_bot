@@ -20,8 +20,8 @@
  * as zero — on the page whose numbers are money.
  */
 import { describe, expect, it } from 'vitest'
+import { usageRows } from '@/components/desk/Operations.helpers'
 
-import { usageRows } from '../Operations'
 
 /** The response shape `get_usage` builds. */
 function usage(over: Record<string, unknown> = {}): Record<string, unknown> {

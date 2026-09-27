@@ -22,7 +22,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
-import { KillSwitchBanner, killSwitchTripped, killSwitchView } from '../KillSwitchBanner'
+import { KillSwitchBanner } from '../KillSwitchBanner'
+import { killSwitchTripped, killSwitchView } from '@/components/desk/KillSwitchBanner.helpers'
 
 const killSwitch = vi.hoisted(() => vi.fn())
 vi.mock('@/api/desk', () => ({ deskApi: { killSwitch } }))

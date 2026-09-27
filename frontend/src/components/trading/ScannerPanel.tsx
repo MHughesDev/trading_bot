@@ -20,8 +20,8 @@ import { Select } from '@/components/primitives/Overlay'
 import { Segmented } from '@/components/primitives/Segmented'
 import { EmptyState } from '@/components/primitives/States'
 import { assetClassChartColor, inferAssetClass } from '@/lib/assetClass'
-import { useLiveQuotes } from './Watchlist'
 import { cn } from '@/lib/utils'
+import { useLiveQuotes } from '@/hooks/useLiveQuotes'
 
 // ── Strategy condition evaluator ──────────────────────────────────────────────
 

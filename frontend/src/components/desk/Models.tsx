@@ -16,7 +16,8 @@ import { Field, Input } from '@/components/primitives/Field'
 import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'
 import { EmptyState } from '@/components/primitives/States'
 import { LLM_PROVIDERS, conversationsApi, llmApi, type AgentProfile, type LlmProvider } from '@/api/agent'
-import { TierBadge, profileIsMeasured } from './Shared'
+import { TierBadge } from './Shared'
+import { profileIsMeasured } from '@/components/desk/Shared.helpers'
 
 /** Exported so its three credential states can be exercised without a network. */
 export function ProviderCard({
@@ -122,11 +123,11 @@ export function ProviderCard({
   )
 }
 
-// The measurement rule lives beside the badge it feeds (`Shared.tsx`), because
-// three surfaces drew this badge and all three had spelled it out themselves.
-// Re-exported here so `profileIsMeasured` stays importable from the page whose
-// acceptance names it.
-export { profileIsMeasured } from './Shared'
+// The measurement rule lives beside the badge it feeds, in `Shared.helpers.ts`,
+// because three surfaces drew this badge and all three had spelled it out
+// themselves. It is imported above rather than re-exported here: a module that
+// exports components *and* a plain function cannot fast-refresh, and a re-export
+// counts (react-refresh/only-export-components).
 
 export function ProfileCard({ p }: { p: AgentProfile }) {
   const measured = profileIsMeasured(p)

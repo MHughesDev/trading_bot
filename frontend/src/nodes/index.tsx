@@ -13,6 +13,7 @@ import {
   type SizeType,
 } from '@/types/spec'
 import { NodeField, NodeShell } from './NodeShell'
+import { MARKET_DATA_LABELS } from './market-data-labels'
 
 /* =============================================================================
    Node renderers.
@@ -28,20 +29,6 @@ import { NodeField, NodeShell } from './NodeShell'
 /* --- Market data (family: data) -------------------------------------------- */
 
 export type MarketDataSource = 'price' | 'volume' | 'orderbook' | 'funding'
-
-export const MARKET_DATA_LABELS: Record<MarketDataSource, string> = {
-  price: 'Price series',
-  volume: 'Volume',
-  orderbook: 'Order book',
-  funding: 'Funding rate',
-}
-
-export const MARKET_DATA_LANES: Record<MarketDataSource, string> = {
-  price: 'market.bars.1m',
-  volume: 'market.bars.1m',
-  orderbook: 'market.orderbook.l2',
-  funding: 'market.funding_rate',
-}
 
 export type MarketDataNodeData = {
   source: MarketDataSource
@@ -293,4 +280,3 @@ export function ExitNode({ data, selected }: NodeProps<ExitNodeType>) {
 export { INDICATOR_LABELS, CONDITION_LABELS, EXIT_LABELS }
 export { NodeShell, NodeField } from './NodeShell'
 export type { NodeFamily, FamilyInfo } from './NodeShell'
-export { FAMILIES, TYPE_FAMILY, familyOf } from './NodeShell'

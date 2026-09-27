@@ -7,8 +7,8 @@
  * which is what this pins.
  */
 import { describe, expect, it } from 'vitest'
+import { formatRate } from '@/components/desk/Operations.helpers'
 
-import { formatRate } from '../Operations'
 
 describe('formatRate', () => {
   it('renders a measured rate as a percentage', () => {

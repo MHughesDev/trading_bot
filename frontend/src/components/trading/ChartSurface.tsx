@@ -13,6 +13,7 @@ import { NumberField } from '@/components/primitives/Field'
 import { price as fmtPrice, DASH, seriesColor } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import type { PriceLineAnnotation } from '@/components/charts/Annotations'
+import { LAYOUT_MODES, indicatorLabel } from './ChartSurface.layouts'
 
 /* =============================================================================
    The chart surface used by both the terminal and the workspace chart panel.
@@ -24,13 +25,6 @@ import type { PriceLineAnnotation } from '@/components/charts/Annotations'
 
 export type LayoutMode = '1' | '2' | '4' | '3+1'
 
-export const LAYOUT_MODES: { value: LayoutMode; label: string; icon: typeof Square; panes: number }[] = [
-  { value: '1', label: 'Single chart', icon: Square, panes: 1 },
-  { value: '2', label: 'Two charts side by side', icon: Columns2, panes: 2 },
-  { value: '4', label: 'Four charts', icon: Grid2x2, panes: 4 },
-  { value: '3+1', label: 'One large, three small', icon: LayoutPanelTop, panes: 4 },
-]
-
 const OVERLAY_KINDS: { kind: IndicatorKind; label: string; overlay: boolean }[] = [
   { kind: 'ema', label: 'EMA', overlay: true },
   { kind: 'sma', label: 'SMA', overlay: true },
@@ -39,15 +33,6 @@ const OVERLAY_KINDS: { kind: IndicatorKind; label: string; overlay: boolean }[] 
   { kind: 'rsi', label: 'RSI', overlay: false },
   { kind: 'macd', label: 'MACD', overlay: false },
 ]
-
-export function indicatorLabel(i: IndicatorInstance): string {
-  switch (i.kind) {
-    case 'bb': return `BB(${i.period ?? 20}, ${i.stddev ?? 2})`
-    case 'macd': return `MACD(${i.fast ?? 12}, ${i.slow ?? 26}, ${i.signal ?? 9})`
-    case 'volume': return 'Volume'
-    default: return `${i.kind.toUpperCase()}(${i.period ?? 20})`
-  }
-}
 
 function uid(kind: string) {
   return `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`

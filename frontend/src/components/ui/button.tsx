@@ -1,4 +1,5 @@
-// L-10: buttonVariants is defined in button.variants.ts and re-exported here
+// L-10: buttonVariants lives in button.variants.ts — importers take it from there, so
+// that fast refresh still works for this file (react-refresh/only-export-components).
 // only as a type convenience. React Fast Refresh requires component files to
 // export only React components; non-component exports disable HMR.
 import * as React from 'react'
@@ -7,7 +8,6 @@ import { type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
 import { buttonVariants } from './button.variants'
 
-export { buttonVariants } from './button.variants'
 
 export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,

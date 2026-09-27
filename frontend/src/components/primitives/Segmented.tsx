@@ -1,5 +1,6 @@
 import { useRef, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
+import { PCT_STEPS } from './Segmented.steps'
 
 /* Spec §3.3 — segmented control. role=radiogroup, arrows move selection.
    The buy/sell variant tints from the direction families, never from accent. */
@@ -147,9 +148,6 @@ export function Tabs<T extends string>({
     </div>
   )
 }
-
-/* Spec §3.6 — percent-of-buying-power row. */
-export const PCT_STEPS = [10, 25, 50, 75, 100] as const
 
 export function PercentRow({
   value,

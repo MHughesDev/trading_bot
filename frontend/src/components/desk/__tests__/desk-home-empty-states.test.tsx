@@ -19,7 +19,8 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { LastDecision, lastDecision } from '../DeskHome'
+import { LastDecision } from '../DeskHome'
+import { lastDecision } from '@/components/desk/DeskHome.helpers'
 
 const answered = [
   {

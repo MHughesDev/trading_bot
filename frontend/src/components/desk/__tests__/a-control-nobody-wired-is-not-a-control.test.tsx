@@ -46,12 +46,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { DeskCard } from '@/api/desk'
-import { Composer, SLASH_COMMANDS } from '../Composer'
-import { ControlsRow, useDeskKeymap, type DeskControls } from '../ControlsRow'
+import { Composer } from '../Composer'
+import { ControlsRow, type DeskControls } from '../ControlsRow'
 import { EvidenceTab, MemoryTab, type EvidenceEntry } from '../RightPanel'
 import { RunDetail } from '../RunDetail'
 import { Card } from '../Cards'
 import { ApprovalCard } from '../ApprovalsInbox'
+import { SLASH_COMMANDS } from '@/components/desk/Composer.helpers'
+import { useDeskKeymap } from '@/components/desk/useDeskKeymap'
 
 // The inbox answers through `researchApi`, not `deskApi`.
 const answerApproval = vi.hoisted(() => vi.fn(() => Promise.resolve({ data: {} })))

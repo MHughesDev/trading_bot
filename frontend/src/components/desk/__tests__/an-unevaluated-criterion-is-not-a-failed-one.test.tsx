@@ -23,7 +23,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { WorkingState } from '@/api/desk'
 import { emptyWorkingState } from '@/api/desk'
-import { StateTab, acceptanceMark } from '../RightPanel'
+import { StateTab } from '../RightPanel'
+import { acceptanceMark } from '@/components/desk/RightPanel.helpers'
 
 function withAcceptance(acceptance: WorkingState['acceptance']): WorkingState {
   return { ...emptyWorkingState('does the overnight gap on BTC pay after costs?'), acceptance }

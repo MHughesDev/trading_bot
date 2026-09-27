@@ -23,8 +23,9 @@ import { fileURLToPath } from 'node:url'
 
 import type { DeskCard, ProvenanceMark } from '@/api/desk'
 import { EvidenceChip } from '../Shared'
-import { makeResolver } from '../Conversation'
-import { citedCount, rowMark, type MemoryRow } from '../MemoryBrowser'
+import { type MemoryRow } from '../MemoryBrowser'
+import { makeResolver } from '@/components/desk/Conversation.helpers'
+import { citedCount, rowMark } from '@/components/desk/MemoryBrowser.helpers'
 
 const FETCHED: ProvenanceMark = {
   provenance: 'untrusted',

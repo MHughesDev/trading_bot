@@ -29,7 +29,8 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { EvidenceTab, StateTab, absenceCopy } from '../RightPanel'
+import { EvidenceTab, StateTab } from '../RightPanel'
+import { absenceCopy } from '@/components/desk/RightPanel.helpers'
 
 describe('the State tab says why it has no state', () => {
   it('names the unmounted route rather than promising a step that will never land', () => {

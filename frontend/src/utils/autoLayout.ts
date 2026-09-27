@@ -1,5 +1,5 @@
 import type { Edge, Node } from '@xyflow/react'
-import { FAMILIES, TYPE_FAMILY } from '@/nodes'
+import { FAMILIES, TYPE_FAMILY } from '@/nodes/families'
 
 /* =============================================================================
    Spec §3.21 — auto-layout.

@@ -32,7 +32,7 @@ import { Button } from '@/components/primitives/Button'
 import { EmptyState } from '@/components/primitives/States'
 import type { SessionDigestLine, SessionDigestRef, SessionDigestRow, SessionDigestView } from '@/api/desk'
 import { sessionDigestBudgetLine, sessionDigestHeading, sessionDigestTarget, sessionDigestView } from '@/api/desk'
-import { ago } from './Shared'
+import { ago } from '@/components/desk/Shared.helpers'
 
 /** What a click on a line asks the surface to open. */
 export type OpenDigestRef = (ref: SessionDigestRef) => void

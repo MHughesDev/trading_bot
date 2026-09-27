@@ -7,9 +7,10 @@ import type { DigestLine, PromptSection, TrajectoryStep } from '@/api/desk'
 import { assemblePrompt, groupByStep, promptIsFaithful } from '@/api/desk'
 import { mergeCards, toCards, type WireEvent } from '@/lib/desk/events'
 import { parseFrame } from '@/hooks/useDeskStream'
-import { ControlsRow, useDeskKeymap, type DeskControls } from '../ControlsRow'
-import { linesInGap, shouldShowDigest, MIN_GAP_MS } from '../AwayDigest'
-import { diffLines } from '../RunDetail'
+import { ControlsRow, type DeskControls } from '../ControlsRow'
+import { useDeskKeymap } from '@/components/desk/useDeskKeymap'
+import { linesInGap, shouldShowDigest, MIN_GAP_MS } from '@/components/desk/AwayDigest.helpers'
+import { diffLines } from '@/components/desk/RunDetail.helpers'
 
 function harness(overrides: Partial<DeskControls> = {}) {
   const spies = {

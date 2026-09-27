@@ -8,8 +8,9 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { WorkingState } from '@/api/desk'
 import { emptyWorkingState } from '@/api/desk'
-import { StateTab, waitingOn } from '../RightPanel'
+import { StateTab } from '../RightPanel'
 import { BudgetMeter } from '../Shared'
+import { waitingOn } from '@/components/desk/RightPanel.helpers'
 
 function runningState(): WorkingState {
   return {

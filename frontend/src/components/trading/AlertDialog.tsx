@@ -11,6 +11,7 @@ import { Label } from '@/components/primitives/Num'
 import { price as fmtPrice, relativeTime, instrumentMeta } from '@/lib/format'
 import { createAlert, deleteAlert, fetchAlerts, type PriceAlert } from '@/api/portfolio'
 import { useToast } from '@/hooks/useToast'
+import { useAlerts } from '@/hooks/useAlerts'
 
 /* =============================================================================
    Price alerts.
@@ -25,15 +26,6 @@ const KINDS = [
   { value: 'price_below' as const, label: 'Price falls below' },
   { value: 'pct_change' as const, label: 'Moves by %' },
 ]
-
-export function useAlerts() {
-  return useQuery({
-    queryKey: ['alerts'],
-    queryFn: fetchAlerts,
-    refetchInterval: 30_000,
-    retry: 1,
-  })
-}
 
 export function AlertDialog({
   open,

@@ -33,8 +33,8 @@
  * it had to step around.
  */
 import { describe, expect, it } from 'vitest'
+import { usageRows } from '@/components/desk/Operations.helpers'
 
-import { usageRows } from '../Operations'
 
 /** A response with real traffic on it, so `unrecorded` is false throughout. */
 function usage(over: Record<string, unknown> = {}): Record<string, unknown> {

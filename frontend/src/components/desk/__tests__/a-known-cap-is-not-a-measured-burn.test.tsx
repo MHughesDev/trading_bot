@@ -26,7 +26,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { BudgetView } from '@/api/desk'
 import { emptyWorkingState } from '@/api/desk'
-import { BudgetMeter, budgetBars } from '../Shared'
+import { BudgetMeter } from '../Shared'
+import { budgetBars } from '@/components/desk/Shared.helpers'
 
 /** What `/api/agent/runs/{id}/state` will answer for a live run today. */
 function asSentToday(over: Partial<BudgetView> = {}): BudgetView {

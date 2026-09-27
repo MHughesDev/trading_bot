@@ -9,8 +9,8 @@
  * component that renders nothing in both cases has told them the first.
  */
 import { describe, expect, it } from 'vitest'
+import { commentPlaceholder } from '@/components/desk/Dossier.helpers'
 
-import { commentPlaceholder } from '../Dossier'
 
 describe('commentPlaceholder', () => {
   it('distinguishes loading from empty', () => {

@@ -22,7 +22,8 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import type { BudgetView } from '@/api/desk'
-import { BudgetMeter, budgetBars } from '../Shared'
+import { BudgetMeter } from '../Shared'
+import { budgetBars } from '@/components/desk/Shared.helpers'
 
 function budget(over: Partial<BudgetView> = {}): BudgetView {
   return {

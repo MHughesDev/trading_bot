@@ -18,7 +18,9 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import type { AgentProfile } from '@/api/agent'
-import { ProfileCard, profileIsMeasured } from '../Models'
+import { ProfileCard } from '../Models'
+// One copy, in `Shared.helpers`. There were three before the sweep.
+import { profileIsMeasured } from '../Shared.helpers'
 
 function profile(over: Partial<AgentProfile> = {}): AgentProfile {
   return {

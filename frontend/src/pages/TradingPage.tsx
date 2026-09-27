@@ -14,11 +14,11 @@ import {
 import { assetClassChartColor, assetClassInfo, inferAssetClass, type PlatformAssetClass } from '@/lib/assetClass'
 import { DASH, money, price as fmtPrice } from '@/lib/format'
 import { WorkspacePanel } from '@/components/trading/WorkspacePanel'
-import { WatchlistPanel, useInitializedAssets, useLiveQuotes } from '@/components/trading/Watchlist'
+import { WatchlistPanel } from '@/components/trading/Watchlist'
 import { OrderBookPanel, Tape } from '@/components/trading/OrderBook'
 import { OrderTicket } from '@/components/trading/OrderTicket'
 import { ScannerPanel } from '@/components/trading/ScannerPanel'
-import { ChartPane, indicatorLabel } from '@/components/trading/ChartSurface'
+import { ChartPane } from '@/components/trading/ChartSurface'
 import { Button, IconButton } from '@/components/primitives/Button'
 import { Badge, Swatch } from '@/components/primitives/Badge'
 import { Label, Pnl, Pct } from '@/components/primitives/Num'
@@ -29,6 +29,8 @@ import { EmptyState } from '@/components/primitives/States'
 import { SearchInput } from '@/components/primitives/Field'
 import { TIMEFRAMES, timeframeLabel } from '@/hooks/useBars'
 import type { IndicatorInstance } from '@/components/charts/MultiPaneChart'
+import { useInitializedAssets, useLiveQuotes } from '@/hooks/useLiveQuotes'
+import { indicatorLabel } from '@/components/trading/ChartSurface.layouts'
 
 /* =============================================================================
    The trading dashboard — the desk.

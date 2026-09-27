@@ -17,7 +17,7 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useDeskStream, parseFrame } from '@/hooks/useDeskStream'
-import { staleAge } from '../Conversation'
+import { staleAge } from '@/components/desk/Conversation.helpers'
 
 vi.mock('@/lib/api', () => ({ getStoredToken: () => 'test-token' }))
 

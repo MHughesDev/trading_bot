@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { ArrowRight, Keyboard, Moon, Rows3, Search, Sun } from 'lucide-react'
-import { NAV_SECTIONS, SECONDARY_SECTIONS } from './TopBar'
 import { useThemeStore } from '@/store/theme'
 import { useModeStore } from '@/store/mode'
 import { cn } from '@/lib/utils'
+import { NAV_SECTIONS, SECONDARY_SECTIONS } from '@/components/layout/nav-sections'
 
 /* Spec §5.6 — ⌘K command palette, ⌘/ shortcut sheet.
    Every shortcut in the product MUST be discoverable in the sheet. */

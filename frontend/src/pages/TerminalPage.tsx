@@ -7,7 +7,7 @@ import { usePortfolioSummary } from '@/hooks/usePortfolioSummary'
 import { useBars, timeframeLabel } from '@/hooks/useBars'
 import { assetClassInfo, inferAssetClass, type PlatformAssetClass } from '@/lib/assetClass'
 import { DASH, compact, price as fmtPrice, signedPct, pct } from '@/lib/format'
-import { WatchlistPanel, WatchStar, useInitializedAssets, useLiveQuotes } from '@/components/trading/Watchlist'
+import { WatchlistPanel, WatchStar } from '@/components/trading/Watchlist'
 import { OrderBookPanel } from '@/components/trading/OrderBook'
 import { OrderTicket } from '@/components/trading/OrderTicket'
 import { TerminalDock } from '@/components/trading/TerminalDock'
@@ -20,6 +20,7 @@ import { MenuItem, MenuLabel, Popover, Tooltip } from '@/components/primitives/O
 import { EmptyState } from '@/components/primitives/States'
 import type { IndicatorInstance } from '@/components/charts/MultiPaneChart'
 import { cn } from '@/lib/utils'
+import { useInitializedAssets, useLiveQuotes } from '@/hooks/useLiveQuotes'
 
 /* =============================================================================
    Spec §4.2 — the per-asset trading terminal.

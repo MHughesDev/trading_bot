@@ -12,8 +12,8 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { yieldLine } from '../Cards'
 import { toCard } from '@/lib/desk/events'
+import { yieldLine } from '@/components/desk/Cards.helpers'
 
 describe('yieldLine', () => {
   it('names each count rather than scoring them', () => {

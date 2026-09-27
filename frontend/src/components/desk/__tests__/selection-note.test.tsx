@@ -14,8 +14,8 @@
  * a line with an empty one, and that a capped list says it was capped.
  */
 import { describe, expect, it } from 'vitest'
+import { selectionLines, selectionSummary } from '@/components/desk/Cards.helpers'
 
-import { selectionLines, selectionSummary } from '../Cards'
 
 const note = {
   policy_version: 'v2',

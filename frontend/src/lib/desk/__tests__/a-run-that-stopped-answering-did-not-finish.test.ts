@@ -24,7 +24,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { DeskCard } from '@/api/desk'
 import { cardAnnouncements, isDecisionCard, runFinishedAnnouncement } from '../announce'
-import { pendingApprovals } from '@/components/desk/RightPanel'
+import { pendingApprovals } from '@/components/desk/RightPanel.helpers'
 
 function card(over: Partial<DeskCard> & { seq: number; kind: DeskCard['kind'] }): DeskCard {
   return { step: 1, at: '2026-09-22T10:00:00Z', headline: 'headline', ...over }

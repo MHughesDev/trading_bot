@@ -7,7 +7,8 @@ import { strategiesApi, api } from '@/lib/api'
 import { useModeStore } from '@/store/mode'
 import { cn } from '@/lib/utils'
 import { ChevronDown } from 'lucide-react'
-import { TriggerStep, DEFAULT_TRIGGER, type TriggerSpec } from './TriggerStep'
+import { TriggerStep, type TriggerSpec } from './TriggerStep'
+import { DEFAULT_TRIGGER } from '@/components/automations/TriggerStep.defaults'
 
 const ASSET_CLASSES = [
   { value: 'crypto_spot_cex', label: 'Crypto Spot (CEX)' },

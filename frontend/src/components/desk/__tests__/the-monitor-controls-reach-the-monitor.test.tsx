@@ -27,12 +27,8 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import {
-  StrategyActionDialog,
-  strategyActionBody,
-  strategyActionRefusal,
-  strategyScope,
-} from '../Operations'
+import { StrategyActionDialog } from '../Operations'
+import { strategyActionBody, strategyActionRefusal, strategyScope } from '@/components/desk/Operations.helpers'
 
 describe('the body is the one the action refuses without', () => {
   it('sends a scale percentage, because `scale_pct is required`', () => {

@@ -24,13 +24,8 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
 import type { AwayDigest } from '@/api/desk'
-import {
-  AwayDigestPanel,
-  MIN_GAP_MS,
-  blindSpots,
-  hasSomethingToSay,
-  linesInGap,
-} from '../AwayDigest'
+import { AwayDigestPanel } from '../AwayDigest'
+import { MIN_GAP_MS, blindSpots, hasSomethingToSay, linesInGap } from '@/components/desk/AwayDigest.helpers'
 
 const NOW = Date.parse('2026-09-20T18:00:00Z')
 const LAST_VISIT = NOW - 8 * 60 * 60 * 1000

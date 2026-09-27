@@ -34,7 +34,8 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 
-import { Usage, nothingRecordedInLlmUsage, usageRows } from '../Operations'
+import { Usage } from '../Operations'
+import { nothingRecordedInLlmUsage, usageRows } from '@/components/desk/Operations.helpers'
 
 const usageCall = vi.hoisted(() => vi.fn())
 // The Spend route renders the barren panel beside the table; it is not under

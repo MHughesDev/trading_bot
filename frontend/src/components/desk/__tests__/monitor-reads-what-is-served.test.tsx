@@ -24,8 +24,8 @@
  * apart.
  */
 import { describe, expect, it } from 'vitest'
+import { killSwitchBadge, monitorRow } from '@/components/desk/Operations.helpers'
 
-import { killSwitchBadge, monitorRow } from '../Operations'
 
 describe('the kill-switch badge does not call an unknown state safe', () => {
   it('says the state is unknown when nothing answered', () => {

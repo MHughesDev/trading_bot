@@ -13,7 +13,8 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { questionFields, type MemoryRow } from '../MemoryBrowser'
+import { type MemoryRow } from '../MemoryBrowser'
+import { questionFields } from '@/components/desk/MemoryBrowser.helpers'
 
 function row(extra: Record<string, unknown> | undefined): MemoryRow {
   return {

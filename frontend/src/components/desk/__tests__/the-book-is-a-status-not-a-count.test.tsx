@@ -34,9 +34,9 @@ import type { ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { AgentProfile } from '@/api/agent'
-import { monitorRow } from '../Operations'
-import { tierTiles } from '../Shared'
 import { TheBook } from '../DeskHome'
+import { monitorRow } from '@/components/desk/Operations.helpers'
+import { tierTiles } from '@/components/desk/Shared.helpers'
 
 vi.mock('@/api/desk', () => ({ deskApi: { haltAll: vi.fn(() => Promise.resolve({ data: {} })) } }))
 

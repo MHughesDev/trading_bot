@@ -24,8 +24,8 @@ import { MemoryRouter } from 'react-router-dom'
 import type { ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { environmentBadge, monitorRow } from '../Operations'
 import { TheBook } from '../DeskHome'
+import { environmentBadge, monitorRow } from '@/components/desk/Operations.helpers'
 
 vi.mock('@/api/desk', () => ({ deskApi: { haltAll: vi.fn(() => Promise.resolve({ data: {} })) } }))
 
