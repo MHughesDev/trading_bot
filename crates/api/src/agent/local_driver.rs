@@ -2087,9 +2087,15 @@ fn build_request(
         Decode::Native { tools } => (None, native_tools(tools)),
         other => (other.schema().cloned(), Vec::new()),
     };
-    let messages = match transcript.filter(|_| matches!(call.decode, Decode::Native { .. })) {
-        Some(t) => transcript_messages(t),
-        None => vec![Message::User {
+    // The transcript is replayed only for a native tool call, and a single user
+    // message carries the prompt otherwise. Written as a match on the pair rather
+    // than `transcript.filter(|_| ...)`: that form reads as a predicate over the
+    // transcript, and a predicate that ignores the value it is given reads as a
+    // bug — it is not one, the condition really is about the *call*, and saying so
+    // in the shape of the code costs nothing.
+    let messages = match (transcript, &call.decode) {
+        (Some(t), Decode::Native { .. }) => transcript_messages(t),
+        _ => vec![Message::User {
             content: call.prompt.clone(),
         }],
     };
