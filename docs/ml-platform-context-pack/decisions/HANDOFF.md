@@ -44,9 +44,14 @@ Phase 0 and 1: done. Phase 2: every item done except 2.1, 2.14 and 2.16, which a
 
 ## 5. Next work, in order
 
-> **Status note — 2026-09-15.** Every item in this section is now dispatched to a parallel
-> track; see `docs/plans/EXECUTION-BOARD.md` §1 before starting any of them, so two agents do
-> not build the same thing. **Do not treat the numbered list below as unclaimed work.**
+> **Status note — 2026-09-15, redirected 2026-09-27.** Every item in this section was
+> dispatched to a parallel track. This note used to send you to
+> `docs/plans/EXECUTION-BOARD.md` §1 to check for a collision before starting one — that
+> table is **superseded and dated**, and its tracks are named by branches that have since
+> landed, been salvaged into main, or gone stale. Check **[`docs/plans/PLAN.md`](../../plans/PLAN.md)**
+> instead: §1 for what is actually left and §3a for how concurrent work is partitioned now
+> (by file territory in one tree, not by branch). **Do not treat the numbered list below as
+> unclaimed work** without checking there first.
 >
 > | This item | Track | State |
 > |---|---|---|

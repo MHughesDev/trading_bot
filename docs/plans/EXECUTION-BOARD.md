@@ -1,6 +1,8 @@
 ---
 Type: Formal
-Status: Current
+Status: Superseded
+Superseded By: docs/plans/PLAN.md §3a
+Superseded On: 2026-09-27
 Created: 2026-09-15
 Derived From: docs/plans/ROADMAP.md, Set S MASTER §5, Set P MASTER §5, Set T MASTER §5,
   docs/procedures/execute-plan.md, ml-platform-context-pack/CLAUDE.md
@@ -8,12 +10,33 @@ Derived From: docs/plans/ROADMAP.md, Set S MASTER §5, Set P MASTER §5, Set T M
 
 # The Execution Board
 
-**The coordination contract for running many implementation agents at once on one repository.**
-[`ROADMAP.md`](./ROADMAP.md) says what to build and in what order. This file says who is
-building what *right now*, what each track may touch, and what every track must not.
+> ## SUPERSEDED, 2026-09-27. Read [PLAN.md §3a](./PLAN.md) instead.
+>
+> **This file's coordination model no longer applies, and following it would now
+> cause the harm it was written to prevent.** It partitions agents by *branch and
+> worktree*, where the hazard is the merge. Every agent since has run in the
+> single main tree — a standing instruction — where there is no merge and the
+> hazard is the opposite one: two agents editing the same file, and one agent's
+> half-written file breaking another's build. The partition that works there is
+> by **file territory**, which is what PLAN.md §3a specifies.
+>
+> **§1's track table is history, not state.** Its eighteen tracks were dispatched
+> on 2026-09-15 and are named by branches that have since either landed, been
+> salvaged into main, or gone stale — `claude/set-p-phase-3-altdata` is 272
+> commits behind main and its collectors reached main by a different route
+> entirely. Nothing reads this table to decide anything, and a reader who took it
+> for current would look for work in places it is no longer being done.
+>
+> Kept rather than deleted because the reasoning in §2 onward — migration-number
+> allocation, the shared-file list, what a track must never touch — is what
+> PLAN.md §3a was derived *from*, and the record of how this programme learned to
+> run agents in parallel is worth more than the disk it costs. Do not update the
+> track table; it is dated on purpose.
 
-> Read this **before** your plan file, not after. A track that takes another track's migration
-> number or edits another track's crate costs more to untangle than it saved.
+**The coordination contract for running many implementation agents at once on one repository.**
+[`ROADMAP.md`](./ROADMAP.md) says what to build and in what order. This file said who was
+building what at the time it was written, what each track could touch, and what every track
+must not.
 
 ---
 
