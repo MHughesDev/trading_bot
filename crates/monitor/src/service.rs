@@ -970,14 +970,83 @@ impl LeaseWatcher {
         status
     }
 
-    /// Run until cancelled.
+    /// Run until cancelled: refresh on every notification, and on the cadence
+    /// regardless.
+    ///
+    /// # Why both, and why the cadence is the floor rather than the mechanism
+    ///
+    /// COMP-007's last exit criterion is that the kill-switch state is visible
+    /// "within one event of a trip", and migrations `0074` and `0075` were
+    /// written to make that possible: both publish a `pg_notify` when their table
+    /// changes, and `0074`'s comment states outright that the mirror "is
+    /// refreshed on every lease renewal and on this NOTIFY, so a trip propagates
+    /// without waiting a cadence". Nothing in the workspace had ever issued a
+    /// `LISTEN`. The triggers fired into an empty room, and a trip reached the
+    /// order gate when the timer next came round — up to a whole
+    /// `MONITOR_MIRROR_REFRESH_MS` after a human pressed the button.
+    ///
+    /// So the notification is what makes it fast and the cadence is what makes it
+    /// **true**. The wait is a [`tokio::time::timeout`] around the receive rather
+    /// than a `select!` on a channel, because the failure that matters here is the
+    /// listener's own: a dropped connection, a `LISTEN` the server forgot across
+    /// a failover, a notification lost in a reconnect. A refresh driven only by
+    /// notifications would, in every one of those cases, stop refreshing *and go
+    /// on reporting the last thing it saw* — an order gate that has quietly
+    /// stopped asking, which is the one direction this crate must never fail in.
+    /// With the timeout, the worst a broken listener can do is make the mirror as
+    /// slow as it was before it existed.
+    ///
+    /// A reconnect is treated as a reason to refresh immediately, not as a
+    /// non-event: [`PgListener::try_recv`][t] returns `Ok(None)` exactly when the
+    /// connection was re-established, which means a notification may have been
+    /// missed, which means the mirror may be stale about a halt.
+    ///
+    /// [t]: sqlx::postgres::PgListener::try_recv
     pub async fn run(self) {
+        let mut listener = match self.store.listener().await {
+            Ok(l) => Some(l),
+            Err(e) => {
+                // Not fatal. The cadence below is the whole safety property; the
+                // listener is latency. Saying so loudly matters because the
+                // desk's "within one event" claim stops holding here.
+                tracing::error!(
+                    error = %e,
+                    channels = ?crate::store::NOTIFY_CHANNELS,
+                    "cannot listen for monitor notifications — the order gate mirror will \
+                     refresh on its cadence only"
+                );
+                None
+            }
+        };
         loop {
             let status = self.refresh().await;
             if !status.permits_orders() {
                 tracing::warn!(?status, "monitor lease not valid — orders refused");
             }
-            tokio::time::sleep(self.cadence).await;
+            match listener.as_mut() {
+                Some(l) => match tokio::time::timeout(self.cadence, l.try_recv()).await {
+                    Ok(Ok(Some(n))) => tracing::debug!(
+                        channel = n.channel(),
+                        scope = n.payload(),
+                        "monitor notification — refreshing the order gate mirror now"
+                    ),
+                    Ok(Ok(None)) => tracing::warn!(
+                        "the monitor notification connection was re-established — refreshing \
+                         in case a trip was published while it was down"
+                    ),
+                    Ok(Err(e)) => {
+                        tracing::error!(
+                            error = %e,
+                            "monitor notifications failed — falling back to the cadence"
+                        );
+                        listener = None;
+                    }
+                    // The cadence elapsed with nothing published, which is the
+                    // ordinary case and not worth a line in the log.
+                    Err(_elapsed) => {}
+                },
+                None => tokio::time::sleep(self.cadence).await,
+            }
         }
     }
 }

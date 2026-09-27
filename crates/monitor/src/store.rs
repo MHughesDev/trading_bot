@@ -42,6 +42,21 @@ fn numeric(v: Option<f64>) -> Option<Decimal> {
     v.and_then(Decimal::from_f64_retain)
 }
 
+/// Every `pg_notify` channel the `monitor` schema's triggers publish on.
+///
+/// Written once, here, and read by both the listener and the guard that scans the
+/// migrations for channels this list has forgotten. A channel published by a
+/// trigger and absent from this array is a trip that reaches the order gate no
+/// sooner than the next cadence — which is exactly the state the whole of
+/// `monitor` was in until this constant existed, because `0074` and `0075` both
+/// publish and nothing anywhere issued a `LISTEN`.
+///
+/// `monitor.strategy_state` is deliberately **not** here, and the reason is not
+/// an omission: it has no trigger to listen to. An automatic scale-down
+/// therefore still waits a cadence. Adding the trigger is a migration, which
+/// this crate may not write.
+pub const NOTIFY_CHANNELS: [&str; 2] = ["monitor_lease", "monitor_kill_switch"];
+
 /// The monitor's database.
 #[derive(Clone, Debug)]
 pub struct MonitorStore {
@@ -57,6 +72,39 @@ impl MonitorStore {
     #[must_use]
     pub fn pool(&self) -> &PgPool {
         &self.pg
+    }
+
+    /// A listener on every channel the monitor's triggers publish
+    /// ([`NOTIFY_CHANNELS`]).
+    ///
+    /// # Why this exists
+    ///
+    /// Migration `0074` says, in a comment, that the order gate's mirror "is
+    /// refreshed on every lease renewal **and on this NOTIFY**, so a trip
+    /// propagates without waiting a cadence". `0075` publishes the same way for
+    /// `monitor.kill_switch`. Both triggers have existed and fired since the
+    /// migrations shipped, and until now **nothing in the workspace ever issued
+    /// a `LISTEN`** — the notifications were published into a channel with no
+    /// subscriber, and the mirror's only refresh was its cadence timer. A
+    /// migration comment cannot notice that about itself; the guard in
+    /// `tests/notifications_reach_the_gate.rs` can.
+    ///
+    /// The listener holds a connection of its own out of the pool, which is
+    /// correct and not incidental: a notification that had to wait for a pool
+    /// permit behind the very queries a wedged database is blocking would arrive
+    /// no sooner than the cadence it exists to beat.
+    ///
+    /// # Errors
+    /// Anything that stopped the `LISTEN` being issued. The caller must keep
+    /// polling on its cadence rather than treat this as fatal — see
+    /// [`LeaseWatcher::run`][r], where a listener that cannot be built or that
+    /// dies degrades to the cadence poll instead of stopping the refresh.
+    ///
+    /// [r]: crate::service::LeaseWatcher::run
+    pub async fn listener(&self) -> Result<sqlx::postgres::PgListener, StoreError> {
+        let mut listener = sqlx::postgres::PgListener::connect_with(&self.pg).await?;
+        listener.listen_all(NOTIFY_CHANNELS.iter().copied()).await?;
+        Ok(listener)
     }
 
     // ── Lease ───────────────────────────────────────────────────────────────

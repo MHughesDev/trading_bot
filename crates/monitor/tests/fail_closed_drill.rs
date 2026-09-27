@@ -1292,3 +1292,122 @@ async fn a_platform_fault_inside_a_window_is_recorded_and_halts_nothing() {
         "with no window open, a lost component is a global halt (§4)"
     );
 }
+
+// ── The last exit criterion — "within one event of a trip" ──────────────────
+
+#[tokio::test]
+async fn a_trip_reaches_the_order_gate_without_waiting_a_cadence() {
+    // Phase 7's last exit criterion is that the kill-switch state is visible
+    // "within one event of a trip", and migrations 0074 and 0075 were written to
+    // make that possible: each installs an `AFTER INSERT OR UPDATE` trigger that
+    // calls `pg_notify`. `0074`'s comment states the consequence outright — the
+    // mirror "is refreshed on every lease renewal and on this NOTIFY, so a trip
+    // propagates without waiting a cadence".
+    //
+    // Until 2026-09-23 nothing in the workspace issued a `LISTEN`. Both triggers
+    // published into an empty room and `LeaseWatcher::run` was a
+    // `sleep(cadence)` loop, so a halt reached the order gate when the timer next
+    // came round.
+    //
+    // The cadence here is deliberately absurd. A minute is far longer than any
+    // real `MONITOR_MIRROR_REFRESH_MS`, and that is the point: with the poll as
+    // the only mechanism this test cannot pass inside its five-second budget, so
+    // it is measuring the notification and nothing else. Reverted to the
+    // pre-change `run`, it fails on the timeout.
+    let (pg, mut drill) = db!();
+    let store = MonitorStore::new(pg.clone());
+
+    let venue = format!("notify-{}", Uuid::new_v4());
+    let scope = Scope::venue(&venue);
+    drill.owns_scope(scope.to_string());
+
+    // A valid lease, so the watcher's first refresh sees a healthy monitor and
+    // records no lease gap. Without it this test would write `global`/`lease`
+    // events into the operator's timeline for an outage that never happened.
+    let terms = drill.terms(60_000);
+    MonitorService::new(store.clone(), terms)
+        .tick()
+        .await
+        .expect("the monitor renews its lease");
+
+    let ks = Arc::new(KillSwitch::new(false));
+    let gate = RiskGate::new(GlobalRiskLimits::default(), Arc::clone(&ks));
+    // A minute, so the cadence cannot be what refreshes the mirror inside this
+    // test: if the assertion below passes, the notification is the only thing
+    // that could have carried the trip.
+    let watcher = LeaseWatcher::new(store.clone(), Arc::clone(&ks), Duration::from_secs(60));
+
+    // The watcher runs as `AppState` spawns it: the whole loop, not a hand-driven
+    // `refresh`. A test that called `refresh` itself would prove nothing about
+    // when production refreshes, which is the entire question.
+    let running = tokio::spawn(watcher.run());
+
+    // Wait for the first pass to have happened, so the assertion below is about a
+    // trip that arrived *after* the loop settled into its wait.
+    for _ in 0..100 {
+        if ks.monitor_available() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        ks.monitor_available(),
+        "the watcher's first refresh never ran; this test is broken, not passing"
+    );
+    assert!(
+        gate.check(intent(), &ctx().on_venue(&venue)).is_ok(),
+        "the venue trades before the trip"
+    );
+
+    // The monitor process trips the venue. `MonitorStore::trip` writes the
+    // durable row and the event and touches no in-memory mirror — which is what
+    // makes this a test of propagation rather than of a shared `Arc`. The
+    // trigger fires inside the same transaction's commit.
+    let event = MonitorEvent::new(
+        scope.clone(),
+        Family::Venue,
+        EventKind::Tripped,
+        "monitor",
+    )
+    .expect("monitor is not an agent actor")
+    .with_reason("the notification drill halts one venue");
+    drill.owns_event(event.event_id);
+    store
+        .trip(&event, "the notification drill halts one venue")
+        .await
+        .expect("the trip is recorded and the row written");
+
+    // Five seconds against a sixty-second cadence. Anything that passes here
+    // passed because of the NOTIFY.
+    let mut propagated_in_ms = None;
+    let started = std::time::Instant::now();
+    for _ in 0..100 {
+        if ks.is_active_scope(&scope) {
+            propagated_in_ms = Some(started.elapsed().as_millis());
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    running.abort();
+
+    let ms = propagated_in_ms.unwrap_or_else(|| {
+        panic!(
+            "five seconds after the trip committed, the order gate's mirror still \
+             says {venue} may trade. The cadence is 60 s, so the only thing that \
+             could have carried this is the pg_notify from migration 0075 — and \
+             nothing was listening for it."
+        )
+    });
+    assert!(
+        ms < 5_000,
+        "propagation took {ms} ms, which is not 'within one event'"
+    );
+    assert!(
+        matches!(
+            gate.check(intent(), &ctx().on_venue(&venue)),
+            Err(RiskRejection::KillSwitchActive)
+        ),
+        "the mirror knows the venue is halted and the gate does not refuse it — the \
+         assertion above is reading something the order path does not"
+    );
+}
