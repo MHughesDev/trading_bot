@@ -32,6 +32,14 @@
 //!   both words anyway, so the day the kind exists this module already accepts
 //!   it, and [`the_kinds_this_watches_are_the_two_the_spec_names`] is what fails
 //!   if somebody quietly drops the one that does not.
+//! * **Nothing publishes a coverage *crossing*.** Coverage itself is recorded —
+//!   the data plane knows how far every instrument reaches — but a frontier is
+//!   a reading, not an event, and [`Observation::CoverageExtended`] now refuses
+//!   a reading rather than raising one card a day off it. What it wants is the
+//!   boundary a question was blocked at, which source 4.4 already holds as a
+//!   `negative_result`'s `data_window.end`. The rule is built and the join is
+//!   named. This is the one gap here that was a **defect** rather than a
+//!   missing producer: see the variant's own docs.
 //! * **No regime is recorded on an instrument profile.** `Kind::InstrumentProfile`
 //!   exists and `MemoryStore::supersede` will keep a succession of them, but
 //!   nothing writes one — no scheduler enqueues the profiler (S-4.7 records
@@ -70,10 +78,48 @@ pub enum Observation {
         since: String,
     },
     /// Data the session did not have before.
+    ///
+    /// # Coverage extending is not an event, and keying on it flooded the agenda
+    ///
+    /// `since` on [`Observation::RegimeFlip`] is documented, named and tested
+    /// so that the rate limit keys on **the change** rather than on the moment
+    /// it was read. This variant had the same obligation and did not meet it:
+    /// the fingerprint was `coverage:{subject}:{to}`, and `to` is the frontier
+    /// the platform's data reaches *now*. On a live feed that advances every
+    /// day, so the fingerprint advanced every day, and §4.7's *"one item per
+    /// event"* became one item per subject per day, forever.
+    ///
+    /// Layer one did not catch it either, which is the part that makes it
+    /// worth a type rather than a comment: the question named `to` as well, so
+    /// [`crate::agenda::dedupe_key`] also differed every day and the second
+    /// day's item merged onto nothing. **Both defences failed at once**, and
+    /// neither had ever been exercised — this variant had no test and no
+    /// producer, so the flood was armed for whoever wired the feed.
+    ///
+    /// So the discrete thing that happens is not "coverage reached `to`". It
+    /// is "coverage crossed a boundary some question was blocked at", and
+    /// [`Self::CoverageExtended::past`] is that boundary. Without one there is
+    /// no event to key on — only a reading — and
+    /// [`Observation::not_an_event`] says so rather than raising an item.
     CoverageExtended {
         subject: String,
         /// The ISO date coverage now reaches.
+        ///
+        /// **Deliberately not in the fingerprint and not in the question.** It
+        /// is the reading, and it moves on its own.
         to: String,
+        /// The boundary the extension crossed: the ISO date a question could
+        /// not be asked past until now.
+        ///
+        /// `None` is the honest common case, not a default to be filled in:
+        /// nothing on this platform publishes "coverage moved past something
+        /// that mattered". The producer that exists is source 4.4's own
+        /// operand — a `negative_result`'s `data_window.end`, which
+        /// [`crate::sources::ledger::RetryTrigger::DataExtendsBeyond`] already
+        /// compares against — so a caller with a blocked question in hand can
+        /// name the boundary it was blocked at. A caller reading only the data
+        /// plane cannot, and gets a skipped line instead of a daily card.
+        past: Option<String>,
     },
     /// A monitor event on a strategy (COMP-007 §6).
     MonitorEvent {
@@ -115,7 +161,13 @@ impl Observation {
                 to,
                 since,
             } => format!("regime:{subject}:{from}->{to}@{since}"),
-            Observation::CoverageExtended { subject, to } => format!("coverage:{subject}:{to}"),
+            // Keyed on the boundary crossed, never on `to`. See the variant.
+            Observation::CoverageExtended { subject, past, to } => match past {
+                Some(b) => format!("coverage:{subject}:past:{b}"),
+                // Only ever reaches a skipped line, and says which reading it
+                // was so the log names the day rather than the subject alone.
+                None => format!("coverage:{subject}:reading@{to}"),
+            },
             // Not keyed on the subject and the kind: two `scaled_down` events a
             // week apart on one strategy are two things that happened, and
             // collapsing them would lose the second.
@@ -149,16 +201,58 @@ impl Observation {
                 "what changed for {subject} when the regime moved from {from} to {to} on {since}, \
                  and does anything established under {from} still hold"
             ),
-            Observation::CoverageExtended { subject, to } => format!(
-                "what can be asked about {subject} now that data reaches {to} that could not be \
-                 asked before"
-            ),
+            // `to` is **not** in this sentence, and that is load-bearing rather
+            // than terse. The sentence is the dedupe key (`agenda::dedupe_key`
+            // normalises it), so a frontier date in it would give the same
+            // crossing a different key every day and layer one would stop
+            // merging the repeat it exists to merge.
+            Observation::CoverageExtended { subject, past, .. } => match past {
+                Some(b) => format!(
+                    "what can be asked about {subject} now that its data reaches past {b}, which a \
+                     question was blocked at"
+                ),
+                // Unreachable through `observations`, which refuses a reading
+                // before it asks for a question. Written rather than
+                // `unreachable!` because a panic in a sentence-builder is a
+                // worse failure than a sentence that names the gap.
+                None => format!(
+                    "what can be asked about {subject} now that its data reaches further — no \
+                     boundary was named, so there is nothing to say it reaches past"
+                ),
+            },
             Observation::MonitorEvent {
                 subject,
                 kind,
                 detail,
                 ..
             } => format!("why did {subject} go {kind} in production: {detail}"),
+        }
+    }
+
+    /// Why §4.7's rate limit cannot key on this observation, if it cannot.
+    ///
+    /// `None` for anything that names something that happened — a regime flip
+    /// has its `since` and a monitor event has its `event_id`, both stable
+    /// however often they are read.
+    ///
+    /// `Some` only for a [`Observation::CoverageExtended`] carrying no
+    /// boundary. That is a *reading* of a frontier rather than a crossing of
+    /// one, and §4.7's rate limit has nothing stable to key on: every read
+    /// would be a fresh event. This is the same distinction
+    /// [`crate::sources::Fired::NotEvaluable`] draws one module over — a
+    /// subscription that cannot answer is not a subscription answering no — and
+    /// it reaches the log as [`SkipReason::NotEvaluable`] for the same reason.
+    #[must_use]
+    pub fn not_an_event(&self) -> Option<String> {
+        match self {
+            Observation::CoverageExtended { subject, to, past } if past.is_none() => Some(format!(
+                "coverage for `{subject}` was read as reaching `{to}`, which is where it is now \
+                 and not something that happened; §4.7's limit keys on an event, so this wants \
+                 the boundary the extension crossed — a blocked question's `data_window.end`"
+            )),
+            Observation::CoverageExtended { .. }
+            | Observation::RegimeFlip { .. }
+            | Observation::MonitorEvent { .. } => None,
         }
     }
 
@@ -241,6 +335,16 @@ pub fn observations(
             out.skipped.push(Skipped {
                 what: fp,
                 why: SkipReason::NotSubscribed,
+            });
+            continue;
+        }
+        // Before the `already` check, because an observation with no stable key
+        // makes that check meaningless rather than false: it would pass every
+        // time and insert every time.
+        if o.not_an_event().is_some() {
+            out.skipped.push(Skipped {
+                what: fp,
+                why: SkipReason::NotEvaluable,
             });
             continue;
         }
@@ -468,6 +572,176 @@ mod tests {
         // which is the right answer: one question, two pieces of evidence.
         assert_eq!(agenda.len(), 2, "{agenda:?}");
         assert_eq!(agenda[1].source_refs.len(), 2, "both events on the card");
+    }
+
+    // ── Source 4.7's third trigger (§4.7: "new data coverage in scope") ─────
+    //
+    // Until 2026-09-23 this variant had no test and no producer, and it keyed
+    // §4.7's rate limit on `to` — where the data reaches *now*. Every test
+    // below fails against that version, and the first two fail by inserting
+    // one card per day for as long as the feed runs.
+
+    /// Coverage reaching `to`, read on three consecutive days.
+    fn reading(to: &str) -> Observation {
+        Observation::CoverageExtended {
+            subject: "btc".into(),
+            to: to.into(),
+            past: None,
+        }
+    }
+
+    /// One crossing of `past`, read on a day when coverage reaches `to`.
+    fn crossing(past: &str, to: &str) -> Observation {
+        Observation::CoverageExtended {
+            subject: "btc".into(),
+            to: to.into(),
+            past: Some(past.into()),
+        }
+    }
+
+    #[test]
+    fn a_coverage_reading_with_no_boundary_is_refused_rather_than_raised_daily() {
+        // The defect this variant shipped with. `to` moves every day on a live
+        // feed, so a fingerprint keyed on it is a fresh event every day and the
+        // rate limit protects nothing.
+        let charter = charter_over(&["btc"]);
+        let mut agenda = empty_agenda();
+        let mut already = Raised::default();
+        for day in ["2026-09-21", "2026-09-22", "2026-09-23"] {
+            let out = observations(&charter, &[reading(day)], &already, &mut agenda);
+            assert!(
+                out.added().next().is_none(),
+                "a reading of the frontier is not an event: {out:?}"
+            );
+            assert_eq!(out.skipped[0].why, SkipReason::NotEvaluable);
+            for item in out.added() {
+                already.record(&item.source_refs[0]);
+            }
+        }
+        assert_eq!(agenda.len(), 1, "only the seeded item: {agenda:?}");
+    }
+
+    #[test]
+    fn what_a_reading_is_missing_is_named_and_is_not_reported_as_a_measured_no() {
+        let missing = reading("2026-09-23")
+            .not_an_event()
+            .expect("a frontier reading names no event");
+        assert!(missing.contains("data_window.end"), "{missing}");
+        // The distinction `Fired` draws one module over: absent is not false.
+        assert_ne!(SkipReason::NotEvaluable, SkipReason::NotSubscribed);
+        assert_ne!(SkipReason::NotEvaluable, SkipReason::AlreadyRaised);
+    }
+
+    #[test]
+    fn an_event_that_names_itself_is_not_refused_as_a_reading() {
+        // The guard must catch only the variant it was written for; a flip and
+        // a monitor event carry stable identities of their own.
+        assert!(flip("2026-09-01").not_an_event().is_none());
+        assert!(crossing("2026-01-31", "2026-09-23").not_an_event().is_none());
+        assert!(Observation::MonitorEvent {
+            subject: "s_1".into(),
+            kind: "scaled_down".into(),
+            event_id: "e_1".into(),
+            detail: "drawdown".into(),
+        }
+        .not_an_event()
+        .is_none());
+    }
+
+    #[test]
+    fn three_daily_readings_of_one_crossing_are_one_item() {
+        // §4.7's own parenthesis, for this trigger: one item per event, not one
+        // per read. The boundary is the same crossing each day; only `to` moves.
+        let charter = charter_over(&["btc"]);
+        let mut agenda = empty_agenda();
+        let mut already = Raised::default();
+        for to in ["2026-09-21", "2026-09-22", "2026-09-23"] {
+            let out = observations(&charter, &[crossing("2026-01-31", to)], &already, &mut agenda);
+            for item in out.added() {
+                already.record(&item.source_refs[0]);
+            }
+            // The item finishes between reads, which is the case layer one
+            // cannot cover: a terminal item stops absorbing offers.
+            for item in agenda.iter_mut().skip(1) {
+                item.status = ItemStatus::Done {
+                    verdict: "accept".into(),
+                };
+            }
+        }
+        assert_eq!(agenda.len(), 2, "one seeded item and one crossing: {agenda:?}");
+    }
+
+    #[test]
+    fn the_frontier_is_in_no_fingerprint_and_in_no_question_so_both_defences_hold() {
+        // Both refusals keyed on the same drifting date, so both failed at
+        // once. The fingerprint is layer §4.7 and the sentence is layer one.
+        let monday = crossing("2026-01-31", "2026-09-21");
+        let wednesday = crossing("2026-01-31", "2026-09-23");
+        assert_eq!(monday.fingerprint(), wednesday.fingerprint());
+        assert_eq!(
+            crate::agenda::dedupe_key(&monday.question(), monday.subject()),
+            crate::agenda::dedupe_key(&wednesday.question(), wednesday.subject()),
+            "a frontier date in the sentence makes layer one stop merging the repeat"
+        );
+        assert!(
+            !monday.question().contains("2026-09-21"),
+            "the question named the reading: {}",
+            monday.question()
+        );
+        assert!(
+            monday.question().contains("2026-01-31"),
+            "the question must name the boundary it crossed: {}",
+            monday.question()
+        );
+    }
+
+    #[test]
+    fn a_later_crossing_is_a_second_item_because_it_is_a_second_opening() {
+        // The limit is per event. Coverage passing January and then passing
+        // June unblocked two different questions.
+        let charter = charter_over(&["btc"]);
+        let mut agenda = empty_agenda();
+        let already = Raised::from_refs([crossing("2026-01-31", "2026-09-21").fingerprint()]);
+        let _ = observations(
+            &charter,
+            &[crossing("2026-06-30", "2026-09-23")],
+            &already,
+            &mut agenda,
+        );
+        assert_eq!(agenda.len(), 2, "{agenda:?}");
+    }
+
+    #[test]
+    fn coverage_out_of_the_charters_scope_inserts_nothing() {
+        let mut agenda = empty_agenda();
+        let out = observations(
+            &charter_over(&["eth"]),
+            &[crossing("2026-01-31", "2026-09-23")],
+            &Raised::default(),
+            &mut agenda,
+        );
+        assert_eq!(agenda.len(), 1);
+        assert_eq!(out.skipped[0].why, SkipReason::OutOfScope);
+    }
+
+    #[test]
+    fn new_coverage_is_an_opening_and_asks_what_can_be_done_not_why() {
+        // §4.7's table: `investigate` for a flip and for coverage, `diagnose`
+        // only for a monitor event, which is a fault rather than an opening.
+        let c = crossing("2026-01-31", "2026-09-23");
+        assert_eq!(c.workflow(), "investigate");
+        assert!(c.is_subscribed(), "coverage has no kind filter of its own");
+        let charter = charter_over(&["btc"]);
+        let mut agenda = empty_agenda();
+        let _ = observations(
+            &charter,
+            std::slice::from_ref(&c),
+            &Raised::default(),
+            &mut agenda,
+        );
+        assert_eq!(agenda[1].workflow, "investigate");
+        assert_eq!(agenda[1].sources, vec![Source::Observation]);
+        assert_eq!(agenda[1].source_refs, vec![c.fingerprint()]);
     }
 
     #[test]

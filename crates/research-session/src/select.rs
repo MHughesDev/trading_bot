@@ -1191,6 +1191,77 @@ mod tests {
         }
     }
 
+    // ── The stored score (§5.4, and S-11.3's "the agenda shown in a digest is
+    //    the agenda that ran") ────────────────────────────────────────────────
+    //
+    // `by_item` had no test. It is the index a caller persists and the digest
+    // later renders, so what it carries and what it is safe to mix are the two
+    // things a reader has to be able to rely on.
+
+    fn a_slate() -> Vec<(AgendaItem, Inputs)> {
+        vec![
+            (item("cheap and dull", Source::CharterSeed), inputs(1.0, 1.0, 1.0, 1.0)),
+            (item("dear and good", Source::Contradiction), inputs(9.0, 1.0, 1.0, 9.0)),
+            (item("middling", Source::OpenQuestion), inputs(4.0, 1.0, 1.0, 3.0)),
+        ]
+    }
+
+    #[test]
+    fn the_stored_score_is_the_one_the_ranking_used_and_not_the_raw_signals() {
+        // `value` and `cost` are percentile-ranked within the slate, so `raw`
+        // and `normalised` differ. A digest rendering `raw` beside a choice made
+        // on `normalised` would show a different agenda than the one that ran,
+        // which is exactly what S-11.3's fourth clause forbids.
+        let slate = a_slate();
+        let scored = score(&slate);
+        let index = by_item(&scored);
+        for s in &scored {
+            assert_eq!(index[&s.item], s.normalised);
+        }
+        assert!(
+            scored.iter().any(|s| s.raw != s.normalised),
+            "nothing was normalised, so this test is comparing one number to itself"
+        );
+    }
+
+    #[test]
+    fn scoring_the_same_slate_twice_gives_the_same_index() {
+        // `score` reads no clock and draws nothing, so an agenda nobody touched
+        // ranks identically. If this ever fails, "no recompute without a source
+        // change" has stopped being a property of the scorer and become a
+        // property of whoever remembered to cache.
+        let slate = a_slate();
+        assert_eq!(by_item(&score(&slate)), by_item(&score(&slate)));
+    }
+
+    #[test]
+    fn a_stored_score_belongs_to_the_slate_it_was_computed_in_and_cannot_be_mixed() {
+        // The warning §5.4's two readings turn on. A percentile rank is relative
+        // to the slate, so adding one item re-ranks the others: a caller that
+        // reused three stored scores and computed a fourth fresh would be
+        // comparing ranks out of three with a rank out of four and calling it an
+        // ordering.
+        let slate = a_slate();
+        let mut wider = slate.clone();
+        wider.push((
+            item("the newcomer", Source::RetryConditionMet),
+            inputs(0.5, 1.0, 1.0, 0.5),
+        ));
+
+        let narrow = by_item(&score(&slate));
+        let broad = by_item(&score(&wider));
+
+        let moved = narrow
+            .iter()
+            .filter(|(id, s)| broad.get(id).is_some_and(|b| b != *s))
+            .count();
+        assert!(
+            moved > 0,
+            "adding an item changed no stored score, so the ranking is not relative to the \
+             slate and this warning is obsolete — read §5.4 again before deleting it"
+        );
+    }
+
     #[test]
     fn the_prior_half_is_still_applied_when_the_precheck_is_absent() {
         let (few, _) = novelty_from(Precheck::NotRecorded, 0);

@@ -931,6 +931,89 @@ mod tests {
         assert_eq!(w.tz(), chrono_tz::UTC);
     }
 
+    // ── The re-arm (§7 rows 1-2: "the driver re-arms on the window boundary") ──
+    //
+    // `Openness::re_arms_at` had no test. It is the instant the driver sleeps
+    // until, so the two ways it can be wrong are both ways a session stops
+    // working: an instant already past busy-loops the worker, and an instant
+    // taken from the wrong side of the boundary sleeps through the window.
+
+    #[test]
+    fn a_calendar_that_found_no_boundary_offers_no_instant_to_re_arm_on() {
+        // `Indeterminate` is the word `openness` returns when it could not find
+        // the next boundary. Handing back an instant anyway would be the
+        // guessed fence this enum exists to refuse, so it is `None` — and a
+        // driver has to treat that as "hold", which is what
+        // `HoldReason::ScheduleIndeterminate` is for.
+        assert_eq!(Openness::Indeterminate.re_arms_at(), None);
+        assert!(!Openness::Indeterminate.may_claim());
+    }
+
+    #[test]
+    fn always_open_re_arms_on_nothing_which_is_not_the_same_as_re_arming_now() {
+        // There is no boundary, so there is no instant. A caller reading `None`
+        // as "wake immediately" would spin; a caller reading it as "there is no
+        // calendar to wait for" is right, and `may_claim` is how it tells the
+        // two `None`s apart.
+        assert_eq!(Openness::AlwaysOpen.re_arms_at(), None);
+        assert!(Openness::AlwaysOpen.may_claim());
+        assert!(!Openness::Indeterminate.may_claim());
+    }
+
+    #[test]
+    fn an_open_window_re_arms_on_its_close_and_a_closed_one_on_its_open() {
+        // Swapped, a driver inside a window would sleep until the window it is
+        // already in opens — i.e. not wake until next week — and a driver
+        // outside one would wake at a close it will never see.
+        let h = weekdays_nine_to_five();
+        let (y, m, d) = MON_JAN_5;
+        let inside = utc(y, m, d, 15, 0);
+        let outside = utc(y, m, d, 23, 0);
+
+        let open = h.openness(inside);
+        assert!(open.may_claim());
+        assert_eq!(open.re_arms_at(), h.closes_after(inside));
+
+        let closed = h.openness(outside);
+        assert!(!closed.may_claim());
+        assert_eq!(closed.re_arms_at(), Some(h.next_open_after(outside).unwrap()));
+    }
+
+    #[test]
+    fn the_re_arm_is_never_an_instant_already_past() {
+        // A re-arm at or before the instant it was computed at is an immediate
+        // re-wake, which is a driver spinning rather than waiting. Swept over a
+        // week of a real schedule, and it counts what it checked so it cannot
+        // pass by checking nothing — the same guard `next_open_after`'s own
+        // sweep carries.
+        let schedules = [
+            weekdays_nine_to_five(),
+            hours(vec![window(&[6, 7], "10:00", "14:00", "Europe/London")]),
+            hours(vec![
+                window(&[1], "22:00", "24:00", "UTC"),
+                window(&[2], "00:00", "02:00", "UTC"),
+            ]),
+        ];
+        let mut checked = 0;
+        for h in &schedules {
+            let (y, m, d) = MON_JAN_5;
+            for hour in 0..(24 * 7) {
+                let at = utc(y, m, d, 0, 0) + chrono::Duration::hours(i64::from(hour));
+                if let Some(next) = h.openness(at).re_arms_at() {
+                    assert!(
+                        next > at,
+                        "re-arming at {next} from {at} wakes the driver into the same decision"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(
+            checked > 400,
+            "the sweep found only {checked} boundaries, so it proved almost nothing"
+        );
+    }
+
     #[test]
     fn the_concurrency_rides_along_so_the_driver_holds_one_object() {
         let schedule = Schedule::default()
