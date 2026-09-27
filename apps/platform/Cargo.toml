@@ -11,14 +11,16 @@ api = { workspace = true }
 jobs = { workspace = true }
 risk = { workspace = true }
 execution = { workspace = true }
-# Declared, and nothing under `src/` uses it: there is no reconciliation sweep in
-# this binary and there never has been. The reason is in
-# `crates/reconciliation/src/positions.rs`'s module doc — the only broker built
-# here is `PaperTradingEngine::multi_asset_broker()`, whose `query_positions`
-# returns the same `engine.positions(class)` the internal book would be read
-# from, so a sweep over that pair cannot diverge. The loop belongs beside the
-# first broker that talks to something outside this process; this line is left in
-# place so that wiring it is one `use`, not a dependency review.
+# Used since 2026-09-27 for one thing: `ForwardRecorders::install()` in `main`,
+# which attaches reconciliation to the fill stream (T-0.1).
+#
+# Still **no reconciliation sweep** in this binary, and that remains deliberate.
+# The reason is in `crates/reconciliation/src/positions.rs`'s module doc: the only
+# broker built here is `PaperTradingEngine::multi_asset_broker()`, whose
+# `query_positions` returns the same `engine.positions(class)` the internal book
+# would be read from, so a sweep over that pair cannot diverge and would log
+# "reconciliation OK" for a check that cannot fail. The sweep belongs beside the
+# first broker that talks to something outside this process.
 reconciliation = { workspace = true }
 strategy-runtime = { workspace = true }
 storage = { workspace = true }

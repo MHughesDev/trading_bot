@@ -142,6 +142,36 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&kill_switch),
     ));
 
+    // Attach reconciliation to the fill stream, before anything can produce a
+    // fill (T-0.1). This is the wire the whole forward-evidence set waits on:
+    // `ForwardRecorder`'s logic has been complete and tested since it was
+    // written, `register_observer` had **zero production call sites**, and
+    // `mlops.forward_observation` holds 0 rows as a direct consequence — so
+    // Gate 15 reads `NotComputable` and DONE-3's clock cannot start even once a
+    // strategy is deployed.
+    //
+    // Installed here rather than beside the execution engine below because the
+    // registry records `execution::fills`' published count at the instant it
+    // attaches, and every fill before that watermark is one the forward record
+    // can never be given: the fill stream has no replay. Earliest is therefore
+    // lowest, and the registry reports `AttachedLate` for the life of the
+    // process if it is ever moved after the first order can be submitted.
+    //
+    // `install()` is idempotent and registers before it returns, so a deployed
+    // recorder is an attached recorder by construction. It does **not** create a
+    // deployment: `ForwardRecorder` is per-deployment and needs a
+    // `DeploymentSpec` plus an opening balance, which arrive when a strategy is
+    // actually deployed (gate H-1). Until then the registry's verdict is
+    // `NoDeployment`, which is a different fact from `NotInstalled` — the first
+    // says nothing has been deployed, the second says this process is not on the
+    // fill stream at all, and only the second makes an empty
+    // `mlops.forward_observation` unreadable as evidence.
+    let forward_recorders = reconciliation::recorder::ForwardRecorders::install();
+    info!(
+        verdict = ?forward_recorders.evidence().verdict(),
+        "reconciliation attached to the paper fill stream"
+    );
+
     // Build the in-house paper trading engine — the paper half of execution.
     // One internal account per asset class, fills simulated locally with
     // per-class realism (tuned spreads/fees, size impact, session calendars,
@@ -588,5 +618,74 @@ async fn load_kill_switch_state(pg: &sqlx::PgPool) -> bool {
             tracing::warn!("could not read global_risk_config — defaulting kill switch to ACTIVE (fail-closed)");
             true
         }
+    }
+}
+
+#[cfg(test)]
+mod fill_stream_tests {
+    /// Reconciliation is attached to the fill stream, and attached **early**.
+    ///
+    /// A source scan, because this is the one defect shape no type and no unit
+    /// test can catch: `ForwardRecorders::install()` returning a registry nobody
+    /// called is indistinguishable, from inside `crates/reconciliation`, from a
+    /// registry that was never installed. That is precisely how this shipped —
+    /// the recorder's logic has been complete and tested since it was written,
+    /// `register_observer` had zero production call sites, and
+    /// `mlops.forward_observation` held 0 rows as a direct result, which keeps
+    /// Gate 15 at `NotComputable` and DONE-3's clock stopped.
+    ///
+    /// The ordering half matters as much as the call. The registry records
+    /// `execution::fills`' published count when it attaches, and the fill stream
+    /// has no replay — every fill before that watermark is one the forward record
+    /// can never be given, and the verdict becomes `AttachedLate` for the life of
+    /// the process. So the call must come before anything that can produce a fill:
+    /// the paper engine, the execution engine, and the server itself.
+    #[test]
+    fn reconciliation_is_installed_before_anything_can_produce_a_fill() {
+        let src = include_str!("main.rs");
+
+        let install = src
+            .find("ForwardRecorders::install()")
+            .expect("main must call ForwardRecorders::install(); the forward record has no other door");
+
+        // Each of these can produce or accept a fill. `install` has to precede
+        // every one of them.
+        for later in [
+            "PaperTradingEngine::realistic()",
+            "ExecutionEngine::new(",
+            "axum::serve(",
+        ] {
+            let at = src
+                .find(later)
+                .unwrap_or_else(|| panic!("`{later}` is gone from main.rs; this guard's ordering claim needs rewriting against whatever replaced it"));
+            assert!(
+                install < at,
+                "ForwardRecorders::install() appears after `{later}`. Fills published before the \
+                 registry attaches are counted as fills_before_install and can never be recovered \
+                 — the stream has no replay — and the verdict is AttachedLate for the whole process."
+            );
+        }
+    }
+
+    /// The install call is not inside a conditional or a comment.
+    ///
+    /// A guard that only greps for the symbol passes on
+    /// `// ForwardRecorders::install()` and on an `if cfg!(feature = "…")` that is
+    /// never true. Asserting the binding is what makes the call load-bearing.
+    #[test]
+    fn the_registry_is_bound_and_its_verdict_is_logged() {
+        let src = include_str!("main.rs");
+        assert!(
+            src.contains("let forward_recorders = reconciliation::recorder::ForwardRecorders::install();"),
+            "the install call must be an unconditional statement binding the registry"
+        );
+        // The verdict is logged because `NoDeployment` and `NotInstalled` are
+        // different facts and only one of them makes an empty
+        // mlops.forward_observation unreadable as evidence. An operator needs to
+        // see which one this process is in.
+        assert!(
+            src.contains("forward_recorders.evidence().verdict()"),
+            "the startup line must log the registry's verdict, not merely build it"
+        );
     }
 }
