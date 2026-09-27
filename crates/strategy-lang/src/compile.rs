@@ -75,7 +75,15 @@ use crate::catalogue::Catalogue;
 use crate::diagnostic::{Code, Diagnostic, Span};
 
 /// The definition version SLv2 writes: the one that has exits.
+///
+/// Not the newest version. 1.4 adds the `unit` on an exit distance, and a
+/// document that does not use one is a 1.3 document — saying 1.4 anyway would
+/// make every strategy unreadable to a runtime that knows 1.3 in exchange for a
+/// field it does not set. [`SCALED_UNIT_VERSION`] is what a scaled distance
+/// raises it to, and only then.
 pub const TARGET_VERSION: &str = "1.3";
+/// The version a volatility-scaled exit distance requires (ADR-D-09).
+pub const SCALED_UNIT_VERSION: &str = domain::strategy_def::DEFINITION_VERSION_V1_4;
 /// The asset class a strategy gets when it does not say. Matches the canonical
 /// example in `domain::strategy_def`.
 pub const DEFAULT_ASSET_CLASS: &str = "crypto_spot_cex";
@@ -125,6 +133,7 @@ pub fn compile_with(
         inputs: HashMap::new(),
         used_inputs: BTreeSet::new(),
         features: BTreeSet::new(),
+        scaled_unit: None,
         errors: Vec::new(),
     };
     let def = c.run(ast);
@@ -143,6 +152,14 @@ struct Compiler<'a> {
     inputs: HashMap<String, String>,
     used_inputs: BTreeSet<String>,
     features: BTreeSet<String>,
+    /// Where the first volatility-scaled exit distance was written, if one was.
+    ///
+    /// A scaled distance is the one thing SLv2 can say that needs
+    /// [`SCALED_UNIT_VERSION`], so the version a document gets is a
+    /// *measurement* of what it contains rather than a constant. The span is
+    /// kept so that a `version 1.3` header written above a scaled stop can be
+    /// refused pointing at the stop.
+    scaled_unit: Option<(Span, String)>,
     errors: Vec<Diagnostic>,
 }
 
@@ -253,10 +270,8 @@ impl<'a> Compiler<'a> {
 
         self.unused_inputs(ast);
 
-        let version = ast
-            .version
-            .as_ref()
-            .map_or_else(|| TARGET_VERSION.to_string(), |(v, _)| v.clone());
+        // After `self.exits`, which is what records a scaled distance.
+        let version = self.version(ast);
         let asset_class = ast
             .asset_class
             .as_ref()
@@ -962,7 +977,7 @@ impl<'a> Compiler<'a> {
             match &clause.kind {
                 ExitKind::None => unreachable!("handled above"),
                 ExitKind::Stop(d) | ExitKind::Target(d) | ExitKind::Trailing(d) => {
-                    let Some(fraction) = self.fraction(d.unit, d.unit_span, &d.value) else {
+                    let Some(distance) = self.distance(d.unit, d.unit_span, &d.value) else {
                         continue;
                     };
                     let wanted_anchor = match &clause.kind {
@@ -986,23 +1001,51 @@ impl<'a> Compiler<'a> {
                         );
                         continue;
                     }
-                    let rule = match &clause.kind {
-                        ExitKind::Stop(_) => json!({"rule": "stop_loss", "fraction": fraction}),
-                        ExitKind::Target(_) => json!({"rule": "take_profit", "fraction": fraction}),
-                        _ => json!({"rule": "trailing_stop", "fraction": fraction}),
+                    let mut rule = match &clause.kind {
+                        ExitKind::Stop(_) => json!({"rule": "stop_loss"}),
+                        ExitKind::Target(_) => json!({"rule": "take_profit"}),
+                        _ => json!({"rule": "trailing_stop"}),
                     };
+                    // `ExitDistance` is flattened into the rule, so its two
+                    // keys are the rule's keys. Merged rather than spelled per
+                    // variant so a change to the distance shape lands once.
+                    for (k, v) in distance {
+                        rule[k] = v;
+                    }
                     match serde_json::from_value::<ExitRule>(rule) {
                         Ok(r) if r.is_well_formed() => rules.push(r),
+                        // The bound depends on the unit, so the refusal has to
+                        // as well: `1.5` as a fraction of entry is a stop that
+                        // can never fire on a long, and `1.5 atr(14)` is the
+                        // most ordinary stop in the domain. Reporting the
+                        // fraction rule over both was what made the language
+                        // unable to say the second.
                         _ => self.err(
                             Diagnostic::semantic(
                                 Code::NotExpressible,
                                 d.span,
-                                format!(
-                                    "a distance of `{}` is not a fraction of entry in (0, 1]",
-                                    d.value.raw
-                                ),
+                                match d.unit {
+                                    Unit::Percent => format!(
+                                        "a distance of `{}` is not a fraction of entry in (0, 1]",
+                                        d.value.raw
+                                    ),
+                                    _ => format!(
+                                        "a distance of `{}` is not a positive multiple of `{}`",
+                                        d.value.raw,
+                                        d.unit.render()
+                                    ),
+                                },
                             )
-                            .with_fix("a stop or target is between 0 % and 100 % of entry")
+                            .with_fix(match d.unit {
+                                Unit::Percent => {
+                                    "a stop or target is between 0 % and 100 % of entry".to_string()
+                                }
+                                _ => format!(
+                                    "write a positive multiple, as in `1.5 {}`; there is no \
+                                     upper bound, because a 5-ATR stop is wide rather than wrong",
+                                    d.unit.render()
+                                ),
+                            })
                             .with_see("guide#exits"),
                         ),
                     }
@@ -1062,44 +1105,92 @@ impl<'a> Compiler<'a> {
         Some(ExitPolicy::Rules { rules })
     }
 
-    /// A distance in a unit the canonical `ExitRule` can store.
+    /// The `ExitDistance` fields for one SLv2 distance, as the keys they are
+    /// flattened into the rule as.
     ///
-    /// `ExitRule::StopLoss` carries `distance: ExitDistance`, and as of v1.4
-    /// (ADR-D-09) `ExitDistance` **can** hold an ATR- or sigma-scaled magnitude
-    /// — `DistanceUnit::Atr { period } | Sigma { period }` — so the refusal
-    /// below is no longer "the schema does not have this yet". It is narrower
-    /// and still real: **this grammar has no syntax for the period** a scaled
-    /// distance requires (`atr`/`sigma` parse to a bare [`Unit`] with no
-    /// number attached — see `parse.rs`'s `Tok::Ident(w) if w == "atr"` arm),
-    /// so there is nothing here to put in `DistanceUnit::Atr { period: ? }`
-    /// even though the target field now exists. Writing a placeholder period
-    /// would be inventing a value the author never stated, which is the
-    /// direction this compiler refuses everywhere else.
+    /// # Why the magnitude is not one number
     ///
-    /// `%` still converts exactly by moving the decimal point two places,
-    /// because a percent-of-entry distance carries no period at all.
-    fn fraction(&mut self, unit: Unit, unit_span: Span, value: &Num) -> Option<String> {
+    /// `%` converts exactly by moving the decimal point two places, because a
+    /// percent-of-entry distance *is* a fraction: `2 %` is `0.02` of the
+    /// reference price. A scaled distance is a **multiplier** and is stored as
+    /// written: `1.5 atr(14)` is one and a half average true ranges, and
+    /// shifting its point would turn it into `0.015` of something. That is the
+    /// reason `ExitDistance`'s Rust field is called `magnitude` while its wire
+    /// key stays `fraction` (ADR-0010 forbids rewriting the stored form), and
+    /// the reason this function branches rather than normalising.
+    ///
+    /// Before ADR-D-09 this refused `atr` and `sigma` outright. The schema
+    /// gained `DistanceUnit::Atr { period }` and the grammar gained the period,
+    /// so there is nothing left to refuse — except a header that pins a version
+    /// too low to hold the unit, which is recorded here and reported once in
+    /// [`Self::version`].
+    fn distance(
+        &mut self,
+        unit: Unit,
+        unit_span: Span,
+        value: &Num,
+    ) -> Option<Vec<(&'static str, Value)>> {
         match unit {
-            Unit::Percent => Some(shift_point(&value.raw, -2)),
-            Unit::Atr | Unit::Sigma => {
+            Unit::Percent => Some(vec![(
+                "fraction",
+                Value::String(shift_point(&value.raw, -2)),
+            )]),
+            Unit::Atr { period } | Unit::Sigma { period } => {
+                if self.scaled_unit.is_none() {
+                    self.scaled_unit = Some((unit_span, unit.render()));
+                }
+                Some(vec![
+                    ("fraction", Value::String(value.raw.clone())),
+                    (
+                        "unit",
+                        json!({ "measure": unit.as_str(), "period": period }),
+                    ),
+                ])
+            }
+        }
+    }
+
+    /// The `definition_version` this document gets, and the one refusal that
+    /// comes with it.
+    ///
+    /// A header with no `version` gets the lowest version that can hold what was
+    /// written: [`TARGET_VERSION`], or [`SCALED_UNIT_VERSION`] when a
+    /// volatility-scaled distance is present. An *explicit* `version` below the
+    /// one a scaled distance needs is refused rather than quietly raised,
+    /// because a reader at the declared version has no `unit` field, would take
+    /// `1.5` for a fraction of the entry price, and would place a 150 % stop
+    /// where a 1.5-ATR stop was meant. Silently raising the header would be
+    /// deciding on the author's behalf that a version claim is advisory.
+    fn version(&mut self, ast: &Strategy) -> String {
+        let Some((scaled_span, rendered)) = self.scaled_unit.clone() else {
+            return ast
+                .version
+                .as_ref()
+                .map_or_else(|| TARGET_VERSION.to_string(), |(v, _)| v.clone());
+        };
+        match &ast.version {
+            None => SCALED_UNIT_VERSION.to_string(),
+            Some((declared, _)) if declared.as_str() == SCALED_UNIT_VERSION => declared.clone(),
+            Some((declared, _)) => {
                 self.err(
                     Diagnostic::semantic(
                         Code::UnitNotRepresentable,
-                        unit_span,
+                        scaled_span,
                         format!(
-                            "`{}` is a per-bar quantity, and this grammar has no syntax for the \
-                             lookback period an ATR- or sigma-scaled distance needs",
-                            unit.as_str()
+                            "a distance in `{rendered}` needs definition_version \
+                             {SCALED_UNIT_VERSION}, and this strategy declares `version \
+                             {declared}`, which has no unit on an exit distance"
                         ),
                     )
-                    .with_fix(
-                        "write the distance in `%` of entry; a scaled stop can be authored \
-                         directly in the stored definition at v1.4 until the grammar names a \
-                         period",
-                    )
+                    .with_fix(format!(
+                        "delete the `version {declared}` line — SLv2 writes \
+                         {SCALED_UNIT_VERSION} on its own when a distance is scaled — or write \
+                         the distance in `%` of entry. Do not hand-convert it: an ATR expressed \
+                         as a fraction is right on the bar you computed it and wrong on the next"
+                    ))
                     .with_see("guide#exits.units"),
                 );
-                None
+                declared.clone()
             }
         }
     }
@@ -1400,6 +1491,7 @@ exit none
 
     use super::*;
     use crate::parse::parse;
+    use domain::strategy_def::exits::DistanceUnit;
 
     fn def(src: &str) -> StrategyDefinition {
         match parse(src).and_then(|ast| compile(&ast)) {
@@ -1574,21 +1666,148 @@ exit none
     }
 
     #[test]
-    fn an_atr_distance_says_the_rule_stores_a_fraction() {
-        let d = code(
+    fn a_scaled_stop_stores_the_unit_and_the_lookback_that_was_written() {
+        let d = def(
             "\
 strategy s on $bound_at_init timeframe 1h
 entry long when close > 1
 size fixed 1
-exit stop 1.5 atr from entry
+exit stop 1.5 atr(14) from entry
+exit trailing 3 sigma(20) from high_water
+",
+        );
+        let Some(ExitPolicy::Rules { rules }) = &d.exits else {
+            panic!("expected rules, got {:?}", d.exits);
+        };
+        assert_eq!(rules[0].unit(), DistanceUnit::Atr { period: 14 });
+        assert_eq!(rules[1].unit(), DistanceUnit::Sigma { period: 20 });
+        // The magnitude is a multiplier and is stored as written. Shifting the
+        // point, as `%` does, would turn one and a half ATRs into 0.015 of
+        // something — and `as_fraction_of_entry` is the accessor that stops a
+        // pre-1.4 reader from taking it for one.
+        let d0 = rules[0].distance().expect("a stop measures a distance");
+        assert_eq!(d0.magnitude.to_string(), "1.5");
+        assert!(d0.as_fraction_of_entry().is_none());
+    }
+
+    /// A scaled unit is the one thing SLv2 can write that needs 1.4, so the
+    /// version is measured from the document rather than pinned to a constant.
+    /// A `%`-only strategy claiming 1.4 would be unreadable to a 1.3 runtime in
+    /// exchange for a field it does not set.
+    #[test]
+    fn the_version_is_raised_by_a_scaled_unit_and_by_nothing_else() {
+        let scaled = def(
+            "\
+strategy s on $bound_at_init timeframe 1h
+entry long when close > 1
+size fixed 1
+exit stop 1.5 atr(14) from entry
+",
+        );
+        assert_eq!(scaled.definition_version, SCALED_UNIT_VERSION);
+
+        let percent = def(
+            "\
+strategy s on $bound_at_init timeframe 1h
+entry long when close > 1
+size fixed 1
+exit stop 2 % from entry
+",
+        );
+        assert_eq!(percent.definition_version, TARGET_VERSION);
+    }
+
+    /// The header is a claim, not a hint. Raising it silently would mean a
+    /// reader at the declared version taking `1.5` for a fraction of entry and
+    /// placing a 150 % stop where a 1.5-ATR stop was meant.
+    #[test]
+    fn a_version_pinned_below_the_one_a_scaled_unit_needs_is_refused() {
+        let d = code(
+            "\
+strategy s on $bound_at_init timeframe 1h
+version 1.3
+entry long when close > 1
+size fixed 1
+exit stop 1.5 atr(14) from entry
 ",
             Code::UnitNotRepresentable,
         );
+        assert!(d.message.contains("atr(14)"), "{}", d.message);
+        assert!(d.message.contains("1.4"), "{}", d.message);
         assert!(
-            d.fix.as_ref().unwrap().contains("`%` of entry"),
+            d.fix.as_ref().unwrap().contains("Do not hand-convert"),
             "{:?}",
             d.fix
         );
+    }
+
+    /// `1.5 atr` is not a stop with a default lookback. A 14-bar ATR and a
+    /// 50-bar ATR are different numbers and the author wrote neither.
+    #[test]
+    fn a_scaled_unit_without_a_lookback_is_refused_rather_than_defaulted() {
+        for unit in ["atr", "sigma"] {
+            let src = format!(
+                "strategy s on $bound_at_init timeframe 1h\nentry long when close > 1\nsize fixed 1\nexit stop 1.5 {unit} from entry\n"
+            );
+            let ds = refuse(&src);
+            let d = ds
+                .iter()
+                .find(|d| d.code == Code::UnitNeedsPeriod)
+                .unwrap_or_else(|| panic!("expected unit_needs_period for `{unit}`: {ds:#?}"));
+            assert!(d.fix.as_ref().unwrap().contains("(14)"), "{:?}", d.fix);
+        }
+    }
+
+    /// `atr(0)` is not "no lookback": it is the feature name `atr_0`, which
+    /// nothing serves. Refused where it is written rather than at the first bar
+    /// of a run somebody paid for.
+    #[test]
+    fn a_lookback_the_engine_will_not_compute_is_refused_at_the_distance() {
+        for bad in ["atr(0)", "atr(1)", "sigma(1.5)", "atr(200000)"] {
+            let src = format!(
+                "strategy s on $bound_at_init timeframe 1h\nentry long when close > 1\nsize fixed 1\nexit stop 1.5 {bad} from entry\n"
+            );
+            let ds = refuse(&src);
+            assert!(
+                ds.iter().any(|d| d.code == Code::BadFeatureParam),
+                "`{bad}` was not refused as a bad lookback: {ds:#?}"
+            );
+        }
+    }
+
+    /// `domain::strategy_def::exits` spells `MIN_UNIT_PERIOD`/`MAX_UNIT_PERIOD`
+    /// out because it sits below `features` in the dependency order, and its own
+    /// doc comment names this test as the thing holding that mirror straight.
+    /// Read from the registry, so the day `atr` changes its range the two stop
+    /// agreeing here rather than inside a stored strategy.
+    #[test]
+    fn the_unit_periods_match_the_engine_registry() {
+        let cat = Catalogue::engine();
+        for (unit, family) in [
+            (DistanceUnit::Atr { period: 14 }, "atr"),
+            (DistanceUnit::Sigma { period: 20 }, "rolling_std"),
+        ] {
+            let f = cat
+                .family(family)
+                .unwrap_or_else(|| panic!("the engine serves `{family}`"));
+            assert_eq!(f.params.len(), 1, "`{family}` takes one lookback");
+            assert_eq!(
+                (f.params[0].min, f.params[0].max),
+                (
+                    i64::from(domain::strategy_def::exits::MIN_UNIT_PERIOD),
+                    i64::from(domain::strategy_def::exits::MAX_UNIT_PERIOD)
+                ),
+                "`{family}`'s range and the domain's unit-period bounds disagree"
+            );
+            // And the name the unit asks the engine for is one the engine
+            // resolves. Without this the bounds could agree while the *name* was
+            // wrong: `sigma` is served by `rolling_std`, not by `sigma`.
+            let name = unit.feature_name().expect("a scaled unit names a feature");
+            assert!(
+                cat.resolve(&name).is_some(),
+                "`{name}` does not resolve in the engine registry"
+            );
+        }
     }
 
     #[test]

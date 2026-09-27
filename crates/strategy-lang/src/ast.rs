@@ -280,25 +280,70 @@ pub struct Entry {
 
 /// The unit a distance is measured in. AGENT-011 §3: "a bare number in a
 /// distance is a compile error with the three legal units named".
+///
+/// # Why the two scaled units carry a period and `%` does not
+///
+/// `atr` on its own is not a measurement: the engine serves `atr_14` and
+/// `atr_50`, and they are different numbers. `domain`'s
+/// [`DistanceUnit::Atr { period }`] says the same thing in the schema, so a
+/// grammar that parsed a bare `atr` would have nothing to put in the field and
+/// would have to invent a lookback the author never wrote. The period is
+/// therefore part of the unit and not an optional decoration —
+/// `1.5 atr(14) from entry` — which is also why two stops at `atr(14)` and
+/// `atr(50)` compare unequal here and in the differ.
+///
+/// `%` has no period because a fraction of the entry price is a fraction of one
+/// number, measured on no window at all.
+///
+/// [`DistanceUnit::Atr { period }`]: domain::strategy_def::exits::DistanceUnit::Atr
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unit {
     Percent,
-    Atr,
-    Sigma,
+    Atr { period: u32 },
+    Sigma { period: u32 },
 }
 
 impl Unit {
+    /// The keyword, without the period. What a diagnostic's `expected` list
+    /// holds, because the keyword is what the author types first.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Percent => "%",
-            Self::Atr => "atr",
-            Self::Sigma => "sigma",
+            Self::Atr { .. } => "atr",
+            Self::Sigma { .. } => "sigma",
         }
     }
 
-    /// The three, in the order the guide lists them.
-    pub const ALL: [Self; 3] = [Self::Percent, Self::Atr, Self::Sigma];
+    /// The unit as it is written in SLv2, period and all: `%`, `atr(14)`.
+    ///
+    /// This — not [`Self::as_str`] — is what the decompiler emits and what the
+    /// differ compares, because `atr(14)` and `atr(50)` are two units and
+    /// `as_str` cannot tell them apart.
+    #[must_use]
+    pub fn render(self) -> String {
+        match self {
+            Self::Percent => "%".to_string(),
+            Self::Atr { period } => format!("atr({period})"),
+            Self::Sigma { period } => format!("sigma({period})"),
+        }
+    }
+
+    /// The lookback, for the two units that have one.
+    #[must_use]
+    pub const fn period(self) -> Option<u32> {
+        match self {
+            Self::Percent => None,
+            Self::Atr { period } | Self::Sigma { period } => Some(period),
+        }
+    }
+
+    /// The three keywords, in the order the guide lists them.
+    ///
+    /// Words rather than values: a `Unit` value now needs a period, and a
+    /// placeholder period inside the list a *missing unit* diagnostic prints
+    /// would be a number the author never wrote appearing in the advice.
+    pub const WORDS: [&'static str; 3] = ["%", "atr", "sigma"];
 }
 
 /// What a distance is measured from.

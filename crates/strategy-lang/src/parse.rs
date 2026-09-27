@@ -32,6 +32,11 @@
 
 use std::collections::HashMap;
 
+// The bounds the feature engine computes a rolling statistic over, read from
+// `domain` rather than spelled again: a second copy of `2..=100_000` in the
+// parser would drift from the one the validator and the runtime read.
+use domain::strategy_def::exits::{MAX_UNIT_PERIOD, MIN_UNIT_PERIOD};
+
 use crate::ast::{
     Anchor, Binding, ConstraintClause, Distance, Entry, Exit, ExitKind, Expr, Num, ParamDecl,
     ParamKind, RiskItem, RiskKind, Side, SizeClause, SizeKind, Strategy, Unit,
@@ -685,13 +690,19 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// `1.5 atr from entry`. The unit is not optional and the diagnostic for a
-    /// missing one names all three (AGENT-011 §3; S-5.5 acceptance).
+    /// `2 % from entry`, `1.5 atr(14) from entry`. The unit is not optional and
+    /// the diagnostic for a missing one names all three (AGENT-011 §3; S-5.5
+    /// acceptance).
+    ///
+    /// The two scaled units take a lookback in parentheses, and it is not
+    /// optional either. `atr` alone is the shape the compiler used to refuse
+    /// wholesale: the schema has `DistanceUnit::Atr { period }` (ADR-D-09) and
+    /// there was no syntax for the period, so the only honest answers were to
+    /// refuse the unit or to invent a lookback. It takes one now, and the
+    /// bare-keyword form is refused by name instead of guessed at.
     fn distance(&mut self) -> Parsed<Distance> {
-        let units = || {
-            Expected::any(Unit::ALL.iter().map(|u| format!("`{}`", u.as_str())))
-                .expect("three units")
-        };
+        let units =
+            || Expected::any(Unit::WORDS.iter().map(|w| format!("`{w}`"))).expect("three units");
         // `1.5atr` arrives as one `Word` (see `lex`): the number and its unit
         // were written with no space. Saying exactly that is a one-character
         // edit for the author; "expected a distance" is a puzzle.
@@ -712,8 +723,16 @@ impl<'a> Parser<'a> {
         let value = self.eat_num(Expected::one("a distance"))?;
         let (unit, unit_span) = match self.peek().clone() {
             Tok::Percent => (Unit::Percent, self.bump().span),
-            Tok::Ident(w) if w == "atr" => (Unit::Atr, self.bump().span),
-            Tok::Ident(w) if w == "sigma" => (Unit::Sigma, self.bump().span),
+            Tok::Ident(w) if w == "atr" || w == "sigma" => {
+                let word_span = self.bump().span;
+                let (period, period_span) = self.unit_period(&w, word_span)?;
+                let unit = if w == "atr" {
+                    Unit::Atr { period }
+                } else {
+                    Unit::Sigma { period }
+                };
+                (unit, word_span.to(period_span))
+            }
             _ => {
                 return Err(Diagnostic::syntax(
                     Code::DistanceWithoutUnit,
@@ -722,7 +741,7 @@ impl<'a> Parser<'a> {
                     units(),
                 )
                 .with_fix(format!(
-                    "write `{v} %`, `{v} atr` or `{v} sigma` from entry",
+                    "write `{v} %`, `{v} atr(14)` or `{v} sigma(20)` from entry",
                     v = value.raw
                 ))
                 .with_see("guide#exits.units"));
@@ -751,6 +770,57 @@ impl<'a> Parser<'a> {
             unit_span,
             anchor,
         })
+    }
+
+    /// `(14)` after `atr` or `sigma`, which is not optional.
+    ///
+    /// Two refusals, and neither of them defaults:
+    ///
+    /// - **No parentheses at all.** `atr` names a family, not a measurement, and
+    ///   the period is what selects `atr_14` over `atr_50`. A compiler that
+    ///   supplied 14 here would store a lookback the author never wrote into a
+    ///   definition that is then swept, hashed and cited.
+    /// - **A period the engine will not compute.** `atr(0)` is not "no
+    ///   lookback"; it is the feature name `atr_0`, which nothing serves. Caught
+    ///   where it is written rather than at the first bar of the run.
+    fn unit_period(&mut self, word: &str, word_span: Span) -> Parsed<(u32, Span)> {
+        if self.peek() != &Tok::LParen {
+            return Err(Diagnostic::syntax(
+                Code::UnitNeedsPeriod,
+                word_span,
+                format!(
+                    "`{word}` has no lookback, and `{word}` over 14 bars and `{word}` over 50 \
+                     bars are different measurements"
+                ),
+                Expected::one("`(`"),
+            )
+            .with_fix(format!(
+                "write the lookback in parentheses — `{word}(14)`. \
+                 `list_features(query=\"{word}\")` says what the engine serves"
+            ))
+            .with_see("guide#exits.units"));
+        }
+        self.bump();
+        let n = self.eat_num(Expected::one("a whole number of bars"))?;
+        let close = self.expect(&Tok::RParen, Expected::one("`)`"))?;
+        let period = match n.raw.parse::<u32>() {
+            Ok(p) if (MIN_UNIT_PERIOD..=MAX_UNIT_PERIOD).contains(&p) => p,
+            _ => {
+                return Err(Diagnostic::semantic(
+                    Code::BadFeatureParam,
+                    n.span,
+                    format!(
+                        "`{}` is not a lookback `{word}` can be measured over: the feature \
+                         engine computes a rolling statistic over {MIN_UNIT_PERIOD}..=\
+                         {MAX_UNIT_PERIOD} whole bars",
+                        n.raw
+                    ),
+                )
+                .with_fix(format!("write a whole number in range, as in `{word}(14)`"))
+                .with_see("guide#exits.units"));
+            }
+        };
+        Ok((period, close))
     }
 
     fn risk(&mut self, comments: Vec<String>) -> Parsed<RiskItem> {

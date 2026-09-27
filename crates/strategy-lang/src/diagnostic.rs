@@ -186,6 +186,9 @@ pub enum Code {
     DistanceWithoutUnit,
     /// A number and its unit written without a space (`1.5atr`).
     UnitNeedsSpace,
+    /// A scaled distance unit written without its lookback (`1.5 atr`).
+    /// `atr` names a family; `atr(14)` names a measurement.
+    UnitNeedsPeriod,
 
     // ── the AGENT-011 §3 legibility rules ────────────────────────────────────
     /// An inline expression longer than [`crate::parse::MAX_INLINE_EXPR`].
@@ -287,6 +290,7 @@ impl Code {
             Self::MissingHeader => "missing_header",
             Self::DistanceWithoutUnit => "distance_without_unit",
             Self::UnitNeedsSpace => "unit_needs_space",
+            Self::UnitNeedsPeriod => "unit_needs_period",
             Self::ExpressionTooLong => "expression_too_long",
             Self::ExpressionUsedTwice => "expression_used_twice",
             Self::DuplicateName => "duplicate_name",

@@ -92,6 +92,12 @@ fn shapes(def: &StrategyDefinition, into: &mut BTreeSet<String>) {
         Some(ExitPolicy::Rules { rules }) => {
             for r in rules {
                 into.insert(format!("exit_rule:{}", r.kind()));
+                // The unit is a shape of its own. A fraction-of-entry distance
+                // and a `1.5 atr(14)` distance are written differently, read
+                // back differently and are legal at different definition
+                // versions, so a corpus that lost the scaled ones would keep
+                // passing while the decompiler wrote `%` over an ATR.
+                into.insert(format!("exit_unit:{}", r.unit().as_str()));
             }
         }
     }
@@ -183,6 +189,9 @@ const REQUIRED_SHAPES: &[&str] = &[
     "exit_rule:on_signal",
     "exits:risk_layer_only",
     "exits:absent",
+    "exit_unit:fraction_of_entry",
+    "exit_unit:atr",
+    "exit_unit:sigma",
     "size_mode:fixed",
     "size_mode:percent_of_balance",
     "size_mode:risk_unit",
@@ -314,6 +323,24 @@ size fixed 1
 exit time 3 bars
 ",
     ),
+    (
+        // Both scaled units in one document, and no `version` header: a scaled
+        // distance is what lifts a document to 1.4, so the compiler stamps it
+        // rather than the author claiming it. Written with two different
+        // lookbacks because the period is part of the unit — `atr(14)` and
+        // `atr(50)` are different distances, and a decompiler that dropped the
+        // number would still round-trip a corpus that only ever used one.
+        "volatility-scaled exits, both units",
+        "\
+strategy vol_scaled on $bound_at_init timeframe 1h
+input trend = ema(close, 20)
+entry long when close > trend
+size risk_per_trade 0.01
+exit stop 1.5 atr(14) from entry
+exit target 2.5 sigma(20) from entry
+exit trailing 3 atr(50) from high_water
+",
+    ),
 ];
 
 #[test]
@@ -326,7 +353,7 @@ fn every_document_in_the_corpus_round_trips() {
     }
     assert_eq!(
         CORPUS.len(),
-        9,
+        10,
         "the corpus shrank; every document is a case"
     );
 

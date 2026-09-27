@@ -345,9 +345,13 @@ pub enum Size {
     RiskPerTrade { fraction: String },
 }
 
-/// `exit …`. Distances are in percent of entry only — the canonical exit rule
-/// stores a fraction of the entry price, so `atr` and `sigma` have nowhere to
-/// go (see [`Limitation::NonPercentDistance`]).
+/// `exit …`. Distances are in percent of entry only.
+///
+/// Not because the platform cannot hold another unit — since ADR-D-09 it can,
+/// and `exit stop 1.5 atr(14) from entry` compiles as text — but because a fill
+/// carrying a unit and a lookback is three decisions in one clause for the tier
+/// this grammar exists to serve. [`Limitation::NonPercentDistance`] says so, and
+/// says the language is the way out.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "exit", rename_all = "snake_case")]
 pub enum Exit {
@@ -821,8 +825,10 @@ impl Limitation {
                  last exit"
             }
             Self::NonPercentDistance => {
-                "the canonical exit rule stores a fraction of the entry price, so a \
-                 per-bar unit (`atr`, `sigma`) has nowhere to go"
+                "the form's exit fills carry a `percent` and nothing else. The *language* \
+                 writes a per-bar unit — `1.5 atr(14)` — since ADR-D-09 gave the schema a \
+                 `unit` and the grammar a period; this narrowing is the form's, not the \
+                 platform's"
             }
             Self::ExitAnchor => {
                 "a stop and a target are measured from the entry and a trailing stop from \
@@ -863,7 +869,10 @@ impl Limitation {
                 "drop it, or express the same idea as a filter on a feature the engine \
                  computes"
             }
-            Self::NonPercentDistance => "write the distance in `%` of entry",
+            Self::NonPercentDistance => {
+                "write the distance in `%` of entry, or write the strategy as SLv2 text, \
+                 where `exit stop 1.5 atr(14) from entry` compiles"
+            }
             Self::ExitAnchor => {
                 "write `from entry` on a stop or a target, `from high_water` on a trailing \
                  stop"
@@ -887,9 +896,14 @@ impl Limitation {
             | Self::AssetClass
             | Self::TrustTier
             | Self::RawFeatureName
-            | Self::IncompleteDocument => Reach::Compiles,
+            | Self::IncompleteDocument
+            // Was `RefusedByTheCompiler(UnitNotRepresentable)`. ADR-D-09 gave
+            // `ExitDistance` a `unit` and the grammar gained the period it
+            // needs, so a scaled distance now compiles and this is a narrowing
+            // of the *form* alone. Writing it as text is the answer, which is
+            // what `Reach::Compiles` tells the caller.
+            | Self::NonPercentDistance => Reach::Compiles,
             Self::Cooldown => Reach::RefusedByTheCompiler(Code::ClauseNotRepresentable),
-            Self::NonPercentDistance => Reach::RefusedByTheCompiler(Code::UnitNotRepresentable),
             Self::ExitAnchor => Reach::RefusedByTheCompiler(Code::NotExpressible),
             Self::SizeModeBeyondTheThree => {
                 Reach::RefusedByTheCompiler(Code::SizeModeNotRepresentable)
@@ -981,7 +995,7 @@ exit time 3 bars
 strategy s on $bound_at_init timeframe 1h
 entry long when close > 1
 size fixed 1
-exit stop 1.5 atr from entry
+exit stop 1.5 atr(14) from entry
 "
             }
             Self::ExitAnchor => {
@@ -1282,7 +1296,7 @@ impl Projector<'_> {
                 p.refuse(
                     Limitation::NonPercentDistance,
                     d.unit_span,
-                    format!("a distance in `{}`", d.unit.as_str()),
+                    format!("a distance in `{}`", d.unit.render()),
                 );
                 return None;
             }

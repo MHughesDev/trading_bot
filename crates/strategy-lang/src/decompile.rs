@@ -36,7 +36,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use domain::strategy_def::{
     actions::{ActionKind, SizeMode},
-    exits::{ExitPolicy, ExitRule},
+    exits::{DistanceUnit, ExitDistance, ExitPolicy, ExitRule},
     nodes::NodeKind,
     params::{ParamSpec, Scale},
     StrategyDefinition,
@@ -430,25 +430,59 @@ impl Plan {
         out
     }
 
+    /// `2 %`, `1.5 atr(14)`, `2.5 sigma(20)` — the distance as its author wrote
+    /// it.
+    ///
+    /// The percent form shifts the point because the canonical document stores a
+    /// fraction and the grammar reads a percentage; the scaled forms do not,
+    /// because a multiplier is already the number the text carries. Rendering
+    /// the period is not decoration: `atr(14)` and `atr(50)` are different
+    /// distances, and a decompiler that dropped it would write text that
+    /// compiles to a different strategy.
+    /// An exit distance as its author writes it, unit included.
+    ///
+    /// The point shift belongs to `fraction_of_entry` alone: `0.02` is written
+    /// `2 %`, and that conversion is the *unit's*, not the number's. A scaled
+    /// distance is already in its unit — `1.5 atr(14)` means one and a half
+    /// average true ranges — so shifting it would turn a stop into a different
+    /// stop, which is exactly the bug this replaced.
+    ///
+    /// The period is never elided. `atr(14)` and `atr(50)` are different
+    /// distances, and the grammar has no bare `atr` to fall back to (the unit
+    /// takes a lookback and refuses without one), so a renderer that dropped it
+    /// would write text the parser rejects.
+    fn render_distance(d: &ExitDistance) -> String {
+        let magnitude = d.magnitude.normalize().to_string();
+        match d.unit {
+            DistanceUnit::FractionOfEntry => format!("{} %", shift_point(&magnitude, 2)),
+            DistanceUnit::Atr { period } => format!("{magnitude} atr({period})"),
+            DistanceUnit::Sigma { period } => format!("{magnitude} sigma({period})"),
+        }
+    }
+
     fn render_exit(&self, rule: &ExitRule, cat: &Catalogue) -> String {
         match rule {
-            ExitRule::StopLoss { .. }
-            | ExitRule::TakeProfit { .. }
-            | ExitRule::TrailingStop { .. } => {
+            ExitRule::StopLoss { distance }
+            | ExitRule::TakeProfit { distance }
+            | ExitRule::TrailingStop { distance } => {
                 let (word, anchor) = match rule {
                     ExitRule::StopLoss { .. } => ("stop", "entry"),
                     ExitRule::TakeProfit { .. } => ("target", "entry"),
                     _ => ("trailing", "high_water"),
                 };
-                let pct = serde_json::to_value(rule)
-                    .ok()
-                    .and_then(|v| {
-                        v.get("fraction")
-                            .and_then(Value::as_str)
-                            .map(str::to_string)
-                    })
-                    .map_or_else(|| "0".to_string(), |f| shift_point(&f, 2));
-                format!("exit {word} {pct} % from {anchor}\n")
+                // Read from the typed `ExitDistance`, not from
+                // `serde_json::to_value(rule)["fraction"]`. That key still
+                // exists — `magnitude` is serialized under it so stored
+                // documents keep their wire form (ADR-0010) — but reading it as
+                // a *fraction* was true only until ADR-D-09 gave the distance a
+                // unit. At `atr` the same number is a multiplier, so the old
+                // code shifted the point on it and wrote `150 %` over
+                // `1.5 atr(14)`: a decompiler that silently changes what a stop
+                // means, which is worse than one that refuses.
+                format!(
+                    "exit {word} {} from {anchor}\n",
+                    Self::render_distance(distance)
+                )
             }
             ExitRule::MaxHoldingBars { bars } => format!("exit time {bars} bars\n"),
             ExitRule::OnSignal { emit } => {
