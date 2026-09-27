@@ -758,3 +758,213 @@ mod tests {
         );
     }
 }
+
+/// Contiguous runs of one causal label, as the diagnostics bundle's regime
+/// attribution consumes them.
+///
+/// # Why this goes through `labels_as_of` rather than over the history directly
+///
+/// `backtest::stats::diagnostics::RegimeWindow` had **no producer anywhere in the
+/// workspace**: `DiagnosticBundle::from_result` takes `&[RegimeWindow]` and its
+/// only caller passed `&[]`, so every bundle this platform ever served reported
+/// `by_regime` as `Unmeasured { NoLabelsSupplied }`. Honest, and never measured.
+///
+/// Building windows from `history` would mean deciding again when a label becomes
+/// an answer, and there is already an answer to that: [`labels_as_of`] requires a
+/// row's **event time and knowledge time both** to be at or before `t`, and
+/// yields `None` rather than the nearest label, because nearest in that direction
+/// is the future. Taking the labels from that function and grouping them keeps
+/// one implementation of the rule. A second one is how a lookahead gets in.
+///
+/// So `times` should be the curve the attribution will run over — the run's own
+/// equity-curve timestamps — and the windows come back aligned to those instants
+/// by construction.
+///
+/// An unlabelled instant **ends** the window it follows rather than extending it.
+/// A gap in the labelling is not the label either side of it.
+///
+/// `times` and `labels` must be the same length and `times` ascending;
+/// [`labels_as_of`] returns labels in the order it was given times.
+#[must_use]
+pub fn windows_from_labels(
+    times: &[DateTime<Utc>],
+    labels: &[Option<RegimeLabel>],
+) -> Vec<backtest::stats::diagnostics::RegimeWindow> {
+    use backtest::stats::diagnostics::RegimeWindow;
+
+    let mut out: Vec<RegimeWindow> = Vec::new();
+    let mut run: Option<(RegimeLabel, DateTime<Utc>, DateTime<Utc>)> = None;
+
+    for (t, l) in times.iter().zip(labels.iter()) {
+        match (l, &mut run) {
+            // Extending the current run.
+            (Some(label), Some((open, _, last))) if *label == *open => *last = *t,
+            // A different label, or the first labelled instant after a gap:
+            // close what was open and start again.
+            (Some(label), slot) => {
+                if let Some((open, start, last)) = slot.take() {
+                    out.push(window(open, start, last));
+                }
+                *slot = Some((*label, *t, *t));
+            }
+            // Unlabelled: nothing is in force, so the run ends here.
+            (None, slot) => {
+                if let Some((open, start, last)) = slot.take() {
+                    out.push(window(open, start, last));
+                }
+            }
+        }
+    }
+    if let Some((open, start, last)) = run {
+        out.push(window(open, start, last));
+    }
+    out
+}
+
+/// One window over `[start, last]`, as a half-open `[start, end)`.
+///
+/// `end` is one nanosecond past the last labelled instant rather than the next
+/// instant in the curve: `regime_attribution` selects equity points with
+/// `ts >= start` and `ts < end`, so this includes `last` and cannot reach over an
+/// instant the label was not in force for. Adjacent windows therefore leave a
+/// sub-nanosecond gap that no equity point can fall into, which is the correct
+/// trade — the alternative extends a label across a boundary to close a gap that
+/// contains nothing.
+fn window(
+    label: RegimeLabel,
+    start: DateTime<Utc>,
+    last: DateTime<Utc>,
+) -> backtest::stats::diagnostics::RegimeWindow {
+    backtest::stats::diagnostics::RegimeWindow {
+        start,
+        end: last + chrono::Duration::nanoseconds(1),
+        label: label.as_str().to_string(),
+    }
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+
+    fn t(secs: i64) -> DateTime<Utc> {
+        DateTime::from_timestamp(secs, 0).expect("in range")
+    }
+
+    fn labels(v: &[Option<RegimeLabel>]) -> Vec<Option<RegimeLabel>> {
+        v.to_vec()
+    }
+
+    #[test]
+    fn contiguous_instants_of_one_label_are_one_window() {
+        let times = [t(0), t(60), t(120)];
+        let w = windows_from_labels(
+            &times,
+            &labels(&[
+                Some(RegimeLabel::LowVol),
+                Some(RegimeLabel::LowVol),
+                Some(RegimeLabel::LowVol),
+            ]),
+        );
+        assert_eq!(w.len(), 1);
+        assert_eq!(w[0].label, "low_vol");
+        assert_eq!(w[0].start, t(0));
+        // Half-open, and past the last labelled instant so that instant is inside
+        // it: `regime_attribution` selects `ts < end`.
+        assert!(w[0].end > t(120));
+        assert!(w[0].end < t(121));
+    }
+
+    #[test]
+    fn a_label_change_closes_one_window_and_opens_the_next() {
+        let times = [t(0), t(60), t(120)];
+        let w = windows_from_labels(
+            &times,
+            &labels(&[
+                Some(RegimeLabel::LowVol),
+                Some(RegimeLabel::HighVol),
+                Some(RegimeLabel::HighVol),
+            ]),
+        );
+        assert_eq!(w.len(), 2);
+        assert_eq!((w[0].label.as_str(), w[0].start), ("low_vol", t(0)));
+        assert_eq!((w[1].label.as_str(), w[1].start), ("high_vol", t(60)));
+        // The first window cannot reach the instant the second owns.
+        assert!(w[0].end <= w[1].start);
+    }
+
+    #[test]
+    fn an_unlabelled_instant_ends_the_window_rather_than_extending_it() {
+        // The rule `labels_as_of` states: an unlabelled observation is not the
+        // label either side of it. A window that spanned the gap would attribute
+        // returns to a regime nobody had established for them.
+        let times = [t(0), t(60), t(120)];
+        let w = windows_from_labels(
+            &times,
+            &labels(&[Some(RegimeLabel::MidVol), None, Some(RegimeLabel::MidVol)]),
+        );
+        assert_eq!(w.len(), 2, "one window either side of the gap, not one across");
+        assert!(w[0].end <= t(60), "the first must not reach the unlabelled instant");
+        assert_eq!(w[1].start, t(120));
+    }
+
+    #[test]
+    fn a_gap_between_two_runs_of_the_same_label_is_still_two_windows() {
+        // Same label either side, so a naive grouping on label alone would merge
+        // them and silently claim the unlabelled middle.
+        let times = [t(0), t(60), t(120), t(180)];
+        let w = windows_from_labels(
+            &times,
+            &labels(&[
+                Some(RegimeLabel::LowVol),
+                None,
+                None,
+                Some(RegimeLabel::LowVol),
+            ]),
+        );
+        assert_eq!(w.len(), 2);
+        assert_eq!(w.iter().filter(|x| x.label == "low_vol").count(), 2);
+    }
+
+    #[test]
+    fn no_labels_at_all_produce_no_windows_rather_than_one_empty_one() {
+        // An empty vec is what `regime_attribution` reads as
+        // `Unmeasured { NoLabelsSupplied }` — which is the truth here. A single
+        // zero-width window would read as a measurement that found nothing.
+        let times = [t(0), t(60)];
+        assert!(windows_from_labels(&times, &labels(&[None, None])).is_empty());
+        assert!(windows_from_labels(&[], &[]).is_empty());
+    }
+
+    #[test]
+    fn one_labelled_instant_is_a_window_that_contains_it() {
+        let w = windows_from_labels(&[t(500)], &labels(&[Some(RegimeLabel::HighVol)]));
+        assert_eq!(w.len(), 1);
+        assert!(w[0].start <= t(500) && w[0].end > t(500));
+    }
+
+    #[test]
+    fn the_windows_come_from_labels_as_of_so_the_knowledge_clock_is_respected() {
+        // End to end through the real rule: a row whose knowledge time is after
+        // the instant asked about is not an answer for it. If `windows_from_labels`
+        // ever stopped going through `labels_as_of`, this is what would break.
+        let history = vec![RegimeObservation {
+            event_time: t(0),
+            label: RegimeLabel::HighVol,
+            p_filtered: vec![0.1, 0.2, 0.7],
+            // Knowable only at t(600) — six hundred seconds after the event.
+            knowledge_time: t(600),
+            series_log_return: None,
+        }];
+        let times = [t(60), t(300), t(900)];
+        let resolved = labels_as_of(&history, &times);
+        assert_eq!(
+            resolved,
+            vec![None, None, Some(RegimeLabel::HighVol)],
+            "a label is not an answer before it was knowable"
+        );
+
+        let w = windows_from_labels(&times, &resolved);
+        assert_eq!(w.len(), 1, "only the instant after the knowledge time");
+        assert_eq!(w[0].start, t(900));
+    }
+}
