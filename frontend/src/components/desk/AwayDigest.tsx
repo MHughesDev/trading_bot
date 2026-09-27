@@ -9,7 +9,7 @@
 //   1. The digest covers exactly the gap since the last visit and no more.
 //   2. Every line is a verdict or a state change, never an event name.
 //   3. It is absent for a gap under an hour.
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/primitives/Button'
 import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'
@@ -20,7 +20,7 @@ import { blindSpots, hasSomethingToSay, writeLastVisit, shouldShowDigest, linesI
 export function AwayDigestPanel({
   data,
   lastVisit,
-  now = Date.now(),
+  now: nowProp,
   loading = false,
   onDismiss,
 }: {
@@ -35,8 +35,25 @@ export function AwayDigestPanel({
   loading?: boolean
   onDismiss?: () => void
 }) {
-  const [dismissed, setDismissed] = useState(false)
-  useEffect(() => setDismissed(false), [data])
+  // `now = Date.now()` as a default parameter read the clock on every render, so
+  // the gap this panel reports slid forward each time the desk re-rendered for
+  // an unrelated reason and the window it named was never the window it had
+  // measured. Captured once, at mount, it is a single instant the whole render
+  // agrees on — and a caller that has a better one (the tests, and anything
+  // that knows when the data was fetched) still overrides it.
+  const [mountedAt] = useState(() => Date.now())
+  const now = nowProp ?? mountedAt
+
+  // A new digest payload is a new thing to read, so a previous dismissal must
+  // not hide it. This used to be `useState(false)` plus
+  // `useEffect(() => setDismissed(false), [data])`, which reached the same answer
+  // one render late: the render that first saw the new payload still rendered
+  // the panel as dismissed, and the effect then re-rendered to un-dismiss it.
+  // Recording *which* payload was dismissed answers it during the first render
+  // instead. The box is there because `data` is legitimately `null` (the
+  // endpoint did not answer), and `null` has to be dismissible too.
+  const [dismissedFor, setDismissedFor] = useState<{ payload: AwayDigestData | null } | null>(null)
+  const dismissed = dismissedFor !== null && dismissedFor.payload === data
 
   if (dismissed || loading || !shouldShowDigest(lastVisit, now)) return null
 
@@ -119,7 +136,7 @@ export function AwayDigestPanel({
           size="xs"
           variant="ghost"
           onClick={() => {
-            setDismissed(true)
+            setDismissedFor({ payload: data })
             writeLastVisit(now)
             onDismiss?.()
           }}

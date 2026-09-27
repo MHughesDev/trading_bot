@@ -88,8 +88,10 @@ export function ModelTrainTab({ modelId }: Props) {
   const logEndRef = useRef<HTMLDivElement>(null)
 
   // Data selection
-  const [instrument, setInstrument] = useState<string>('')
-  const [timeframe, setTimeframe] = useState<string>('')
+  // The picked values, which may be empty. The effective ones are derived below
+  // from these plus what the platform actually has bars for.
+  const [instrumentChoice, setInstrumentChoice] = useState<string>('')
+  const [timeframeChoice, setTimeframeChoice] = useState<string>('')
   const [lookbackDays, setLookbackDays] = useState<number>(30)
   const [labelHorizon, setLabelHorizon] = useState<string>('1h')
 
@@ -113,26 +115,36 @@ export function ModelTrainTab({ modelId }: Props) {
     return map
   }, [marketInstruments])
 
-  // Default the selection once data loads.
-  useEffect(() => {
-    if (!marketInstruments || marketInstruments.length === 0) return
-    if (!instrument) {
-      const first = marketInstruments[0]
-      setInstrument(first.instrument_id)
-      setTimeframe(first.timeframe)
-    }
-  }, [marketInstruments, instrument])
-
+  // Stated as a fallback rather than as an effect that writes the default in. The
+  // effect rendered the form once with no instrument chosen and corrected it on the
+  // next render; a training form whose instrument field is briefly blank is a form
+  // someone can submit in that state. The timeframe falls back to the first one the
+  // chosen instrument has, which also subsumes the correction the picker below used
+  // to do by hand.
+  const instrument = instrumentChoice || marketInstruments?.[0]?.instrument_id || ''
   const timeframesForInstrument = instrumentOptions.get(instrument) ?? []
+  const timeframe =
+    timeframeChoice && timeframesForInstrument.some((m) => m.timeframe === timeframeChoice)
+      ? timeframeChoice
+      : (timeframesForInstrument[0]?.timeframe ?? '')
   const selectedCoverage = timeframesForInstrument.find((m) => m.timeframe === timeframe)
 
   const activeRun = runs?.find((r) => r.status === 'running')
   const latestRun = runs?.[0]
 
-  // Accumulate log lines from phase changes
+  // Accumulate log lines from phase changes.
+  //
+  // This one stays an effect, and the escape is deliberate. The log is a record of
+  // transitions this client *observed* while it was watching -- the polled run row
+  // carries only the phase it is in now, so there is nothing to derive the history
+  // from and no render-time value that could stand in for it. It is the same shape
+  // as a subscription: an external system reports a change, and the change is
+  // recorded. The dedupe below returns `prev` unchanged for a poll that saw no
+  // transition, so an unchanged phase costs no render at all.
   useEffect(() => {
     if (!activeRun) return
     const line = `[${new Date().toLocaleTimeString()}] Phase: ${activeRun.phase} (${Math.round(activeRun.progress)}%)`
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- appends observed phase transitions, which the polled payload does not carry and nothing can derive.
     setLogLines((prev) => {
       const last = prev[prev.length - 1]
       // Avoid duplicate lines
@@ -141,7 +153,10 @@ export function ModelTrainTab({ modelId }: Props) {
       }
       return [...prev.slice(-200), line]
     })
-  }, [activeRun?.phase, activeRun?.progress])
+    // `activeRun` rather than two of its fields: the rule is right that the effect
+    // reads the whole object, and the dedupe above already makes a re-run with an
+    // unchanged phase and progress return `prev`, which re-renders nothing.
+  }, [activeRun])
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -198,14 +213,7 @@ export function ModelTrainTab({ modelId }: Props) {
                 </label>
                 <select
                   value={instrument}
-                  onChange={(e) => {
-                    const next = e.target.value
-                    setInstrument(next)
-                    const tfs = instrumentOptions.get(next) ?? []
-                    if (tfs.length && !tfs.some((m) => m.timeframe === timeframe)) {
-                      setTimeframe(tfs[0].timeframe)
-                    }
-                  }}
+                  onChange={(e) => setInstrumentChoice(e.target.value)}
                   disabled={!!activeRun}
                   className="w-full h-8 rounded-lg border border-border bg-surface px-2 text-xs text-text focus:outline-none focus:border-accent disabled:opacity-50"
                 >
@@ -224,7 +232,7 @@ export function ModelTrainTab({ modelId }: Props) {
                   </label>
                   <select
                     value={timeframe}
-                    onChange={(e) => setTimeframe(e.target.value)}
+                    onChange={(e) => setTimeframeChoice(e.target.value)}
                     disabled={!!activeRun}
                     className="w-full h-8 rounded-lg border border-border bg-surface px-2 text-xs text-text focus:outline-none focus:border-accent disabled:opacity-50"
                   >

@@ -87,13 +87,26 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     )
   }, [q, commands])
 
-  useEffect(() => setI(0), [q])
-  useEffect(() => {
+  // Both of these used to be effects, which meant every keystroke rendered once
+  // with the *previous* highlight index before a second render corrected it --
+  // and on the frame the palette opened, it rendered the last search still in
+  // the box. Adjusting during render is React's documented way to respond to a
+  // changed input, and it gets the right answer on the first render instead of
+  // the second.
+  const [prevOpen, setPrevOpen] = useState(open)
+  if (open !== prevOpen) {
+    setPrevOpen(open)
     if (open) {
       setQ('')
       setI(0)
     }
-  }, [open])
+  }
+
+  const [prevQ, setPrevQ] = useState(q)
+  if (q !== prevQ) {
+    setPrevQ(q)
+    setI(0)
+  }
 
   useEffect(() => {
     if (!open) return

@@ -155,13 +155,20 @@ export function MultiPaneChart({
     ro.observe(mainRef.current)
     lastBarCount.current = 0
 
+    // Read the overlay map once, here, and clear *that* object in the cleanup.
+    // The ref holds the same Map for the component's whole life — it is only
+    // ever mutated, never reassigned — so this is the identical object either
+    // way; reading it during the effect rather than during cleanup is what
+    // makes that guarantee visible instead of assumed.
+    const overlays = overlayMap.current
+
     return () => {
       ro.disconnect()
       mc.remove();         mainChart.current = null; candleSeries.current = null
       volChart.current?.remove();  volChart.current  = null; volSeriesRef.current  = null
       rsiChart.current?.remove();  rsiChart.current  = null; rsiSeriesRef.current  = []
       macdChart.current?.remove(); macdChart.current = null; macdSeriesRef.current = []
-      overlayMap.current.clear()
+      overlays.clear()
       lastBarCount.current = 0
     }
   }, [theme])
@@ -278,7 +285,7 @@ export function MultiPaneChart({
           const vals = inst.kind === 'ema'
             ? calcEMA(closes, inst.period ?? 20)
             : calcSMA(closes, inst.period ?? 20)
-          series[0] && (series[0] as ISeriesApi<'Line'>).setData(validPoints(vals))
+          if (series[0]) (series[0] as ISeriesApi<'Line'>).setData(validPoints(vals))
         }
       }
     }
@@ -381,7 +388,6 @@ export function MultiPaneChart({
         try { r.current?.timeScale().setVisibleRange(range) } catch { /* no data yet */ }
       })
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bars, markers, indicators])
 
   // ── price lines ───────────────────────────────────────────────────────────
@@ -401,7 +407,6 @@ export function MultiPaneChart({
       if (existing.has(id)) { (existing.get(id) as PLApply).applyOptions(opts) }
       else { existing.set(id, series.createPriceLine(opts)) }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [priceLines])
 
   const hasVol  = indicators.some((i) => i.kind === 'volume')

@@ -42,8 +42,17 @@ export function useConnection(): ConnectionInfo {
     // Staying off the bus keeps a stray control frame from some other panel
     // from repainting "no credential" as "connected".
     if (!getStoredToken()) return
-    // Re-check on mount too: a socket that opened between render and effect
-    // would otherwise wait for the next heartbeat to be reported as live.
+    // Re-check on mount too: a socket that opened between render and effect would
+    // otherwise wait for the next heartbeat to be reported as live.
+    //
+    // This is the subscription case the rule's own message carves out, and it
+    // cannot be derived. The ws client is a mutable external object with no
+    // snapshot to read during render, and the whole point of this line is to close
+    // the window *between* render and effect -- a value computed during render is
+    // by definition on the wrong side of it. The updater returns `s` unchanged when
+    // it is already `connected`, so this cascades exactly once, on the mount where
+    // the socket beat us to it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads the ws client's live state at subscription time; there is no render-time snapshot of it.
     if (getWsClient()?.isConnected()) setState((s) => (s === 'connected' ? s : 'connected'))
     const off = wsBus.on((msg) => {
       const now = Date.now()

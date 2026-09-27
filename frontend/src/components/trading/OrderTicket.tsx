@@ -98,21 +98,32 @@ export function OrderTicket({
   const [stopLoss, setStopLoss] = useState('')
   const [confirming, setConfirming] = useState(false)
 
-  // Seed the limit price from the touch when the instrument or side changes.
-  useEffect(() => {
+  // Seed the limit price from the touch when the instrument changes -- during that
+  // render, not after it. `seededFor` starts as null so the very first render of a
+  // ticket seeds too, which is what the mount run of the old effect did.
+  const [seededFor, setSeededFor] = useState<string | null>(null)
+  if (seededFor !== instrument) {
+    setSeededFor(instrument)
     const touch = side === 'buy' ? (bid ?? lastPrice) : (ask ?? lastPrice)
     if (touch != null && limitPrice === '') setLimitPrice(touch.toFixed(meta.priceDp))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instrument])
+  }
 
   // A price clicked in the order book writes straight into the ticket (§3.14).
+  // The write happens during render so the ticket never shows the old price for a
+  // frame; telling the parent the preset has been consumed stays in an effect,
+  // because that is a message to another component and a render is no place to
+  // send one.
+  const [prevPreset, setPrevPreset] = useState(presetPrice)
+  if (presetPrice !== prevPreset) {
+    setPrevPreset(presetPrice)
+    if (presetPrice != null) {
+      if (type === 'market') setType('limit')
+      setLimitPrice(presetPrice.toFixed(meta.priceDp))
+    }
+  }
   useEffect(() => {
-    if (presetPrice == null) return
-    if (type === 'market') setType('limit')
-    setLimitPrice(presetPrice.toFixed(meta.priceDp))
-    onPresetConsumed?.()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presetPrice])
+    if (presetPrice != null) onPresetConsumed?.()
+  }, [presetPrice, onPresetConsumed])
 
   const refPrice =
     type === 'market'

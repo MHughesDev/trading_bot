@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Accessibility, AlertTriangle, Bell, Bot, CandlestickChart, Check, Copy, Database, Download, FlaskConical, Gauge, Globe, Info, Keyboard, KeyRound, LayoutGrid, LogOut, Palette, Plug, Receipt, RotateCcw, Shield, ShieldAlert, Sigma, Upload, User as UserIcon, Zap } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -73,6 +73,16 @@ export function SettingsPage() {
   const refs = useRef<Partial<Record<SectionId, HTMLElement | null>>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
 
+  // `S` used to be handed `refs` itself and write into it. That made the section
+  // wrapper a component that mutates its own props, which is exactly the thing
+  // the immutability rule exists to catch: the write is invisible from the call
+  // site and only works because both sides happen to agree about the shape.
+  // A register callback keeps the map private to this component and gives the
+  // child one thing it is allowed to do with it.
+  const register = useCallback((id: SectionId, el: HTMLElement | null) => {
+    refs.current[id] = el
+  }, [])
+
   useEffect(() => {
     const root = scrollRef.current
     if (!root) return
@@ -131,30 +141,30 @@ export function SettingsPage() {
         </nav>
 
         <div className="read-col">
-          <S id="appearance" title="Appearance" refs={refs} blurb="Two themes, deliberately different. Not one theme and its inversion."><AppearanceSection /></S>
-          <S id="workspace" title="Workspace" refs={refs} blurb="Where the app opens and how the trading desk behaves."><WorkspaceSection /></S>
-          <S id="charts" title="Charts" refs={refs} blurb="What a chart shows before you touch it."><ChartsSection /></S>
-          <S id="accessibility" title="Accessibility" refs={refs} blurb="Colour is never the only cue. These make that stronger."><AccessibilitySection /></S>
+          <S id="appearance" title="Appearance" register={register} blurb="Two themes, deliberately different. Not one theme and its inversion."><AppearanceSection /></S>
+          <S id="workspace" title="Workspace" register={register} blurb="Where the app opens and how the trading desk behaves."><WorkspaceSection /></S>
+          <S id="charts" title="Charts" register={register} blurb="What a chart shows before you touch it."><ChartsSection /></S>
+          <S id="accessibility" title="Accessibility" register={register} blurb="Colour is never the only cue. These make that stronger."><AccessibilitySection /></S>
 
-          <S id="ticket" title="Order ticket" refs={refs} blurb="What the ticket is pre-filled with when it opens."><TicketSection /></S>
-          <S id="risk" title="Risk limits" refs={refs} blurb="Account-level clamps that apply to every strategy and every order."><RiskSection /></S>
-          <S id="automations" title="Automation defaults" refs={refs} blurb="Starting point for a new automation."><AutomationDefaultsSection /></S>
-          <S id="backtesting" title="Back testing" refs={refs} blurb="Starting point for a new run."><BacktestDefaultsSection /></S>
+          <S id="ticket" title="Order ticket" register={register} blurb="What the ticket is pre-filled with when it opens."><TicketSection /></S>
+          <S id="risk" title="Risk limits" register={register} blurb="Account-level clamps that apply to every strategy and every order."><RiskSection /></S>
+          <S id="automations" title="Automation defaults" register={register} blurb="Starting point for a new automation."><AutomationDefaultsSection /></S>
+          <S id="backtesting" title="Back testing" register={register} blurb="Starting point for a new run."><BacktestDefaultsSection /></S>
 
-          <S id="marketdata" title="Market data" refs={refs} blurb="Feed depth, repaint ceiling and what counts as stale."><MarketDataSection /></S>
-          <S id="numbers" title="Numbers & locale" refs={refs} blurb="How every figure in the product renders."><NumbersSection /></S>
-          <S id="storage" title="Local data" refs={refs} blurb="What this browser is holding, and how to clear it."><StorageSection /></S>
+          <S id="marketdata" title="Market data" register={register} blurb="Feed depth, repaint ceiling and what counts as stale."><MarketDataSection /></S>
+          <S id="numbers" title="Numbers & locale" register={register} blurb="How every figure in the product renders."><NumbersSection /></S>
+          <S id="storage" title="Local data" register={register} blurb="What this browser is holding, and how to clear it."><StorageSection /></S>
 
-          <S id="venues" title="Venues" refs={refs} blurb="Credentials are verified at the venue before they are saved."><VenuesSection /></S>
-          <S id="ai" title="AI providers" refs={refs} blurb="Encrypted at rest, verified on save, never returned."><AiSection /></S>
-          <S id="agent" title="Research agent" refs={refs} blurb="What the agent may do without asking, and what it costs."><AgentSection /></S>
-          <S id="api" title="API access" refs={refs} blurb="Service tokens for headless and MCP access."><ApiAccessCard /></S>
+          <S id="venues" title="Venues" register={register} blurb="Credentials are verified at the venue before they are saved."><VenuesSection /></S>
+          <S id="ai" title="AI providers" register={register} blurb="Encrypted at rest, verified on save, never returned."><AiSection /></S>
+          <S id="agent" title="Research agent" register={register} blurb="What the agent may do without asking, and what it costs."><AgentSection /></S>
+          <S id="api" title="API access" register={register} blurb="Service tokens for headless and MCP access."><ApiAccessCard /></S>
 
-          <S id="notifications" title="Notifications" refs={refs} blurb="What interrupts you."><NotificationsSection /><BrowserNotifications /></S>
-          <S id="keyboard" title="Keyboard" refs={refs} blurb="Every shortcut in the product."><KeyboardSection /></S>
-          <S id="account" title="Account" refs={refs}><AccountSection /></S>
-          <S id="about" title="About" refs={refs}><AboutSection /></S>
-          <S id="danger" title="Danger zone" refs={refs} blurb="Everything here is irreversible."><DangerSection /></S>
+          <S id="notifications" title="Notifications" register={register} blurb="What interrupts you."><NotificationsSection /><BrowserNotifications /></S>
+          <S id="keyboard" title="Keyboard" register={register} blurb="Every shortcut in the product."><KeyboardSection /></S>
+          <S id="account" title="Account" register={register}><AccountSection /></S>
+          <S id="about" title="About" register={register}><AboutSection /></S>
+          <S id="danger" title="Danger zone" register={register} blurb="Everything here is irreversible."><DangerSection /></S>
 
           <div style={{ height: 'var(--s-16)' }} />
         </div>
@@ -167,20 +177,20 @@ function S({
   id,
   title,
   blurb,
-  refs,
+  register,
   children,
 }: {
   id: SectionId
   title: string
   blurb?: string
-  refs: React.MutableRefObject<Partial<Record<SectionId, HTMLElement | null>>>
+  register: (id: SectionId, el: HTMLElement | null) => void
   children: React.ReactNode
 }) {
   return (
     <section
       data-section={id}
       ref={(el) => {
-        refs.current[id] = el
+        register(id, el)
       }}
       style={{ scrollMarginTop: 'var(--s-4)' }}
     >
@@ -881,6 +891,12 @@ function MarketDataSection() {
 function NumbersSection() {
   const prefs = usePrefs()
   const sample = 1234567.891
+  // The preview's instant is captured once, when the panel mounts, rather than
+  // read fresh during render. `clockTime(Date.now())` made this component
+  // render a different tree every time it happened to re-render -- toggling any
+  // switch above moved the clock -- which is the definition of non-idempotent.
+  // Every other row here is a fixed sample; this one now is too.
+  const [shownAt] = useState(() => Date.now())
   return (
     <Panel>
       <PanelHeader
@@ -925,7 +941,7 @@ function NumbersSection() {
           <KeyValue k="Win rate" v={pct(54, 0)} />
           <KeyValue k="BTC price (2dp)" v={fmtPrice('BTC-USD', 64318.4)} />
           <KeyValue k="EURUSD price (4dp)" v={fmtPrice('EURUSD', 1.10423)} />
-          <KeyValue k="Time" v={<span className="mono">{clockTime(Date.now())}</span>} />
+          <KeyValue k="Time" v={<span className="mono">{clockTime(shownAt)}</span>} />
         </div>
         <p className="mut" style={{ fontSize: 'var(--t-11)', marginTop: 'var(--s-3)', lineHeight: 1.5 }}>
           Decimal places are fixed per instrument from its metadata, never "as many as needed", so the same

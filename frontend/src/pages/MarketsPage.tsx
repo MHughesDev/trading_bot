@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Database, Download, ExternalLink, Play, Plus, RotateCw, Search, Square } from 'lucide-react'
@@ -446,16 +446,26 @@ function InitialiseDialog({
   const [lookback, setLookback] = useState('90')
   const [search, setSearch] = useState('')
 
-  useEffect(() => {
+  // Both of these respond to an input changing, so both happen during the render
+  // that sees the change instead of in an effect one render later. The dialog no
+  // longer opens showing the previous search for a frame, and the asset class no
+  // longer lags a chosen symbol by a render -- the class picker below is still a
+  // real choice, so inferring only on a *change* of symbol is what keeps a manual
+  // override from being overwritten on the next render.
+  const [prevOpen, setPrevOpen] = useState(open)
+  if (open !== prevOpen) {
+    setPrevOpen(open)
     if (open) {
       setSymbol('')
       setSearch('')
     }
-  }, [open])
+  }
 
-  useEffect(() => {
+  const [prevSymbol, setPrevSymbol] = useState(symbol)
+  if (symbol !== prevSymbol) {
+    setPrevSymbol(symbol)
     if (symbol) setAssetClass(inferAssetClass(symbol))
-  }, [symbol])
+  }
 
   const results = useQuery({
     queryKey: ['universe-search', search],

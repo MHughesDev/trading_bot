@@ -8,8 +8,18 @@ import type { DeskControls } from './ControlsRow'
  * thing a person should never have to click out of a text field to do.
  */
 export function useDeskKeymap(c: DeskControls) {
+  // The latest-controls ref is refreshed in an effect, not during render.
+  // Writing a ref while rendering is a real hazard under concurrent rendering:
+  // a render that React throws away still leaves its write behind, so the
+  // listener can end up holding controls from a tree that was never committed.
+  // Every read here happens from a `keydown` handler, which runs long after the
+  // commit, so the effect refresh is not a timing change -- it is the same value
+  // arriving by a route that cannot be poisoned by an abandoned render.
   const ref = useRef(c)
-  ref.current = c
+  useEffect(() => {
+    ref.current = c
+  })
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const k = ref.current

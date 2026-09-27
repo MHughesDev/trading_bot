@@ -44,12 +44,29 @@ export function HyperparamEditor({ framework, disabled, onChange }: Props) {
     defaultsFor(framework),
   )
   const [rawText, setRawText] = useState('{}')
-  const [rawError, setRawError] = useState<string | null>(null)
 
-  // Reset to framework defaults whenever the framework changes.
-  useEffect(() => {
+  // Reset to framework defaults during the render that changes the framework. As
+  // an effect this rendered the previous framework's knob values against the new
+  // framework's schema once -- a learning rate from one adapter shown as if it
+  // belonged to another.
+  const [prevFramework, setPrevFramework] = useState(framework)
+  if (framework !== prevFramework) {
+    setPrevFramework(framework)
     setValues(defaultsFor(framework))
-  }, [framework])
+  }
+
+  // Parsed once, here, instead of inside the push-up effect. `rawError` was state
+  // the effect set but never cleared -- switching back to the knobs did not reset
+  // it -- which only went unnoticed because it is rendered in the JSON pane alone.
+  // As a derived value it cannot be stale.
+  const parsedRaw = useMemo<{ ok: true; value: unknown } | { ok: false }>(() => {
+    try {
+      return { ok: true, value: JSON.parse(rawText || '{}') }
+    } catch {
+      return { ok: false }
+    }
+  }, [rawText])
+  const rawError = mode === 'raw' && !parsedRaw.ok ? 'Invalid JSON' : null
 
   const schema = useMemo(() => schemaFor(framework, values), [framework, values])
 
@@ -67,22 +84,20 @@ export function HyperparamEditor({ framework, disabled, onChange }: Props) {
     return out
   }, [framework, schema, values])
 
-  // Push changes up.
+  // Push changes up. This stays an effect: it is a message to the parent, which is
+  // an external system as far as this component is concerned, and a render is no
+  // place to send one.
   useEffect(() => {
     if (mode === 'raw') {
-      try {
-        const parsed = JSON.parse(rawText || '{}')
-        setRawError(null)
-        onChange(parsed, true)
-      } catch {
-        setRawError('Invalid JSON')
-        onChange({}, false)
-      }
+      if (parsedRaw.ok) onChange(parsedRaw.value as Record<string, unknown>, true)
+      else onChange({}, false)
     } else {
       onChange(formHyperparams, true)
     }
+    // `onChange` is deliberately absent: callers pass a fresh closure every render,
+    // and including it would make this effect a render loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, rawText, formHyperparams])
+  }, [mode, parsedRaw, formHyperparams])
 
   function setParam(p: ParamDesc, raw: string) {
     setValues((prev) => {

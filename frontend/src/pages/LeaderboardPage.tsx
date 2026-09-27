@@ -75,6 +75,44 @@ function DeltaIcon({ value }: { value?: number }) {
   return <TrendingDown className="h-3 w-3 text-neg" />
 }
 
+/**
+ * A sort control, declared at module scope rather than inside the page.
+ *
+ * It used to be a closure defined during `LeaderboardPage`'s render, which gave
+ * it a new component identity on every render — React tore the `<button>` down
+ * and built a new one each time. That is not only wasted work: the leaderboard
+ * refetches every two minutes, and each refetch threw away the focus of anyone
+ * who had tabbed to a sort header. Hoisting it keeps one DOM node for the life
+ * of the table, so focus and `:active` survive a refetch.
+ */
+function SortHeader({
+  col,
+  label,
+  sortKey,
+  sortAsc,
+  onSort,
+}: {
+  col: SortKey
+  label: string
+  sortKey: SortKey
+  sortAsc: boolean
+  onSort: (key: SortKey) => void
+}) {
+  return (
+    <button
+      onClick={() => onSort(col)}
+      className="flex items-center gap-1 text-xs font-medium text-fg-secondary hover:text-text transition-colors"
+    >
+      {label}
+      {sortKey === col
+        ? sortAsc
+          ? <ChevronUp className="h-3 w-3" />
+          : <ChevronDown className="h-3 w-3" />
+        : <ChevronDown className="h-3 w-3 opacity-30" />}
+    </button>
+  )
+}
+
 export function LeaderboardPage() {
   const navigate = useNavigate()
   const { data, isLoading } = useLeaderboard()
@@ -93,19 +131,7 @@ export function LeaderboardPage() {
     return sortAsc ? av - bv : bv - av
   })
 
-  const SortHeader = ({ col, label }: { col: SortKey; label: string }) => (
-    <button
-      onClick={() => toggleSort(col)}
-      className="flex items-center gap-1 text-xs font-medium text-fg-secondary hover:text-text transition-colors"
-    >
-      {label}
-      {sortKey === col
-        ? sortAsc
-          ? <ChevronUp className="h-3 w-3" />
-          : <ChevronDown className="h-3 w-3" />
-        : <ChevronDown className="h-3 w-3 opacity-30" />}
-    </button>
-  )
+  const th = { sortKey, sortAsc, onSort: toggleSort }
 
   return (
     <div className="mx-auto w-full max-w-5xl px-6 py-6">
@@ -138,21 +164,21 @@ export function LeaderboardPage() {
             <thead>
               <tr className="border-b border-border bg-sunken">
                 <th className="px-4 py-3 text-left w-12">
-                  <SortHeader col="rank" label="Rank" />
+                  <SortHeader col="rank" label="Rank" {...th} />
                 </th>
                 <th className="px-4 py-3 text-left">Model</th>
                 <th className="px-4 py-3 text-left hidden sm:table-cell">Kind</th>
                 <th className="px-4 py-3 text-right">
-                  <SortHeader col="score" label="Score" />
+                  <SortHeader col="score" label="Score" {...th} />
                 </th>
                 <th className="px-4 py-3 text-right hidden md:table-cell">
-                  <SortHeader col="crps" label="CRPS" />
+                  <SortHeader col="crps" label="CRPS" {...th} />
                 </th>
                 <th className="px-4 py-3 text-right hidden md:table-cell">
-                  <SortHeader col="coverage_90" label="Cov 90%" />
+                  <SortHeader col="coverage_90" label="Cov 90%" {...th} />
                 </th>
                 <th className="px-4 py-3 text-right hidden lg:table-cell">
-                  <SortHeader col="sharpe" label="Sharpe" />
+                  <SortHeader col="sharpe" label="Sharpe" {...th} />
                 </th>
                 <th className="px-4 py-3 w-8" />
               </tr>

@@ -222,7 +222,9 @@ export function usePortfolioSummary(): PortfolioSummary {
       reconcileDelta: serverEquity - rowEquity,
       excludedCurrencies: totals?.excluded_currencies ?? [],
     }
-  }, [rollup, q.isLoading, q.error, q])
+    // `q` covers `q.isLoading` and `q.error`; naming the fields as well told the
+    // rule this memo depended on things it could already see through `q`.
+  }, [rollup, q])
 }
 
 /** Every open position across every class, flattened for the positions tab. */

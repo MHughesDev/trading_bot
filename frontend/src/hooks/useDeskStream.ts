@@ -56,12 +56,29 @@ export function parseFrame(frame: string): { id: string | null; data: string } {
 }
 
 export function useDeskStream({ url, onEvent }: Options): DeskStream {
-  const [state, setState] = useState<StreamState>('connecting')
-  const [error, setError] = useState<string | null>(null)
+  // The reading is stored with the url it was taken from, so it cannot be read
+  // as a reading about a different stream. `state` used to be a bare value that
+  // an effect reset to `'closed'` when the url went away, which meant the render
+  // that first saw a *new* url still reported the previous stream's state.
+  const [socket, setSocket] = useState<{ url: string | null; state: StreamState }>({
+    url: null,
+    state: 'connecting',
+  })
+  const [socketError, setSocketError] = useState<string | null>(null)
   const [cursor, setCursor] = useState<string | null>(null)
   const [staleForSecs, setStaleForSecs] = useState<number | null>(null)
   const [everReceived, setEverReceived] = useState(false)
   const [nonce, setNonce] = useState(0)
+
+  // An absent credential is a permanent answer and a *render-time* one: nothing
+  // can mint a token without a reload, so this reads the same on every render of
+  // this component's life. `closed` rather than `stale` for the reason the effect
+  // below used to give -- reconnecting cannot produce a token, so a retry loop
+  // here is a poll against a fact.
+  const signedOut = !getStoredToken()
+  const state: StreamState =
+    !url || signedOut ? 'closed' : socket.url === url ? socket.state : 'connecting'
+  const error = url && signedOut ? 'not signed in' : socketError
 
   const onEventRef = useRef(onEvent)
   onEventRef.current = onEvent
@@ -73,10 +90,10 @@ export function useDeskStream({ url, onEvent }: Options): DeskStream {
   const reconnect = useCallback(() => setNonce((n) => n + 1), [])
 
   useEffect(() => {
-    if (!url) {
-      setState('closed')
-      return
-    }
+    // No url, nothing to open. `state` already reads `'closed'` from `url` alone,
+    // so there is nothing to set here.
+    if (!url) return
+    const setState = (next: StreamState) => setSocket({ url, state: next })
     // A different conversation is a different stream: what the previous one had
     // received is not evidence about this one. Keyed on the url rather than on
     // this effect running, because a manual reconnect re-runs it and resumes the
@@ -114,17 +131,12 @@ export function useDeskStream({ url, onEvent }: Options): DeskStream {
       }
     }
 
-    // An absent credential is a permanent answer, and the cheapest place to
-    // give it is before the first request. Sending `Bearer dev-local` asked the
-    // platform a question it has always answered 401, and then reported that
-    // 401 as though a real credential had been refused. The state is `closed`
-    // rather than `stale` for the same reason a 401 is: reconnecting cannot
-    // produce a token, so a retry loop here is a poll against a fact.
-    if (!getStoredToken()) {
-      setError('not signed in')
-      setState('closed')
-      return () => {}
-    }
+    // An absent credential is a permanent answer, and the cheapest place to give
+    // it is before the first request -- sending `Bearer dev-local` asked the
+    // platform a question it has always answered 401, and then reported that 401
+    // as though a real credential had been refused. Both readings it produces are
+    // derived above, from the token itself, so there is nothing to set here.
+    if (signedOut) return () => {}
 
     const run = async () => {
       while (!closed) {
@@ -140,7 +152,7 @@ export function useDeskStream({ url, onEvent }: Options): DeskStream {
           if (!res.ok || !res.body) {
             if (res.status === 401 || res.status === 404) {
               // A permanent answer. Retrying turns it into a polling loop.
-              setError(res.status === 401 ? 'not signed in' : 'this conversation is not available')
+              setSocketError(res.status === 401 ? 'not signed in' : 'this conversation is not available')
               setState('closed')
               return
             }
@@ -148,7 +160,7 @@ export function useDeskStream({ url, onEvent }: Options): DeskStream {
           }
           backoffMs = 1_000
           setState('live')
-          setError(null)
+          setSocketError(null)
           const reader = res.body.getReader()
           const decoder = new TextDecoder()
           let buffer = ''
@@ -165,7 +177,7 @@ export function useDeskStream({ url, onEvent }: Options): DeskStream {
           }
         } catch (e) {
           if (closed || (e as Error).name === 'AbortError') return
-          setError('the event stream dropped; reconnecting')
+          setSocketError('the event stream dropped; reconnecting')
         }
         if (closed) return
         // Stale, not empty: the last state stays on screen with its age — and
@@ -185,7 +197,7 @@ export function useDeskStream({ url, onEvent }: Options): DeskStream {
       closed = true
       controller.abort()
     }
-  }, [url, nonce])
+  }, [url, nonce, signedOut])
 
   // Ages the stale marker once a second so "stale · 40s" is true rather than
   // frozen at the moment the socket dropped.

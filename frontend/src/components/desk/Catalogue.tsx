@@ -38,16 +38,22 @@ export function Catalogue() {
   const tools = cat.data?.tools ?? []
   const visible = toolsVisibleInMode(tools, mode)
   const hidden = tools.filter((t) => !visible.includes(t))
+  // Keyed off the query result and the two controls, not off `visible`.
+  // `toolsVisibleInMode` returns a fresh array every render, so a dep on
+  // `visible` changed on every render and the memo never held anything — it was
+  // the cost of a memo with none of the benefit. Recomputing the filter inside
+  // is cheaper than the array identity it was guarding.
   const namespaces = useMemo(() => {
     const m = new Map<string, ToolCard[]>()
-    for (const t of visible) {
-      if (!t.name.toLowerCase().includes(q.toLowerCase())) continue
+    const needle = q.toLowerCase()
+    for (const t of toolsVisibleInMode(cat.data?.tools ?? [], mode)) {
+      if (!t.name.toLowerCase().includes(needle)) continue
       const list = m.get(t.namespace) ?? []
       list.push(t)
       m.set(t.namespace, list)
     }
     return [...m.entries()].sort(([a], [b]) => a.localeCompare(b))
-  }, [visible, q])
+  }, [cat.data, mode, q])
 
   return (
     <div className="desk-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>

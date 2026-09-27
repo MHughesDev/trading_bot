@@ -3,7 +3,7 @@ import { AlertTriangle, Check, ChevronDown, ChevronUp, Info } from 'lucide-react
 import { IconButton } from '@/components/primitives/Button'
 import { Badge } from '@/components/primitives/Badge'
 import { Label } from '@/components/primitives/Num'
-import { clockTime } from '@/lib/format'
+import { DASH, clockTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 /* Spec §4.3 — the "Tips" box that occupied prime canvas real estate is replaced
@@ -73,9 +73,15 @@ export function ValidationConsole({
 
       {!collapsed && (
         <div style={{ overflow: 'auto', maxHeight: 200 }} aria-live="polite">
+          {/* The clean line carries the *validation run's* instant, not the
+              render's. `clockTime(Date.now())` put a fresh timestamp beside this
+              row every time the builder re-rendered for any reason, so a line
+              that reports "nothing to report" kept claiming it had just been
+              measured. When nothing has run there is no instant to show, and
+              DASH says that rather than inventing one. */}
           {messages.length === 0 ? (
             <div className="cmsg">
-              <span className="t">{clockTime(Date.now())}</span>
+              <span className="t">{lastRun ? clockTime(lastRun) : DASH}</span>
               <Check size={12} className="i pos" aria-hidden />
               <span>Nothing to report. Add blocks and wire them up.</span>
             </div>

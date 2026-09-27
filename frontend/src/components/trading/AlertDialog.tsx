@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Bell, Trash2 } from 'lucide-react'
 import { Modal } from '@/components/primitives/Modal'
@@ -46,13 +46,18 @@ export function AlertDialog({
   const [value, setValue] = useState('')
   const [note, setNote] = useState('')
 
-  useEffect(() => {
+  // Prefill on the open transition, during render. As an effect this rendered
+  // the dialog once with an empty price field and then filled it, so opening the
+  // ticket flashed a blank value that looked like "no last price" -- the one
+  // reading this dialog exists to put in front of you.
+  const [prevOpen, setPrevOpen] = useState(open)
+  if (open !== prevOpen) {
+    setPrevOpen(open)
     if (open) {
       setValue(lastPrice != null ? lastPrice.toFixed(meta.priceDp) : '')
       setNote('')
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }
 
   const create = useMutation({
     mutationFn: () => createAlert({ instrumentId: instrument, kind, value, note: note || undefined }),

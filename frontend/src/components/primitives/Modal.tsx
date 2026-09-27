@@ -151,9 +151,15 @@ export function ConfirmDialog({
 }) {
   const [typed, setTyped] = useState('')
 
-  useEffect(() => {
+  // Clearing the confirmation box on close, during render rather than in an
+  // effect. An effect cleared it one render late, so a dialog reopened quickly
+  // could show the phrase the last person typed -- on a dialog whose entire job
+  // is to make an irreversible action deliberate, that is the wrong default.
+  const [prevOpen, setPrevOpen] = useState(open)
+  if (open !== prevOpen) {
+    setPrevOpen(open)
     if (!open) setTyped('')
-  }, [open])
+  }
 
   const ready = !typeToConfirm || typed.trim().toUpperCase() === typeToConfirm.toUpperCase()
 

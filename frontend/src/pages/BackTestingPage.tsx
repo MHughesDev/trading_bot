@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, FlaskConical, Play, RotateCcw, ShieldCheck, StopCircle, Trash2 } from 'lucide-react'
 import { backtestsApi, strategyPickerApi, type BacktestSnapshot, type CreateBacktestRequest, type InstrumentCoverage } from '@/api/backtests'
@@ -100,7 +100,9 @@ function QuickMode() {
       q.state.data?.backtests.some((b) => isActive(b.status)) ? 1500 : 8000,
   })
 
-  const list = runs.data?.backtests ?? []
+  // Held stable so the memo below is keyed on the query result rather than on a
+  // fresh `[]` produced by this line on every render.
+  const list = useMemo(() => runs.data?.backtests ?? [], [runs.data])
   const selected = useMemo(
     () => list.find((r) => r.id === selectedId) ?? list[0] ?? null,
     [list, selectedId],
@@ -277,7 +279,7 @@ function RunConfigPanel({ onCreated }: { onCreated: (id: string) => void }) {
   const [balance, setBalance] = useState('100000')
   const [quote, setQuote] = useState('USD')
   const [name, setName] = useState('')
-  const [autoCollect, setAutoCollect] = useState(true)
+  const [autoCollectChoice, setAutoCollectChoice] = useState(true)
 
   const strategies = useQuery({
     queryKey: ['strategies', 'picker'],
@@ -291,9 +293,12 @@ function RunConfigPanel({ onCreated }: { onCreated: (id: string) => void }) {
   })
 
   const collectable = COLLECTABLE.has(assetClass)
-  useEffect(() => {
-    if (!collectable) setAutoCollect(false)
-  }, [collectable])
+  // Backfilling is only meaningful where a collector exists, so the effective
+  // value is the choice *and* the capability rather than a stored flag an effect
+  // reached in to clear. The checkbox is disabled when `!collectable`, so this
+  // renders it unchecked there and gives the choice back when the class changes
+  // to one that can be collected -- which the old reset silently ate.
+  const autoCollect = collectable && autoCollectChoice
 
   const cov = useMemo(() => {
     const rows = (coverage.data ?? []).filter((c) => c.instrument_id === instrument)
@@ -421,7 +426,7 @@ function RunConfigPanel({ onCreated }: { onCreated: (id: string) => void }) {
               type="checkbox"
               checked={autoCollect}
               disabled={!collectable}
-              onChange={(e) => setAutoCollect(e.target.checked)}
+              onChange={(e) => setAutoCollectChoice(e.target.checked)}
             />
             Backfill missing bars before running
           </label>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { assetApi } from '@/lib/api'
 import { usePrefs } from '@/store/prefs'
@@ -76,7 +76,12 @@ export function useBars(instrument: string | undefined, tfSecs: number, lookback
   const lookbackDays = lookbackDaysOverride ?? prefLookback
   const [liveBars, setLiveBars] = useState<Bar[]>([])
   const [lastUpdate, setLastUpdate] = useState<number | null>(null)
-  const panelId = useRef(`bars-${Math.random().toString(36).slice(2, 8)}`)
+  // A stable per-instance subscription id. This was `useRef(`bars-${Math.random()…}`)`,
+  // which evaluated a fresh random string on *every* render and threw all but
+  // the first away — impure work during render, and the kind the compiler is
+  // right to refuse. `useId` gives the same guarantee (unique per mounted
+  // component, constant for its life) without rolling the dice.
+  const panelId = `bars-${useId()}`
 
   const rest = useQuery({
     queryKey: ['bars', instrument, tfSecs, lookbackDays],
@@ -92,9 +97,18 @@ export function useBars(instrument: string | undefined, tfSecs: number, lookback
     staleTime: 5_000,
   })
 
-  useEffect(() => {
+  // Dropping the live tail when the chart changes instrument or timeframe, in
+  // the same render rather than in an effect. As an effect this was a real
+  // wrong-data bug, not a style point: `bars` splices `liveBars` onto the REST
+  // series, so for one render after switching from BTC to ETH the chart drew
+  // BTC's live minutes on top of ETH's history. A chart is the one surface where
+  // a frame of the wrong instrument's prices is indistinguishable from a fact.
+  const seriesKey = `${instrument ?? ''}|${tfSecs}`
+  const [prevSeriesKey, setPrevSeriesKey] = useState(seriesKey)
+  if (seriesKey !== prevSeriesKey) {
+    setPrevSeriesKey(seriesKey)
     setLiveBars([])
-  }, [instrument, tfSecs])
+  }
 
   useEffect(() => {
     if (!instrument) return
@@ -102,7 +116,7 @@ export function useBars(instrument: string | undefined, tfSecs: number, lookback
     // server-side aggregation, which is authoritative for their boundaries.
     if (tfSecs !== 60) return
     const client = getWsClient()
-    const id = panelId.current
+    const id = panelId
     client?.subscribe(id, [
       { lane: 'market.bars.1m', instrument, max_fps: 4 },
       { lane: 'market.trades', instrument, max_fps: 4 },
@@ -153,7 +167,7 @@ export function useBars(instrument: string | undefined, tfSecs: number, lookback
       off()
       client?.unsubscribe(id)
     }
-  }, [instrument, tfSecs])
+  }, [instrument, tfSecs, panelId])
 
   const bars = useMemo(() => {
     const base = rest.data ?? []

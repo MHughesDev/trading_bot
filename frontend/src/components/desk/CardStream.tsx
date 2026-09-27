@@ -52,11 +52,12 @@ export function CardStream({
   const [open, setOpen] = useState<Set<number>>(() => loadOpen(conversationId))
   const [showAll, setShowAll] = useState(false)
 
-  useEffect(() => {
-    setOpen(loadOpen(conversationId))
-    setShowAll(false)
-  }, [conversationId])
-
+  // There is no effect resetting `open` and `showAll` when the conversation
+  // changes, because the caller passes `key={conversationId}`: a different
+  // conversation is a different stream with a different remembered disclosure
+  // set, and remounting is how React says that. The effect that used to do it
+  // re-read `localStorage` a render late, so the first render of a new
+  // conversation showed the previous one's open steps.
   useEffect(() => {
     try {
       localStorage.setItem(storageKey(conversationId), JSON.stringify([...open]))

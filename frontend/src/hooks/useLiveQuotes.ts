@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { assetApi } from '@/lib/api'
 import { getWsClient, wsBus } from '@/api/ws'
@@ -7,13 +7,18 @@ import type { Quote } from '@/components/trading/Watchlist'
 /** Live last-price + session change for a set of symbols, off the 1m bar lane. */
 export function useLiveQuotes(symbols: string[]): Record<string, Quote> {
   const [quotes, setQuotes] = useState<Record<string, Quote>>({})
-  const panelId = useRef(`quotes-${Math.random().toString(36).slice(2, 8)}`)
+  // A stable per-instance subscription id. This was `useRef(`quotes-${Math.random()...}`)`,
+  // which evaluated a fresh random string on *every* render and threw all but
+  // the first away -- impure work during render, and the kind the compiler is
+  // right to refuse. `useId` gives the same guarantee (unique per mounted
+  // component, constant for its life) without rolling the dice.
+  const panelId = `quotes-${useId()}`
   const key = symbols.join(',')
 
   useEffect(() => {
     if (!symbols.length) return
     const client = getWsClient()
-    const id = panelId.current
+    const id = panelId
 
     // Two lanes, on purpose. Bars give the session anchor a change % is measured
     // against; trades give the last price between minute boundaries. Subscribing
@@ -72,7 +77,7 @@ export function useLiveQuotes(symbols: string[]): Record<string, Quote> {
       client?.unsubscribe(id)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key])
+  }, [key, panelId])
 
   return quotes
 }

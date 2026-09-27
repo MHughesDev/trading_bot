@@ -93,9 +93,14 @@ export function ModelTestTab({ modelId }: Props) {
     [versions],
   )
 
-  const [selectedVersions, setSelectedVersions] = useState<number[]>([])
-  const [instrument, setInstrument] = useState('')
-  const [timeframe, setTimeframe] = useState('')
+  // Three "default this once the data arrives" effects used to live below. Each
+  // one rendered the tab with an empty selection first and corrected it on the
+  // next render, which on the instrument picker meant a visible flash of no
+  // instrument chosen. They are the same rule stated as a fallback instead: what
+  // the person picked, or the first thing available.
+  const [versionChoice, setVersionChoice] = useState<number[]>([])
+  const [instrumentChoice, setInstrumentChoice] = useState('')
+  const [timeframeChoice, setTimeframeChoice] = useState('')
   const [features, setFeatures] = useState<Record<string, number>>({})
   const [featureOrder, setFeatureOrder] = useState<string[]>([])
   const [mode, setMode] = useState<'form' | 'json'>('form')
@@ -121,21 +126,22 @@ export function ModelTestTab({ modelId }: Props) {
     return m
   }, [marketInstruments])
 
-  // Default version selection once versions load.
-  useEffect(() => {
-    if (selectedVersions.length === 0 && testableVersions.length > 0) {
-      setSelectedVersions([testableVersions[0].version])
-    }
-  }, [testableVersions, selectedVersions.length])
+  const selectedVersions =
+    versionChoice.length > 0
+      ? versionChoice
+      : testableVersions.length > 0
+        ? [testableVersions[0].version]
+        : []
 
-  // Default instrument/timeframe.
-  useEffect(() => {
-    if (!instrument && marketInstruments && marketInstruments.length > 0) {
-      const first = marketInstruments[0]
-      setInstrument(first.instrument_id)
-      setTimeframe(first.timeframe)
-    }
-  }, [marketInstruments, instrument])
+  // The instrument falls back to the first one with stored bars; the timeframe
+  // falls back to the first one that instrument actually has. Stating the second
+  // as a fallback also subsumes the correction the instrument picker used to do by
+  // hand -- a timeframe the new instrument does not offer can no longer be the
+  // selected value even for a render.
+  const instrument = instrumentChoice || marketInstruments?.[0]?.instrument_id || ''
+  const timeframesHere = instrumentMap.get(instrument) ?? []
+  const timeframe =
+    timeframeChoice && timeframesHere.includes(timeframeChoice) ? timeframeChoice : (timeframesHere[0] ?? '')
 
   // Prefill the expected feature schema (names + zeros) on load.
   useEffect(() => {
@@ -255,7 +261,7 @@ export function ModelTestTab({ modelId }: Props) {
   }
 
   function replayCase(input: { instrument_id?: string; features?: Record<string, number> }) {
-    if (input.instrument_id) setInstrument(input.instrument_id)
+    if (input.instrument_id) setInstrumentChoice(input.instrument_id)
     if (input.features) {
       setFeatures(input.features)
       setJsonText(JSON.stringify(input.features, null, 2))
@@ -264,8 +270,13 @@ export function ModelTestTab({ modelId }: Props) {
   }
 
   function toggleVersion(version: number) {
-    setSelectedVersions((prev) =>
-      prev.includes(version) ? prev.filter((v) => v !== version) : [...prev, version],
+    // Toggles against the *effective* selection, so the version shown as chosen by
+    // the fallback is the one a click removes. Clearing the last one falls back to
+    // the first testable version again, exactly as the old effect did.
+    setVersionChoice(
+      selectedVersions.includes(version)
+        ? selectedVersions.filter((v) => v !== version)
+        : [...selectedVersions, version],
     )
   }
 
@@ -360,11 +371,7 @@ export function ModelTestTab({ modelId }: Props) {
               </label>
               <select
                 value={instrument}
-                onChange={(e) => {
-                  setInstrument(e.target.value)
-                  const tfs = instrumentMap.get(e.target.value) ?? []
-                  if (tfs.length && !tfs.includes(timeframe)) setTimeframe(tfs[0])
-                }}
+                onChange={(e) => setInstrumentChoice(e.target.value)}
                 className="w-full h-8 rounded-lg border border-border bg-surface px-2 text-xs text-text focus:outline-none focus:border-accent"
               >
                 {instrumentMap.size === 0 && <option value="">— none stored —</option>}
@@ -381,7 +388,7 @@ export function ModelTestTab({ modelId }: Props) {
               </label>
               <select
                 value={timeframe}
-                onChange={(e) => setTimeframe(e.target.value)}
+                onChange={(e) => setTimeframeChoice(e.target.value)}
                 className="w-full h-8 rounded-lg border border-border bg-surface px-2 text-xs text-text focus:outline-none focus:border-accent"
               >
                 {(instrumentMap.get(instrument) ?? []).map((tf) => (

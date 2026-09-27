@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -37,7 +37,13 @@ export function Tooltip({
   disabled?: boolean
 }) {
   const ref = useRef<HTMLSpanElement>(null)
-  const [shown, setShown] = useState(false)
+  // The anchor's box is measured at the moment the tooltip is shown, in the timer
+  // callback, rather than read off the ref during render. Measuring during render
+  // is reading the DOM from before the commit that is being rendered -- it happens
+  // to work here only because the anchor is always already mounted. A rect in
+  // state says when it was taken, and `shown` is simply "we have one".
+  const [rect, setRect] = useState<DOMRect | null>(null)
+  const shown = rect !== null
   const timer = useRef<number>(0)
 
   useEffect(() => () => window.clearTimeout(timer.current), [])
@@ -46,14 +52,14 @@ export function Tooltip({
 
   const open = () => {
     window.clearTimeout(timer.current)
-    timer.current = window.setTimeout(() => setShown(true), 300)
+    timer.current = window.setTimeout(() => setRect(anchorRect(ref.current)), 300)
   }
   const close = () => {
     window.clearTimeout(timer.current)
-    setShown(false)
+    setRect(null)
   }
 
-  const pos = shown ? place(anchorRect(ref.current), side) : null
+  const pos = rect ? place(rect, side) : null
 
   return (
     <>
@@ -97,20 +103,36 @@ export function Popover({
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
-  const [open, setOpen] = useState(false)
+  // Same as the tooltip: the trigger is measured when the popover is opened, in
+  // the click handler, and holding the rect *is* holding "open". One value cannot
+  // disagree with itself about whether the panel is up and where it goes.
+  const [rect, setRect] = useState<DOMRect | null>(null)
+  const open = rect !== null
+  // Bumped when the panel closes. The focus restore lives in the effect below
+  // rather than in the `close` callback, because that callback is handed to
+  // `children()` during render -- a closure created in render must not be the
+  // thing that reaches into a ref, even if nothing calls it until a click.
+  const [closes, setCloses] = useState(0)
+
+  const close = useCallback(() => {
+    setRect(null)
+    setCloses((n) => n + 1)
+  }, [])
+
+  useEffect(() => {
+    if (closes === 0) return
+    triggerRef.current?.focus()
+  }, [closes])
 
   useEffect(() => {
     if (!open) return
     function onDown(e: MouseEvent) {
       if (panelRef.current?.contains(e.target as Node)) return
       if (triggerRef.current?.contains(e.target as Node)) return
-      setOpen(false)
+      setRect(null)
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setOpen(false)
-        triggerRef.current?.focus()
-      }
+      if (e.key === 'Escape') close()
     }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
@@ -118,9 +140,8 @@ export function Popover({
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
     }
-  }, [open])
+  }, [open, close])
 
-  const rect = open ? anchorRect(triggerRef.current) : null
   const style: React.CSSProperties = rect
     ? {
         position: 'fixed',
@@ -136,14 +157,15 @@ export function Popover({
 
   return (
     <>
-      {trigger({ onClick: () => setOpen((o) => !o), ref: triggerRef, 'aria-expanded': open })}
+      {trigger({
+        onClick: () => (open ? close() : setRect(anchorRect(triggerRef.current))),
+        ref: triggerRef,
+        'aria-expanded': open,
+      })}
       {open &&
         createPortal(
           <div ref={panelRef} className="popover" role="menu" aria-label={ariaLabel} style={style}>
-            {children(() => {
-              setOpen(false)
-              triggerRef.current?.focus()
-            })}
+            {children(close)}
           </div>,
           document.body,
         )}

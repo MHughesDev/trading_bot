@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { Layers } from 'lucide-react'
 import { getWsClient, wsBus } from '@/api/ws'
 import { price as fmtPrice, qty as fmtQty, DASH } from '@/lib/format'
@@ -190,15 +190,36 @@ export function OrderBookPanel({
 /* -----------------------------------------------------------------------------
    Time & sales (the tape). Streams `market.trades`.
    -------------------------------------------------------------------------- */
+/** One row of the tape. */
+interface Print {
+  ts: number
+  price: number
+  size: number
+  side: 'buy' | 'sell'
+}
+
 export function Tape({ instrument }: { instrument: string | undefined }) {
-  const [trades, setTrades] = useState<{ ts: number; price: number; size: number; side: 'buy' | 'sell' }[]>([])
-  const panelId = useRef(`tape-${Math.random().toString(36).slice(2, 8)}`)
+  // The prints are tagged with the instrument they were printed for. `setTrades([])`
+  // at the top of the subscribe effect was the reset, and it landed a render late,
+  // so switching symbols showed the previous market's prints under the new
+  // market's header -- on a tape, every row is a claim that a trade happened at
+  // that price in this instrument.
+  const [tape, setTape] = useState<{ instrument: string | undefined; prints: Print[] }>({
+    instrument,
+    prints: [],
+  })
+  const trades = tape.instrument === instrument ? tape.prints : []
+  // A stable per-instance subscription id. This was `useRef(`tape-${Math.random()...}`)`,
+  // which evaluated a fresh random string on *every* render and threw all but
+  // the first away -- impure work during render, and the kind the compiler is
+  // right to refuse. `useId` gives the same guarantee (unique per mounted
+  // component, constant for its life) without rolling the dice.
+  const panelId = `tape-${useId()}`
 
   useEffect(() => {
     if (!instrument) return
     const client = getWsClient()
-    const id = panelId.current
-    setTrades([])
+    const id = panelId
     client?.subscribe(id, [{ lane: 'market.trades', instrument, max_fps: 10 }])
     const off = wsBus.on((msg) => {
       if (msg.type !== 'frame') return
@@ -208,15 +229,19 @@ export function Tape({ instrument }: { instrument: string | undefined }) {
       const price = Number(p.price)
       const size = Number(p.size ?? p.quantity)
       if (!Number.isFinite(price) || !Number.isFinite(size)) return
-      setTrades((t) =>
-        [{ ts: Date.now(), price, size, side: (p.side === 'sell' ? 'sell' : 'buy') as 'buy' | 'sell' }, ...t].slice(0, 100),
-      )
+      setTape((t) => ({
+        instrument,
+        prints: [
+          { ts: Date.now(), price, size, side: (p.side === 'sell' ? 'sell' : 'buy') as 'buy' | 'sell' },
+          ...(t.instrument === instrument ? t.prints : []),
+        ].slice(0, 100),
+      }))
     })
     return () => {
       off()
       client?.unsubscribe(id)
     }
-  }, [instrument])
+  }, [instrument, panelId])
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>

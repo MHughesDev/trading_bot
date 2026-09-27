@@ -147,7 +147,6 @@ export function OhlcvChart({ bars, markers = [], priceLines = [], height = 360 }
       }))
       createSeriesMarkers(candleRef.current, seriesMarkers)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bars, markers])
 
   // Sync TP/SL price lines — separate effect so price-line changes don't
@@ -192,7 +191,6 @@ export function OhlcvChart({ bars, markers = [], priceLines = [], height = 360 }
         existing.set(id, newLine)
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [priceLines])
 
   return <div ref={containerRef} style={{ height }} className="w-full" />

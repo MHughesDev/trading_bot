@@ -15,8 +15,14 @@ export interface SuiteProgress {
 
 export function useSuiteProgress(onProgress?: (p: SuiteProgress) => void): SuiteProgress | null {
   const [latest, setLatest] = useState<SuiteProgress | null>(null)
+  // Refreshed in an effect rather than during render: a discarded render must
+  // not be able to leave its callback behind for the socket to call. The only
+  // reader is `onmessage`, which runs after commit, so nothing about the timing
+  // the caller observes changes.
   const cb = useRef(onProgress)
-  cb.current = onProgress
+  useEffect(() => {
+    cb.current = onProgress
+  })
 
   useEffect(() => {
     // No token, no socket. `?? 'dev-local'` used to open one anyway: the lane

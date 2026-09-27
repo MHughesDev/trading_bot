@@ -96,10 +96,15 @@ export function AutomationsPage() {
     refetchInterval: 15_000,
   })
 
-  useEffect(() => {
-    const open = params.get('open')
-    if (open) setOpenId(open)
-  }, [params])
+  // `openId` is seeded from the url above, so this only has to catch a *later*
+  // navigation that names a different automation. Doing it during render keeps
+  // the panel from rendering closed for one frame after such a navigation.
+  const [prevParams, setPrevParams] = useState(params)
+  if (params !== prevParams) {
+    setPrevParams(params)
+    const fromUrl = params.get('open')
+    if (fromUrl) setOpenId(fromUrl)
+  }
 
   const arm = useMutation({
     mutationFn: ({ id, armed }: { id: string; armed: boolean }) =>
@@ -119,7 +124,9 @@ export function AutomationsPage() {
     },
   })
 
-  const list = automations.data ?? []
+  // Held stable so the memo below is keyed on the query result rather than on a
+  // fresh `[]` produced by this line on every render.
+  const list = useMemo(() => automations.data ?? [], [automations.data])
   const filtered = useMemo(
     () => (accountFilter === 'all' ? list : list.filter((a) => a.account_mode === accountFilter)),
     [list, accountFilter],

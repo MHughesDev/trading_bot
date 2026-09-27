@@ -3,7 +3,7 @@
 // Header · card stream · controls row · composer, with the right panel beside
 // it. Everything a person needs to work with a run is on this screen and nothing
 // here requires reading a transcript.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
@@ -51,7 +51,8 @@ export function Conversation({
    */
   onOpenPath?: (to: string) => void
 }) {
-  const [cards, setCards] = useState<DeskCard[]>([])
+  /** Cards this screen renders itself, which are on no wire. See `onOffer`. */
+  const [localCards, setLocalCards] = useState<DeskCard[]>([])
   const [events, setEvents] = useState<WireEvent[]>([])
   const [tab, setTab] = useState<PanelTab>('state')
   const [detailsAll, setDetailsAll] = useState(false)
@@ -106,10 +107,13 @@ export function Conversation({
     [polled.data, events],
   )
 
-  useEffect(() => {
-    if (wire.length === 0) return
-    setCards((prev) => mergeCards(prev, toCards(wire)))
-  }, [wire])
+  // Folded during render rather than accumulated by an effect. `wire` is already
+  // the whole stream -- `events` only ever grows and the poll returns the lot --
+  // so `cards` was a second copy of it that lagged by a render and could, in
+  // principle, disagree with the Cost and Tools tabs the comment above promises
+  // it cannot. The one thing that was *not* in `wire` is the locally rendered
+  // offer card, so that keeps its own state and is merged on top.
+  const cards = useMemo(() => mergeCards(toCards(wire), localCards), [wire, localCards])
 
   const state = useQuery({
     queryKey: ['desk', 'state', runId],
@@ -428,6 +432,9 @@ export function Conversation({
           </section>
         )}
         <CardStream
+          // A different conversation is a different stream with its own
+          // remembered disclosure set; remounting is how that is said.
+          key={conversationId}
           conversationId={conversationId}
           cards={cards}
           resolve={resolve}
@@ -481,7 +488,7 @@ export function Conversation({
           onOffer={(q) => {
             // Until S-10.2 classifies server-side, the offer is rendered locally
             // as a card so the behaviour is real rather than promised.
-            setCards((prev) =>
+            setLocalCards((prev) =>
               mergeCards(prev, [
                 {
                   seq: Date.now(),

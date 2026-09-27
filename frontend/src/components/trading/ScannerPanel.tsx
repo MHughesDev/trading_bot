@@ -6,7 +6,7 @@
 // scanner responsive without a round trip, at the cost of only supporting the
 // comparison grammar the saved v1.0 definition format uses.
 
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useId, useRef, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Radar, X } from 'lucide-react'
 import { strategiesApi } from '@/lib/api'
@@ -133,7 +133,12 @@ export function ScannerPanel({
   initialStrategyId = '',
   initialTimeframe = '1h',
 }: ScannerPanelProps) {
-  const evalPanelId = useRef(`scanner-eval-${Math.random().toString(36).slice(2)}`).current
+  // A stable per-instance subscription id. This was `useRef(`scanner-eval-${Math.random()...}`)`,
+  // which evaluated a fresh random string on *every* render and threw all but
+  // the first away -- impure work during render, and the kind the compiler is
+  // right to refuse. `useId` gives the same guarantee (unique per mounted
+  // component, constant for its life) without rolling the dice.
+  const evalPanelId = `scanner-eval-${useId()}`
 
   const [selectedStrategyId, setSelectedStrategyId] = useState<string>(initialStrategyId)
   const [timeframe, setTimeframe] = useState<string>(initialTimeframe)
@@ -178,8 +183,21 @@ export function ScannerPanel({
     parsedStrategy.current = strategyDef ? parseDefinition(strategyDef) : null
     barBuffers.current = new Map()
     tickCounters.current = new Map()
-    setTriggeredIds(new Set())
   }, [strategyDef, timeframe])
+
+  // The triggered set belongs to one (strategy, timeframe) pair, so it is cleared
+  // during the render that changes either. Clearing it in the effect above left
+  // the previous strategy's triggers lit for a render on the new one -- a
+  // scanner's whole output is "which of these fired", and a stale lit row is that
+  // output being wrong rather than merely late.
+  const [scanKey, setScanKey] = useState<{ def: typeof strategyDef; tf: string }>({
+    def: strategyDef,
+    tf: timeframe,
+  })
+  if (scanKey.def !== strategyDef || scanKey.tf !== timeframe) {
+    setScanKey({ def: strategyDef, tf: timeframe })
+    setTriggeredIds(new Set())
+  }
 
   useEffect(() => {
     if (instruments.length === 0) return
