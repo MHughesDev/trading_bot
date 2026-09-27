@@ -465,8 +465,21 @@ tokens** until the job completes.
 `PARTIAL` 2026-09-16 — the wall clock is gone and the steer half landed with S-2.14; the budget,
 approval, escalation and sub-run halves are not started.
 
-**No wall clock.** `budgets.max_wall_clock_s` is deleted from every shipped profile and ignored
-by the loop, replaced by `orchestration.idle_timeout_s` (600 s). The reason it had to go is that
+**No wall clock — and, corrected 2026-09-27, nothing replaced it.**
+`orchestration.idle_timeout_s` has **no enforcement point anywhere in the
+workspace**. Its only reader is `tests/conformance.rs:364`, which asserts
+`idle_timeout_s >= 60` — a *range* check over a field nothing acts on, which is
+exactly the shape S-10.6's own note calls out as passing while nothing read the
+value. **A run today has no timeout of any kind except `max_steps`.**
+
+The watchdog cannot live in the loop: `drive.rs` is sans-IO and
+`the_loop_names_no_runtime_no_client_and_no_provider` forbids `SystemTime`, and a
+run hung inside a model call or a tool call is not calling the loop at all. It
+belongs in the driver, which is `crates/api`.
+
+The original note read as follows, and the "replaced by" was the false part.
+`budgets.max_wall_clock_s` is deleted from every shipped profile and ignored
+by the loop, nominally in favour of `orchestration.idle_timeout_s` (600 s). The reason it had to go is that
 S-2.11 made the common case unmeasurable by it: a run suspended on a forty-minute sweep has been
 *alive* for forty minutes and *idle* for none of them, and a wall clock cannot tell the two
 apart. Killing it at the hour mark destroys work proceeding exactly as designed, and raising the

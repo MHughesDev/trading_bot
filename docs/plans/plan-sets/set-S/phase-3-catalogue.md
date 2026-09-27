@@ -1,6 +1,14 @@
 # Phase 3 — The catalogue
 
-**Completion: 42% (7 / 19 tasks), plus 8 `PARTIAL` and 4 `BLOCKED:UPSTREAM`.**
+**Completion: 42% (8 / 19 tasks), plus 10 `PARTIAL` and 1 `NOT STARTED`.**
+
+> **2026-09-27.** S-3.18 closed. S-3.10, S-3.13 and S-3.17 moved
+> `BLOCKED:UPSTREAM` → `PARTIAL`: the perturbation runtime mode now exists, the
+> return-series route is served, `by_regime` is measured, and one of S-3.17's three
+> tools was already on disk behind the blocked marker. **No `BLOCKED:UPSTREAM`
+> remains in this phase** — what is left is tools to write and two producers to
+> build (a funding read route, shared by S-3.14 and S-3.15; and `SeriesKind::Signal`
+> for S-3.16).
 
 > Status 2026-09-16. The **templated tier is real**: a tool is a Python file under
 > `apps/skill-runner/templates/<ns>/<name>.py` whose module docstring carries a fenced JSON
@@ -128,12 +136,15 @@ version:
   a route over `BarStore::as_of` returning the as-of/latest diff — and it has
   170,594 real bars to run against, so it is **not** blocked on deployment
   state.
-- **Nothing in the workspace mentions `shift_bars`, `shift_column`,
+- ~~**Nothing in the workspace mentions `shift_bars`, `shift_column`,
   `mask_column`, `jitter_bars`, `fill_delay_ms` or `perturbation_pct`.** The
-  runtime mode §5.4 assumes does not exist.
-- **No route returns a run's return series as JSON.**
-  `SuiteManager::recorded_returns` is reachable only as a parquet file through
-  the template materialiser, so `ablation_sweep` and `parameter_fragility_map`
+  runtime mode §5.4 assumes does not exist.~~ **Closed 2026-09-27** for all but
+  `fill_delay_ms`, which is refused by name because the preview produces no fills:
+  see S-3.10.
+- ~~**No route returns a run's return series as JSON.**~~ **Closed 2026-09-27**:
+  `GET /api/backtest/experiments/{id}/returns` serves it, timestamps included.
+  Until then `SuiteManager::recorded_returns` was reachable only as a parquet file
+  through the template materialiser, so `ablation_sweep` and `parameter_fragility_map`
   have nothing to diff.
 - **No membership calendar exists anywhere** — zero hits across the workspace.
   `instruments` has four rows, all `active = true`, with a current-state boolean
@@ -532,13 +543,49 @@ length is derived, not hard-coded.
 ## Leakage
 
 ### S-3.10 `future_perturbation_test` — M
-`BLOCKED:UPSTREAM` — the runtime mode does not exist. `shift_bars`, `shift_column`,
-`mask_column`, `jitter_bars`, `fill_delay_ms` and `perturbation_pct` appear **nowhere**
-in the workspace (`.rs`, `.py`, `.sql`). Needed first: a perturbation argument on
-`features::runtime::backfill_column` — the one place a feature column is produced —
-carried through `backtest::preview::preview_signals`, plus a field on
-`POST /api/agent/strategy/preview`. See **Q-S3-03**: §5.4 names column
-perturbation and data truncation as one tool, so neither was built.
+`PARTIAL` 2026-09-27 (was `BLOCKED:UPSTREAM`) — **the runtime mode exists now.**
+`crates/backtest/src/perturb.rs` carries `ShiftColumn`, `MaskColumn` and
+`JitterColumn` with validation, and `backtest::preview::preview_signals_perturbed`
+applies them; `preview_signals` keeps its signature and delegates with an empty set.
+
+**This task's own prescription was wrong and was not followed.** It asked for "a
+perturbation argument on `features::runtime::backfill_column`". That function is a
+three-line wrapper over `value_at` and a `shift` parameter inside it would hand
+**every feature implementation** the ability to read forward — which is the one
+structural guarantee `crates/features` exists to provide, and the guarantee
+`crates/mcp-server/src/tools/strategy.rs:546` reasons from. The perturbation is
+applied to the produced column in `crates/backtest` instead, and `crates/features`
+needs no change at all.
+
+That substitution rests on `crates/features/tests/features_versioned.rs::
+backfill_and_incremental_serving_agree` (INV-14), which asserts the batch column
+equals a growing window's value bit for bit at every index — so at zero shift the
+perturbed path is a no-op and the perturbation is the only difference between two
+runs. **That test is now load-bearing for a second caller and must not be
+relaxed.**
+
+**What remains, and neither is in `crates/backtest`:** a `perturbations` field on
+`POST /api/agent/strategy/preview` (shape recorded in the working notes), and
+`future_perturbation_test` itself in `crates/mcp-server/src/tools/audit.rs` — two
+preview calls and a diff over entry bars, which must refuse to report "no
+lookahead" when the perturbed run's `never_fires_code` is
+`perturbed_column_has_no_value`. `fill_delay_ms` is refused outright by the
+perturbation set: the preview produces no fills, so there is nothing for a delay to
+apply to. That half is S-3.13's `timing_jitter_sensitivity` and stays blocked.
+
+**Q-S3-03 is answered: two tools, not one** (§5.4 fuses column perturbation with
+data truncation). Four reasons, strongest first. Their null results mean different
+things — perturbation's no-divergence is evidence about *causality*, truncation's
+is evidence about *sample dependence*, and a compound verdict collapses to "clean"
+in a reader's head. They sit on opposite sides of the trial boundary: truncation
+changes the `DataSlice`, which is part of the pre-registered subject and must clear
+the holdout guard, while perturbation changes nothing the ledger knows about and
+spends nothing — one tool would need two incompatible trial-accounting rules.
+Only perturbation has an indicator to blame, and naming the offending indicator is
+half of this task's acceptance. And their failure modes collide: a truncation short
+enough to bite the warm-up and a masked column both present as "the strategy
+stopped firing". Truncation is not built, and belongs near `DataSlice` rather than
+near the feature engine.
 
 Re-run with each signal/indicator shifted or masked and diff against the unperturbed run.
 Mechanical: it reads no strategy code. Needs a "run with column X shifted" mode in the
@@ -671,14 +718,37 @@ templated tier, which cannot carry per-trade rows (Q-S3-02); and the spec and th
 plan disagree about whether `regime_failure_search` spends a trial (Q-S3-01).
 
 ### S-3.13 Ablation, fragility, jitter, regime failure — L
-`BLOCKED:UPSTREAM` — **no route returns a run's return series as JSON.**
-`backtest::SuiteManager::recorded_returns` is reachable only as a parquet file
-through the template materialiser (`routes/agent_templates.rs`), so `ablation_sweep`
-and `parameter_fragility_map` have nothing to diff against the null library's CI.
-`timing_jitter_sensitivity` needs S-3.10's missing runtime mode **and** fills, which
-`preview_signals` states it does not produce. `regime_failure_search` is blocked on
-**one line** — `crates/api/src/research/mod.rs:316` passes `&[]` where labelled
-windows belong, so every `by_regime` this platform has served was empty.
+`PARTIAL` 2026-09-27 (was `BLOCKED:UPSTREAM`) — **three of the four blockers are
+closed; the tools are the remaining work.** Per tool:
+
+- **`ablation_sweep`** — its data blocker is gone:
+  `GET /api/backtest/experiments/{id}/returns` now serves the recorded family as
+  JSON, timestamps included. But it still needs a **dispatcher, not a reader**:
+  leave-one-rule-out means constructing and running N variants, and that route
+  serves only already-recorded ones. It also opens a question worth settling before
+  code: this task says all four tools spend `Falsification` trials, but a tool that
+  only re-reads recorded returns should declare `TrialKind::None` for the reason
+  `path_risk` does — charging a trial for a re-read raises `N_eff` against work
+  nobody did, and it moves the tool out of ring 0 into a mode that may not reach it.
+- **`parameter_fragility_map`** — **should be re-scoped rather than built.** It is
+  substantially already there under another name: `crates/research/src/surface.rs`
+  carries `plateau`, `cliffs` ("bin edges across which the mean drops sharply") and
+  `sensitivity` per parameter, `SweepReport.neighbourhood_plateau` is already a
+  plateau-versus-knife-edge verdict with a stated rule, and `GET
+  /api/research/sweeps/{id}` already serves the whole thing to the agent. A tool
+  that recomputed this from the returns route would be a second answer to
+  arithmetic the platform already performs, which `tools/audit.rs`'s own module
+  docs forbid. What is genuinely missing is only the single scalar index and the
+  CI comparison.
+- **`timing_jitter_sensitivity`** — still blocked, and now for one reason rather
+  than two. S-3.10's runtime mode exists, but the preview produces no fills, so
+  `fill_delay_ms` is refused by name. This needs the simulator's order path.
+- **`regime_failure_search`** — its "one line" is closed.
+  `crates/api/src/research/mod.rs` now resolves a market scope from the run's
+  experiment and supplies real labelled windows, so `by_regime` is measured rather
+  than `Unmeasured { NoLabelsSupplied }`. Every failure along that path still
+  yields no windows rather than a guess. The tool itself is `crates/mcp-server`
+  work and is not written.
 
 `ablation_sweep` (leave-one-rule-out over the JSON strategy def, deltas must clear the null
 library's CI rather than raw point deltas), `parameter_fragility_map` (plateau vs knife-edge,
@@ -822,12 +892,23 @@ per report; a recommended rebalance faster than the break-even turnover is flagg
 **Traces:** AGENT-006 §5.3; research brief Theme 4.
 
 ### S-3.17 Model diagnostics — M
-`BLOCKED:UPSTREAM` — **there is nothing to score against.** `model_predictions`
-exists, is empty, and carries no realised outcome (`direction`, `magnitude_str`,
-`confidence`, `horizon` only), so a drift detector that reached it would have no
-label. `skills::SeriesKind` has `Ohlcv` and `TrialReturns` and no prediction kind.
-AGENT-006 §5.7 also puts all three tools at tier **P** (templated), so they belong in
-`apps/skill-runner/templates/model/*.py`, not in `crates/mcp-server`.
+`PARTIAL` 2026-09-27 (was `BLOCKED:UPSTREAM`) — **one of the three is built, and the
+blocked marker was hiding it.** `apps/skill-runner/templates/model/detect_drift.py` is on
+disk and in the catalogue (`every_template_on_disk_reached_the_catalogue` would fail
+otherwise). `conformal_calibrate` and `time_aware_importance` are genuinely
+unstarted.
+
+The scoring blocker is real and unchanged for the half that needs a label:
+`model_predictions` exists, is empty, and carries no realised outcome (`direction`,
+`magnitude_str`, `confidence`, `horizon` only), so a drift detector that reached it
+would have nothing to score against. `skills::SeriesKind` has `Ohlcv` and
+`TrialReturns` and no prediction kind. AGENT-006 §5.7 puts all three tools at tier
+**P** (templated), so they belong in `apps/skill-runner/templates/model/*.py`, not
+in `crates/mcp-server` — which is where `detect_drift` correctly is.
+
+Marked `PARTIAL` rather than `BLOCKED:UPSTREAM` because a marker that says nothing
+can proceed, over a tool that shipped, is the kind of claim this file has been
+corrected for three times.
 
 `detect_drift` (live vs train, PSI/KS/MMD — gates live inference), `conformal_calibrate`
 (adaptive conformal or EnbPI, **never** vanilla split-conformal on market data),
@@ -839,8 +920,35 @@ continuing; `realized_coverage` is monitored and its drift reported.
 **Traces:** AGENT-006 §5.7; research brief Theme 6.
 
 ### S-3.18 Portfolio — M
-`PARTIAL` 2026-09-16 — `shrunk_covariance` and `allocate_book` are built and tested;
-`check_control_limits` waits on phase 7's tables.
+`DONE` 2026-09-27 (was `PARTIAL` 2026-09-16) — `shrunk_covariance` and `allocate_book`
+were built and tested; `check_control_limits` now exists
+(`crates/mcp-server/src/tools/control_limits.rs`) and both acceptance clauses hold.
+
+**"Waits on phase 7's tables" was stale.** Migrations 0074–0078 are all in the tree,
+and four agent-readable monitor reads already existed, so the tool composes those —
+**no new route was needed and none was written.**
+
+The "no write path and no agent-callable halt" clause is closed by a guard rather
+than by inspection: `no_tool_anywhere_posts_to_the_monitor` scans the whole
+`src/tools/` tree for a mutating verb near an `/api/monitor` path and separately
+pins `ApiClient`'s verb set, so a new verb fails the test rather than slipping past
+it. Its first version keyed on the path and failed on its own prose — keying on the
+verb is what lets a tool *say* "a human resets it with POST …" without tripping.
+
+Three silences report as themselves rather than as "within limits", which is the
+failure this tool was most exposed to: `unwatched` (the lease is not valid, so
+nothing has looked), `unmonitored` (no declared limits, or the monitor has never
+seen this strategy) and `state_and_events_disagree` (both reported, neither
+corrected). Nothing re-derives a breach — `ControlLimit::breached_by` treats a `NaN`
+reading as a breach, and a second `>` here would read the same failed measurement
+as a pass.
+
+**One recorded deviation from §5.7:** `window=30d|60d|90d` is not accepted, because
+`GET /api/monitor/events` serves no `occurred_at` and a window that cannot be
+applied should not be in a schema. The payload says `time_bounded: false` with the
+reason, and `events_truncated` separates "no events" from "older than the most
+recent thousand". Adding `occurred_at` and a `scope` filter to that route is the
+one-field change that would close it.
 
 This task needed a **second materialisation kind** first, and that is the reusable half:
 `SeriesKind::TrialReturns` gives a template the recorded return series of every run in an

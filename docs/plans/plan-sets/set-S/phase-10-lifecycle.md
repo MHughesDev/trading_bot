@@ -1,6 +1,11 @@
 # Phase 10 — Modes and the research lifecycle
 
-**Completion: 38% (6 / 16 tasks), plus 10 `PARTIAL`. Nothing untouched.**
+**Completion: 31% (5 / 16 tasks), plus 11 `PARTIAL`. Nothing untouched.**
+
+> **2026-09-27.** S-10.14 moved `DONE` → `PARTIAL`. Its third acceptance clause is a
+> live `qwen2.5-7b` run and no recorded evidence of one exists — the same gate H-2
+> that holds S-10.3, S-10.12 and one clause of S-10.4. A tick over an undemonstrated
+> clause is what ADR-S1-06 exists to prevent.
 
 > A correction to this line, made 2026-09-17: it briefly read 7/16, counting
 > S-10.4 and S-10.12 as done. Both have acceptance criteria that need a live run
@@ -1110,8 +1115,19 @@ carries barren rate per (tier, workflow); the usage page shows cost per knowledg
 **Traces:** AGENT-013 P5, §10; §13.14. AGENT-009 §4 (amended).
 
 ### S-10.14 Workflows as stage skeletons, per tier — M
-`DONE` 2026-09-17 — the skeletons, both enforcement halves, per-tier availability,
-the authoring mode and the workflow on every look.
+`PARTIAL` 2026-09-27 (was `DONE` 2026-09-17) — the skeletons, both enforcement
+halves, per-tier availability, the authoring mode and the workflow on every look
+are all built and asserted.
+
+**Downgraded because its third acceptance clause has never been demonstrated.**
+That clause is "on `qwen2.5-7b` `investigate` completes with a grammar-filled
+registration and ≤ 1 refinement" — a live local run — and no recorded evidence of
+one exists. It is behind gate H-2 like the rest of the live-run clauses in this
+phase, which is not a reason to call it met.
+
+A `DONE` over an undemonstrated clause is the shape ADR-S1-06 exists to prevent: a
+tick is what a reader scans, and a caveat in the prose beside it is how a partially
+verified criterion comes to be reported as verified.
 
 **Per-tier availability landed with S-10.11**, which needed it: `Profile::workflows`
 is a declared list with `Profile::may_run` as its enforcement point, the three

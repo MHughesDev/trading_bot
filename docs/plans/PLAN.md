@@ -17,20 +17,20 @@ worse than no map, because people steer by it.
 
 ---
 
-## 1. Where we are — **40% left**
+## 1. Where we are — **39% left**
 
-Derived 2026-09-23 from the `### <TASK-ID>` headings and their status markers
+Derived 2026-09-27 from the `### <TASK-ID>` headings and their status markers
 across sets P, S and T. Size-weighted **S = 1, M = 2, L = 4**: 189 tasks of
 wildly different sizes averaged flat would flatter us.
 
 | counting rule | % of the work left |
 |---|---|
 | strict — only `DONE` counts | 62% |
-| **`PARTIAL` counts half** | **40%** |
-| generous — `PARTIAL` counts done | 18% |
+| **`PARTIAL` counts half** | **39%** |
+| generous — `PARTIAL` counts done | 16% |
 
 Take the middle number and treat it as **±10**, not as a measurement. `PARTIAL`
-is 234 of 531 units and in this repository it spans "complete, one database test
+is 242 of 531 units and in this repository it spans "complete, one database test
 unwritten" to "the types exist and nothing calls them". The spread between the
 strict and generous rows *is* the uncertainty, and it is honest to show it rather
 than pick one and present it as precision.
@@ -39,7 +39,7 @@ than pick one and present it as precision.
 
 | set | subject | tasks | units | done | partial | % left |
 |---|---|---:|---:|---:|---:|---:|
-| **S** | The Agent Platform | 189 | 446 | 194 | 221 | **32%** |
+| **S** | The Agent Platform | 189 | 446 | 194 | 229 | **31%** |
 | **P** | Data Reach | 30 | 51 | 6 | 9 | **79%** |
 | **T** | Forward Evidence | 17 | 34 | 2 | 4 | **88%** |
 
@@ -73,14 +73,22 @@ discovered only after H-1 was spent.
 | 9 — Context as retrieval | 20 | 56 | 46 | 10 | 0 | 0 | 9% |
 | 8 — Integration and honesty | 9 | 24 | 18 | 6 | 0 | 0 | 12% |
 | **4 — Memory and evaluation** | 17 | 39 | 18 | 19 | 0 | 2 | **29%** |
+| **3 — The catalogue** | 19 | 50 | 20 | 28 | 2 | **0** | **32%** |
 | **6 — The Research Desk** | 24 | **66** | 22 | 44 | 0 | 0 | **33%** |
 | 7 — The monitor | 13 | 29 | 10 | 18 | 0 | 1 | 34% |
-| 10 — Modes and the lifecycle | 16 | 41 | 11 | 30 | 0 | 0 | 37% |
+| 10 — Modes and the lifecycle | 16 | 41 | 9 | 32 | 0 | 0 | 39% |
 | 2 — One runtime | 16 | 32 | 9 | 19 | 4 | 0 | 42% |
-| 3 — The catalogue | 19 | 50 | 18 | 22 | 2 | 8 | 42% |
 | 5 — The language | 15 | 36 | 12 | 15 | 9 | 0 | 46% |
 | 0 — Ground rules | 6 | 7 | 1 | 5 | 1 | 0 | 50% |
 | **11 — Continuous research** | 14 | 32 | 0 | 28 | 4 | 0 | **56%** |
+
+**Phase 3 moved 42% → 32% and its blocked column reached zero**, which is the
+larger fact: all four `BLOCKED:UPSTREAM` markers in Set S are gone. Three were
+closed by building the thing they waited on (a perturbation runtime mode, a
+return-series route, a `by_regime` producer) and one — S-3.17 — turned out to have
+had a shipped tool sitting behind the blocked marker the whole time. **Phase 10
+moved the other way**, 37% → 39%, because S-10.14's `DONE` did not survive reading
+its third acceptance clause.
 
 Phase 4 moved 45% → 29% on 2026-09-23: a second audit against acceptance
 criteria (not code presence) found four `PARTIAL` markers under-claimed
@@ -344,6 +352,7 @@ Newest first. One line per closing, with the evidence.
 
 | date | what | evidence |
 |---|---|---|
+| 2026-09-27 | **The last `BLOCKED:UPSTREAM` in Set S is gone, and the five stranded agent tracks all landed.** Four concurrent tracks plus a salvage pass. What was blocked and now is not: a perturbation runtime mode (built in `crates/backtest`, and the phase file's own prescription — a shift inside `features::runtime::backfill_column` — was **refused**, because it would hand every feature implementation the ability to read forward); `GET /api/backtest/experiments/{id}/returns`, which `recorded_returns` had only ever reached as a parquet file written for a Python template; and `by_regime`, which reported `Unmeasured` on every bundle this platform has ever served because its only caller passed `&[]`. S-3.17 was not blocked at all — `detect_drift` was on disk and catalogued behind the marker. **Four real defects closed on the way**: the trade rows the job path threw away (`manager.rs` called `run_simulation` where `run_simulation_detailed` had been harvesting round trips all along, which is why all 11 `backtest_jobs` rows report `has_trades = false`); the `pg_notify` two migrations promised with **nothing anywhere issuing a LISTEN**, so every kill-switch trip waited a full cadence against a COMP-007 exit criterion that says "within one event"; 46 mangled string literals in `crates/harness`, concentrated in the tool descriptions that are the whole of what the model is told a tool is *for*; and an approval card that read "`open_vault` falls under the `open_vault` approval envelope" for every approval ever shown to a human. `npm run lint` reached **zero** from ~140, and five of those findings were user-visible bugs — a chart drawing the wrong instrument's live prices for one render after a symbol switch, an order book showing the previous market's depth under the new market's header, sort-header focus destroyed every 120s refetch | 39% left (strict 62 / generous 16); Set S 32% → 31%; phase 3 42% → 32%, blocked 8 → 0; phase 10 37% → 39% (S-10.14 downgraded); harness 770, backtest 474, mcp-server 286, api 421, monitor 281, collectors 193, research-session 291, frontend 609, all green |
 | 2026-09-23 | **Phase 6 audited a second time; two more under-claimed, and the same reconciliation mistake repeated once.** S-6.7 (composer) and S-6.23 (provenance fence) had every acceptance clause met against real production callers and move to `DONE`. Four notes corrected without a marker change: S-6.1's real blocker is `npm run lint` failing with ~140 React-Compiler errors that no prior audit ever ran, not a mid-edit tree; S-6.6 is a one-day-old built-but-unreached pair (backend `pause`/`resume` mounted 09-22, frontend still says they're gone from a 09-21 deletion); S-6.22's two remaining named clauses were both closed by commit `e0f9c3f` with the note never updated; S-6.24's stated blocker (missing memory migrations) is false — `desk_digest.rs` already queries `agent_memory.entry` and `monitor.events` successfully, and this file's own later prose already said so without the per-task block being reconciled, repeating a mistake the first audit had already fixed once for S-6.10/S-6.18. Confirmed unchanged: migrations 0119 and 0140 are both applied and successful on the shared dev Postgres with no gaps against disk (the cross-track hazard flagged 09-22 is fully resolved); phase 9 and phase 10 had declared the identical migration range and neither had used it | phase 6: 36% → 33% left; Set S unchanged at 32% (unit-weighted rounding); `scripts/verify_plans.py`: 3 problems → 0 |
 | 2026-09-23 | **This file was two days stale, and phase 4 was audited a second time against acceptance criteria rather than code presence.** §1's tables had not been re-derived since 2026-09-21 despite several closings landing on 09-22 (phase 11's five markers, the security fixes, the salvage of thirteen killed agents); re-running the derivation moved phases 0, 3 and 11 along with 4. Phase 4 itself: four `PARTIAL`s were under-claimed (S-4.3, S-4.5, S-4.7, S-4.9 — every clause held, with CI-running evidence, and the note hadn't caught up) and four were over-claimed, where the `PARTIAL` note asserted something false about the tree rather than merely being outdated — S-4.13 grepped `MultiStepEvidence` and missed the `multi_step_evidence` field that's still there; S-4.15 said two files didn't exist when both do, missing the real gap (`conflict::decide_write` has no caller, so `conflicts_with` is a column nothing will ever populate); S-4.17 said only a migration was missing when the sealed eval set actually runs on every PR today, the opposite of its own acceptance; S-4.8 said only a credential was missing when the query function it claimed was tested has zero callers and zero tests. Separately, the silence alarm (`storage::clickhouse::census`, landed 09-22) got its last wire: `health_jobs::run_once` now calls `census::silence_report` on an hourly tick, split from the tenant pass so a Postgres hiccup can't silence the silence alarm | phase 4: 45% → 29% left; Set S 34% → 32%; headline 41% → 40% (strict 63 / generous 18); `cargo test -p platform` 13/13, `cargo test -p storage --lib` 61/61 |
 | 2026-09-22 | **Three commits recovered from a worktree, and 26 worktrees retired without losing a line.** Only one of 30 had commits: gate-evidence sources for gates 3, 4, 10 and 12, stranded since 2026-09-15 — `capacity.rs`, `factors.rs`, `ledger/evidence.rs`, migration `0119`, none of which existed on main. One conflict needed a judgement rather than a side: `gate_worker` passed `factors: None` where the incoming commit **supplied** them, which was the commit's whole point. The other 29 held **no commits at all** — a week of agent output visible only as uncommitted edits, including Set P phase 3's collectors for tasks the plan calls unstarted. Each was committed to the branch it was already on, then removed: the worktree is a checkout, the branch is the record | 18 branches hold the preserved work; 22 GB reclaimed; `ledger`, `backtest`, `api` all compile |
