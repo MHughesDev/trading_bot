@@ -80,6 +80,68 @@ impl DatasetSpec {
                 .into_iter()
                 .any(|f| f.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME))
     }
+
+    /// What share of this dataset's rows carry a derived knowledge time (Set P
+    /// P-1.6).
+    ///
+    /// A boolean was not enough. "This dataset touches backfilled history" is true
+    /// of a window with one sentinel row in a million and of one with nothing else,
+    /// and those are not the same claim: the first is a footnote and the second
+    /// means the dataset supplies Gate 15 with no forward evidence at all (D-P3).
+    /// So the manifest states the fraction, and a reader can tell which they have.
+    ///
+    /// A wholly backfilled dataset is **not refused** — it is flagged, with its
+    /// fraction on the record. Refusing it would delete the only history the
+    /// platform has; hiding the fraction would let it be read as observed.
+    #[must_use]
+    pub fn backfilled_share(
+        &self,
+        row_flags: impl IntoIterator<Item = QualityFlags>,
+    ) -> BackfilledShare {
+        let mut rows = 0_u64;
+        let mut backfilled = 0_u64;
+        for f in row_flags {
+            rows += 1;
+            if f.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME) {
+                backfilled += 1;
+            }
+        }
+        BackfilledShare { rows, backfilled }
+    }
+}
+
+/// The backfilled-knowledge-time census of one dataset, for its manifest.
+///
+/// Counts rather than a pre-divided float, so a reader can see the denominator. A
+/// fraction of `0.0` over zero rows and a fraction of `0.0` over a million rows mean
+/// entirely different things, and a bare `f64` cannot tell them apart.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackfilledShare {
+    pub rows: u64,
+    pub backfilled: u64,
+}
+
+impl BackfilledShare {
+    /// The share of rows whose knowledge time was derived rather than observed.
+    ///
+    /// `None` for an empty dataset: zero out of zero is not zero per cent, and
+    /// reporting it as such would describe an empty window as fully observed.
+    #[must_use]
+    pub fn fraction(&self) -> Option<f64> {
+        (self.rows > 0).then(|| self.backfilled as f64 / self.rows as f64)
+    }
+
+    /// No row in this dataset was watched arrive, so it supplies no forward
+    /// evidence (Set P D-P3). Flagged, never a refusal.
+    #[must_use]
+    pub const fn wholly_backfilled(&self) -> bool {
+        self.rows > 0 && self.backfilled == self.rows
+    }
+
+    #[must_use]
+    pub const fn any_backfilled(&self) -> bool {
+        self.backfilled > 0
+    }
 }
 
 #[cfg(test)]

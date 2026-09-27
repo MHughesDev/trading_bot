@@ -118,23 +118,87 @@ impl SourceDecl {
         }
     }
 
-    /// Tradier option chain snapshots.
+    /// Tradier option chain snapshots (P-0.5).
     ///
     /// Delayed data: a forward snapshot IS observed — the platform held the bytes
     /// and knows when — but it observed a quote that was already 900 s stale. The
     /// receipt is the knowledge time; the 900 s is the declared lag the row carries
     /// into embargo arithmetic. Observed and observed-late are different facts and
     /// this source records both.
+    ///
+    /// The name is `tradier_chain_rest`, the row migration 0098 created for chain
+    /// snapshots — **not** `tradier_rest`, which migration 0046 seeded for the
+    /// delayed *quote* collector. Both rows happen to declare 900 s, so the lag
+    /// would have come out right either way; the id would not, and a row stamped
+    /// with the wrong source names the wrong endpoint for every later provenance
+    /// question.
     #[must_use]
     pub const fn tradier_chain() -> Self {
         Self {
-            name: "tradier_rest",
+            name: "tradier_chain_rest",
             kind: SourceKind::RestHistory,
             declared_lag: Duration::from_secs(900),
             notes:
                 "Tradier documents a 15-minute delay on sandbox data and on production index data",
         }
     }
+
+    /// Coinbase Exchange public candles (P-1.2).
+    ///
+    /// Mirrors `dataplane.source` row 2 (migration 0046). Declared in code as well
+    /// as in the table because the backfill adapters name a source by string and
+    /// nothing in the workspace could previously answer "what lag does that name
+    /// declare?" without a database — which made P-1.4's cross-source property
+    /// untestable.
+    #[must_use]
+    pub const fn coinbase_rest() -> Self {
+        Self {
+            name: "coinbase_rest",
+            kind: SourceKind::RestHistory,
+            declared_lag: Duration::from_secs(60),
+            notes: "candles published after the minute closes",
+        }
+    }
+
+    /// Kraken public OHLC and downloadable history archives (P-1.3).
+    ///
+    /// Mirrors `dataplane.source` row 3.
+    #[must_use]
+    pub const fn kraken_rest() -> Self {
+        Self {
+            name: "kraken_rest",
+            kind: SourceKind::RestHistory,
+            declared_lag: Duration::from_secs(60),
+            notes: "public OHLC and history archives; candles published after the minute closes",
+        }
+    }
+
+    /// Alpaca free-plan historical bars (P-1.4).
+    ///
+    /// Mirrors `dataplane.source` row 5, and the 900 s is the point: it is fifteen
+    /// times Coinbase's, so two backfills of the *same bar close* from the two
+    /// sources land fifteen minutes apart in knowledge time. A dataset that spans
+    /// both must carry the larger (ADR-P2-24), and assuming the lags equal is how a
+    /// mixed-venue history quietly claims to have been knowable sooner than it was.
+    #[must_use]
+    pub const fn alpaca_rest() -> Self {
+        Self {
+            name: "alpaca_rest",
+            kind: SourceKind::RestHistory,
+            declared_lag: Duration::from_secs(900),
+            notes: "free-tier SIP data is 15-minute delayed",
+        }
+    }
+
+    /// Every source declared in code, so a test can sweep them.
+    pub const ALL: &'static [fn() -> Self] = &[
+        Self::kraken_futures_ticker,
+        Self::kraken_futures_funding_history,
+        Self::tradier_chain,
+        Self::coinbase_rest,
+        Self::kraken_rest,
+        Self::alpaca_rest,
+    ];
 
     /// The knowledge time for one row, given how that row was collected.
     ///
@@ -276,6 +340,41 @@ impl Knowledge {
         let d = self.time() - event_time;
         d.to_std().unwrap_or(Duration::ZERO)
     }
+}
+
+/// The declared lag a dataset over a mixed window must carry (Set P P-1.6;
+/// ADR-P2-24).
+///
+/// A dataset assembled from more than one source is only as timely as its *slowest*
+/// source. Taking the mean, the first, or the source that happens to supply most of
+/// the rows all understate the lag, and understating it shortens the embargo — which
+/// is the direction that flatters a result. So the answer is the maximum, and it is
+/// computed rather than typed.
+///
+/// Returns `None` for an empty mix: a dataset that names no source has no declared
+/// lag to carry, and defaulting that to zero would be the worst possible guess.
+#[must_use]
+pub fn max_declared_lag<'a>(sources: impl IntoIterator<Item = &'a SourceDecl>) -> Option<Duration> {
+    sources.into_iter().map(|s| s.declared_lag).max()
+}
+
+/// The same figure in the unit `split::EmbargoInputs.max_knowledge_lag_ms` wants.
+///
+/// # Errors
+/// [`LagError::NoSources`] when the mix is empty, so a caller cannot silently reach
+/// `max_knowledge_lag_ms = 0` for a dataset whose sources were never resolved.
+pub fn max_knowledge_lag_ms<'a>(
+    sources: impl IntoIterator<Item = &'a SourceDecl>,
+) -> Result<u64, LagError> {
+    max_declared_lag(sources)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .ok_or(LagError::NoSources)
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum LagError {
+    #[error("a dataset must name at least one source before it can declare a knowledge lag; refusing to default to zero")]
+    NoSources,
 }
 
 /// `Duration` as whole seconds, so the JSON form is readable and stable.
@@ -446,5 +545,153 @@ mod tests {
         let src = SourceDecl::tradier_chain();
         let k = src.knowledge_for(t(1), Collection::Historical).unwrap();
         assert_eq!(k.implied_lag(t(1)), Duration::from_secs(900));
+    }
+
+    /// Every source declared in code names the row the migrations seeded, with the
+    /// lag that row carries. A name that drifts resolves to the wrong `source_id`,
+    /// and a row stamped with the wrong source carries the wrong declared lag into
+    /// every embargo calculation that reads it.
+    #[test]
+    fn every_declared_source_matches_the_row_the_migrations_seeded() {
+        // (name, declared_lag_ms) exactly as `migrations/0046_dataplane.sql` and
+        // `migrations/0098_forward_series.sql` INSERT them.
+        let seeded: &[(&str, u64)] = &[
+            ("coinbase_rest", 60_000),
+            ("kraken_rest", 60_000),
+            ("alpaca_rest", 900_000),
+            ("kraken_futures_rest", 3_600_000),
+            ("kraken_futures_history", 3_600_000),
+            ("tradier_chain_rest", 900_000),
+        ];
+        for make in SourceDecl::ALL {
+            let s = make();
+            let (_, ms) = seeded
+                .iter()
+                .find(|(n, _)| *n == s.name)
+                .unwrap_or_else(|| panic!("{} is declared in code but seeded nowhere", s.name));
+            assert_eq!(
+                s.declared_lag,
+                Duration::from_millis(*ms),
+                "{} declares a lag the migration does not",
+                s.name
+            );
+            assert!(!s.notes.is_empty(), "{} declares a lag with no reason", s.name);
+        }
+        assert_eq!(SourceDecl::ALL.len(), seeded.len());
+    }
+
+    /// P-1.4's acceptance clause, as a test: **two backfilled rows for the same bar
+    /// close from different sources carry different knowledge times.** Alpaca's
+    /// declared lag is fifteen times Coinbase's, so the two stamps are fifteen
+    /// minutes apart — and both are flagged, so neither can be mistaken for an
+    /// observation.
+    ///
+    /// The failure this closes is the one that looks like diligence: treating a
+    /// backfilled bar's knowledge time as a property of the *bar* rather than of the
+    /// source that handed it over. Do that and a mixed-venue history claims every
+    /// Alpaca bar was knowable fourteen minutes before Alpaca published it.
+    #[test]
+    fn two_backfilled_rows_for_one_bar_close_from_different_sources_differ_in_knowledge_time() {
+        let close = t(1);
+        let fast = SourceDecl::coinbase_rest()
+            .knowledge_for(close, Collection::Historical)
+            .unwrap();
+        let slow = SourceDecl::alpaca_rest()
+            .knowledge_for(close, Collection::Historical)
+            .unwrap();
+        assert_ne!(
+            fast.time(),
+            slow.time(),
+            "two sources with different declared lags cannot share a knowledge time"
+        );
+        assert_eq!(slow.time() - fast.time(), chrono::Duration::seconds(840));
+        for k in [fast, slow] {
+            assert!(k.is_derived(), "a history pull is never an observation");
+            assert!(k
+                .quality_flags()
+                .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME));
+            assert!(!k.is_forward_evidence());
+        }
+        // Kraken's bars share Coinbase's 60 s, and that is a fact about the venues
+        // rather than an accident worth hiding: the assertion is that the lag comes
+        // from the source, not that every source differs.
+        assert_eq!(
+            SourceDecl::kraken_rest()
+                .knowledge_for(close, Collection::Historical)
+                .unwrap()
+                .time(),
+            fast.time()
+        );
+    }
+
+    /// P-1.6's second clause: a dataset over a mixed window carries the **maximum**
+    /// declared lag of its sources. A dataset is only as timely as its slowest
+    /// source, and every other summary of the mix understates the lag — which
+    /// shortens the embargo, which flatters the result.
+    #[test]
+    fn a_mixed_window_carries_the_maximum_declared_lag_of_its_sources() {
+        let mix = [
+            SourceDecl::coinbase_rest(),
+            SourceDecl::kraken_rest(),
+            SourceDecl::alpaca_rest(),
+        ];
+        assert_eq!(
+            max_declared_lag(mix.iter()),
+            Some(Duration::from_secs(900)),
+            "the slowest source in the mix, not the commonest and not the mean"
+        );
+        assert_eq!(max_knowledge_lag_ms(mix.iter()).unwrap(), 900_000);
+        // Order cannot change the answer.
+        let reversed: Vec<_> = mix.iter().rev().collect();
+        assert_eq!(
+            max_knowledge_lag_ms(reversed.into_iter()).unwrap(),
+            900_000
+        );
+        // A single-source dataset carries that source's lag, unchanged.
+        assert_eq!(
+            max_knowledge_lag_ms([SourceDecl::coinbase_rest()].iter()).unwrap(),
+            60_000
+        );
+    }
+
+    /// Adversarial: a dataset that names no source is refused rather than handed a
+    /// zero lag. `max_knowledge_lag_ms = 0` means "nothing was ever late", which is
+    /// the most optimistic possible answer and the one an unresolved source list
+    /// would silently produce.
+    #[test]
+    fn a_dataset_that_names_no_source_is_refused_rather_than_given_a_zero_lag() {
+        let empty: [SourceDecl; 0] = [];
+        assert_eq!(max_declared_lag(empty.iter()), None);
+        assert_eq!(
+            max_knowledge_lag_ms(empty.iter()),
+            Err(LagError::NoSources)
+        );
+    }
+
+    /// And the figure reaches the embargo: a mix containing Alpaca embargoes more
+    /// bars than one that does not. Without this the maximum would be a number
+    /// computed and then dropped.
+    #[test]
+    fn the_maximum_lag_lengthens_the_embargo_it_is_computed_for() {
+        let inputs = |lag_ms: u64| crate::split::EmbargoInputs {
+            horizon_bars: 5,
+            max_lookback_bars: 10,
+            max_knowledge_lag_ms: lag_ms,
+            settlement_lag_bars: 0,
+        };
+        let crypto_only =
+            max_knowledge_lag_ms([SourceDecl::coinbase_rest()].iter()).unwrap();
+        let mixed = max_knowledge_lag_ms(
+            [SourceDecl::coinbase_rest(), SourceDecl::alpaca_rest()].iter(),
+        )
+        .unwrap();
+        let narrow = crate::split::compute_embargo(&inputs(crypto_only));
+        let wide = crate::split::compute_embargo(&inputs(mixed));
+        assert!(
+            wide > narrow,
+            "a window that includes a 900 s source must embargo more than one that does not \
+             ({wide} vs {narrow})"
+        );
+        assert_eq!(wide - narrow, 14, "15 minutes minus 1 minute, in 1m bars");
     }
 }
