@@ -5874,12 +5874,12 @@ mod tests {
 
         assert!(
             ruling.reason.contains("`sealed_holdout`"),
-            "the card must name the envelope the platform classified this under;              got: {}",
+            "the card must name the envelope the platform classified this under; got: {}",
             ruling.reason
         );
         assert!(
             !ruling.reason.contains("`open_vault` approval envelope"),
-            "the tool name is back in the envelope slot, which is the defect this              test exists for; got: {}",
+            "the tool name is back in the envelope slot, the defect this test exists for; got: {}",
             ruling.reason
         );
         // The tool is still named — it is the subject of the sentence, and dropping

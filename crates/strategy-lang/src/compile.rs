@@ -1667,15 +1667,13 @@ exit none
 
     #[test]
     fn a_scaled_stop_stores_the_unit_and_the_lookback_that_was_written() {
-        let d = def(
-            "\
+        let d = def("\
 strategy s on $bound_at_init timeframe 1h
 entry long when close > 1
 size fixed 1
 exit stop 1.5 atr(14) from entry
 exit trailing 3 sigma(20) from high_water
-",
-        );
+");
         let Some(ExitPolicy::Rules { rules }) = &d.exits else {
             panic!("expected rules, got {:?}", d.exits);
         };
@@ -1696,24 +1694,20 @@ exit trailing 3 sigma(20) from high_water
     /// exchange for a field it does not set.
     #[test]
     fn the_version_is_raised_by_a_scaled_unit_and_by_nothing_else() {
-        let scaled = def(
-            "\
+        let scaled = def("\
 strategy s on $bound_at_init timeframe 1h
 entry long when close > 1
 size fixed 1
 exit stop 1.5 atr(14) from entry
-",
-        );
+");
         assert_eq!(scaled.definition_version, SCALED_UNIT_VERSION);
 
-        let percent = def(
-            "\
+        let percent = def("\
 strategy s on $bound_at_init timeframe 1h
 entry long when close > 1
 size fixed 1
 exit stop 2 % from entry
-",
-        );
+");
         assert_eq!(percent.definition_version, TARGET_VERSION);
     }
 

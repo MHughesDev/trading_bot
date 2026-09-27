@@ -535,11 +535,7 @@ mod tests {
             },
         ] {
             let out = apply(&p, &col);
-            assert!(
-                out[0].is_none(),
-                "{} invented a warm-up value",
-                p.mode()
-            );
+            assert!(out[0].is_none(), "{} invented a warm-up value", p.mode());
         }
     }
 }

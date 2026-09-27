@@ -915,8 +915,15 @@ mod window_tests {
             &times,
             &labels(&[Some(RegimeLabel::MidVol), None, Some(RegimeLabel::MidVol)]),
         );
-        assert_eq!(w.len(), 2, "one window either side of the gap, not one across");
-        assert!(w[0].end <= t(60), "the first must not reach the unlabelled instant");
+        assert_eq!(
+            w.len(),
+            2,
+            "one window either side of the gap, not one across"
+        );
+        assert!(
+            w[0].end <= t(60),
+            "the first must not reach the unlabelled instant"
+        );
         assert_eq!(w[1].start, t(120));
     }
 

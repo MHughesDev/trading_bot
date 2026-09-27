@@ -637,7 +637,9 @@ mod tests {
         // The guard must catch only the variant it was written for; a flip and
         // a monitor event carry stable identities of their own.
         assert!(flip("2026-09-01").not_an_event().is_none());
-        assert!(crossing("2026-01-31", "2026-09-23").not_an_event().is_none());
+        assert!(crossing("2026-01-31", "2026-09-23")
+            .not_an_event()
+            .is_none());
         assert!(Observation::MonitorEvent {
             subject: "s_1".into(),
             kind: "scaled_down".into(),
@@ -656,7 +658,12 @@ mod tests {
         let mut agenda = empty_agenda();
         let mut already = Raised::default();
         for to in ["2026-09-21", "2026-09-22", "2026-09-23"] {
-            let out = observations(&charter, &[crossing("2026-01-31", to)], &already, &mut agenda);
+            let out = observations(
+                &charter,
+                &[crossing("2026-01-31", to)],
+                &already,
+                &mut agenda,
+            );
             for item in out.added() {
                 already.record(&item.source_refs[0]);
             }
@@ -668,7 +675,11 @@ mod tests {
                 };
             }
         }
-        assert_eq!(agenda.len(), 2, "one seeded item and one crossing: {agenda:?}");
+        assert_eq!(
+            agenda.len(),
+            2,
+            "one seeded item and one crossing: {agenda:?}"
+        );
     }
 
     #[test]

@@ -957,8 +957,7 @@ mod tests {
                 continue;
             }
             assert!(
-                !code.contains("run_simulation(")
-                    || code.contains("run_simulation_detailed("),
+                !code.contains("run_simulation(") || code.contains("run_simulation_detailed("),
                 "a job stored through `run_simulation` has no trade rows: {code}"
             );
         }

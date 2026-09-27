@@ -47,9 +47,9 @@ use serde::Serialize;
 use sqlx::PgPool;
 
 use backtest::store::BarStore;
-use domain::model::forecast::CalibratedForecast;
 use backtest::types::TimeframeExt;
 use backtest::warmup::feature_row;
+use domain::model::forecast::CalibratedForecast;
 use domain::payloads::bar::Timeframe;
 
 /// What a caller asks for.
@@ -195,13 +195,12 @@ pub async fn call_model(
         });
     };
 
-    let version: Option<(i32,)> = sqlx::query_as(
-        "SELECT version FROM ai_model_aliases WHERE model_id = $1 AND alias = $2",
-    )
-    .bind(&model_id)
-    .bind(&req.alias)
-    .fetch_optional(pg)
-    .await?;
+    let version: Option<(i32,)> =
+        sqlx::query_as("SELECT version FROM ai_model_aliases WHERE model_id = $1 AND alias = $2")
+            .bind(&model_id)
+            .bind(&req.alias)
+            .fetch_optional(pg)
+            .await?;
     let Some((version,)) = version else {
         return Ok(ModelCall::NoSuchAlias {
             model_id,
@@ -385,7 +384,6 @@ async fn declared_features(
         .filter(|l| !l.is_empty()))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -443,8 +441,7 @@ mod tests {
         // the map silently and the model is called with a short vector. Here it
         // must be a refusal that says the name out loud.
         let required = names(&["close", "frobnicate_12"]);
-        let missing =
-            assemble(&required, &rows(120)).expect_err("frobnicate_12 is not a feature");
+        let missing = assemble(&required, &rows(120)).expect_err("frobnicate_12 is not a feature");
 
         assert_eq!(
             missing,

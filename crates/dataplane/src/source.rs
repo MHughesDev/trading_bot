@@ -575,7 +575,11 @@ mod tests {
                 "{} declares a lag the migration does not",
                 s.name
             );
-            assert!(!s.notes.is_empty(), "{} declares a lag with no reason", s.name);
+            assert!(
+                !s.notes.is_empty(),
+                "{} declares a lag with no reason",
+                s.name
+            );
         }
         assert_eq!(SourceDecl::ALL.len(), seeded.len());
     }
@@ -643,10 +647,7 @@ mod tests {
         assert_eq!(max_knowledge_lag_ms(mix.iter()).unwrap(), 900_000);
         // Order cannot change the answer.
         let reversed: Vec<_> = mix.iter().rev().collect();
-        assert_eq!(
-            max_knowledge_lag_ms(reversed.into_iter()).unwrap(),
-            900_000
-        );
+        assert_eq!(max_knowledge_lag_ms(reversed.into_iter()).unwrap(), 900_000);
         // A single-source dataset carries that source's lag, unchanged.
         assert_eq!(
             max_knowledge_lag_ms([SourceDecl::coinbase_rest()].iter()).unwrap(),
@@ -662,10 +663,7 @@ mod tests {
     fn a_dataset_that_names_no_source_is_refused_rather_than_given_a_zero_lag() {
         let empty: [SourceDecl; 0] = [];
         assert_eq!(max_declared_lag(empty.iter()), None);
-        assert_eq!(
-            max_knowledge_lag_ms(empty.iter()),
-            Err(LagError::NoSources)
-        );
+        assert_eq!(max_knowledge_lag_ms(empty.iter()), Err(LagError::NoSources));
     }
 
     /// And the figure reaches the embargo: a mix containing Alpaca embargoes more
@@ -679,12 +677,10 @@ mod tests {
             max_knowledge_lag_ms: lag_ms,
             settlement_lag_bars: 0,
         };
-        let crypto_only =
-            max_knowledge_lag_ms([SourceDecl::coinbase_rest()].iter()).unwrap();
-        let mixed = max_knowledge_lag_ms(
-            [SourceDecl::coinbase_rest(), SourceDecl::alpaca_rest()].iter(),
-        )
-        .unwrap();
+        let crypto_only = max_knowledge_lag_ms([SourceDecl::coinbase_rest()].iter()).unwrap();
+        let mixed =
+            max_knowledge_lag_ms([SourceDecl::coinbase_rest(), SourceDecl::alpaca_rest()].iter())
+                .unwrap();
         let narrow = crate::split::compute_embargo(&inputs(crypto_only));
         let wide = crate::split::compute_embargo(&inputs(mixed));
         assert!(

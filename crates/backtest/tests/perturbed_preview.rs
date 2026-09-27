@@ -191,14 +191,20 @@ fn a_masked_column_is_not_reported_as_a_warm_up_problem() {
     )
     .expect("the perturbed preview runs");
 
-    assert_eq!(masked.entries, 0, "a condition naming a blank column is false");
+    assert_eq!(
+        masked.entries, 0,
+        "a condition naming a blank column is false"
+    );
     assert_eq!(
         masked.never_fires_code,
         Some("perturbed_column_has_no_value"),
         "the diagnosis blames the perturbation, not the window"
     );
     let why = masked.never_fires_because.as_deref().unwrap_or_default();
-    assert!(why.contains("ema_3"), "the offending column is named: {why}");
+    assert!(
+        why.contains("ema_3"),
+        "the offending column is named: {why}"
+    );
     assert_eq!(masked.perturbations[0].bars_with_value, 0);
 }
 

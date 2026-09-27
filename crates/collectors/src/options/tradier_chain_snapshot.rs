@@ -1049,7 +1049,11 @@ mod tests {
         let s = snap(received);
         assert!(!s.contracts.is_empty());
         for c in &s.contracts {
-            assert_eq!(c.event_time, at(14, 0), "the row describes the 14:00 market");
+            assert_eq!(
+                c.event_time,
+                at(14, 0),
+                "the row describes the 14:00 market"
+            );
             assert_eq!(
                 c.knowledge.time(),
                 received,
@@ -1244,7 +1248,10 @@ mod tests {
     fn a_contract_outside_the_universe_is_deferred_to_the_daily_slot_not_dropped() {
         let hourly = snap(punctual()); // 14:00 slot — not the daily one
         assert!(hourly.contracts.iter().all(|c| c.in_liquid_universe));
-        assert!(hourly.contracts.iter().all(|c| c.cadence == Cadence::Hourly));
+        assert!(hourly
+            .contracts
+            .iter()
+            .all(|c| c.cadence == Cadence::Hourly));
         assert_eq!(
             hourly.deferred_to_daily, 1,
             "the $500 strike is 2.5x spot and is outside |moneyness - 1| <= 0.30"
@@ -1323,7 +1330,8 @@ mod tests {
     fn a_chain_without_its_underlying_price_is_refused_rather_than_gated_on_a_guess() {
         let e = parse_chain(CHAIN, "AAPL", None, punctual(), &plan()).unwrap_err();
         assert!(matches!(e, ChainError::MissingUnderlyingPrice(s) if s == "AAPL"));
-        let zero = parse_chain(CHAIN, "AAPL", Some(Decimal::ZERO), punctual(), &plan()).unwrap_err();
+        let zero =
+            parse_chain(CHAIN, "AAPL", Some(Decimal::ZERO), punctual(), &plan()).unwrap_err();
         assert!(matches!(zero, ChainError::MissingUnderlyingPrice(_)));
     }
 
@@ -1420,7 +1428,10 @@ mod tests {
     fn the_venue_timestamp_is_the_newer_of_the_two_quote_stamps() {
         let s = snap(punctual());
         let c = s.contracts.iter().find(|c| c.right == 'C').unwrap();
-        assert_eq!(c.venue_ts, DateTime::from_timestamp_millis(1_768_000_060_000));
+        assert_eq!(
+            c.venue_ts,
+            DateTime::from_timestamp_millis(1_768_000_060_000)
+        );
         // Absent stamps are absent, not epoch zero.
         let put = s.contracts.iter().find(|c| c.right == 'P').unwrap();
         assert_eq!(put.venue_ts, None);

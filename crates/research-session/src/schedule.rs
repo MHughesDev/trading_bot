@@ -976,7 +976,10 @@ mod tests {
 
         let closed = h.openness(outside);
         assert!(!closed.may_claim());
-        assert_eq!(closed.re_arms_at(), Some(h.next_open_after(outside).unwrap()));
+        assert_eq!(
+            closed.re_arms_at(),
+            Some(h.next_open_after(outside).unwrap())
+        );
     }
 
     #[test]

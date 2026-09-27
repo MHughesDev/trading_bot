@@ -216,11 +216,7 @@ pub fn preview_signals_perturbed(
     let perturbed: HashMap<String, Vec<Option<f64>>> = if perturbations.is_empty() {
         HashMap::new()
     } else {
-        let set = PerturbationSet::validate(
-            perturbations.items().to_vec(),
-            &names,
-            bars.len(),
-        )?;
+        let set = PerturbationSet::validate(perturbations.items().to_vec(), &names, bars.len())?;
         let all_rows: Vec<features::FeatureRow> = bars.iter().map(feature_row).collect();
         indicators
             .iter()

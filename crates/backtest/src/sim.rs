@@ -923,7 +923,8 @@ impl DetailedOutcome {
             );
         }
 
-        let engine_did_something = total_positions.unwrap_or(0) > 0 || total_orders.unwrap_or(0) > 0;
+        let engine_did_something =
+            total_positions.unwrap_or(0) > 0 || total_orders.unwrap_or(0) > 0;
         if harvested == 0 && engine_did_something {
             doc.insert(
                 "trades_not_harvested".into(),
@@ -1388,7 +1389,13 @@ mod tests {
             "summary": { "orders.total": "58" },
         });
         let doc = outcome(stats.clone(), vec![round_trip(dec!(1), dec!(0.1))]).result_document();
-        for key in ["total_orders", "total_positions", "stats_returns", "stats_pnls", "summary"] {
+        for key in [
+            "total_orders",
+            "total_positions",
+            "stats_returns",
+            "stats_pnls",
+            "summary",
+        ] {
             assert_eq!(doc.get(key), stats.get(key), "{key} survived");
         }
     }
@@ -1487,7 +1494,10 @@ mod tests {
     fn the_engines_own_position_count_is_published_next_to_the_harvest() {
         let doc = outcome(
             serde_json::json!({ "total_orders": 4, "total_positions": 3 }),
-            vec![round_trip(dec!(1), dec!(0.1)), round_trip(dec!(2), dec!(0.1))],
+            vec![
+                round_trip(dec!(1), dec!(0.1)),
+                round_trip(dec!(2), dec!(0.1)),
+            ],
         )
         .result_document();
         assert_eq!(doc["trade_rows_harvested"], serde_json::json!(2));

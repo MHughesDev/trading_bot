@@ -1363,14 +1363,9 @@ async fn a_trip_reaches_the_order_gate_without_waiting_a_cadence() {
     // durable row and the event and touches no in-memory mirror — which is what
     // makes this a test of propagation rather than of a shared `Arc`. The
     // trigger fires inside the same transaction's commit.
-    let event = MonitorEvent::new(
-        scope.clone(),
-        Family::Venue,
-        EventKind::Tripped,
-        "monitor",
-    )
-    .expect("monitor is not an agent actor")
-    .with_reason("the notification drill halts one venue");
+    let event = MonitorEvent::new(scope.clone(), Family::Venue, EventKind::Tripped, "monitor")
+        .expect("monitor is not an agent actor")
+        .with_reason("the notification drill halts one venue");
     drill.owns_event(event.event_id);
     store
         .trip(&event, "the notification drill halts one venue")

@@ -77,13 +77,7 @@ const EVENT_SCAN: i64 = 1000;
 /// `blip` is deliberately absent: COMP-007 §4.1 defines it as a single-cadence
 /// excursion that is recorded and acted on by nothing, and folding it in here
 /// would report every strategy as breaching.
-const BREACH_KINDS: &[&str] = &[
-    "warning",
-    "breach",
-    "scaled_down",
-    "halted",
-    "tripped",
-];
+const BREACH_KINDS: &[&str] = &["warning", "breach", "scaled_down", "halted", "tripped"];
 
 /// `check_control_limits` — the monitor's reading for one strategy.
 pub async fn check_control_limits(api: &ApiClient, params: &Value) -> Value {
@@ -267,9 +261,8 @@ pub fn report(
         .get("strategies")
         .and_then(Value::as_array)
         .and_then(|rows| {
-            rows.iter().find(|r| {
-                r.get("strategy_id").and_then(Value::as_str) == Some(strategy_id)
-            })
+            rows.iter()
+                .find(|r| r.get("strategy_id").and_then(Value::as_str) == Some(strategy_id))
         });
     let state = row
         .and_then(|r| r.get("state"))

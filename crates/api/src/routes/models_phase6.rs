@@ -130,11 +130,14 @@ pub async fn predict(
                 | ModelCall::FeaturesUnavailable { .. }
                 | ModelCall::NoBars { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             };
-            (code, Json(serde_json::to_value(&outcome).unwrap_or(Value::Null))).into_response()
+            (
+                code,
+                Json(serde_json::to_value(&outcome).unwrap_or(Value::Null)),
+            )
+                .into_response()
         }
     }
 }
-
 
 // ── I-6.4: Tags ───────────────────────────────────────────────────────────────
 

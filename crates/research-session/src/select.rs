@@ -1200,9 +1200,18 @@ mod tests {
 
     fn a_slate() -> Vec<(AgendaItem, Inputs)> {
         vec![
-            (item("cheap and dull", Source::CharterSeed), inputs(1.0, 1.0, 1.0, 1.0)),
-            (item("dear and good", Source::Contradiction), inputs(9.0, 1.0, 1.0, 9.0)),
-            (item("middling", Source::OpenQuestion), inputs(4.0, 1.0, 1.0, 3.0)),
+            (
+                item("cheap and dull", Source::CharterSeed),
+                inputs(1.0, 1.0, 1.0, 1.0),
+            ),
+            (
+                item("dear and good", Source::Contradiction),
+                inputs(9.0, 1.0, 1.0, 9.0),
+            ),
+            (
+                item("middling", Source::OpenQuestion),
+                inputs(4.0, 1.0, 1.0, 3.0),
+            ),
         ]
     }
 
