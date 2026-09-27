@@ -909,6 +909,11 @@ async fn dispatch_untraced(
         "get_paper_activity" => tools::portfolio::get_paper_activity(&ctx.api, params).await,
         "get_trading_status" => tools::portfolio::get_trading_status(&ctx.api).await,
         "get_order" => tools::portfolio::get_order(&ctx.api, params).await,
+        // S-3.18. Reads COMP-007's monitor; it cannot halt, scale or clear
+        // anything, and `no_tool_anywhere_posts_to_the_monitor` proves it.
+        "check_control_limits" => {
+            tools::control_limits::check_control_limits(&ctx.api, params).await
+        }
 
         // ── Model registry and the training pipeline ───────────────────────────
         "list_models" => tools::models::list_models(&ctx.api).await,

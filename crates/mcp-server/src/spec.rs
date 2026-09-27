@@ -370,6 +370,9 @@ pub fn catalog() -> &'static [ToolSpec] {
         specs.extend(crate::tools::builder::specs());
         specs.extend(crate::tools::backtests::specs());
         specs.extend(crate::tools::portfolio::specs());
+        // S-3.18. Read-only over COMP-007's monitor tables; the three mutations
+        // beside it require a human session and no tool carries that scope.
+        specs.extend(crate::tools::control_limits::specs());
         specs.extend(crate::tools::models::specs());
         specs.extend(crate::tools::automations::specs());
         specs.extend(crate::tools::research::specs());
@@ -1161,7 +1164,7 @@ mod tests {
     fn inference_is_reachable_from_chat_and_training_is_not() {
         let by_name = |n: &str| {
             catalog()
-                .into_iter()
+                .iter()
                 .find(|s| s.name == n)
                 .unwrap_or_else(|| panic!("`{n}` is not in the catalogue"))
         };

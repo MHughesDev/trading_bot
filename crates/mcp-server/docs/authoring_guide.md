@@ -965,6 +965,38 @@ guessed limit reads exactly like a checked one. Too high and a strategy is
 throttled live; too low and a workable strategy is refused. Read the numbers from
 the venue's current documentation before sizing a requote rate against them.
 
+### check_control_limits
+
+What the live monitor recorded about one strategy. It reads and only reads:
+halting, scaling, resuming, clearing a trip and declaring a limit all require a
+human session, and no tool in this catalogue carries that scope. Asking is the
+whole capability.
+
+**Three answers are not "healthy", and telling them apart is the point of the
+tool.**
+
+* `unwatched` — the monitor's lease is not valid, so no process has renewed it.
+  Every state row is then something an earlier process left behind, and "no
+  breach since" means "nothing has looked since". Treat the strategy's live
+  numbers as unmeasured.
+* `unmonitored` — no control limits are declared for this strategy, or the
+  monitor has never seen it. With no limit there is nothing to breach, so a clean
+  answer here is not evidence of anything.
+* `state_and_events_disagree` — the monitor's current state and its recorded
+  events do not agree about whether a limit was crossed. Both are reported and
+  neither is corrected; that is a fact about the monitor, not a number to pick
+  between.
+
+**The event list has no time bound.** `GET /api/monitor/events` serves no
+`occurred_at`, so `breaching` is the most recent events the monitor recorded for
+this scope and not the ones inside any window — which is why there is no `window`
+argument to pass. `events_truncated: true` means older events for this strategy
+exist and were not scanned.
+
+Nothing here re-derives a breach. `ControlLimit::breached_by` is the monitor's
+arithmetic, and it treats a `NaN` reading as a breach; a second implementation
+that used `>` would read the same failed measurement as a pass.
+
 ### list_features
 
 What the backtest engine will actually resolve. Call it before writing a

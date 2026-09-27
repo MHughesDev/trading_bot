@@ -14,6 +14,7 @@ pub mod backtests;
 pub mod builder;
 pub mod campaign;
 pub mod code;
+pub mod control_limits;
 pub mod core;
 pub mod discovery;
 pub mod falsification;
