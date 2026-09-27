@@ -523,6 +523,14 @@ pub fn router(state: AppState) -> Router {
             "/api/research/diagnostics/{run_id}",
             get(research::get_diagnostics),
         )
+        // The recorded family's return series as JSON. Set S S-3.13's
+        // `ablation_sweep` and `parameter_fragility_map` were BLOCKED:UPSTREAM on
+        // this: `recorded_returns` was reachable only as a parquet file written
+        // for a Python template.
+        .route(
+            "/api/backtest/experiments/{id}/returns",
+            get(research::get_experiment_returns),
+        )
         .route(
             "/api/backtest/experiments/{id}/studies/{study_id}/carried-forward",
             get(research::get_carried_forward),

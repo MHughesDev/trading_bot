@@ -8,7 +8,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::research::{StartError, StartSweepBody};
@@ -119,4 +119,103 @@ pub async fn get_carried_forward(
         )
             .into_response(),
     }
+}
+
+/// GET /api/backtest/experiments/:id/returns — a recorded family's return
+/// series, as JSON.
+///
+/// # Why this route exists
+///
+/// `SuiteManager::recorded_returns` has been reachable in exactly one way: the
+/// template materialiser writes it to a **parquet file** on the cache root for a
+/// Python skill to read. That is right for a template and useless for anything
+/// else, and it left `ablation_sweep` and `parameter_fragility_map` (Set S
+/// S-3.13) with nothing to diff against the null library's confidence interval —
+/// the phase file records them as `BLOCKED:UPSTREAM` for exactly this reason:
+/// *"no route returns a run's return series as JSON"*.
+///
+/// The timestamps are carried, not dropped, and that is the point of returning
+/// the family rather than a bare matrix. `recorded_family` says why in its own
+/// comment: without them a family is an integer-indexed matrix, and an integer
+/// index cannot be aligned to anything outside itself — no factor series, no
+/// market regime, no second family. Every attribution tool needs the alignment.
+///
+/// One member per recorded run with at least two returns, deduplicated across
+/// studies, in the order the studies recorded them.
+pub async fn get_experiment_returns(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+) -> impl IntoResponse {
+    let family = match state.suite.recorded_returns(token.user_id(), id) {
+        Ok(f) => f,
+        // `NotFound` is the only error this call can return today, and it is
+        // matched by name rather than caught as a catch-all so it stays that way.
+        // Mapping every future error to 404 is how `/api/evidence/trades` came to
+        // report "no trades" for a table migration 0026 had renamed: a 404 for a
+        // real failure is a lie the caller cannot distinguish from an answer.
+        Err(backtest::suite::SuiteError::NotFound) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "not_found",
+                    "message": "no experiment of yours with that id",
+                    "experiment_id": id.to_string(),
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "suite_error",
+                    "message": e.to_string(),
+                    "experiment_id": id.to_string(),
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // An empty family is 422 and not an empty 200, and the wording is the
+    // materialiser's own: nothing was dispatched to find this out, so the caller
+    // has not learned that the runs produced no returns — it has learned that no
+    // run happened. A caller reading `[]` from a 200 would conclude the first.
+    if family.is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "empty_family",
+                "message": "this experiment has no recorded run with a usable return series. \
+                            Nothing was dispatched to find that out — run the family first.",
+                "experiment_id": id.to_string(),
+            })),
+        )
+            .into_response();
+    }
+
+    let members: Vec<Value> = family
+        .into_iter()
+        .map(|(run_id, stamps, returns)| {
+            json!({
+                "run_id": run_id,
+                // RFC-3339 so the alignment survives the wire as text rather than
+                // as an epoch a reader has to guess the unit of.
+                "at": stamps.iter().map(|t| t.to_rfc3339()).collect::<Vec<_>>(),
+                "returns": returns,
+            })
+        })
+        .collect();
+
+    Json(json!({
+        "experiment_id": id.to_string(),
+        "members": members.len(),
+        // Named `daily_returns` because that is what `recorded_family` computes
+        // (`daily_returns` over the equity curve). A consumer that assumed
+        // per-bar returns would misscale every statistic it took.
+        "series": "daily_returns",
+        "family": members,
+    }))
+    .into_response()
 }
