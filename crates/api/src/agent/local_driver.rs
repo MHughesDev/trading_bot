@@ -2087,7 +2087,7 @@ fn build_request(
         Decode::Native { tools } => (None, native_tools(tools)),
         other => (other.schema().cloned(), Vec::new()),
     };
-    let messages = match transcript.filter(|t| matches!(call.decode, Decode::Native { .. })) {
+    let messages = match transcript.filter(|_| matches!(call.decode, Decode::Native { .. })) {
         Some(t) => transcript_messages(t),
         None => vec![Message::User {
             content: call.prompt.clone(),

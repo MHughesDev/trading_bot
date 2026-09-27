@@ -12,7 +12,7 @@
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::{auth::BearerToken, state::AppState};

@@ -23,7 +23,7 @@
 
 use serde_json::{Map, Value};
 
-use harness::registry::{Risk, ToolDef, ToolRegistry, REFLECT};
+use harness::registry::{Risk, ToolDef, ToolRegistry};
 use mcp_server_lib::{dispatch_tool, taxonomy, tool_definitions_for, McpContext, ToolProfile};
 
 /// Tools the harness answers itself, so the bridge must not also register them.

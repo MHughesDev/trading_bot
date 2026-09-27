@@ -267,7 +267,7 @@ fn precheck(b: &Battery) -> Verdict {
         .step("negative results")
         .and_then(|s| s.field("rows"))
         .and_then(Value::as_array)
-        .map(Clone::clone)
+        .cloned()
         .unwrap_or_default();
     let mut closed: Vec<String> = Vec::new();
     let mut reopenable: Vec<String> = Vec::new();

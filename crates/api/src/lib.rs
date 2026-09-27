@@ -19,6 +19,7 @@ pub mod lifecycle_evaluate;
 pub mod live_bus;
 pub mod llm_proxy;
 pub mod memory_store;
+pub mod model_call;
 pub mod negative_from_funnel;
 pub mod orchestrator;
 pub mod projects;

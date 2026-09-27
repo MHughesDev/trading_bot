@@ -78,6 +78,58 @@ pub async fn get_model(api: &ApiClient, params: &Value) -> Value {
     }
 }
 
+// ── Calling a trained model ─────────────────────────────────────────────────
+
+/// `call_model` — ask a trained model for a prediction. Inference only.
+///
+/// This is a **read**, and that is the whole reason it is reachable from a Chat
+/// turn: training writes a version and spends compute, promotion changes what
+/// live strategies resolve to, and asking a finished model what it thinks does
+/// neither. `Risk::Read` derives to ring 0 (`research`), and `ToolSpec::new`
+/// defaults to spending no trial, so this passes the mode gate in both Chat and
+/// Research without either gate being widened — the difference between the modes
+/// is trials, not reach, and this spends none.
+///
+/// Every refusal from the route arrives as a typed `outcome` and is passed
+/// through verbatim. That matters more here than anywhere else in this file: a
+/// model asked for a prediction it cannot make must say so, because the
+/// alternative is a direction and a confidence the agent will quote in a finding.
+pub async fn call_model(api: &ApiClient, params: &Value) -> Value {
+    let model_id = str_arg(params, "model_id");
+    if model_id.is_empty() {
+        return json!({ "error": "missing_field", "field": "model_id" });
+    }
+    let instrument_id = str_arg(params, "instrument_id");
+    if instrument_id.is_empty() {
+        // Not defaulted to the model id, which is what the route under this used
+        // to do: it keyed the gateway's cache and trace on a model id in the
+        // instrument slot. "Which market" has no sensible default.
+        return json!({ "error": "missing_field", "field": "instrument_id" });
+    }
+
+    let mut query = format!("instrument_id={}", urlencode(instrument_id));
+    for (key, value) in [
+        ("alias", str_arg(params, "alias")),
+        ("timeframe", str_arg(params, "timeframe")),
+        ("as_of", str_arg(params, "as_of")),
+    ] {
+        if !value.is_empty() {
+            query.push_str(&format!("&{key}={}", urlencode(value)));
+        }
+    }
+
+    match api
+        .get(&format!(
+            "/api/models/{}/predict?{query}",
+            urlencode(model_id)
+        ))
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => e.to_tool_error(),
+    }
+}
+
 // ── The training pipeline ───────────────────────────────────────────────────
 
 fn str_arg<'a>(params: &'a Value, key: &str) -> &'a str {
@@ -392,6 +444,35 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
             json!({ "type": "object", "properties": {} }),
         )
         .internal(),
+        // Inference is a read: it writes no version, spends no trial, and
+        // changes nothing a later run would resolve differently. That is what
+        // makes it reachable from a Chat turn, where training and promotion are
+        // not — the mode gate filters on ring and trials, and this tool is ring 0
+        // with no trial.
+        ToolSpec::new(
+            "call_model",
+            "model",
+            Risk::Read,
+            "Ask an already-trained model for a prediction on one instrument at one instant. \
+             Inference only: it never trains, creates or promotes anything. Features are \
+             computed from stored bars at or before `as_of` using exactly the column list the \
+             model's version was trained on — if any column cannot be produced the call is \
+             refused and names them, rather than substituting zeros. An `outcome` of \
+             `abstained` is the model declining to answer and is not a neutral prediction.",
+            json!({
+                "type": "object",
+                "required": ["model_id", "instrument_id"],
+                "properties": {
+                    "model_id": { "type": "string", "description": "Model id or slug" },
+                    "instrument_id": { "type": "string", "description": "The instrument to predict for. Must have stored bars." },
+                    "alias": { "type": "string", "description": "Which published version to call. Default 'production'." },
+                    "timeframe": { "type": "string", "enum": ["1m", "5m", "15m", "1h", "4h", "1d"], "description": "Default 1h" },
+                    "as_of": { "type": "string", "description": "RFC-3339. Default now; clamped to now. Features use only bars at or before it." }
+                }
+            }),
+        )
+        .internal()
+        .evidence(&["model_id"]),
         // Training spends real compute and writes a new version. Nothing is
         // destroyed and a bad version can simply not be promoted, so: write.
         ToolSpec::new(

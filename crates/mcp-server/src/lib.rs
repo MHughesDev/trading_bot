@@ -914,6 +914,7 @@ async fn dispatch_untraced(
         "list_models" => tools::models::list_models(&ctx.api).await,
         "get_model" => tools::models::get_model(&ctx.api, params).await,
         "list_feature_sets" => tools::models::list_feature_sets(&ctx.api).await,
+        "call_model" => tools::models::call_model(&ctx.api, params).await,
         "train_model" => tools::models::train_model(&ctx.api, params, progress.clone()).await,
         "get_training_run" => tools::models::get_training_run(&ctx.api, params).await,
         "promote_model_version" => tools::models::promote_model_version(&ctx.api, params).await,

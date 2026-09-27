@@ -1144,6 +1144,61 @@ mod tests {
         }
     }
 
+    /// Calling a trained model is reachable from a Chat turn; training and
+    /// promoting are not.
+    ///
+    /// The distinction is the point, and it is derived rather than declared:
+    /// inference writes no version, spends no trial and changes nothing a later
+    /// run resolves differently, so it is a `Read` and lands in ring 0. Training
+    /// writes a version, promotion changes what live strategies resolve to.
+    ///
+    /// Asserted here because the mode gate filters on exactly two properties —
+    /// ring and trials — and a later edit giving `call_model` a trial or an
+    /// envelope would remove it from Chat silently. The failure mode this guards
+    /// is the opposite one too: a `train_model` that drifted to `Read` would
+    /// become callable in a Chat turn, which is the door AGENT-013 §4 closes.
+    #[test]
+    fn inference_is_reachable_from_chat_and_training_is_not() {
+        let by_name = |n: &str| {
+            catalog()
+                .into_iter()
+                .find(|s| s.name == n)
+                .unwrap_or_else(|| panic!("`{n}` is not in the catalogue"))
+        };
+
+        let call = by_name("call_model");
+        assert_eq!(
+            call.ring(),
+            RING_RESEARCH,
+            "call_model must be ring 0 or a Chat turn cannot name it"
+        );
+        assert_eq!(
+            call.spends_trial,
+            TrialKind::None,
+            "call_model must spend no trial: Chat spends none, and a trial here would hide \
+             inference behind Research"
+        );
+        assert_eq!(
+            call.envelope,
+            Envelope::None,
+            "call_model must carry no envelope: asking a finished model what it thinks is not \
+             an action a human needs to approve"
+        );
+
+        for name in ["train_model", "promote_model_version"] {
+            let spec = by_name(name);
+            let reachable_from_chat =
+                spec.ring() == RING_RESEARCH && spec.spends_trial == TrialKind::None;
+            assert!(
+                !reachable_from_chat,
+                "`{name}` is reachable from a Chat turn (ring {}, trial {:?}). Training and \
+                 promotion are writes; Chat is a read-only mode.",
+                spec.ring(),
+                spec.spends_trial
+            );
+        }
+    }
+
     /// The promotion envelope is the paper ring, and at least one tool holds it —
     /// otherwise this rule is untested prose and the ring-2 branch is dead code.
     #[test]

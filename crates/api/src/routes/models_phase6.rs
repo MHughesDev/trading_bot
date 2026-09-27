@@ -10,10 +10,12 @@ use axum::{
 };
 use chrono::Utc;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 
-use domain::model::forecast::CalibratedForecast;
+use domain::payloads::bar::Timeframe;
 use model_registry::tags::CreateTemplateRequest;
+
+use crate::model_call::ModelCall;
 
 use crate::{auth::BearerToken, state::AppState};
 
@@ -21,93 +23,118 @@ use crate::{auth::BearerToken, state::AppState};
 
 #[derive(Deserialize)]
 pub struct PredictQuery {
+    /// The instrument to predict for. **Required**, and deliberately not
+    /// defaulted: this route used to pass the *model id* into the gateway's
+    /// `instrument_id` slot, which corrupted the prediction cache key and the
+    /// trace row alike. There is no sensible default for "which market", and a
+    /// guess here is a wrong answer nobody can see.
+    pub instrument_id: String,
     pub alias: Option<String>,
-    pub version: Option<u32>,
     pub timeframe: Option<String>,
     pub as_of: Option<String>,
 }
 
 /// GET /api/models/{id}/predict
+///
+/// Calls a trained model with the features its version was trained on.
+///
+/// The whole body of this handler is argument parsing: the call itself lives in
+/// [`crate::model_call`], because the agent-facing `call_model` tool reaches this
+/// same route over HTTP (ADR-0022) and two implementations of "ask a model" would
+/// be two answers to the only question that matters here.
+///
+/// **What this replaced.** The previous version built an empty
+/// `HashMap<String, f64>` and passed it as the feature vector, with the model id
+/// in the instrument slot. It answered 200 with a direction and a confidence
+/// computed from no inputs at all. Nothing called it, which is the only reason
+/// that never reached an operator.
 pub async fn predict(
     State(state): State<AppState>,
     _token: BearerToken,
     Path(id): Path<String>,
     Query(params): Query<PredictQuery>,
 ) -> impl IntoResponse {
-    // Convert all query params to owned values before any .await to avoid
-    // self-referential borrows in the async future (makes it !Send).
-    let alias_str: String = params.alias.unwrap_or_else(|| "production".to_string());
-    let timeframe: String = params.timeframe.unwrap_or_else(|| "1h".to_string());
-    let as_of = params
-        .as_of
-        .and_then(|s| s.parse::<chrono::DateTime<Utc>>().ok())
-        .unwrap_or_else(Utc::now)
-        .min(Utc::now());
-
-    let version: i32 = if let Some(v) = params.version {
-        v as i32
-    } else {
-        let resolved: Option<(i32,)> = sqlx::query_as(
-            "SELECT version FROM ai_model_aliases WHERE model_id = $1 AND alias = $2",
-        )
-        .bind(&id)
-        .bind(&alias_str)
-        .fetch_optional(&state.pg)
-        .await
-        .ok()
-        .flatten();
-
-        match resolved {
-            Some((v,)) => v,
-            None => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({ "error": format!("alias '{alias_str}' not found for {id}") })),
-                )
-                    .into_response();
-            }
+    let timeframe = match params.timeframe.as_deref().unwrap_or("1h") {
+        "1m" => Timeframe::Minutes1,
+        "5m" => Timeframe::Minutes5,
+        "15m" => Timeframe::Minutes15,
+        "1h" => Timeframe::Hours1,
+        "4h" => Timeframe::Hours4,
+        "1d" => Timeframe::Daily,
+        other => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "unsupported_timeframe",
+                    "timeframe": other,
+                    "supported": ["1m", "5m", "15m", "1h", "4h", "1d"],
+                })),
+            )
+                .into_response();
         }
     };
 
-    let features_map = std::collections::HashMap::<String, f64>::new();
-    match state
-        .inference
-        .forecast(&id, &alias_str, &id, &features_map)
+    // An unparseable `as_of` is refused rather than silently becoming "now": a
+    // caller who asked for a point in time and got the present would read the
+    // answer as point-in-time when it is not.
+    let as_of = match params.as_of.as_deref() {
+        None => Utc::now(),
+        Some(s) => match s.parse::<chrono::DateTime<Utc>>() {
+            Ok(t) => t,
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "unparseable_as_of",
+                        "as_of": s,
+                        "expected": "an RFC-3339 timestamp",
+                    })),
+                )
+                    .into_response();
+            }
+        },
+    };
+
+    let req = crate::model_call::CallRequest {
+        model_ref: id,
+        alias: params.alias.unwrap_or_else(|| "production".to_string()),
+        instrument_id: params.instrument_id,
+        timeframe,
+        as_of,
+    };
+
+    match crate::model_call::call_model(&state.pg, &state.inference, &state.clickhouse_url, &req)
         .await
     {
-        Some(result) => {
-            if let Some(dist) = result.distribution {
-                match CalibratedForecast::from_distribution(
-                    id.clone(),
-                    version as u32,
-                    id.clone(),
-                    timeframe,
-                    as_of,
-                    dist,
-                ) {
-                    Ok(cf) => Json(serde_json::to_value(cf).unwrap()).into_response(),
-                    Err(e) => (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({ "error": e })),
-                    )
-                        .into_response(),
-                }
-            } else {
-                Json(json!({
-                    "model_id": id, "version": version, "as_of": as_of,
-                    "direction": result.direction, "confidence": result.confidence,
-                    "point_in_time": true,
-                }))
-                .into_response()
-            }
-        }
-        None => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": "no forecast available" })),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "database_unreachable", "detail": e.to_string() })),
         )
             .into_response(),
+        Ok(outcome) => {
+            // The status says what kind of answer this is; the body always
+            // carries the typed outcome, so a caller reads one shape whichever
+            // status arrived.
+            let code = match &outcome {
+                ModelCall::Predicted { .. } => StatusCode::OK,
+                ModelCall::NoSuchModel { .. } | ModelCall::NoSuchAlias { .. } => {
+                    StatusCode::NOT_FOUND
+                }
+                // 503: the model declined to answer. Retryable, and not the
+                // caller's mistake.
+                ModelCall::Abstained { .. } => StatusCode::SERVICE_UNAVAILABLE,
+                // 422: understood, and cannot be served as asked. A missing
+                // feature set or an uncomputable column is not a bad request —
+                // the request was fine, the inputs are not there.
+                ModelCall::NoFeatureSet { .. }
+                | ModelCall::FeaturesUnavailable { .. }
+                | ModelCall::NoBars { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            };
+            (code, Json(serde_json::to_value(&outcome).unwrap_or(Value::Null))).into_response()
+        }
     }
 }
+
 
 // ── I-6.4: Tags ───────────────────────────────────────────────────────────────
 

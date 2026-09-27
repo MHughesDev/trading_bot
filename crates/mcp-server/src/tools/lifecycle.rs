@@ -125,14 +125,14 @@ pub fn check_registration(params: &Value) -> Result<(), Value> {
         }
     }
 
-    if params.get("objective").map_or(true, Value::is_null) {
+    if params.get("objective").is_none_or(Value::is_null) {
         return Err(missing(
             "objective",
             "a vector and its constraints — `{\"maximize\": [...], \"subject_to\": {...}}` — \
              never a scalar score (ADR-012).",
         ));
     }
-    if params.get("benchmark").map_or(true, Value::is_null) {
+    if params.get("benchmark").is_none_or(Value::is_null) {
         return Err(missing(
             "benchmark",
             "better than what, decided before the result.",
