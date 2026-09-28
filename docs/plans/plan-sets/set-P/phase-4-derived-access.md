@@ -162,6 +162,21 @@ the crate cannot disagree about what free means. The two halves are deliberate a
 job's own comment: the CHECK stops an inadmissible *value*, and the task stops an undeclared
 *source*, which the CHECK cannot see because a source inserted without the column never reaches it.
 
+**Exercised, not merely written.** 0104 was applied to a throwaway database (PostgreSQL 16) and each
+mechanism driven: an `INSERT` omitting `cost_class` fails the NOT NULL, `'freemium'` fails the CHECK
+by name, `'paid'` is accepted *by the column* — correctly, because the ADR gate is the xtask half and
+not the database's job — `information_schema` confirms `column_default IS NULL`, and `UPDATE` and
+`DELETE` on `universe_membership_event` are both refused by the trigger with the row still present
+afterwards. Re-running the whole file is clean, and it does **not** rewrite a source already declared
+`paid` back to `free`, because every declaration carries `AND cost_class IS NULL` — a re-run cannot
+launder a paid source into a free one.
+
+**Not yet applied to the platform's database.** Docker was down, and the server answering on the
+port the repo's `DATABASE_URL` names turned out to be a different PostgreSQL holding migrations 1-35
+against the 140 on disk — it accepts the platform's credentials, which is exactly what makes it
+misleading. 0104 is written and validated; applying it is a `sqlx migrate run` against the real
+database once it is up.
+
 **Two findings from building it.** The check's first run failed on `kraken_futures_rest` and
 `kraken_futures_history` — two sources 0098 added that migration 0104's first draft did not classify,
 which is exactly the failure mode the task is for, caught on the day the mechanism landed. And the
