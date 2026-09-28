@@ -2,6 +2,7 @@
 //! Where money is actually saved — halt on divergence before any new orders.
 
 pub mod divergence;
+pub mod fleet;
 pub mod forward;
 pub mod freshness;
 pub mod gate15;
@@ -13,6 +14,10 @@ pub mod store;
 pub use divergence::{
     check_position_divergence, check_position_divergence_at_venue, compare_position,
     DivergenceMonitor, DivergenceVerdict, ReconcileOutcome,
+};
+pub use fleet::{
+    CommonModeFinding, DeploymentDivergence, Direction, FleetError, FleetInconclusive, FleetPolicy,
+    FleetReport, FleetSummary, FleetVerdict,
 };
 pub use forward::{
     AlignedBar, AlignmentError, DeploymentSpec, DivergenceThresholds, ExpectedBar, ForwardError,

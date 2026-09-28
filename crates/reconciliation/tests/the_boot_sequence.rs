@@ -16,10 +16,11 @@
 //!    there is no way to attach one that did not — `ForwardRecorder` does not
 //!    implement `FillObserver`, so the half-wire that shipped last time is now
 //!    a compile error rather than a silent no-op.
-//! 3. The one production binary that can place orders and does not install
-//!    forward recording is still exactly the one we know about. A second such
-//!    binary fails this test rather than quietly producing fills nobody
-//!    records.
+//! 3. The set of production binaries that can place orders and do not install
+//!    forward recording is still exactly the set we know about — empty, since
+//!    `apps/platform/src/main.rs` was wired on 2026-09-27 — and some production
+//!    binary does both. Both halves are asserted, because an empty list alone is
+//!    also what a workspace with no binaries at all looks like.
 
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -320,10 +321,18 @@ const CALL_SITE: &str = "\
 ";
 
 /// Production binaries that construct an `ExecutionEngine` and do not install
-/// forward recording. Exact equality, not a subset: a new one fails here, and
-/// wiring this one up fails here too, which is the acknowledgement the last
-/// attempt never had to make.
-const UNWIRED_ENGINE_SITES: &[&str] = &["apps/platform/src/main.rs"];
+/// forward recording.
+///
+/// **Empty since 2026-09-27**, when `apps/platform/src/main.rs` — the one entry
+/// this list has ever held — installed the registry beside its engine. The list
+/// stays, and the assertion stays exact equality rather than becoming
+/// `is_empty()`, because the two directions are different failures and both
+/// have happened: a new binary appearing here is a process that trades without
+/// recording, and an entry reappearing is the wire rotting back out. Exact
+/// equality is also the acknowledgement the last attempt never had to make —
+/// closing the hole edits this file, so nobody can believe it is closed without
+/// having said so here.
+const UNWIRED_ENGINE_SITES: &[&str] = &[];
 
 #[test]
 fn every_production_binary_that_can_place_an_order_is_accounted_for() {
@@ -345,6 +354,30 @@ fn every_production_binary_that_can_place_an_order_is_accounted_for() {
          constructed, and delete the entry here.\n\n{CALL_SITE}\n\
          If a file disappeared: it is now wired — delete its entry from \
          UNWIRED_ENGINE_SITES.\n"
+    );
+}
+
+/// The wire is in a binary, and it is in the *one* binary that can place orders.
+///
+/// [`every_production_binary_that_can_place_an_order_is_accounted_for`] is
+/// satisfied by a workspace with no binaries at all, which is how a ratchet
+/// quietly stops ratcheting: delete the call site and the engine together and
+/// the list is still empty. This asserts the positive fact separately — some
+/// production source both builds an engine and installs the registry — so the
+/// two cannot fail silently in the same direction.
+#[test]
+fn the_binary_that_builds_an_engine_is_the_one_that_installs_the_registry() {
+    let wired: Vec<String> = production_files()
+        .into_iter()
+        .filter(|(_, body)| {
+            body.contains("ExecutionEngine::new") && body.contains("ForwardRecorders::install")
+        })
+        .map(|(rel, _)| rel)
+        .collect();
+
+    assert!(
+        !wired.is_empty(),
+        "no production source both constructs an ExecutionEngine and installs forward recording. Either the platform binary lost its engine, or it lost the wire in T-0.1's title — and an empty UNWIRED_ENGINE_SITES cannot tell those apart from a closed hole"
     );
 }
 

@@ -76,8 +76,18 @@ const MUST_BE_CALLED: &[(&str, &str)] = &[
         "execute::total_bound(",
     ),
     (
-        "§4.3-4.7: the five subscriptions, on every iteration",
-        "sources::ingest(",
+        // `ingest_for`, not `ingest`, and the distinction is the fix. `ingest`
+        // derives the session from the agenda it is handed, so on a board with
+        // nothing non-terminal it has no session to build items under — and the
+        // driver used to skip all five subscriptions in exactly that case. That is
+        // the iteration where they matter most: the loop answers
+        // `NothingClaimable` rather than obeying it so the sources run *before*
+        // `replenish::on_drain` decides, and a drained session under
+        // `replenish = false` would otherwise complete for good over a `World`
+        // nobody read. Asserting the named-session door is what keeps the guard
+        // from coming back.
+        "§4.3-4.7: the five subscriptions, on every iteration, including a drained board",
+        "sources::ingest_for(",
     ),
     (
         "§4.9 and §7 rows 4-5: what a drained agenda means",
@@ -91,6 +101,45 @@ const MUST_BE_CALLED: &[(&str, &str)] = &[
 /// adding one without naming the missing symbol is how this list stops meaning
 /// anything.
 const UNWIRED: &[(&str, &str)] = &[
+    (
+        "select::novelty_from",
+        "The driver calls `select::novelty_from_prior` at `session_driver.rs:641`, \
+         which is the one-argument form: it applies the prior-statement half of \
+         §5.1's novelty and **not** the hypothesis-precheck factor. So a question \
+         whose precheck said `proceed_as_variant` is scored as though it had said \
+         `proceed_new`, and a variant of something already asked ranks as high as \
+         a fresh line of enquiry. `novelty_from` exists, returns \
+         `(Signal, PrecheckFactor)` and applies §5.1's 1.0 / 0.6 — it hands the \
+         factor back *beside* the signal precisely so that dropping it is a \
+         visible act rather than a silent one, and dropping it is what this call \
+         site currently does. MISSING: the item's `hypothesis_precheck` verdict \
+         threaded to line 641. The driver already reads it in `intake_check`, so \
+         this is a parameter, not a new query — and `PrecheckFactor::NotRecorded` \
+         must ride on the `decision` row beside the score it did not contribute \
+         to, or the absence becomes indistinguishable from a factor of 1.0.",
+    ),
+    (
+        "agenda::DedupeScorecard",
+        "S-11.4's object is built and tested (`a_layer_nobody_asked_is_not_a_layer_\
+         that_caught_nothing`) and has no reader. It assembles P3's \"which layer \
+         caught each duplicate\" out of facts this driver already writes — \
+         `dedupe_layer` on every insert, and `trials_charged: 0` — so nothing has \
+         to be measured again. Its natural home is the digest. MISSING: a field on \
+         `digest::DigestInput`, which is a struct literal in this file, so the two \
+         sides have to move together — which is why it is recorded here rather \
+         than half-added.",
+    ),
+    (
+        "select::SelectionPolicy::nonconformances",
+        "The per-field conformance reader is built and tested (`the_conformance_\
+         reader_would_catch_a_drift`) and nothing calls it, so a policy that \
+         drifted from AGENT-014 §5.1's table would drift unobserved — which is the \
+         one thing the reader exists to prevent. MISSING: a caller. It does not \
+         belong in this driver: a policy nonconformance is a fact about the build, \
+         not about a session, so it belongs in `crates/invariants` beside the \
+         other spec-mirroring guards, and that crate would need a \
+         `research-session` dev-dependency.",
+    ),
     (
         "charter::admit",
         "Two reasons, and either alone is enough. Its call site is session \

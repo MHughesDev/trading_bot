@@ -23,6 +23,10 @@ const PHASE_FILES: &[&str] = &[
     "crates/reconciliation/src/forward.rs",
     "crates/reconciliation/src/recorder.rs",
     "crates/reconciliation/src/divergence.rs",
+    // T-2.2's fleet aggregation. It reads forward observations and files a
+    // finding against the simulator; it reaches no venue, and it is listed here
+    // so that stays a checked fact rather than a reading of the diff.
+    "crates/reconciliation/src/fleet.rs",
     "crates/reconciliation/src/gate15.rs",
     "crates/reconciliation/src/store.rs",
     "crates/risk/src/strategy_halt.rs",

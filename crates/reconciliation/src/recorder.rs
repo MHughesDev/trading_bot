@@ -418,6 +418,21 @@ impl ForwardRecorders {
         }
     }
 
+    /// This registry's state as the one value a startup log line, a health
+    /// endpoint or an operator should carry.
+    ///
+    /// A convenience over `evidence().verdict()`, and not only a convenience: a
+    /// caller that reaches for [`Self::deployment_count`] on its own reads `0`
+    /// and cannot tell [`ForwardRecordingVerdict::NoDeployment`] from
+    /// [`ForwardRecordingVerdict::NotInstalled`] — the two facts an empty
+    /// `mlops.forward_observation` has to be told apart by, and the reason the
+    /// verdict exists at all. Making the verdict the shortest thing to reach
+    /// for is the point.
+    #[must_use]
+    pub fn verdict(&self) -> ForwardRecordingVerdict {
+        self.evidence().verdict()
+    }
+
     /// The same report for a process that may never have installed anything.
     #[must_use]
     pub fn process_evidence() -> ForwardRecordingEvidence {

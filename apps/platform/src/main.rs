@@ -167,8 +167,23 @@ async fn main() -> anyhow::Result<()> {
     // fill stream at all, and only the second makes an empty
     // `mlops.forward_observation` unreadable as evidence.
     let forward_recorders = reconciliation::recorder::ForwardRecorders::install();
+
+    // Assert something is listening, rather than trusting that `install()` did.
+    // A refactor that broke registration would otherwise boot silently and the
+    // first anyone would know is an empty `mlops.forward_observation` after a
+    // deployment — the one number in this programme that cannot be backfilled,
+    // because the fill stream has no replay.
+    //
+    // `execution::fills::require_recording()` and **not**
+    // `ForwardRecorders::require_recording()`: the latter answers
+    // `Err(NoDeployment)` until a strategy is deployed, so asserting it here would
+    // refuse every boot. The question at startup is "is the stream observed", not
+    // "is a deployment recording", and those are different facts.
+    execution::fills::require_recording()
+        .expect("the fill stream must be observed before any order can be placed");
+
     info!(
-        verdict = ?forward_recorders.evidence().verdict(),
+        verdict = ?forward_recorders.verdict(),
         "reconciliation attached to the paper fill stream"
     );
 

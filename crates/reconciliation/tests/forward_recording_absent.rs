@@ -120,6 +120,15 @@ fn the_four_states_of_an_empty_forward_record_are_four_different_facts() {
         Err(ForwardRecordingGap::AttachedLate { fills: 1 }),
         "the guard keeps reporting the gap after the registry arrives"
     );
+    // The registry must be able to state this without the caller assembling it.
+    // A startup line that logs `deployment_count()` reads `0` here and reads `0`
+    // in state 1 as well, so the one number a binary is most likely to reach for
+    // is the one number that cannot tell "not attached" from "nothing deployed".
+    assert_eq!(
+        recorders.verdict(),
+        late.verdict(),
+        "the verdict is reachable from the registry itself, not only by way of evidence()"
+    );
 
     // ── 4. "Attached, nothing deployed" is a fifth fact again. ──
     //
