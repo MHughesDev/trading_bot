@@ -42,20 +42,23 @@
 //! matters twice over, because `breached_by` treats a `NaN` reading as a breach
 //! and a second implementation that used `>` would treat it as a pass.
 //!
-//! # Deviation from §5.7's signature, recorded
+//! # §5.7's `window`, and how it came to be honoured
 //!
-//! §5.7 writes the tool as `(strategy_id, window=30d|60d|90d)`. **`window` is
-//! not accepted**, because it cannot be honoured: `GET /api/monitor/events`
-//! serves `(event_id, scope, family, kind)` and no `occurred_at`, so an event
-//! cannot be placed inside or outside a window. An argument the handler silently
-//! ignores is worse than a missing one — the caller believes it scoped the
-//! question and reads the answer as bounded. The events this tool reports are
-//! therefore labelled `time_bounded: false`, and
-//! `the_event_list_says_it_has_no_time_bound` holds that label in place.
+//! §5.7 writes the tool as `(strategy_id, window=30d|60d|90d)`. `window` was
+//! **refused outright** until 2026-09-28, because it could not be honoured:
+//! `GET /api/monitor/events` served `(event_id, scope, family, kind)` and no
+//! `occurred_at`, so an event could not be placed inside or outside a window. An
+//! argument the handler silently ignores is worse than a missing one — the caller
+//! believes it scoped the question and reads the answer as bounded — so the payload
+//! said `time_bounded: false` and a test held the label in place.
 //!
-//! What would close the gap is one field: `occurred_at` on the rows
-//! `MonitorStore::recent_events` already orders by, plus a `scope` filter so a
-//! strategy's events do not have to be found by scanning a global list.
+//! The route now selects `occurred_at` (it had always *ordered by* it) and takes
+//! `scope` and `window`, applied in SQL rather than to the page it would otherwise
+//! have returned. `window` is accepted here as the same closed set, and the tool's
+//! `time_bounded` is read back from the bound the **route echoed** rather than from
+//! the argument that was sent. That is the part worth keeping: a tool that reports
+//! its own request as the applied bound cannot tell a caller when a server ignored
+//! it, which is the failure the old refusal was avoiding in the first place.
 
 use serde_json::{json, Value};
 
@@ -108,10 +111,34 @@ pub async fn check_control_limits(api: &ApiClient, params: &Value) -> Value {
         Ok(v) => v,
         Err(e) => return e.to_tool_error(),
     };
-    let events = match api
-        .get(&format!("/api/monitor/events?limit={EVENT_SCAN}"))
-        .await
-    {
+    // `window` is validated here rather than passed through, so an unknown value
+    // is a tool error naming the accepted set instead of a 422 from a route the
+    // caller cannot see.
+    let window = match params.get("window").and_then(Value::as_str) {
+        None => None,
+        Some(w) if matches!(w, "30d" | "60d" | "90d") => Some(w),
+        Some(other) => {
+            return json!({
+                "error": "unknown_window",
+                "field": "window",
+                "value": other,
+                "known": ["30d", "60d", "90d"],
+            })
+        }
+    };
+    // Scoped at the route, not filtered here. Scanning a global page for one
+    // strategy's rows makes "the last 30 days" mean "whichever of the last thousand
+    // platform-wide events were this strategy's", which shrinks as the platform
+    // gets busier with nothing in the answer to say so.
+    let mut url = format!(
+        "/api/monitor/events?limit={EVENT_SCAN}&scope={}",
+        urlencode(&format!("strategy:{strategy_id}"))
+    );
+    if let Some(w) = window {
+        url.push_str("&window=");
+        url.push_str(w);
+    }
+    let events = match api.get(&url).await {
         Ok(v) => v,
         Err(e) => return e.to_tool_error(),
     };
@@ -232,6 +259,16 @@ pub fn report(
     events: &Value,
 ) -> Value {
     let scope = format!("strategy:{strategy_id}");
+
+    // The bound the *route* says it applied. `None` when the route echoed none,
+    // which includes a route version that predates the field: an older server
+    // answers `time_bounded: false`, truthfully, rather than inheriting this
+    // tool's request.
+    let applied_since = events
+        .get("window")
+        .and_then(|w| w.get("since"))
+        .filter(|v| !v.is_null())
+        .cloned();
 
     let lease = switch
         .get("lease")
@@ -367,15 +404,25 @@ pub fn report(
             "breaching": breaching,
             "n_breaching": breaching.len(),
             "events_scanned": scanned,
-            // The route serves no `occurred_at`, so an event cannot be placed
-            // inside a window. Said in the payload rather than only in the
-            // module docs, because the payload is what a caller reads.
-            "time_bounded": false,
-            "time_bound_note": "GET /api/monitor/events serves no occurred_at, so these events \
-                                are the most recent the monitor recorded and not the ones inside \
-                                any window. `events_truncated` true means older events for this \
-                                strategy exist and were not scanned.",
-            "events_truncated": scanned as i64 >= EVENT_SCAN,
+            // Read back from what the route echoed, never from what was requested.
+            // A tool that reports its own argument as the applied bound cannot tell
+            // a caller that the server ignored it, which is exactly the lie the old
+            // outright refusal of `window` existed to avoid.
+            "time_bounded": applied_since.is_some(),
+            "time_bound": applied_since,
+            "time_bound_note": if applied_since.is_some() {
+                "`time_bound` is the lower bound the route reports having applied, not the window \
+                 that was asked for. Events are this strategy's own, filtered server-side."
+            } else {
+                "the route applied no lower bound, so these events are the most recent the monitor \
+                 recorded and not the ones inside any window. `events_truncated` true means older \
+                 events for this strategy exist and were not scanned."
+            },
+            "events_truncated": events
+                .get("window")
+                .and_then(|w| w.get("truncated"))
+                .and_then(Value::as_bool)
+                .unwrap_or(scanned as i64 >= EVENT_SCAN),
             "state_and_events_disagree": disagree,
             "disagreement_note": if disagree {
                 "the monitor's current state for this strategy and its recorded events do not \
@@ -424,13 +471,22 @@ pub fn specs() -> Vec<ToolSpec> {
         json!({
             "type": "object",
             "required": ["strategy_id"],
-            // Closed, so no action can be smuggled in as an extra field. `window`
-            // is absent on purpose; see the module docs.
+            // Closed, so no action can be smuggled in as an extra field.
             "additionalProperties": false,
             "properties": {
                 "strategy_id": {
                     "type": "string",
                     "description": "the strategy instance id the monitor keys on"
+                },
+                "window": {
+                    "type": "string",
+                    // A closed set rather than a duration, because these are the
+                    // three §5.7 names and an argument a schema does not describe
+                    // is one nobody can reason about from the outside.
+                    "enum": ["30d", "60d", "90d"],
+                    "description": "how far back to read this strategy's monitor events. Omit for \
+                                    the most recent regardless of age. The result reports the bound \
+                                    the server says it applied, in `time_bound`."
                 }
             }
         }),
@@ -474,6 +530,14 @@ mod tests {
 
     fn events(rows: Value) -> Value {
         json!({ "events": rows })
+    }
+
+    /// A route response that echoes the bound it says it applied.
+    fn events_since(rows: Value, since: &str, truncated: bool) -> Value {
+        json!({
+            "events": rows,
+            "window": { "since": since, "scope": "strategy:s1", "limit": 1000, "truncated": truncated },
+        })
     }
 
     /// The healthy path, so the refusals below are refusals of something.
@@ -659,10 +723,12 @@ mod tests {
         assert_eq!(out["detail"]["status"], "unwatched");
     }
 
-    /// §5.7's `window` cannot be honoured, so the payload says the list is not
-    /// time bounded rather than letting a caller assume it is.
+    /// A route that echoed no bound leaves the payload saying so, whatever was
+    /// asked for. This was the only behaviour until 2026-09-28, and it stays the
+    /// answer for a server that predates the field — an older monitor answers
+    /// truthfully rather than inheriting this tool's request.
     #[test]
-    fn the_event_list_says_it_has_no_time_bound() {
+    fn a_route_that_echoes_no_bound_is_reported_as_unbounded() {
         let out = report(
             "s1",
             &switch("valid", &[], true),
@@ -671,20 +737,88 @@ mod tests {
             &events(json!([])),
         );
         assert_eq!(out["detail"]["time_bounded"], false);
-        assert!(out["detail"]["time_bound_note"].is_string());
+        assert!(out["detail"]["time_bound"].is_null());
+        let note = out["detail"]["time_bound_note"].as_str().expect("a note");
+        assert!(
+            note.contains("no lower bound"),
+            "the note has to say the list is unbounded, because a caller that asked \
+             for 30d and reads only `events` will otherwise assume it got them: {note}"
+        );
     }
 
-    /// And no `window` argument is accepted, so nothing can be passed that the
-    /// handler quietly drops.
+    /// `[was the whole reason `window` was refused]` The bound reported is the one
+    /// the route echoed.
     #[test]
-    fn the_schema_accepts_no_window_it_cannot_apply() {
+    fn the_reported_bound_is_the_one_the_route_says_it_applied() {
+        let out = report(
+            "s1",
+            &switch("valid", &[], true),
+            &strategies("s1", "nominal"),
+            &gate_ok("s1"),
+            &events_since(json!([]), "2026-08-29T00:00:00Z", false),
+        );
+        assert_eq!(out["detail"]["time_bounded"], true);
+        assert_eq!(out["detail"]["time_bound"], "2026-08-29T00:00:00Z");
+        assert_eq!(out["detail"]["events_truncated"], false);
+    }
+
+    /// A `since` the route echoes as `null` is not a bound. Distinguished from the
+    /// key being absent because a route is free to echo the shape with nothing in
+    /// it, and `"window": {"since": null}` read as bounded would be the original
+    /// lie with an extra step.
+    #[test]
+    fn an_echoed_null_bound_is_not_a_bound() {
+        let out = report(
+            "s1",
+            &switch("valid", &[], true),
+            &strategies("s1", "nominal"),
+            &gate_ok("s1"),
+            &json!({ "events": [], "window": { "since": null, "truncated": false } }),
+        );
+        assert_eq!(out["detail"]["time_bounded"], false);
+    }
+
+    /// Truncation comes from the route too, because the tool cannot see it: a page
+    /// that came back shorter than the limit might be all there is, or might be a
+    /// server with a lower ceiling than `EVENT_SCAN`.
+    #[test]
+    fn truncation_is_the_routes_answer_and_not_a_count_comparison() {
+        let out = report(
+            "s1",
+            &switch("valid", &[], true),
+            &strategies("s1", "nominal"),
+            &gate_ok("s1"),
+            &events_since(json!([]), "2026-08-29T00:00:00Z", true),
+        );
+        assert_eq!(
+            out["detail"]["events_truncated"], true,
+            "zero rows scanned, and the route still says there are older ones"
+        );
+    }
+
+    /// The schema accepts exactly §5.7's three windows and nothing else. An open
+    /// enum here would let a duration through that the route refuses, turning a
+    /// tool error into a 422 the caller cannot see.
+    #[test]
+    fn the_schema_accepts_the_three_windows_and_no_other_argument() {
         let spec = &specs()[0];
         let props = spec.input_schema["properties"].as_object().unwrap();
-        assert_eq!(props.len(), 1, "one argument: {props:?}");
+        assert_eq!(props.len(), 2, "strategy_id and window: {props:?}");
         assert!(props.contains_key("strategy_id"));
+        assert_eq!(
+            props["window"]["enum"],
+            json!(["30d", "60d", "90d"]),
+            "the closed set §5.7 names"
+        );
         assert_eq!(
             spec.input_schema["additionalProperties"], false,
             "an open schema is a field an action could arrive through"
+        );
+        assert_eq!(
+            spec.input_schema["required"],
+            json!(["strategy_id"]),
+            "`window` is optional: omitting it must keep meaning the most recent \
+             events regardless of age, which is what every existing caller expects"
         );
     }
 

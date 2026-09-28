@@ -16,6 +16,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use chrono::{DateTime, Utc};
 use monitor::control::ResetRequest;
 use monitor::drill::{DrillOutcome, DrillTrigger};
 use monitor::events::{EventKind, MonitorEvent};
@@ -124,22 +125,114 @@ pub async fn get_kill_switch(
 pub struct EventsQuery {
     #[serde(default)]
     limit: Option<i64>,
+    /// One strategy's events. Without it, every strategy's.
+    #[serde(default)]
+    scope: Option<String>,
+    /// `30d`, `60d` or `90d` (COMP-007 §5.7). Mutually exclusive with `since`.
+    #[serde(default)]
+    window: Option<String>,
+    /// An explicit inclusive lower bound on `occurred_at`, for a caller that wants
+    /// a window §5.7 does not name.
+    #[serde(default)]
+    since: Option<DateTime<Utc>>,
+}
+
+/// §5.7's three windows, as days.
+///
+/// A closed set rather than a duration parser. §5.7 names exactly these three, and
+/// the reason to refuse `45d` rather than accept it is the same reason
+/// `check_control_limits` refused `window` altogether until now: an argument a
+/// caller can pass and a schema does not describe is one nobody can reason about
+/// from the outside.
+fn window_days(raw: &str) -> Option<i64> {
+    match raw {
+        "30d" => Some(30),
+        "60d" => Some(60),
+        "90d" => Some(90),
+        _ => None,
+    }
 }
 
 /// `GET /api/monitor/events`
+///
+/// **`occurred_at` was ordered by and not selected**, which is why
+/// `check_control_limits` has been answering `time_bounded: false` and refusing
+/// §5.7's `window` argument outright — an event with no time cannot be placed
+/// inside or outside a window, and a tool that accepted the argument anyway would
+/// be lying about what it applied. That is the one field, and it is here now,
+/// along with the `scope` and `since` the window needs to be useful.
+///
+/// The filters are applied in SQL, not to the page this route would otherwise
+/// have returned. Filtering after `LIMIT` would make "this strategy's last 30
+/// days" mean "whichever of the last thousand events platform-wide happen to be
+/// this strategy's, inside 30 days" -- an answer that silently shrinks as the rest
+/// of the platform gets busier.
 pub async fn list_events(
     _token: BearerToken,
     State(state): State<AppState>,
     Query(q): Query<EventsQuery>,
 ) -> Result<Json<serde_json::Value>, Response> {
+    let limit = q.limit.unwrap_or(100).clamp(1, 1000);
+    let mut query = monitor::store::EventsQuery::recent(limit);
+    if let Some(s) = q.scope.clone() {
+        query = query.scoped(s);
+    }
+    // `window` and `since` are not merged. Two lower bounds silently reduced to
+    // the stricter one is how a caller comes to believe it read 90 days.
+    match (q.window.as_deref(), q.since) {
+        (Some(_), Some(_)) => {
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({
+                    "error": "window_and_since",
+                    "message": "pass `window` or `since`, not both",
+                })),
+            )
+                .into_response())
+        }
+        (Some(w), None) => match window_days(w) {
+            Some(days) => query = query.since(Utc::now() - chrono::Duration::days(days)),
+            None => {
+                return Err((
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(json!({
+                        "error": "unknown_window",
+                        "message": format!("unknown window {w:?}"),
+                        "known": ["30d", "60d", "90d"],
+                    })),
+                )
+                    .into_response())
+            }
+        },
+        (None, Some(s)) => query = query.since(s),
+        (None, None) => {}
+    }
+
     let rows = store(&state)
-        .recent_events(q.limit.unwrap_or(100).clamp(1, 1000))
+        .recent_events(&query)
         .await
         .map_err(server_error)?;
+    // `truncated` separates "no more events" from "older than this page", which is
+    // the distinction `check_control_limits` carries as `events_truncated`.
+    let truncated = i64::try_from(rows.len()).unwrap_or(i64::MAX) >= limit;
     Ok(Json(json!({
-        "events": rows.into_iter().map(|(id, scope, family, kind)| json!({
-            "event_id": id, "scope": scope, "family": family, "kind": kind,
+        "events": rows.iter().map(|e| json!({
+            "event_id": e.event_id,
+            "occurred_at": e.occurred_at,
+            "scope": e.scope,
+            "family": e.family,
+            "kind": e.kind,
+            "metric": e.metric,
+            "actor": e.actor,
+            "is_drill": e.is_drill,
         })).collect::<Vec<_>>(),
+        "window": {
+            // Echoed so a caller can tell an applied bound from an ignored one.
+            "since": query.since,
+            "scope": query.scope,
+            "limit": limit,
+            "truncated": truncated,
+        },
     })))
 }
 

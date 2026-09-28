@@ -63,6 +63,71 @@ pub struct MonitorStore {
     pg: PgPool,
 }
 
+/// One row of `monitor.events` as it is read back, with its time.
+///
+/// A struct rather than the tuple this used to return, for one reason that has
+/// already bitten: a `(Uuid, String, String, String)` gives `scope`, `family` and
+/// `kind` the same type, so swapping two of them at a call site compiles and
+/// produces a plausible payload. Adding `occurred_at` would have made it a
+/// five-tuple with three interchangeable `String`s in it.
+///
+/// `RecordedEvent` and not `MonitorEvent`: `events::MonitorEvent` is the *write*
+/// type, the thing the monitor decides to record. This is the row that came back,
+/// which carries `event_id`, `occurred_at` and `is_drill` that the write type does
+/// not, and lacks the fields the writer had no reason to keep. Two names because
+/// they are two things.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecordedEvent {
+    pub event_id: Uuid,
+    /// When the monitor recorded it. Selected, not merely ordered by.
+    pub occurred_at: DateTime<Utc>,
+    pub scope: String,
+    pub family: String,
+    pub kind: String,
+    /// The metric the event is about, when it is about one.
+    pub metric: Option<String>,
+    pub actor: String,
+    /// A rehearsal (§4.2). Carried so a caller can keep a drill out of a
+    /// precision numerator rather than discovering later that it could not.
+    pub is_drill: bool,
+}
+
+/// What to read from `monitor.events`.
+///
+/// `scope` and `since` are both `None` by default, which reads the whole table --
+/// the behaviour before either existed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EventsQuery {
+    pub limit: i64,
+    /// One strategy's events, or every strategy's.
+    pub scope: Option<String>,
+    /// Inclusive lower bound on `occurred_at`.
+    pub since: Option<DateTime<Utc>>,
+}
+
+impl EventsQuery {
+    #[must_use]
+    pub const fn recent(limit: i64) -> Self {
+        Self {
+            limit,
+            scope: None,
+            since: None,
+        }
+    }
+
+    #[must_use]
+    pub fn scoped(mut self, scope: impl Into<String>) -> Self {
+        self.scope = Some(scope.into());
+        self
+    }
+
+    #[must_use]
+    pub const fn since(mut self, since: DateTime<Utc>) -> Self {
+        self.since = Some(since);
+        self
+    }
+}
+
 impl MonitorStore {
     #[must_use]
     pub fn new(pg: PgPool) -> Self {
@@ -536,26 +601,41 @@ impl MonitorStore {
     }
 
     /// The most recent events, newest first.
-    pub async fn recent_events(
-        &self,
-        limit: i64,
-    ) -> Result<Vec<(Uuid, String, String, String)>, StoreError> {
+    pub async fn recent_events(&self, q: &EventsQuery) -> Result<Vec<RecordedEvent>, StoreError> {
+        // `occurred_at` was ordered by and not selected, which is the whole reason
+        // `check_control_limits` reports `time_bounded: false`: §5.7 writes that
+        // tool as `(strategy_id, window=30d|60d|90d)` and an event with no time
+        // cannot be placed inside or outside a window. It is selected now.
+        //
+        // The filters are pushed into SQL rather than applied after `LIMIT`. That
+        // is not an optimisation: filtering a thousand-row page client-side means
+        // "the last 30 days for this strategy" silently becomes "whichever of the
+        // last thousand events platform-wide happen to be this strategy's, inside
+        // 30 days" -- an answer that shrinks as the rest of the platform gets
+        // busier, with nothing in it to say so.
         let rows = sqlx::query(
-            "SELECT event_id, scope, family, kind FROM monitor.events
+            "SELECT event_id, occurred_at, scope, family, kind, metric, actor, is_drill
+               FROM monitor.events
+              WHERE ($2::TEXT IS NULL OR scope = $2)
+                AND ($3::TIMESTAMPTZ IS NULL OR occurred_at >= $3)
               ORDER BY occurred_at DESC LIMIT $1",
         )
-        .bind(limit)
+        .bind(q.limit)
+        .bind(q.scope.as_deref())
+        .bind(q.since)
         .fetch_all(&self.pg)
         .await?;
         Ok(rows
             .into_iter()
-            .map(|r| {
-                (
-                    r.get("event_id"),
-                    r.get("scope"),
-                    r.get("family"),
-                    r.get("kind"),
-                )
+            .map(|r| RecordedEvent {
+                event_id: r.get("event_id"),
+                occurred_at: r.get("occurred_at"),
+                scope: r.get("scope"),
+                family: r.get("family"),
+                kind: r.get("kind"),
+                metric: r.get("metric"),
+                actor: r.get("actor"),
+                is_drill: r.get("is_drill"),
             })
             .collect())
     }
