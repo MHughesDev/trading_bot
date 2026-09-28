@@ -19,6 +19,18 @@ use anyhow::Context;
 use domain::instrument::AssetClass;
 use tracing::{info, warn};
 
+/// Sent on every backfill request.
+///
+/// The same shape `collectors::derivs::funding` and the Tradier snapshot already
+/// use, and for their stated reason: several of these endpoints throttle or refuse
+/// a missing or library-default User-Agent, and an honest one is what lets a venue
+/// throttle this platform specifically rather than the whole egress IP it shares.
+const BACKFILL_USER_AGENT: &str = concat!(
+    "trading_bot-research/",
+    env!("CARGO_PKG_VERSION"),
+    " (+deep history backfill)"
+);
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Load layered config first (before tracing, so we can read json_logs).
@@ -467,6 +479,68 @@ async fn main() -> anyhow::Result<()> {
                 pool = pool.register(std::sync::Arc::new(api::workers::DataQcWorker::new(
                     cfg.clickhouse.url.clone(),
                 )));
+                // Deep history (Set P P-1.1). **`JobKind::Backfill` had no worker
+                // anywhere**, so every submitted window queued for ever — the same
+                // shape as S-10.11's `ResearchRun`, one aisle over. Registered here
+                // because `JobKind::Backfill.worker_class()` is `Data`.
+                //
+                // One `BackfillRouter` rather than one worker per venue, because
+                // `WorkerPool::register` keys on `JobKind` and all three venues
+                // answer `Backfill`: three registrations would keep the last and
+                // silently drop two. The router dispatches on `manifest.source`,
+                // and `BackfillEngine::run` refuses a window whose source is not
+                // its adapter's own — a mis-route would otherwise stamp Coinbase
+                // candles with Alpaca's 900 s declared lag, or worse, the reverse
+                // (ADR-P2-24).
+                //
+                // Registering a worker does not start a collection. Nothing here
+                // polls, nothing schedules a window, and no venue is contacted
+                // until a human submits a `backfill` job naming one. What changes
+                // is that such a job now runs instead of sitting queued.
+                //
+                // **Coinbase and Kraken only, and the absence is deliberate.**
+                // Both serve their candle endpoints to any client. Alpaca's
+                // adapter exists and is tested, but `collectors::backfill::HttpGet`
+                // sends no authorization header, so `alpaca_rest` cannot
+                // authenticate through this path at all. It is left unregistered
+                // rather than half-wired: the router answers a window naming it
+                // with a terminal `no_backfill_engine` and the routable list, which
+                // is a true statement an operator can act on. A registered Alpaca
+                // engine would instead fail every window at the venue with a 403
+                // that reads like a plan restriction.
+                let bar_store =
+                    std::sync::Arc::new(backtest::store::BarStore::connect(&cfg.clickhouse.url));
+                let sink =
+                    std::sync::Arc::new(backtest::backfill_sink::BarStoreSink::new(bar_store));
+                let cursors = std::sync::Arc::new(storage::backfill_state::PgBackfillState::new(
+                    app_state.pg.clone(),
+                ));
+                let http =
+                    std::sync::Arc::new(collectors::backfill::ReqwestGet::new(BACKFILL_USER_AGENT));
+                let backfill = jobs::kinds::backfill::BackfillRouter::new()
+                    .with(std::sync::Arc::new(
+                        jobs::kinds::backfill::BackfillEngine::new(
+                            std::sync::Arc::new(
+                                collectors::backfill::coinbase::CoinbaseBackfill::new(http.clone()),
+                            ),
+                            sink.clone(),
+                            cursors.clone(),
+                        ),
+                    ))
+                    .with(std::sync::Arc::new(
+                        jobs::kinds::backfill::BackfillEngine::new(
+                            std::sync::Arc::new(
+                                collectors::backfill::kraken::KrakenOhlcBackfill::new(http.clone()),
+                            ),
+                            sink.clone(),
+                            cursors.clone(),
+                        ),
+                    ));
+                info!(
+                    sources = ?backfill.sources(),
+                    "backfill worker registered"
+                );
+                pool = pool.register(std::sync::Arc::new(backfill));
             }
             if class == jobs::WorkerClass::Research {
                 // The synthetic venue (DATA-005 §9). It is a research-class worker
@@ -659,9 +733,9 @@ mod fill_stream_tests {
     fn reconciliation_is_installed_before_anything_can_produce_a_fill() {
         let src = include_str!("main.rs");
 
-        let install = src
-            .find("ForwardRecorders::install()")
-            .expect("main must call ForwardRecorders::install(); the forward record has no other door");
+        let install = src.find("ForwardRecorders::install()").expect(
+            "main must call ForwardRecorders::install(); the forward record has no other door",
+        );
 
         // Each of these can produce or accept a fill. `install` has to precede
         // every one of them.
@@ -691,7 +765,9 @@ mod fill_stream_tests {
     fn the_registry_is_bound_and_its_verdict_is_logged() {
         let src = include_str!("main.rs");
         assert!(
-            src.contains("let forward_recorders = reconciliation::recorder::ForwardRecorders::install();"),
+            src.contains(
+                "let forward_recorders = reconciliation::recorder::ForwardRecorders::install();"
+            ),
             "the install call must be an unconditional statement binding the registry"
         );
         // The verdict is logged because `NoDeployment` and `NotInstalled` are
@@ -702,5 +778,97 @@ mod fill_stream_tests {
             src.contains("forward_recorders.evidence().verdict()"),
             "the startup line must log the registry's verdict, not merely build it"
         );
+    }
+}
+
+#[cfg(test)]
+mod backfill_registration_tests {
+    /// A `backfill` job has a worker that can claim it.
+    ///
+    /// A source scan for the same reason as `fill_stream_tests`: from inside
+    /// `crates/jobs`, a `BackfillRouter` nobody registers is indistinguishable from
+    /// one that is. That is exactly how this shipped — the worker, the engine,
+    /// migration 0099 and `dataplane.backfill_state` have all been complete since
+    /// P-1.1 was written, and `apps/platform` registered GateAdvance, DataQc,
+    /// SimulatePaths, Campaign, ResearchRun and Session and nothing for `backfill`,
+    /// so a submitted window queued for ever.
+    ///
+    /// `JobKind::Backfill.worker_class()` is `Data`, so the registration has to be
+    /// inside the `Data` arm; a `Backtest`-arm registration would panic in
+    /// `WorkerPool::register`, but only at startup and only on the path that
+    /// constructs that pool.
+    #[test]
+    fn a_backfill_job_has_a_worker_that_can_claim_it() {
+        let src = include_str!("main.rs");
+        let data_arm = src
+            .find("if class == jobs::WorkerClass::Data {")
+            .expect("the Data worker-class arm is gone; this guard needs rewriting");
+        let next_arm = src[data_arm..]
+            .find("if class == jobs::WorkerClass::Research {")
+            .map_or(src.len(), |at| data_arm + at);
+        let arm = &src[data_arm..next_arm];
+        assert!(
+            arm.contains("pool.register(std::sync::Arc::new(backfill))"),
+            "the backfill router must be registered inside the Data arm, or every submitted \
+             window queues for ever"
+        );
+    }
+
+    /// At least one venue is routable, and the router is not registered empty.
+    ///
+    /// `BackfillRouter::new()` with no `.with(…)` is a legal worker that refuses
+    /// every window with `no_backfill_engine`. That refusal is honest, and it is
+    /// also indistinguishable in the job table from a deployment that meant to
+    /// register venues and dropped them during an edit.
+    #[test]
+    fn the_router_is_registered_with_at_least_one_venue() {
+        let src = include_str!("main.rs");
+        let at = src
+            .find("BackfillRouter::new()")
+            .expect("main must construct the router");
+        let tail = &src[at..];
+        let end = tail.find(";").unwrap_or(tail.len());
+        let chain = &tail[..end];
+        assert!(
+            chain.contains(".with("),
+            "the router is constructed with no venues; every backfill would be refused"
+        );
+        // Coinbase and Kraken serve their candle endpoints unauthenticated, which
+        // is why these two are the ones wired. If either name changes, this guard
+        // should be rewritten against whatever replaced it rather than deleted.
+        for venue in ["CoinbaseBackfill::new(", "KrakenOhlcBackfill::new("] {
+            assert!(
+                chain.contains(venue),
+                "`{venue}` is no longer in the router chain; if the venue was removed on purpose, \
+                 say so here rather than leaving the guard asserting a venue that is gone"
+            );
+        }
+    }
+
+    /// Registering a worker is not starting a collection.
+    ///
+    /// The standing rule is that no live venue poll starts as a side effect of the
+    /// process booting. The backfill path is driven entirely by submitted jobs, so
+    /// this arm must not also *submit* one — a seeded window at startup would be a
+    /// collection nobody asked for, against a free endpoint, on every restart.
+    #[test]
+    fn the_registration_does_not_also_submit_a_window() {
+        let src = include_str!("main.rs");
+        let at = src
+            .find("BackfillRouter::new()")
+            .expect("main must construct the router");
+        // Look at the whole Data arm, not just the chain: a seeded submission would
+        // most naturally be written just after the registration.
+        let arm_end = src[at..]
+            .find("if class == jobs::WorkerClass::Research {")
+            .map_or(src.len(), |x| at + x);
+        let arm = &src[at..arm_end];
+        for submitting in ["BackfillManifest {", "JobKind::Backfill", "submit("] {
+            assert!(
+                !arm.contains(submitting),
+                "`{submitting}` appears beside the backfill registration. Registering a worker \
+                 makes a human's submitted window run; it must not itself enqueue one."
+            );
+        }
     }
 }

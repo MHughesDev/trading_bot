@@ -240,6 +240,15 @@ impl BackfillEngine {
         self
     }
 
+    /// The `dataplane.source.name` this engine's adapter declares.
+    ///
+    /// Read by [`BackfillRouter::with`] so the routing key comes from the adapter
+    /// rather than from whoever is assembling the table.
+    #[must_use]
+    pub fn source_name(&self) -> &str {
+        self.source.source_name()
+    }
+
     /// Run one window as far as it gets.
     ///
     /// # Errors
@@ -253,6 +262,28 @@ impl BackfillEngine {
         cancelled: &(dyn Fn() -> bool + Sync),
     ) -> Result<RunOutcome, StateError> {
         let key = m.key();
+        // **The manifest names a source; this engine holds one.** Nothing checked
+        // that they were the same, and the consequence is not a wrong answer, it is
+        // a *plausible* one: `BarStoreSink` reads `declared_vendor_lag_ms` for
+        // `manifest.source`, so an Alpaca window run through the Coinbase adapter
+        // writes Coinbase's candles stamped with Alpaca's 900 s knowledge time. The
+        // rows look observed-late and are silently inadmissible as PIT evidence;
+        // the reverse direction stamps 900 s-delayed bars as 60 s and is worse,
+        // because it makes them look admissible. See ADR-P2-24 and P-1.4.
+        //
+        // This refuses **before** `state.ensure`, so a mis-routed job leaves no
+        // `backfill_state` row behind: the window was not attempted, and a row
+        // saying `failed` would tell an operator to look at the window rather than
+        // at whoever built the routing table.
+        if m.source != self.source.source_name() {
+            return Ok(RunOutcome::Failed {
+                reason: format!(
+                    "this engine drives `{}`, and the manifest asks for `{}`. Nothing was fetched and no cursor was created. A backfill's source selects the declared vendor lag stamped on every row, so running a window through the wrong adapter is a point-in-time corruption rather than a mix-up.",
+                    self.source.source_name(),
+                    m.source
+                ),
+            });
+        }
         let period = match m.period_secs() {
             Ok(p) => p,
             Err(e) => {
@@ -528,4 +559,98 @@ fn output(status: &str, pages: u64, rows: u64, m: &BackfillManifest) -> JobOutpu
         actual: crate::types::Cost::default(),
     }
     .clamped()
+}
+
+// ── routing one job kind across several venues ───────────────────────────────
+
+/// One `backfill` worker over several venues.
+///
+/// **Why this exists rather than a `BackfillWorker` per venue.** `WorkerPool`
+/// stores its workers in a `HashMap<JobKind, _>` and every backfill worker
+/// answers `JobKind::Backfill`, so registering three of them keeps whichever was
+/// registered last and silently discards the other two. The pool is right to do
+/// that — two workers for one kind would both claim the same rows — so the fan-out
+/// has to happen one level down, here, on the field the manifest already carries.
+///
+/// The map is built at the composition root, because *which* venues a deployment
+/// can reach is a deployment fact: Coinbase and Kraken serve their candle
+/// endpoints to anyone, and Alpaca does not.
+///
+/// **An unroutable source is a terminal, named refusal**, not a pause and not a
+/// default. Defaulting to "the first engine" is the failure this type exists to
+/// prevent (see the guard in [`BackfillEngine::run`]); pausing would leave the
+/// operator waiting for a retry that cannot change the outcome. The message lists
+/// the sources that *are* routable, because the most likely cause is a typo in a
+/// source name and the second most likely is a venue this deployment has no
+/// credential for.
+pub struct BackfillRouter {
+    engines: std::collections::BTreeMap<String, Arc<BackfillEngine>>,
+}
+
+impl BackfillRouter {
+    /// A router with no venues. Registering it is legal and does nothing useful:
+    /// every job gets the "no engine" refusal, which is a truthful answer and the
+    /// one an operator can act on.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            engines: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// Adds one venue's engine under the `dataplane.source.name` its adapter
+    /// declares.
+    ///
+    /// The key is taken from `source_name()` rather than passed in, so a caller
+    /// cannot register the Coinbase engine under `"alpaca_rest"` — which would
+    /// route past [`BackfillEngine::run`]'s guard into exactly the mis-stamping
+    /// that guard exists to stop.
+    #[must_use]
+    pub fn with(mut self, engine: Arc<BackfillEngine>) -> Self {
+        let name = engine.source_name().to_string();
+        self.engines.insert(name, engine);
+        self
+    }
+
+    /// The source names this router can drive, in a stable order.
+    #[must_use]
+    pub fn sources(&self) -> Vec<&str> {
+        self.engines.keys().map(String::as_str).collect()
+    }
+}
+
+impl Default for BackfillRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait::async_trait]
+impl Worker for BackfillRouter {
+    fn kind(&self) -> JobKind {
+        JobKind::Backfill
+    }
+
+    async fn run(&self, ctx: &JobContext, manifest: &Value) -> Result<JobOutput, JobError> {
+        let m = BackfillManifest::from_value(manifest)
+            .map_err(|e| JobError::logic(TerminalReason::DataError, "invalid_manifest", e))?;
+        let Some(engine) = self.engines.get(&m.source) else {
+            let known = self.sources().join(", ");
+            let known = if known.is_empty() {
+                "none — this deployment registered no backfill venues".to_string()
+            } else {
+                known
+            };
+            let mut e = JobError::logic(
+                TerminalReason::DataError,
+                "no_backfill_engine",
+                format!("no backfill engine for source `{}`", m.source),
+            );
+            e.fix = Some(format!("routable sources here: {known}"));
+            return Err(e);
+        };
+        BackfillWorker::new(Arc::clone(engine))
+            .run(ctx, manifest)
+            .await
+    }
 }
