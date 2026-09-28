@@ -1,6 +1,8 @@
 # Data Reach — Set P
 
-**Completion: 79% left (4 / 30 tasks). 4 done, 5 partial, 1 BLOCKED:UPSTREAM, 20 not started.**
+**Completion: 57% left (9 / 30 tasks). 9 done, 9 partial, 1 BLOCKED:UPSTREAM, 11 not started.**
+**Migrations shipped:** 0100 — `data_qc_reports` (P-2.2), 2026-09-15; 0104 — `cost_class` plus the
+universe event log (P-4.3, P-4.5), 2026-09-28.
 
 > **This line read `0% (0 / 30 tasks). NOT STARTED.` until 2026-09-21** — while
 > this set’s own phase files recorded real work. It was wrong by the maximum
@@ -19,7 +21,6 @@ ADR-P2-24 (the `knowledge_time` sentinel), `docs/artifact.md` FM-11.
 **Requirement IDs:** DA-07, DA-08, DA-10, DA-11, DA-12, DA-14 · sources S1–S8.
 **Migration range:** 0097–0104.
 
-**Migrations shipped:** 0100 — `data_qc_reports` (P-2.2), 2026-09-15.
 **Scope class:** End-state architecture. Phases are build-ordering, not feature-gating.
 
 ---

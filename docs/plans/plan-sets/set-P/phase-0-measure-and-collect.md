@@ -1,6 +1,6 @@
 # Phase 0 — Measure, and start the irreversible clock
 
-**Completion: 0% (0 / 6 tasks)**
+**Completion: 17% (1 / 6 tasks), plus 2 `PARTIAL` and 1 `BLOCKED:UPSTREAM` — 2026-09-28: P-0.5 had all three clauses tested behind a `NOT STARTED` marker, and P-0.6's two halves turned out to be in opposite states, the alarm wired and the downsampling decision uncalled.**
 
 **Requirement IDs:** S5, S6, S8, DA-12 · `artifact.md` FM-11.
 **Spec:** [DATA-005 §11 (S5, S6, S8), §12](../../../specs/DATA-005-data-api-v2.md);
@@ -129,7 +129,20 @@ verified and quoted in the task, or `BLOCKED:UPSTREAM`.
 **Traces:** DATA-005 §11 S5, §12; DA-12; INV-07; ADR-P2-26.
 
 ### P-0.5 Equity option chain snapshots on the existing Tradier collector — S
-`NOT STARTED`
+`DONE` 2026-09-28 — **the marker said `NOT STARTED`; all three clauses have named tests.**
+`crates/collectors/src/options/tradier_chain_snapshot.rs`:
+`a_snapshots_knowledge_time_is_its_observation_nine_hundred_seconds_after_the_market_it_describes`
+asserts both halves of clause 1 rather than one — if `knowledge_time` were the slot the row would
+claim to have been knowable before Tradier published it, and if `event_time` were the receipt the row
+would claim the 14:15 market when Tradier had shown us 14:00, which is fifteen minutes of lookahead
+in every study that reads it. `the_idempotence_key_is_symbol_expiry_and_as_of` is clause 2 over the
+acceptance's own tuple, and separates a call from a put on the same strike and expiry, which is where
+a too-coarse key would collapse two contracts into one.
+
+Clause 3 is `no_corporate_action_handling_is_introduced_by_this_task`, and it is a source scan rather
+than a value assertion — correctly, because *this code does not reach for the adjustment machinery*
+is a fact about the code and not about any one value it produces. The source row and its declared lag
+are in migration 0098: source 19, `tradier_chain_rest`, 900 000 ms.
 
 DA-12's SHOULD: a forward-stored chain snapshot job on the Tradier collector the platform
 already has. Same table and same IV-not-Greeks rule as P-0.4, same universe gate. Delayed
@@ -148,7 +161,24 @@ no corporate-action handling is introduced by this task.
 **Traces:** DATA-005 §11 S8; DA-12; ADR-P2-24 (declared lags).
 
 ### P-0.6 Disk budget, downsampling and the silence alarm — M
-`NOT STARTED`
+`PARTIAL` 2026-09-28 — **the two halves of this task are in opposite states, and the marker was
+hiding both.**
+
+The alarm half is done and *reached*: `crates/dataplane/src/retention.rs`'s
+`stopping_a_collector_raises_the_alarm_within_k_cadences` advances a clock rather than sleeping,
+as clause 1 asks, and `retention::alarm` is genuinely called from
+`crates/observability/src/silence.rs:637`.
+
+**The downsampling half is tested and unreached.** `over_budget_never_deletes` passes, so clause
+2's stated property holds of the function — but `retention_action`, the function that *decides*
+the downsampling, has **no caller workspace-wide**. So a forward series will reach its disk
+budget and nothing will downsample it, while the test that exists for that clause goes on
+passing. Same shape as the census, and worth stating in the task rather than in a commit
+message: clause 2's acceptance asks for a test that *drives a table past its budget*, and a pure
+function nobody calls cannot drive a table. Wiring it needs a job.
+
+Clause 3 — the coverage page listing every forward series with its last-row age — is the census
+read path and belongs with P-0.2.
 
 Three things that must exist *before* the first snapshot, not after:
 

@@ -2,3 +2,13 @@
 name = "xtask"
 version = "0.1.0"
 edition = "2021"
+
+# The only dependency, and it is the point of `check-free-sources`. The rule
+# "which cost classes are admissible, and what a paid one needs" lives in
+# `dataplane::source` beside the declarations it governs, with its own tests. A
+# grep in this crate restating that predicate would be a second implementation of
+# the fence, free to drift from the first, which is the shape this repository
+# keeps finding. `dataplane` is pure logic (no sqlx, no tokio), so importing it
+# costs this build almost nothing.
+[dependencies]
+dataplane = { workspace = true }

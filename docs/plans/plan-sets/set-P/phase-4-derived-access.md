@@ -1,6 +1,6 @@
 # Phase 4 — Derived access and the source fence
 
-**Completion: 0% (0 / 5 tasks)**
+**Completion: 20% (1 / 5 tasks), plus 3 `PARTIAL` — 2026-09-28: the derivations and the fence are built and the storage half shipped. What is missing in each remaining task is a caller, and in P-4.1's case the caller is blocked on a read path that does not return provenance.**
 
 **Requirement IDs:** DA-08, DA-10, DA-14.
 **Spec:** [DATA-005 §8 (universes), §11 (sources), §12](../../../specs/DATA-005-data-api-v2.md);
@@ -8,6 +8,7 @@ ADR-0027.
 **Depends on:** Phase 1 (bars to resample), Phase 2 (grades, so a derived series inherits one).
 **Blocks:** nothing in this set.
 **Migration range:** 0104.
+**Migrations shipped:** 0104 (`cost_class` plus the universe event log, 2026-09-28).
 
 Two unrelated things, both small, both belonging at the end: making stored bars reachable at
 whatever resolution a study needs, and making the free-only policy a mechanism instead of a
@@ -16,7 +17,32 @@ habit.
 ---
 
 ### P-4.1 Server-side resampling — M
-`NOT STARTED`
+`PARTIAL` 2026-09-28 — **every acceptance clause is verified and the code has no caller**, which in
+this repository is the failure mode worth naming rather than a technicality.
+
+`crates/dataplane/src/resample.rs` (23 tests): a 1m to 1h resample agrees bar for bar with the
+venue's own 1h series, nested grids agree on the extremes they share, a derived series inherits the
+**worst** grade and the **largest** lag of its inputs, a D-graded input cannot be washed out by
+aggregation, a source that declared no grade is refused rather than assumed clean, and upsampling
+and a non-nesting coarser period are both refused rather than interpolated.
+
+Two design decisions recorded because a later reader would otherwise call them bugs. A trailing
+bucket the input does not cover is **dropped** — that is what makes the venue comparison valid,
+since a venue does not publish the hour it is still in — while an *interior* venue gap is kept and
+flagged, because dropping it would turn a 4-minute hole into a 60-minute one. And the output is a
+`ResampledBar`, not a `CanonicalBar`, deliberately: handing back a canonical bar invites a caller to
+insert one, and a read-time derivation has no `source_id`, `ingest_time` or `revision_seq` to be
+honest about.
+
+**The blocker for the route, precisely.** `resample` requires a `SourceProvenance` for every
+distinct `source_id` in its inputs, and refuses a source that declared no grade — which is the whole
+of clause 2 and is right. `backtest::store::BarStore::load_bars` returns `LoadedBar`, which carries
+`ts_ns`, `open_ns`, `knowledge_ns`, OHLCV, `trade_count` and `quality_flags` and **no `source_id`
+and no `vwap`**; the `market_bar` SELECT in `read_facts` does not project either. So a route written
+today would have to invent a `source_id` and a grade, which is exactly the laundering step clause 2
+exists to prevent. What is needed first: `source_id` and `vwap` added to `LoadedBar` and to both SQL
+variants in `read_facts` (the fast path and the restatement-resolved path), and a grade-plus-lag
+lookup per source. That is `crates/backtest/src/store.rs`, not this file.
 
 Any stored timeframe resampled to any coarser timeframe at read time, computed once in the
 data layer rather than by every caller. The resampled series inherits the **worst** grade and
@@ -34,7 +60,18 @@ timeframe is refused rather than interpolated.
 **Traces:** DA-10; DATA-005 §3, §7.
 
 ### P-4.2 Information-driven bars — S
-`NOT STARTED`
+`PARTIAL` 2026-09-28 — all three acceptance clauses verified in
+`crates/dataplane/src/bars/information_driven.rs` (21 tests); no caller, for the same reason as
+P-4.1 and with the same fix.
+
+Volume, dollar and tick bars, each recording the threshold it closed on; regenerating with the same
+threshold is byte-identical, and the hash distinguishes two kinds that happened to produce the same
+bars.
+
+**Clause 3's case is live rather than hypothetical, which is why it is worth its own note.**
+Coinbase's candle endpoint reports no trade count, so its adapter writes `0`. Tick bars over that
+window would have returned an empty series reading identically to *this instrument did not trade*.
+The refusal names the metric, the source, and what would supply it.
 
 Volume, dollar and tick bars where the inputs exist. These are sampled on information rather
 than on the clock, which is the point — clock bars oversample quiet periods and undersample
@@ -50,7 +87,32 @@ generator whose inputs are absent returns a stated reason rather than an empty s
 **Traces:** DA-10; 06_DATA §2.
 
 ### P-4.3 As-of universes — M
-`NOT STARTED`
+`PARTIAL` 2026-09-28 — clauses 1 and 3 verified, clause 2 needs the experiment evaluator.
+
+**The write model this task sketches cannot satisfy its own acceptance, so it was not built.**
+`(name, instrument_id, valid_from, valid_to, reason)` fails clause 3 by construction: the `UPDATE`
+that closes `valid_to` destroys the answer a previous study got, which is the survivorship bias this
+task exists to prevent, one level up. One row per `(universe, instrument)` also cannot represent an
+instrument that left an index and rejoined it. So `crates/dataplane/src/universe.rs` (15 tests) is
+an append-only `MembershipEvent` log, and intervals are a derived read model where every `valid_to`
+is computed. Migration 0104 ships `dataplane.universe_membership_event` with an insert-only trigger,
+because *never overwritten* enforced only by the application layer is a rule the next migration
+drops.
+
+Two clocks, both required: `effective` is when the change took effect in the world, `recorded_at`
+when this platform learned of it. An index change announced on the 1st and effective on the 15th is
+knowable from the 1st, and `members_known_as_of` is the function anything a study reads must call —
+`members_as_of` alone would let an announced-but-not-yet-recorded change reach a backtest.
+
+`QcContext::resolve_membership` folds a log into `Membership::Historical`, so `qc::survivorship`
+stops answering `InsufficientMetadata` for every universe. Before it, the only
+`Membership::Historical` anywhere in the workspace was one typed by hand in that file's own test
+helper.
+
+**What keeps it `PARTIAL`:** clause 2 — an Experiment declaring a universe is evaluated on as-of
+membership, proven by a test where the two answers differ. Experiment evaluation does not call
+`members_known_as_of`, and the test the clause asks for needs the two answers to differ, so it
+cannot be written against a caller that does not exist.
 
 `universes` and `universe_membership` (migration 0104: name, instrument_id, valid_from,
 valid_to, reason) and `GET /api/data/universe/{name}?as_of=` returning membership valid at
@@ -79,7 +141,36 @@ row, and the static invariant suite fails the build if one is added.
 **Traces:** DATA-005 §8; DA-08; P-2.5.
 
 ### P-4.5 The free-only fence, as a CI check — M
-`NOT STARTED`
+`DONE` 2026-09-28 — all four clauses, and the check found two undeclared sources on its first run.
+
+`crates/dataplane/src/source.rs`: `CostClass` has no `Default` and `SourceDecl.cost_class` is
+required, so *a source with no cost_class fails to compile* is now literally true;
+`CostClass::parse` refuses the empty string rather than reading it as free. `PAID_SOURCE_ALLOWLIST`
+is empty, and `check_cost_class_against` is parameterised over an allowlist for one reason: a test
+that could only ever exercise the refusal would prove the fence is *closed* rather than that it has
+a gate.
+
+Migration 0104 adds `dataplane.source.cost_class TEXT NOT NULL` with a `CHECK` restricting it to
+free or paid, and **no DEFAULT**, which is the mechanism rather than a detail of it: a
+`DEFAULT 'free'` would undo both halves of the crate-side refusal at once. Every shipped source is
+declared free one statement at a time, so adding a source means adding a line that says which it is.
+
+`cargo xtask check-free-sources` runs in CI beside `check-bars-v1-frozen` and
+`check-bars-v2-frozen`. It **calls** `dataplane::source::check_declared_cost_classes` rather than
+restating the predicate — that is the only dependency `xtask` has, and it is there so this job and
+the crate cannot disagree about what free means. The two halves are deliberate and stated in the
+job's own comment: the CHECK stops an inadmissible *value*, and the task stops an undeclared
+*source*, which the CHECK cannot see because a source inserted without the column never reaches it.
+
+**Two findings from building it.** The check's first run failed on `kraken_futures_rest` and
+`kraken_futures_history` — two sources 0098 added that migration 0104's first draft did not classify,
+which is exactly the failure mode the task is for, caught on the day the mechanism landed. And the
+first version of the scanner's statement splitter was `find(';')`; `dataplane.source` row 1's note
+contains a semicolon, so it ended the 0046 insert after its first row and reported four sources over
+a table holding nineteen. A guard that silently checks a quarter of its subject is worse than no
+guard, because the number it prints reads like a measurement. `statement_end` now honours string
+literals and doubled-quote escapes, pinned by nine tests including one over the real migrations that
+fails if the found count drops below nineteen.
 
 DA-14 says no paid source may be added without revisiting ADR-0027. Today that is a convention.
 This makes it a mechanism: every source is declared in `dataplane.source` with a `cost_class`

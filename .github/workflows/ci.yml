@@ -220,6 +220,27 @@ jobs:
       - name: Run market_bars_v2 write check
         run: cargo xtask check-bars-v2-frozen
 
+  # ADR-0027 makes this platform free-only, and DA-14 says no paid source may be
+  # added without revisiting it. Until now that was a convention, which is to say
+  # it was whatever the last reviewer noticed.
+  #
+  # The predicate lives in `dataplane::source` beside the declarations it governs
+  # and the task calls it, so this job and the crate cannot disagree about what
+  # "free" means. It reads the migrations' text, so what it proves is that every
+  # source the migrations *insert* also has a `cost_class` they *declare* -- the
+  # NOT NULL with no DEFAULT and the CHECK in migration 0104 cover the value, and
+  # this covers the source nobody classified, which the CHECK cannot see because a
+  # source inserted without the column never reaches it.
+  check-free-sources:
+    name: Source fence (every data source is free or ADR-waived)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run the free-only source fence
+        run: cargo xtask check-free-sources
+
   auditor-suite:
     name: Auditor suite (AGENT-004 AE-02)
     runs-on: ubuntu-latest

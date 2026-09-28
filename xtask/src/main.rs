@@ -5,6 +5,7 @@
 //!   lint-no-json-hotpath  — verify serde_json absent from market-lane hot paths (CI enforced)
 //!   check-bars-v1-frozen  — verify nothing writes the retired market_bars table (CI enforced)
 //!   check-bars-v2-frozen  — verify nothing new writes the frozen market_bars_v2 (CI enforced)
+//!   check-free-sources    — verify every declared data source is free, or waived by an ADR (CI enforced)
 
 use std::process::Command;
 
@@ -15,13 +16,14 @@ fn main() {
         Some("lint-no-json-hotpath") => lint_no_json_hotpath(),
         Some("check-bars-v1-frozen") => check_bars_v1_frozen(),
         Some("check-bars-v2-frozen") => check_bars_v2_frozen(),
+        Some("check-free-sources") => check_free_sources(),
         Some(t) => {
             eprintln!("Unknown xtask: {t}");
             std::process::exit(1);
         }
         None => {
             println!(
-                "Usage: cargo xtask <check-money-f64|lint-no-json-hotpath|check-bars-v1-frozen|check-bars-v2-frozen>"
+                "Usage: cargo xtask <check-money-f64|lint-no-json-hotpath|check-bars-v1-frozen|check-bars-v2-frozen|check-free-sources>"
             );
         }
     }
@@ -958,6 +960,336 @@ mod tests {
             drift.is_empty(),
             "V2_PRE_FREEZE_WRITERS is out of date:\n{}",
             drift.join("\n")
+        );
+    }
+}
+
+/// Every data source this platform declares is free, or has an allowlist entry
+/// naming the ADR that approved paying for it (Set P P-4.5, DA-14, ADR-0027).
+///
+/// **The predicate is not here.** It lives in `dataplane::source`, beside the
+/// declarations it governs and with its own tests, and this task calls it. That is
+/// the whole reason `xtask` has a dependency at all: a grep in this file restating
+/// "paid needs an ADR" would be a second implementation of the fence, free to
+/// drift from the first, which is the defect shape the fence itself is guarding
+/// against one level up.
+///
+/// **What this reads, and what that does and does not prove.** It reads the text
+/// of `migrations/*.sql`, not the database. So it proves that every source the
+/// migrations *insert* also has a `cost_class` the migrations *declare*, and that
+/// every declared value passes the fence. It does not prove anything about a row
+/// inserted by hand into a running database — nothing static can, and the column's
+/// `NOT NULL` with no `DEFAULT` plus its `CHECK` is what covers that case
+/// (migration 0104). The two halves are deliberate: the CHECK stops an
+/// inadmissible *value*, and this stops an undeclared *source*, which the CHECK
+/// cannot see because a source added without the column never reaches it.
+fn check_free_sources() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("xtask sits one level under the workspace root")
+        .join("migrations");
+    let mut files: Vec<std::path::PathBuf> = match std::fs::read_dir(&root) {
+        Ok(rd) => rd
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "sql"))
+            .collect(),
+        Err(e) => {
+            eprintln!("check-free-sources: FAILED — cannot read {}: {e}", root.display());
+            std::process::exit(1);
+        }
+    };
+    files.sort();
+
+    // name -> the file that inserted it, in migration order.
+    let mut inserted: Vec<(String, String)> = Vec::new();
+    // name -> the last cost_class declared for it, and where.
+    let mut declared: Vec<(String, String, String)> = Vec::new();
+
+    for f in &files {
+        let Ok(sql) = std::fs::read_to_string(f) else {
+            continue;
+        };
+        let where_ = f
+            .file_name()
+            .map_or_else(|| "?".to_string(), |n| n.to_string_lossy().to_string());
+        for name in source_names_inserted(&sql) {
+            if !inserted.iter().any(|(n, _)| *n == name) {
+                inserted.push((name, where_.clone()));
+            }
+        }
+        for (name, value) in cost_classes_declared(&sql) {
+            declared.retain(|(n, _, _)| *n != name);
+            declared.push((name, value, where_.clone()));
+        }
+    }
+
+    let mut problems: Vec<String> = Vec::new();
+
+    if inserted.is_empty() {
+        eprintln!(
+            "check-free-sources: FAILED — no `INSERT INTO dataplane.source` found in any migration."
+        );
+        eprintln!("Either the table moved or this scanner's pattern no longer matches it. A fence");
+        eprintln!("that silently finds nothing to check is worse than no fence: it reports OK.");
+        std::process::exit(1);
+    }
+
+    for (name, at) in &inserted {
+        if !declared.iter().any(|(n, _, _)| n == name) {
+            problems.push(format!(
+                "`{name}` is inserted in {at} and no migration declares its cost_class"
+            ));
+        }
+    }
+
+    // The fence itself, over every declared pair, through `dataplane`.
+    let pairs: Vec<(&str, Option<&str>)> = declared
+        .iter()
+        .map(|(n, v, _)| (n.as_str(), Some(v.as_str())))
+        .collect();
+    if let Err(e) = dataplane::source::check_declared_cost_classes(pairs) {
+        problems.push(e.to_string());
+    }
+
+    if problems.is_empty() {
+        println!(
+            "check-free-sources: OK — {} source(s), every one with a declared cost_class that passes the fence",
+            inserted.len()
+        );
+        return;
+    }
+
+    eprintln!("check-free-sources: FAILED — {} problem(s):", problems.len());
+    for p in &problems {
+        eprintln!("  {p}");
+    }
+    eprintln!();
+    eprintln!("ADR-0027 makes this platform free-only. Adding a paid source is a decision");
+    eprintln!("someone signs, not a dependency that appears (DA-14). To add one: set");
+    eprintln!("cost_class = 'paid' in the migration AND add a PaidSourceWaiver to");
+    eprintln!("dataplane::source::PAID_SOURCE_ALLOWLIST naming the ADR that approved it.");
+    eprintln!("To add a free one: say `cost_class = 'free'` for it in the migration. The");
+    eprintln!("column has no DEFAULT on purpose, so silence is not an answer.");
+    std::process::exit(1);
+}
+
+/// Where the SQL statement starting at `from` ends, honouring string literals.
+///
+/// **Not `find(';')`.** That was the first version and it was wrong in a way that
+/// reported success: `dataplane.source` row 1 carries the note *"trades aggregated
+/// to bars in-process; knowledge_time observed at close"*, so a naive scan ended
+/// the 0046 insert after its first row and the check reported `OK -- 4 source(s)`
+/// over a table holding nineteen. A guard that silently checks a quarter of its
+/// subject is worse than no guard, because the number it prints looks like a
+/// measurement. `''` inside a literal is Postgres' own escape for a quote and is
+/// handled here for the same reason.
+fn statement_end(sql: &str, from: usize) -> usize {
+    let bytes = sql.as_bytes();
+    let mut i = from;
+    let mut in_str = false;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\'' => {
+                if in_str && bytes.get(i + 1) == Some(&b'\'') {
+                    i += 1; // an escaped quote, still inside the literal
+                } else {
+                    in_str = !in_str;
+                }
+            }
+            b';' if !in_str => return i,
+            _ => {}
+        }
+        i += 1;
+    }
+    sql.len()
+}
+
+/// Source names an `INSERT INTO dataplane.source ... VALUES (id, 'name', ...)`
+/// adds, for every such statement in one migration.
+///
+/// Positional rather than column-aware, because every insert into this table in
+/// this repository is `(source_id, name, …)` and a column-name parser would be a
+/// small SQL implementation. If that shape ever changes, this returns nothing for
+/// the new statement — which the empty-set check in the caller turns into a
+/// failure rather than an OK.
+fn source_names_inserted(sql: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let lower = sql.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(at) = lower[from..].find("insert into dataplane.source") {
+        let start = from + at;
+        let end = statement_end(sql, start);
+        for tuple in sql[start..end].split('(').skip(1) {
+            let mut parts = tuple.split(',');
+            let Some(first) = parts.next() else { continue };
+            if first.trim().parse::<i64>().is_err() {
+                continue; // not a `(id, 'name', …)` value tuple
+            }
+            if let Some(name) = parts.next().and_then(|p| quoted(p)) {
+                out.push(name);
+            }
+        }
+        from = end.max(start + 1);
+    }
+    out
+}
+
+/// `(name, cost_class)` for every `SET cost_class = '…' WHERE name = '…'` in one
+/// migration.
+///
+/// Only the UPDATE form, deliberately: it is the form that names both halves on
+/// one statement, so there is no positional guessing and no way for this scanner
+/// to pair a class with the wrong source. A future migration that sets the column
+/// inside an INSERT will leave the source undeclared as far as this check is
+/// concerned, and the caller fails — which is the safe direction.
+fn cost_classes_declared(sql: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let lower = sql.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(at) = lower[from..].find("set cost_class = ") {
+        let start = from + at;
+        let end = statement_end(sql, start);
+        let stmt = &sql[start..end];
+        let lstmt = &lower[start..end];
+        let class = quoted(&stmt["set cost_class = ".len()..]);
+        let name = lstmt.find("name = ").and_then(|w| quoted(&stmt[w + 7..]));
+        if let (Some(c), Some(n)) = (class, name) {
+            out.push((n, c));
+        }
+        from = end.max(start + 1);
+    }
+    out
+}
+
+/// The first single-quoted literal in `s`.
+fn quoted(s: &str) -> Option<String> {
+    let a = s.find('\'')?;
+    let rest = &s[a + 1..];
+    let b = rest.find('\'')?;
+    Some(rest[..b].to_string())
+}
+
+#[cfg(test)]
+mod free_sources_tests {
+    use super::{cost_classes_declared, quoted, source_names_inserted, statement_end};
+
+    /// `[was a silent quarter-measurement]` The first version of
+    /// `statement_end` was `find(';')`, and `dataplane.source` row 1's note
+    /// contains a semicolon. The scan ended the 0046 insert after its first row
+    /// and `check-free-sources` printed `OK -- 4 source(s)` over nineteen. The
+    /// failure was invisible precisely because it printed a number.
+    #[test]
+    fn a_semicolon_inside_a_string_literal_does_not_end_the_statement() {
+        let sql = "INSERT INTO dataplane.source (source_id, name) VALUES\n  \
+                   (1, 'a', 'x; y'),\n  (2, 'b', 'plain');\n";
+        assert_eq!(source_names_inserted(sql), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn a_doubled_quote_is_an_escape_and_not_the_end_of_the_literal() {
+        // Postgres writes a literal quote as ''. Reading it as the close means the
+        // rest of the row is parsed as if it were SQL.
+        let sql = "INSERT INTO dataplane.source (source_id, name) VALUES (1, 'a', 'it''s; fine'), (2, 'b', 'q');";
+        assert_eq!(source_names_inserted(sql), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn the_statement_ends_at_the_first_semicolon_outside_a_literal() {
+        let sql = "SELECT 'a;b'; SELECT 2;";
+        assert_eq!(statement_end(sql, 0), 12);
+    }
+
+    /// An unterminated literal must not loop or panic; it ends the statement at
+    /// end of input, which makes the caller see one oversized statement rather
+    /// than nothing.
+    #[test]
+    fn an_unterminated_literal_ends_at_end_of_input() {
+        let sql = "SELECT 'oops";
+        assert_eq!(statement_end(sql, 0), sql.len());
+    }
+
+    #[test]
+    fn a_column_list_is_not_mistaken_for_a_value_tuple() {
+        // `(source_id, name, kind)` has no leading integer, so it is skipped —
+        // otherwise `name` itself would be collected as a source called "name".
+        let sql = "INSERT INTO dataplane.source (source_id, name, kind) VALUES (7, 'x', 'rest_history');";
+        assert_eq!(source_names_inserted(sql), vec!["x"]);
+    }
+
+    #[test]
+    fn a_declaration_pairs_the_class_with_the_source_on_its_own_statement() {
+        let sql = "UPDATE dataplane.source SET cost_class = 'free' WHERE name = 'coinbase_rest' AND cost_class IS NULL;\n\
+                   UPDATE dataplane.source SET cost_class = 'paid' WHERE name = 'polygon';";
+        assert_eq!(
+            cost_classes_declared(sql),
+            vec![
+                ("coinbase_rest".to_string(), "free".to_string()),
+                ("polygon".to_string(), "paid".to_string()),
+            ]
+        );
+    }
+
+    /// The whole reason only the UPDATE form is read: a value and a name on the
+    /// same statement cannot be mispaired. A bulk `SET cost_class = 'free'` with
+    /// no `WHERE name` declares nothing, and must be reported as declaring
+    /// nothing rather than as declaring it for whatever source was nearby.
+    #[test]
+    fn a_bulk_update_with_no_name_declares_nothing() {
+        let sql = "UPDATE dataplane.source SET cost_class = 'free' WHERE cost_class IS NULL;";
+        assert!(cost_classes_declared(sql).is_empty());
+    }
+
+    #[test]
+    fn quoted_reads_the_first_literal_and_nothing_after_it() {
+        assert_eq!(quoted(" = 'free' WHERE"), Some("free".to_string()));
+        assert_eq!(quoted("no literal here"), None);
+    }
+
+    /// The scanner runs over the real migrations, and finds every source the real
+    /// `dataplane.source` inserts. Pinning the count is what would fail if a
+    /// migration added a source in a shape this scanner cannot see — at which
+    /// point the fix is the scanner, not the number.
+    #[test]
+    fn every_source_the_migrations_insert_is_found_and_declared() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("migrations");
+        let mut inserted: Vec<String> = Vec::new();
+        let mut declared: Vec<String> = Vec::new();
+        let mut files: Vec<_> = std::fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "sql"))
+            .collect();
+        files.sort();
+        for f in files {
+            let sql = std::fs::read_to_string(&f).unwrap();
+            for n in source_names_inserted(&sql) {
+                if !inserted.contains(&n) {
+                    inserted.push(n);
+                }
+            }
+            for (n, _) in cost_classes_declared(&sql) {
+                if !declared.contains(&n) {
+                    declared.push(n);
+                }
+            }
+        }
+        assert!(
+            inserted.len() >= 19,
+            "only {} sources found; 0046 inserts 16 and 0098 inserts 3, so a count \
+             below 19 means the scanner stopped seeing some of them: {inserted:?}",
+            inserted.len()
+        );
+        let mut missing: Vec<&String> = inserted.iter().filter(|n| !declared.contains(n)).collect();
+        missing.sort();
+        assert!(
+            missing.is_empty(),
+            "sources with no declared cost_class: {missing:?}. The column has no DEFAULT \
+             on purpose (ADR-0027, DA-14), so a source nobody classified must fail."
         );
     }
 }
