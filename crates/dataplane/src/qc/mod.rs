@@ -73,6 +73,32 @@ pub struct QcContext<'a> {
     pub bad_ticks_repaired: bool,
 }
 
+impl QcContext<'_> {
+    /// Resolve `membership` from a universe's append-only membership log
+    /// (Set P P-4.3).
+    ///
+    /// The bridge exists here rather than in the caller because the survivorship
+    /// check has been answering `InsufficientMetadata` for every universe — not
+    /// because the check is weak, but because nothing could build a
+    /// [`Membership::Historical`] to hand it. A caller that has the log should not
+    /// also have to know how to fold it into departure counts, because a caller
+    /// that gets that fold wrong reports a clean universe.
+    ///
+    /// # Errors
+    /// [`crate::universe::UniverseError`] when the log is internally inconsistent.
+    /// A universe that cannot be resolved is refused rather than downgraded to
+    /// `Unknown`: "no history" and "history that does not add up" need different
+    /// answers from a human.
+    pub fn resolve_membership(
+        &mut self,
+        log: &[crate::universe::MembershipEvent],
+        window: (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>),
+    ) -> Result<(), crate::universe::UniverseError> {
+        self.membership = Some(crate::universe::survivorship_membership(log, window)?);
+        Ok(())
+    }
+}
+
 /// One complete run.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct QcReport {
@@ -205,6 +231,64 @@ mod tests {
             }),
             ..QcContext::default()
         }
+    }
+
+    /// The bridge, exercised through the battery: a context given a real
+    /// membership log grades survivorship on that history instead of reporting
+    /// `InsufficientMetadata`.
+    ///
+    /// Before P-4.3 there was no way to reach this branch with real data — the
+    /// only `Membership::Historical` in the workspace was the one this file's own
+    /// test helper types out by hand, which proves the check works and nothing
+    /// about whether anything can feed it.
+    #[test]
+    fn a_universe_log_reaches_the_survivorship_check_through_the_context() {
+        use crate::universe::MembershipEvent;
+        use chrono::TimeZone;
+        let d = |y, m, day| chrono::Utc.with_ymd_and_hms(y, m, day, 0, 0, 0).unwrap();
+        let log = vec![
+            MembershipEvent::added("u", crate::InstrumentKey(1), d(2020, 1, 1), "listed"),
+            MembershipEvent::added("u", crate::InstrumentKey(2), d(2021, 1, 1), "listed"),
+            MembershipEvent::removed("u", crate::InstrumentKey(2), d(2022, 6, 1), "delisted"),
+        ];
+
+        let mut blind = QcContext::default();
+        assert!(blind.membership.is_none());
+        let unresolved = run(&bars(400), &subject(400), &QcConfig::default(), &blind);
+        let before = unresolved
+            .graded
+            .checks
+            .iter()
+            .find(|c| c.kind == CheckKind::Survivorship)
+            .unwrap();
+        assert_eq!(before.outcome, Outcome::InsufficientMetadata);
+
+        blind
+            .resolve_membership(&log, (d(2021, 1, 1), d(2023, 1, 1)))
+            .expect("a consistent log resolves");
+        let resolved = run(&bars(400), &subject(400), &QcConfig::default(), &blind);
+        let after = resolved
+            .graded
+            .checks
+            .iter()
+            .find(|c| c.kind == CheckKind::Survivorship)
+            .unwrap();
+        assert_eq!(after.outcome, Outcome::Pass);
+        assert!(after.detail.contains("1 departed"), "{}", after.detail);
+
+        // An inconsistent log is refused rather than quietly leaving the context
+        // on `Unknown`, which would read as "this universe has no history".
+        let broken = vec![MembershipEvent::removed(
+            "u",
+            crate::InstrumentKey(9),
+            d(2022, 1, 1),
+            "delisted",
+        )];
+        let mut c = QcContext::default();
+        assert!(c
+            .resolve_membership(&broken, (d(2021, 1, 1), d(2023, 1, 1)))
+            .is_err());
+        assert!(c.membership.is_none());
     }
 
     // ── the whole battery ────────────────────────────────────────────────────

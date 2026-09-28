@@ -30,7 +30,7 @@
 use std::time::Duration;
 
 use chrono::{DateTime, TimeZone, Utc};
-use dataplane::source::{Collection, Knowledge, SourceDecl, SourceKind};
+use dataplane::source::{Collection, CostClass, Knowledge, SourceDecl, SourceKind};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
@@ -64,6 +64,7 @@ pub const fn source() -> SourceDecl {
         name: SOURCE_NAME,
         kind: SourceKind::RestHistory,
         declared_lag: Duration::from_millis(DECLARED_LAG_MS as u64),
+        cost_class: CostClass::Free,
         notes: "candlesticks describe a closed period; the earliest a period's close is readable is one period after it",
     }
 }

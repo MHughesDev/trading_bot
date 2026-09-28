@@ -141,9 +141,24 @@ impl CoinbaseBackfill {
     /// How much bar-close time one page can carry, given the venue's 300-candle
     /// cap. Derived, never assumed: a fixed span would either waste requests on
     /// coarse timeframes or silently truncate fine ones.
+    ///
+    /// One period short of `300 × period`, because Coinbase's `start`/`end` bound
+    /// the bar **open** inclusively: a full-cap span asks for 301 candles, which is
+    /// past the venue's own limit. See [`super::page_span_secs`].
     #[must_use]
     pub fn page_span_secs(period_secs: u32) -> i64 {
-        i64::from(period_secs) * MAX_CANDLES
+        super::page_span_secs(period_secs, MAX_CANDLES)
+    }
+
+    /// Permits this adapter's limiter has granted.
+    ///
+    /// Exposed for the census and for the one property a fixture venue can prove
+    /// that a unit test cannot: that the number of permits taken equals the number
+    /// of requests sent, so there is no path through `fetch_page` that reaches the
+    /// network without asking the limiter first.
+    #[must_use]
+    pub fn limiter_granted(&self) -> u64 {
+        self.limiter.limit().granted()
     }
 }
 
@@ -257,14 +272,32 @@ mod tests {
         ));
     }
 
+    /// The span stays one period inside the venue's own cap, because `start` and
+    /// `end` bound the bar open **inclusively** and a span of exactly 300 periods
+    /// therefore asks for 301 candles. The previous value, `300 × period`, did
+    /// exactly that on every page of every backfill.
     #[test]
-    fn the_page_span_follows_the_venue_s_candle_cap() {
-        assert_eq!(CoinbaseBackfill::page_span_secs(60), 18_000, "300 minutes");
+    fn the_page_span_stays_one_candle_inside_the_venue_s_cap() {
+        assert_eq!(
+            CoinbaseBackfill::page_span_secs(60),
+            17_940,
+            "299 minutes: 300 candle opens inclusive of both bounds"
+        );
         assert_eq!(
             CoinbaseBackfill::page_span_secs(86_400),
-            25_920_000,
-            "300 days"
+            25_833_600,
+            "299 days"
         );
+        // The property, rather than the two numbers: the number of candle opens a
+        // page's URL covers never exceeds the cap.
+        for period in [60_u32, 300, 900, 3_600, 21_600, 86_400] {
+            let span = CoinbaseBackfill::page_span_secs(period);
+            let opens_inclusive = span / i64::from(period) + 1;
+            assert!(
+                opens_inclusive <= MAX_CANDLES,
+                "a {period}s page asks for {opens_inclusive} candles, past the {MAX_CANDLES} cap"
+            );
+        }
     }
 
     #[test]

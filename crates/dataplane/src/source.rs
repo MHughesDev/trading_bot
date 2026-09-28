@@ -67,6 +67,152 @@ impl SourceKind {
     }
 }
 
+/// What a source costs, and therefore whether it may be here at all
+/// (Set P P-4.5; DA-14; ADR-0027).
+///
+/// ADR-0027 makes the platform free-only. Until now that was a convention: a paid
+/// source could enter through a dependency, a trial key or a helpful pull request,
+/// and nothing would notice until an invoice arrived or a backtest stopped being
+/// reproducible on a machine without the key. This enum makes it a declaration.
+///
+/// There is deliberately **no `Default`**. A source cannot be constructed without
+/// stating what it costs, so "nobody thought about it" is a compile error rather
+/// than a silent `free`. The point is not to forbid paid data — it is to make
+/// adding it a decision someone signs (a row in
+/// [`PAID_SOURCE_ALLOWLIST`] naming the ADR) rather than a dependency that
+/// appears.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CostClass {
+    /// No payment, no key that costs money, no trial that expires into one.
+    Free,
+    /// Costs money. Admissible only with an allowlist entry naming the ADR that
+    /// approved it.
+    Paid,
+}
+
+impl CostClass {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Free => "free",
+            Self::Paid => "paid",
+        }
+    }
+
+    /// Parse the stored form (`dataplane.source.cost_class`).
+    ///
+    /// Returns `None` for anything else, **including an empty string**: a column
+    /// the migration left unset must fail the fence rather than be read as free.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "free" => Some(Self::Free),
+            "paid" => Some(Self::Paid),
+            _ => None,
+        }
+    }
+}
+
+/// One signed exception to the free-only rule.
+///
+/// `adr` is the document that approved the spend. It is required and checked
+/// non-empty by [`check_cost_class`], because an allowlist entry with no ADR is
+/// the convention this mechanism replaces, written down.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaidSourceWaiver {
+    /// `dataplane.source.name`.
+    pub source: &'static str,
+    /// e.g. `"ADR-0041"`. Never empty.
+    pub adr: &'static str,
+    /// What it costs and why it was worth it, in one sentence.
+    pub note: &'static str,
+}
+
+/// Every paid source the platform has ever approved.
+///
+/// **Empty, and that is the current state of the programme**: ADR-0027 is
+/// free-only and no ADR has reversed it. An addition here is a deliberate,
+/// reviewable act — which is the entire mechanism.
+pub const PAID_SOURCE_ALLOWLIST: &[PaidSourceWaiver] = &[];
+
+/// Why a source may not enter the platform.
+///
+/// Every variant names its field `source_name`, not `source`: `thiserror` gives a
+/// field called `source` error-chain meaning and demands it implement `StdError`.
+/// The same trap `KnowledgeError` documents, two hundred lines down.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum FenceError {
+    #[error("source {source_name} declares cost_class = 'paid' but no entry in PAID_SOURCE_ALLOWLIST names the ADR that approved it; ADR-0027 makes this platform free-only, and adding a paid source is a decision to be signed rather than a dependency that appears (DA-14)")]
+    PaidWithoutAdr { source_name: String },
+    #[error("source {source_name} declares cost_class {value:?}, which is neither 'free' nor 'paid'; an unrecognised or absent cost class is refused rather than assumed free")]
+    UnknownCostClass { source_name: String, value: String },
+    #[error("PAID_SOURCE_ALLOWLIST entry for {source_name} names no ADR; an allowlist with an unsigned entry is the convention this check replaces")]
+    WaiverNamesNoAdr { source_name: String },
+}
+
+/// Check one source against the shipped allowlist.
+///
+/// # Errors
+/// [`FenceError`] when a paid source has no ADR-bearing waiver.
+pub fn check_cost_class(name: &str, cost: CostClass) -> Result<(), FenceError> {
+    check_cost_class_against(name, cost, PAID_SOURCE_ALLOWLIST)
+}
+
+/// The same check against a given allowlist.
+///
+/// Parameterised for one reason: the shipped allowlist is empty, so a test that
+/// could only ever exercise the refusal would prove the fence is *closed* rather
+/// than that it has a gate. Both branches are the same function.
+///
+/// # Errors
+/// [`FenceError`] when a paid source has no ADR-bearing waiver in `allowlist`.
+pub fn check_cost_class_against(
+    name: &str,
+    cost: CostClass,
+    allowlist: &[PaidSourceWaiver],
+) -> Result<(), FenceError> {
+    if cost == CostClass::Free {
+        return Ok(());
+    }
+    let waiver =
+        allowlist
+            .iter()
+            .find(|w| w.source == name)
+            .ok_or_else(|| FenceError::PaidWithoutAdr {
+                source_name: name.to_string(),
+            })?;
+    if waiver.adr.trim().is_empty() {
+        return Err(FenceError::WaiverNamesNoAdr {
+            source_name: name.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Check sources as a build guard reads them out of the migrations: a name and
+/// whatever text the `cost_class` column holds.
+///
+/// This is the entry point an `xtask` guard calls, so the rule lives beside the
+/// declarations rather than being restated in a grep. `None` is what an absent
+/// column looks like, and it fails.
+///
+/// # Errors
+/// The first [`FenceError`] found.
+pub fn check_declared_cost_classes<'a>(
+    declared: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
+) -> Result<(), FenceError> {
+    for (name, value) in declared {
+        let raw = value.unwrap_or("");
+        let class = CostClass::parse(raw).ok_or_else(|| FenceError::UnknownCostClass {
+            source_name: name.to_string(),
+            value: raw.to_string(),
+        })?;
+        check_cost_class(name, class)?;
+    }
+    Ok(())
+}
+
 /// A source, its kind, and the lag it declares.
 ///
 /// The declared lag is what a backfilled row's knowledge time is derived from, and
@@ -78,6 +224,8 @@ pub struct SourceDecl {
     pub name: &'static str,
     pub kind: SourceKind,
     pub declared_lag: Duration,
+    /// What this source costs. No default: see [`CostClass`].
+    pub cost_class: CostClass,
     /// Why the lag is what it is, in one sentence.
     pub notes: &'static str,
 }
@@ -99,6 +247,7 @@ impl SourceDecl {
             name: "kraken_futures_rest",
             kind: SourceKind::RestHistory,
             declared_lag: Duration::from_secs(3600),
+            cost_class: CostClass::Free,
             notes: "public /derivatives/api/v3/tickers poll; funding settles hourly, so a polled value is bounded by one settlement interval",
         }
     }
@@ -114,6 +263,7 @@ impl SourceDecl {
             name: "kraken_futures_history",
             kind: SourceKind::RestHistory,
             declared_lag: Duration::from_secs(3600),
+            cost_class: CostClass::Free,
             notes: "historical-funding-rates; rates are published at the settlement hour",
         }
     }
@@ -138,6 +288,7 @@ impl SourceDecl {
             name: "tradier_chain_rest",
             kind: SourceKind::RestHistory,
             declared_lag: Duration::from_secs(900),
+            cost_class: CostClass::Free,
             notes:
                 "Tradier documents a 15-minute delay on sandbox data and on production index data",
         }
@@ -156,6 +307,7 @@ impl SourceDecl {
             name: "coinbase_rest",
             kind: SourceKind::RestHistory,
             declared_lag: Duration::from_secs(60),
+            cost_class: CostClass::Free,
             notes: "candles published after the minute closes",
         }
     }
@@ -169,6 +321,7 @@ impl SourceDecl {
             name: "kraken_rest",
             kind: SourceKind::RestHistory,
             declared_lag: Duration::from_secs(60),
+            cost_class: CostClass::Free,
             notes: "public OHLC and history archives; candles published after the minute closes",
         }
     }
@@ -186,6 +339,7 @@ impl SourceDecl {
             name: "alpaca_rest",
             kind: SourceKind::RestHistory,
             declared_lag: Duration::from_secs(900),
+            cost_class: CostClass::Free,
             notes: "free-tier SIP data is 15-minute delayed",
         }
     }
@@ -410,6 +564,7 @@ mod tests {
             name: "kraken_ws",
             kind: SourceKind::LiveStream,
             declared_lag: Duration::ZERO,
+            cost_class: CostClass::Free,
             notes: "live",
         };
         let recv = t(1) + chrono::Duration::milliseconds(40);
@@ -582,6 +737,145 @@ mod tests {
             );
         }
         assert_eq!(SourceDecl::ALL.len(), seeded.len());
+    }
+
+    // ── the free-only fence (P-4.5, DA-14, ADR-0027) ─────────────────────────
+
+    /// The state of the programme, asserted rather than assumed: every source the
+    /// platform declares is free, and the paid allowlist is empty because no ADR
+    /// has reversed ADR-0027.
+    #[test]
+    fn every_declared_source_is_free_and_the_paid_allowlist_is_empty() {
+        for make in SourceDecl::ALL {
+            let s = make();
+            assert_eq!(
+                s.cost_class,
+                CostClass::Free,
+                "{} is not free; if that is intentional it needs an ADR and an allowlist entry",
+                s.name
+            );
+            assert!(check_cost_class(s.name, s.cost_class).is_ok());
+        }
+        assert!(
+            PAID_SOURCE_ALLOWLIST.is_empty(),
+            "ADR-0027 is free-only; an entry here means an ADR reversed it, and this assertion is \
+             where that shows up"
+        );
+    }
+
+    /// P-4.5 clause 1. A paid source with nobody's signature on it is refused, and
+    /// the refusal says what would admit it.
+    #[test]
+    fn a_paid_source_with_no_allowlist_entry_is_refused() {
+        let err = check_cost_class("polygon_rest", CostClass::Paid).unwrap_err();
+        assert_eq!(
+            err,
+            FenceError::PaidWithoutAdr {
+                source_name: "polygon_rest".into()
+            }
+        );
+        let text = err.to_string();
+        assert!(text.contains("ADR-0027"), "{text}");
+        assert!(
+            text.contains("decision to be signed"),
+            "the refusal should say what would admit it: {text}"
+        );
+    }
+
+    /// P-4.5 clause 2. The mechanism is not a prohibition: an entry naming the ADR
+    /// that approved the spend passes. Exercised through the real predicate over a
+    /// stand-in allowlist, because the shipped one is empty and a test that only
+    /// ever sees the refusal proves the fence is closed rather than that it has a
+    /// gate.
+    #[test]
+    fn a_paid_source_named_in_an_allowlist_entry_with_its_adr_passes() {
+        let signed = [PaidSourceWaiver {
+            source: "polygon_rest",
+            adr: "ADR-0041",
+            note: "$29/month starter plan, approved for the equities onboarding",
+        }];
+        assert!(check_cost_class_against("polygon_rest", CostClass::Paid, &signed).is_ok());
+        assert_eq!(
+            check_cost_class_against("some_other_vendor", CostClass::Paid, &signed).unwrap_err(),
+            FenceError::PaidWithoutAdr {
+                source_name: "some_other_vendor".into()
+            },
+            "a waiver admits the source it names and no other"
+        );
+
+        // An entry with no ADR is itself refused: an unsigned allowlist is the
+        // convention this check replaces, written down.
+        let unsigned = [PaidSourceWaiver {
+            source: "polygon_rest",
+            adr: "   ",
+            note: "nobody signed this",
+        }];
+        let err = check_cost_class_against("polygon_rest", CostClass::Paid, &unsigned).unwrap_err();
+        assert_eq!(
+            err,
+            FenceError::WaiverNamesNoAdr {
+                source_name: "polygon_rest".into()
+            }
+        );
+        assert!(err.to_string().contains("unsigned entry"), "{err}");
+
+        // A free source needs no waiver in any allowlist.
+        assert!(check_cost_class_against("coinbase_rest", CostClass::Free, &[]).is_ok());
+    }
+
+    /// P-4.5 clause 3, the half a migration CHECK cannot cover on its own: a
+    /// `cost_class` that is absent, empty or unrecognised **fails** rather than
+    /// being read as free. An absent column is the case that would otherwise
+    /// default to the answer nobody chose.
+    #[test]
+    fn a_source_with_no_cost_class_is_refused_rather_than_assumed_free() {
+        assert_eq!(CostClass::parse("free"), Some(CostClass::Free));
+        assert_eq!(CostClass::parse("paid"), Some(CostClass::Paid));
+        for absent in ["", " ", "FREE", "gratis", "unknown"] {
+            assert_eq!(
+                CostClass::parse(absent),
+                None,
+                "{absent:?} must not parse as a cost class"
+            );
+        }
+        // What a build guard reading the migrations sees.
+        assert!(check_declared_cost_classes([("coinbase_rest", Some("free"))]).is_ok());
+        assert_eq!(
+            check_declared_cost_classes([("mystery_rest", None)]).unwrap_err(),
+            FenceError::UnknownCostClass {
+                source_name: "mystery_rest".into(),
+                value: String::new()
+            }
+        );
+        assert_eq!(
+            check_declared_cost_classes([("mystery_rest", Some(""))]).unwrap_err(),
+            FenceError::UnknownCostClass {
+                source_name: "mystery_rest".into(),
+                value: String::new()
+            }
+        );
+        assert!(matches!(
+            check_declared_cost_classes([
+                ("coinbase_rest", Some("free")),
+                ("polygon_rest", Some("paid")),
+            ]),
+            Err(FenceError::PaidWithoutAdr { .. })
+        ));
+    }
+
+    /// The whole declared set, through the guard's own entry point, so the
+    /// function CI will call is the function the crate's own tests exercise. A
+    /// guard with a private predicate is a second implementation waiting to drift.
+    #[test]
+    fn the_shipped_declarations_pass_the_guards_own_entry_point() {
+        let declared: Vec<(&str, Option<&str>)> = SourceDecl::ALL
+            .iter()
+            .map(|make| {
+                let s = make();
+                (s.name, Some(s.cost_class.as_str()))
+            })
+            .collect();
+        assert!(check_declared_cost_classes(declared).is_ok());
     }
 
     /// P-1.4's acceptance clause, as a test: **two backfilled rows for the same bar

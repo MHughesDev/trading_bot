@@ -206,9 +206,14 @@ impl AlpacaBackfill {
         }
     }
 
+    /// One period short of `10 000 × period`. The `limit` is a row cap and the
+    /// `start`/`end` bounds are inclusive on the open, so a full-cap span asks for
+    /// 10 001 rows; whether the truncation drops the oldest or the newest decides
+    /// whether this page silently loses a bar, and the engine does not follow
+    /// `next_page_token`. See [`super::page_span_secs`].
     #[must_use]
     pub fn page_span_secs(period_secs: u32) -> i64 {
-        i64::from(period_secs) * MAX_BARS
+        super::page_span_secs(period_secs, MAX_BARS)
     }
 }
 

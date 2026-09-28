@@ -538,6 +538,107 @@ mod tests {
         assert_eq!(report.rate_limited, 0);
     }
 
+    /// P-0.3's third acceptance clause: **a restart resumes without duplicating a
+    /// row, idempotent on `(venue, instrument, event_time)`.**
+    ///
+    /// A restart is a *new collector object* over the same venue state — no
+    /// in-memory cursor, no remembered last poll — so the property has to be that
+    /// the keys are a pure function of the venue's own data. Anything derived from
+    /// the process (a counter, a sequence number, the poll instant) would make the
+    /// second run's rows new rows, and an hourly series would grow by one duplicate
+    /// per restart for ever.
+    ///
+    /// The realized rate is the case that matters, because its `event_time` is the
+    /// settlement hour rather than the poll instant: two collectors polling forty
+    /// minutes apart inside one settlement hour must still land on one row.
+    #[tokio::test]
+    async fn a_restart_writes_rows_whose_keys_already_exist_rather_than_new_ones() {
+        let before = ForwardCollector::new(FixtureSource::new(), CountingSink::default());
+        before.poll_once().await.unwrap();
+
+        // The process dies. A new collector, a new sink, the same venue state.
+        let after = ForwardCollector::new(FixtureSource::new(), CountingSink::default());
+        after.poll_once().await.unwrap();
+
+        let keys = |c: &ForwardCollector<FixtureSource, CountingSink>| {
+            let mut k: Vec<_> = c
+                .sink
+                .funding
+                .lock()
+                .unwrap()
+                .iter()
+                .map(FundingObservation::dedup_key)
+                .collect();
+            k.sort();
+            k
+        };
+        assert_eq!(
+            keys(&before),
+            keys(&after),
+            "a restart must reproduce the same idempotence keys, not mint new ones"
+        );
+        let mut oi_before: Vec<_> = before
+            .sink
+            .open_interest
+            .lock()
+            .unwrap()
+            .iter()
+            .map(OpenInterestObservation::dedup_key)
+            .collect();
+        let mut oi_after: Vec<_> = after
+            .sink
+            .open_interest
+            .lock()
+            .unwrap()
+            .iter()
+            .map(OpenInterestObservation::dedup_key)
+            .collect();
+        oi_before.sort();
+        oi_after.sort();
+        assert_eq!(oi_before, oi_after);
+
+        // And the keys carry all three parts the clause names: nothing collapses
+        // two instruments or two settlements onto one row.
+        let rows = before.sink.funding.lock().unwrap();
+        let distinct: std::collections::BTreeSet<_> =
+            rows.iter().map(FundingObservation::dedup_key).collect();
+        assert_eq!(distinct.len(), rows.len(), "every row has its own key");
+        assert!(rows.iter().all(|r| r.dedup_key().0 == VENUE));
+    }
+
+    /// The same restart property for the history leg, which is where a duplicate
+    /// would be cheapest to create: re-running a backfill over a window already
+    /// stored must produce the keys that are already there.
+    #[tokio::test]
+    async fn re_running_the_history_leg_reproduces_its_keys() {
+        let c = ForwardCollector::new(FixtureSource::new(), CountingSink::default());
+        c.backfill_funding("PF_XBTUSD").await.unwrap();
+        let first: Vec<_> = c
+            .sink
+            .funding
+            .lock()
+            .unwrap()
+            .iter()
+            .map(FundingObservation::dedup_key)
+            .collect();
+
+        c.backfill_funding("PF_XBTUSD").await.unwrap();
+        let both: Vec<_> = c
+            .sink
+            .funding
+            .lock()
+            .unwrap()
+            .iter()
+            .map(FundingObservation::dedup_key)
+            .collect();
+        assert_eq!(both.len(), first.len() * 2, "the counting sink keeps both");
+        assert_eq!(
+            &both[first.len()..],
+            &first[..],
+            "the second pass carries the first pass's keys, so a replacing store collapses them"
+        );
+    }
+
     #[tokio::test(start_paused = true)]
     async fn a_limiter_refusal_is_counted_apart_from_a_failure() {
         let src = FixtureSource::new();

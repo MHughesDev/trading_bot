@@ -29,7 +29,7 @@ use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::source::{Collection, Knowledge, SourceDecl, SourceKind};
+use crate::source::{Collection, CostClass, Knowledge, SourceDecl, SourceKind};
 
 impl SourceDecl {
     /// ALFRED's vintage-aware observations endpoint.
@@ -48,6 +48,7 @@ impl SourceDecl {
             name: "alfred_rest",
             kind: SourceKind::RestHistory,
             declared_lag: Duration::from_secs(86_399),
+            cost_class: CostClass::Free,
             notes: "ALFRED reports a vintage DATE with no time of day; the conservative knowable instant is the end of that day",
         }
     }

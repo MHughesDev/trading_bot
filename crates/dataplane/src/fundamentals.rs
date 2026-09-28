@@ -27,7 +27,7 @@ use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::source::{Collection, Knowledge, SourceDecl, SourceKind};
+use crate::source::{Collection, CostClass, Knowledge, SourceDecl, SourceKind};
 
 impl SourceDecl {
     /// SEC EDGAR's structured-data endpoints (`companyfacts`, `submissions`).
@@ -46,6 +46,7 @@ impl SourceDecl {
             name: "sec_edgar",
             kind: SourceKind::RestHistory,
             declared_lag: Duration::from_secs(86_399),
+            cost_class: CostClass::Free,
             notes: "companyfacts reports a filed DATE with no time of day; the conservative knowable instant is the end of that day",
         }
     }

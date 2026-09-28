@@ -210,6 +210,35 @@ impl Limited {
 
 // ── shared parsing helpers ───────────────────────────────────────────────────
 
+// ── paging arithmetic, in one place ──────────────────────────────────────────
+
+/// How much bar-close time one page may cover, given a venue's own row cap.
+///
+/// **`cap − 1`, not `cap`, and the missing row is the whole point.** Every one of
+/// these venues bounds a page by a timestamp, and whether that bound is inclusive
+/// is not something this repository can settle without calling the live endpoint.
+/// Asking for a span of exactly `cap` periods asks for `cap + 1` rows under the
+/// inclusive reading, and what a venue does with an over-long request is its own
+/// business: Coinbase answers an error, Alpaca truncates — and *which end* it
+/// truncates decides whether the page silently loses its newest row. One row per
+/// page lost is 144 fabricated holes across a 30-day 1m window, indistinguishable
+/// from venue outages and unrecoverable once the cursor has passed them.
+///
+/// A span one period short is correct under **both** readings: inclusive gives
+/// exactly `cap` rows with a one-row overlap into the next page, which the sink
+/// records as `unchanged`; exclusive gives `cap − 1` rows and the next page picks
+/// up the one left. Neither leaves a hole, and neither exceeds the cap. The cost
+/// is one extra request per `cap` pages.
+#[must_use]
+pub const fn page_span_secs(period_secs: u32, venue_row_cap: i64) -> i64 {
+    let rows = if venue_row_cap > 1 {
+        venue_row_cap - 1
+    } else {
+        1
+    };
+    period_secs as i64 * rows
+}
+
 /// A venue number as its own digits.
 ///
 /// `RawValue::get()` hands back the exact bytes the venue sent. Quoted strings

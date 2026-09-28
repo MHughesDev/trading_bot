@@ -183,9 +183,12 @@ impl KrakenOhlcBackfill {
         }
     }
 
+    /// One period short of `720 × period`: Kraken's `since` is documented as
+    /// exclusive of the named open, and a page sized to the exact cap would lose
+    /// its last bar under the inclusive reading. See [`super::page_span_secs`].
     #[must_use]
     pub fn page_span_secs(period_secs: u32) -> i64 {
-        i64::from(period_secs) * MAX_CANDLES
+        super::page_span_secs(period_secs, MAX_CANDLES)
     }
 }
 

@@ -77,6 +77,16 @@ mod tests {
         assert_eq!(QualityFlags::VENUE_OUTAGE.0, 0x0010);
         assert_eq!(QualityFlags::REORG_PENDING.0, 0x0400);
         assert_eq!(QualityFlags::QUALITY_TIER_3.0, 0x4000);
+        // The one whose value must never move: it is the only thing distinguishing
+        // a row a REST endpoint handed over weeks late from one the platform
+        // watched arrive (ADR-P2-24, Set P P-1.6). Renumber it and every
+        // already-flagged row in ClickHouse silently means something else.
+        assert_eq!(QualityFlags::BACKFILLED_KNOWLEDGE_TIME.0, 0x8000);
+        assert_eq!(QualityFlags::NON_REPRODUCIBLE.0, 0x1_0000);
+        assert!(
+            !QualityFlags::BACKFILLED_KNOWLEDGE_TIME.intersects(QualityFlags::NON_REPRODUCIBLE),
+            "two flags sharing a bit would make one readable as the other"
+        );
     }
 
     #[test]

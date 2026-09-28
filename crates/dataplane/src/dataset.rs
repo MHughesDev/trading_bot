@@ -219,4 +219,131 @@ mod tests {
         excl.quality_exclusion_mask |= QualityFlags::BACKFILLED_KNOWLEDGE_TIME;
         assert!(!excl.uses_backfilled_knowledge([QualityFlags::BACKFILLED_KNOWLEDGE_TIME]));
     }
+
+    // ── P-1.6: backfilled and observed rows stay distinguishable ─────────────
+
+    /// P-1.6's third clause: a dataset whose rows are **entirely** backfilled is
+    /// not refused — refusing it would delete the only history the platform has —
+    /// but the manifest states the fraction, so it cannot be read as observed.
+    ///
+    /// This is the clause a boolean cannot carry. `uses_backfilled_knowledge` is
+    /// equally true of a window with one sentinel row in a million and of one with
+    /// nothing else, and those are different claims: the first is a footnote, the
+    /// second means the dataset supplies Gate 15 with no forward evidence at all
+    /// (D-P3).
+    #[test]
+    fn a_wholly_backfilled_dataset_is_flagged_with_its_fraction_rather_than_refused() {
+        let s = spec();
+        let all_derived = [QualityFlags::BACKFILLED_KNOWLEDGE_TIME; 4];
+        let share = s.backfilled_share(all_derived);
+
+        assert_eq!(share.rows, 4);
+        assert_eq!(share.backfilled, 4);
+        assert_eq!(share.fraction(), Some(1.0));
+        assert!(share.wholly_backfilled(), "no row here was watched arrive");
+        assert!(share.any_backfilled());
+        // Not refused: the spec still hashes, and it hashes to the same thing it
+        // would have without the row census, because the fraction is a property of
+        // the rows and not of the spec.
+        assert_eq!(s.dataset_id(), spec().dataset_id());
+    }
+
+    /// One sentinel row in a mostly-observed window is a footnote, and the
+    /// fraction is what says so. The denominator travels with it, because 0 % over
+    /// zero rows and 0 % over a million rows mean entirely different things.
+    #[test]
+    fn a_mostly_observed_dataset_reports_a_small_fraction_not_a_bare_true() {
+        let s = spec();
+        let mut flags = vec![QualityFlags::NONE; 999];
+        flags.push(QualityFlags::BACKFILLED_KNOWLEDGE_TIME);
+        let share = s.backfilled_share(flags);
+
+        assert_eq!(share.rows, 1_000);
+        assert_eq!(share.backfilled, 1);
+        assert!((share.fraction().unwrap() - 0.001).abs() < 1e-9);
+        assert!(
+            !share.wholly_backfilled(),
+            "999 observed rows do supply forward evidence"
+        );
+        assert!(
+            share.any_backfilled(),
+            "and the one hole is still on the record"
+        );
+        // The boolean cannot tell the two datasets apart; the fraction can.
+        let wholly = s.backfilled_share([QualityFlags::BACKFILLED_KNOWLEDGE_TIME]);
+        assert_eq!(share.any_backfilled(), wholly.any_backfilled());
+        assert_ne!(share.fraction(), wholly.fraction());
+    }
+
+    /// A fully observed window reports zero — over a stated denominator — and is
+    /// not mistaken for an empty one.
+    #[test]
+    fn a_fully_observed_window_reports_zero_over_a_real_denominator() {
+        let s = spec();
+        let observed = s.backfilled_share([QualityFlags::NONE; 10]);
+        assert_eq!(observed.fraction(), Some(0.0));
+        assert!(!observed.any_backfilled());
+        assert!(!observed.wholly_backfilled());
+
+        let empty = s.backfilled_share([]);
+        assert_eq!(
+            empty.fraction(),
+            None,
+            "zero out of zero is not zero per cent; reporting it as such would describe an empty \
+             window as fully observed"
+        );
+        assert!(
+            !empty.wholly_backfilled(),
+            "an empty window is not a wholly backfilled one"
+        );
+        assert_ne!(observed.fraction(), empty.fraction());
+    }
+
+    /// P-1.6's first clause, at the level this module can hold it: the share is
+    /// computed from the flag, so dropping the flag from the rows collapses the
+    /// answer to "fully observed" — and this test fails when it does.
+    ///
+    /// The flag is the *only* thing distinguishing a row a REST endpoint handed
+    /// over weeks late from one the platform watched arrive; `market_bars_v2`
+    /// shipped without it and a year of history looked live.
+    #[test]
+    fn dropping_the_backfilled_flag_makes_a_derived_window_look_observed() {
+        let s = spec();
+        let flagged = s.backfilled_share([QualityFlags::BACKFILLED_KNOWLEDGE_TIME; 3]);
+        // The same three rows with the flag lost anywhere upstream.
+        let unflagged = s.backfilled_share([QualityFlags::NONE; 3]);
+        assert_eq!(flagged.rows, unflagged.rows);
+        assert_eq!(flagged.fraction(), Some(1.0));
+        assert_eq!(
+            unflagged.fraction(),
+            Some(0.0),
+            "with the flag gone the same rows claim to have been watched arrive"
+        );
+        assert!(flagged.wholly_backfilled() && !unflagged.wholly_backfilled());
+    }
+
+    /// A dataset that *excludes* backfilled rows by mask still reports the share
+    /// of the rows it was handed. The mask decides admissibility; the census
+    /// describes what arrived, and conflating them would let an exclusion mask
+    /// silently rewrite the manifest.
+    #[test]
+    fn an_exclusion_mask_does_not_rewrite_the_share_the_manifest_reports() {
+        let mut excl = spec();
+        excl.quality_exclusion_mask |= QualityFlags::BACKFILLED_KNOWLEDGE_TIME;
+        let rows = [
+            QualityFlags::BACKFILLED_KNOWLEDGE_TIME,
+            QualityFlags::NONE,
+            QualityFlags::NONE,
+            QualityFlags::NONE,
+        ];
+        assert!(
+            !excl.uses_backfilled_knowledge(rows),
+            "the mask excludes them, so the dataset does not use them"
+        );
+        let share = excl.backfilled_share(rows);
+        assert_eq!(
+            share.backfilled, 1,
+            "but one of the four rows handed over was derived, and the manifest says so"
+        );
+    }
 }
