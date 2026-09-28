@@ -40,15 +40,46 @@ tell the truth?* — from unanswerable into merely unanswered-yet.
 ---
 
 ### T-0.1 Wire `crates/reconciliation` to the paper fill stream — M
-`PARTIAL` — **downgraded from `DONE` on 2026-09-21, and the title is the
-criterion it fails.** The task is *"wire `crates/reconciliation` to the paper
-fill stream"*. `ForwardRecorder` is constructed **only in
-`crates/reconciliation/tests/`**; `execution::fills::register_observer` has
-**zero production call sites**; `ExecutionEngine.fill_observer` is `None` at
-construction; and **`with_fill_observer` — which this phase file instructs a
-track to call — does not exist as a method anywhere in the workspace**.
-`mlops.forward_observation` holds 0 rows. The logic is done; the wire in the
-title is not in place.
+`PARTIAL` 2026-09-27 — **the wire in the title is in place now; what remains needs
+a deployment.** `apps/platform/src/main.rs` calls
+`reconciliation::recorder::ForwardRecorders::install()` before anything can produce
+a fill, so `register_observer` has a production call site and this process is on
+the fill stream. Two guards hold it there:
+`reconciliation_is_installed_before_anything_can_produce_a_fill` asserts the call
+precedes `PaperTradingEngine::realistic()`, `ExecutionEngine::new(` and
+`axum::serve(` — proved load-bearing by moving the block after the engine and
+watching it fail — and a second asserts the call is an unconditional binding whose
+verdict is logged.
+
+**Ordering is part of the fix, not decoration.** The registry records
+`execution::fills`' published count when it attaches and the fill stream has no
+replay, so every fill before that watermark is one the forward record can never be
+given and the verdict becomes `AttachedLate` for the life of the process.
+
+**`with_fill_observer` was not created, and this file's instruction to call it is
+stale.** `crates/execution/src/lib.rs:82` records that `ExecutionEngine` used to
+carry an `Option<Arc<dyn FillObserver>>` field nothing used, and that it was
+replaced by the global registry in `execution::fills`. The registry is the
+mechanism; a per-engine field would be a second way to attach, and the registry's
+`install()` is idempotent precisely because two subscriptions would deliver every
+fill twice and double-count the number that is hardest to acquire.
+
+**What keeps it `PARTIAL`:** no deployment exists, so no `ForwardRecorder` is
+constructed and `mlops.forward_observation` still holds 0 rows. `ForwardRecorder` is
+per-deployment — it needs a `DeploymentSpec` and an opening balance — and those
+arrive when a strategy is actually deployed, which is gate H-1. The registry's
+verdict is therefore `NoDeployment`, and **that is a different fact from
+`NotInstalled`**: the first says nothing has been deployed, the second says this
+process is not on the fill stream at all, and only the second makes an empty
+`mlops.forward_observation` unreadable as evidence. The verdict is logged at startup
+so an operator can tell which one they are in.
+
+The "same shape as the ledger's backtest series" half below is unverified against
+real fills for the same reason.
+
+**The second blocker on T-0.4 that no plan file recorded is now discharged.** A
+credential alone would still not have produced a `forward_observation` row, and
+that would have surfaced only after H-1 was spent. It would now.
 
 **This is a second blocker on T-0.4 that no plan file recorded.** A frontier or
 paper credential alone would not produce a `forward_observation` row, so the

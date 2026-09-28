@@ -59,11 +59,23 @@ in the workspace**), and T-0.3's own note says *"This criterion is not met"*
 above a `DONE`. The one task that survives does so because its author wrote its
 partial down honestly.
 
-**The consequence is not the percentage.** T-0.1 means a credential alone would
-not start the evidence clock: with no production call site for the fill
-observer, `mlops.forward_observation` stays empty and Gate 15 stays
-`NotComputable`. That second blocker was in no plan file, and it would have been
-discovered only after H-1 was spent.
+**The consequence was not the percentage, and it is now discharged.** T-0.1 meant
+a credential alone would not start the evidence clock: with no production call site
+for the fill observer, `mlops.forward_observation` stayed empty and Gate 15 stayed
+`NotComputable`. That second blocker was in no plan file and would have surfaced
+only after H-1 was spent.
+
+**Closed 2026-09-27.** `apps/platform/src/main.rs` installs
+`reconciliation::recorder::ForwardRecorders` before anything can produce a fill, so
+the process is on the fill stream and two guards keep the call ahead of the paper
+engine, the execution engine and the server. `ExecutionEngine::with_fill_observer`
+was **not** created: it never existed because the per-engine field was replaced by
+the global registry, so this file's instruction to call it is stale rather than
+unmet. What remains needs a deployment — `ForwardRecorder` is per-deployment and
+takes a `DeploymentSpec` plus an opening balance — so the registry's verdict is
+`NoDeployment`, which is a different fact from `NotInstalled` and is logged at
+startup so an operator can tell which. **H-1 would now produce a
+`forward_observation` row.**
 
 ### Set S by phase
 
@@ -320,7 +332,7 @@ cost while they wait.
 
 | # | what is needed | what it unblocks | tracked as |
 |---|---|---|---|
-| H-1 | **Deploy one hand-authored strategy to paper** | The evidence clock. DONE-3 is the only condition with a calendar in it, and this is the day it starts | T-0.4 |
+| H-1 | **Deploy one hand-authored strategy to paper** | The evidence clock. DONE-3 is the only condition with a calendar in it, and this is the day it starts. **Its engineering prerequisite is discharged as of 2026-09-27**: reconciliation is now installed on the fill stream at startup, so a deployment will actually produce `forward_observation` rows. Until 2026-09-27 this gate would have been spent and produced nothing | T-0.4 |
 | H-2 | **A frontier provider credential** | No live agent session has ever run. Two Set S acceptance criteria sit behind it, and Set L phases 3–4 are "built, never run live" for the same reason | S-4.14, Set L §4 |
 | ~~H-3~~ | ~~Sort the working tree~~ | **Discharged 2026-09-21.** The ~20-file tree the triage describes is gone — every file has been landed in a commit. `git status --short` now shows one file that is not an agent's in-flight work, and it is the one the user has confirmed is theirs. No decision was needed in the end | S-0.1 |
 | H-4 | Decide the capital gate | Stage 6 | ROADMAP §8 |
