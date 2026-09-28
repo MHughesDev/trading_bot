@@ -6948,6 +6948,9 @@ dependencies = [
 [[package]]
 name = "xtask"
 version = "0.1.0"
+dependencies = [
+ "dataplane",
+]
 
 [[package]]
 name = "xxhash-rust"
