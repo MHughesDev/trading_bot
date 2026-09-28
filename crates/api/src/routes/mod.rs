@@ -321,6 +321,9 @@ pub fn router(state: AppState) -> Router {
             post(evidence::similar_trials),
         )
         .route("/api/data/catalog", get(data::get_catalog))
+        // S-3.14 / S-3.15: the one door two tasks need. `read_funding` had no
+        // caller anywhere before this line.
+        .route("/api/data/funding", get(data::get_funding))
         .route("/api/data/live/{instrument}", get(data::get_live))
         .route(
             "/api/data/synthetic",
