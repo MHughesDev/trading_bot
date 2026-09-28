@@ -1,6 +1,6 @@
 # Phase 5 — The language
 
-**Completion: 20% (3 / 15 tasks), plus 7 `PARTIAL` — the feature engine is built; the language is not.**
+**Completion: 33% (5 / 15 tasks), plus 5 `PARTIAL` — 2026-09-27: the compiler and the round trip close on their literal acceptance, and the validator pass that refused every sweepable strategy is fixed. The feature engine is built; the language is authorable but not yet previewable.**
 
 > **This file was wrong about the engine and right about the language.** Until 2026-09-16 it
 > recorded all fifteen tasks as `NOT STARTED`. `crates/features` is in fact about 5,100 lines
@@ -236,6 +236,19 @@ templates. One engine, proven by test.
 
 **The half that was actually broken was downstream.** `ValidationErrorItem` — what the MCP tool returns — mapped `{path, message}` and dropped the rest, in two identical copies (`authoring.rs` and `builder.rs`). The validator would have carried a fix for every code and no caller would ever have seen one. Now one `From` impl.
 
+**And the pass it added carried a defect of its own for eleven days, found and fixed 2026-09-27.**
+`feature_names::check` ran on the **raw** definition while every other pass read the copy
+materialized with parameter defaults, and `features::resolve_feature("ema_{{fast}}")` is `None` — so
+**every definition with a swept indicator period was refused `unknown_feature`**. `{{param}}`
+interpolation is the whole of v1.2, `compile.rs` emits it for any `input x = ema(close, fast)`, three
+of the four worked skeletons use it, and the persist route runs `validate()` first. A hard-coded-period
+strategy validated and the same strategy made sweepable did not. The old refusal also offered no
+repair: `ema_{{fast}}` is twelve characters against `ema_20`'s six and the edit-distance cap is three,
+so it fell through to "Call `list_features`". The pass now reads the substituted copy and is skipped
+when substitution fails, so `ema_{{nope}}` is reported as a *parameter* error rather than pointing at
+the wrong clause. `tests/a_sweepable_strategy_is_not_an_unknown_feature.rs`: 3 of its 5 cases fail
+before the change, 0 after.
+
 **And it found a real defect.** The validator never checked that declared feature names resolve: a definition with `rsi14` returned `Ok` and failed inside `features::runtime::feature` during the run — for an agent, after a trial was spent. `feature_names::check` resolves every name through the registry and suggests the repair, tried against `resolve_feature` rather than against the advertised examples (the example for `rsi` is `rsi_20`, so an edit-distance search offered nothing for `rsi14`, while `rsi_14` resolves).
 
 **What keeps it `PARTIAL`: one of §5's six codes has no producer.** Five do — `unknown_feature`, `when_names_expression` and `loosening` from validator passes, and `warmup_exceeds_window` and `never_fires` from `preview_signals`, whose `diagnose` now returns `(code, prose)` and whose `SignalPreview` carries `never_fires_code`. The sixth, `distance_without_unit`, belongs to SLv2's grammar, which does not exist; it stays in the table with nothing emitting it, honestly.
@@ -326,7 +339,17 @@ errors do not teach is a parser a model cannot iterate against, which is the
 whole argument of AGENT-011 §3.
 
 ### S-5.6 The compiler — M
-`PARTIAL`
+`DONE` 2026-09-27 — the acceptance is now pinned at the byte level for all three skeletons, and
+the one clause that was genuinely missing is closed. `tests/the_json_a_human_would_have_written.rs`
+runs each skeleton through `domain::strategy_def::revision::canonical_json` — the same function the
+revision hash is taken over — against hand-written JSON, so a `Decimal` that starts serializing
+`0.0150` instead of `0.015`, or a `DistanceUnit` that stops being skipped at its default, fails.
+A fourth test asserts the three pinned are the three the acceptance names. What it does not catch
+is stated in the file: the expected side is deserialized before canonicalising, so anything the
+typed deserializer normalises is normalised on both sides. FEAT-004 §3.1's `order` clauses now
+parse; `order market` compiles to the same definition as its absence, because FEAT-004 names market
+as the default and `OrderSpec` has no order-type field — said out loud rather than silently accepted,
+with `limit`/`stop`/`stop_limit` and a stray `offset` or `tif` refused by name.
 
 ~~`crates/strategy-lang` **does not exist**.~~ **False as of 2026-09-21, and it was false when it was written under seven separate tasks.** The crate is **13,877 lines over 129 passing tests** — `lex, ast, parse, compile, decompile, diff, suggest, block, form, skeleton, catalogue, diagnostic`. What was true is worse and more specific: **nothing in the workspace depended on it.** `grep strategy-lang crates/*/Cargo.toml` matched only its own manifest. Thirteen thousand lines of the built-but-unreached shape. See the note at the head of this file.
 
@@ -364,14 +387,17 @@ mechanism: `atr`/`sigma` exit distances (Q-S5-01 — the schema gained the field
 a bare token with no period, and `DistanceUnit::Atr { period }` needs one from
 somewhere the parser does not have; the fix text says so rather than the
 now-false "the schema does not have this yet"), `crossed_above`/`below` and
-`rising`/`falling` (Q-S5-02 — the runtime has no previous-value register and
-`bytecode::Op` has no cross op), state predicates, several maths builtins,
+`rising`/`falling` (Q-S5-02 — the stated reason is **false as of 2026-09-27**:
+`crates/strategy-runtime` has `Op::{CrossedAbove, CrossedBelow, Rising, Falling}`,
+`HistoryRegisters` and `SignalEvaluator`. The refusal stands on what is still true —
+`strategy-validator::check_call` accepts only `feature` and `bar`, and `backtest/src/sim.rs:1218`
+still evaluates conditions with the *stateless* `evaluate_signals`, which answers `NeedsHistory`
+rather than an answer — so a crossing strategy would validate nowhere and backtest nowhere, and
+widening the grammar would be a broken promise. The message was corrected in place and is pinned
+by `crossed_above_is_refused_for_the_two_reasons_that_are_still_true`), state predicates, several maths builtins,
 `cooldown`, `vol_target`/`kelly` sizing and `max_daily_loss`.
 
-**What is genuinely missing:** FEAT-004 §3.1's `order` clauses hit
-`unknown_clause` rather than a named refusal, and the acceptance asks for three
-skeletons where only AGENT-011 §3's trend skeleton exists — the other two are
-S-5.12.
+~~**What is genuinely missing:** FEAT-004 §3.1's `order` clauses hit `unknown_clause` rather than a named refusal, and the acceptance asks for three skeletons where only AGENT-011 §3's trend skeleton exists.~~ **Both closed 2026-09-27** — see the completion note at the head of this task. Recorded while closing it: `domain::strategy_def::nodes`' frozen-grammar EBNF, the validator, and the runtime's `bytecode::compile` are now **three disagreeing implementations** of one grammar with nothing comparing them.
 
 **One defect found and removed at integration.** `catalogue.rs` shipped from the
 track carrying its own 61-family transcription of `features::registry` — the
@@ -383,7 +409,13 @@ make the decompiler guess which the author wrote), with
 sets name by name and parameter by parameter.
 
 ### S-5.7 The decompiler and the round trip — M
-`PARTIAL`
+`DONE` 2026-09-27 — re-read against its literal acceptance, which is "SLv2 → JSON → text → JSON
+yields an identical definition (round-trip test)", and `tests/round_trip.rs` is exactly that over 13
+definitions plus a text fixpoint. `REQUIRED_SHAPES` (30 entries) fails the build if the corpus stops
+exercising any exit-rule kind, size mode, side, parameter type, boolean operator, or non-default
+version/asset-class/trust path, so the suite cannot pass by covering less. The gap recorded below —
+nothing has run the decompiler over the *stored* set — is the body's "every stored strategy has a
+readable form", not the Acceptance line, and it stays recorded as an open test gap.
 
 ~~`crates/strategy-lang` **does not exist**.~~ **False as of 2026-09-21, and it was false when it was written under seven separate tasks.** The crate is **13,877 lines over 129 passing tests** — `lex, ast, parse, compile, decompile, diff, suggest, block, form, skeleton, catalogue, diagnostic`. What was true is worse and more specific: **nothing in the workspace depended on it.** `grep strategy-lang crates/*/Cargo.toml` matched only its own manifest. Thirteen thousand lines of the built-but-unreached shape. See the note at the head of this file.
 
@@ -534,9 +566,16 @@ the first line.** `size vol_target 0.15` has no `SizeMode`, so it uses
 its input. A test asserts the notes name `size_mode_not_representable` and that
 the text does not claim the sizing it cannot do.
 
+**Narrowed 2026-09-27: the `validate` half of the acceptance was failing, and for the worst
+possible reason.** Three of the four skeletons emit `{{param}}` interpolation, and
+`strategy-validator::validate` ran its feature-name pass on the **raw** definition, so
+`ema_{{fast}}` was refused `unknown_feature`. The skeletons compiled and round-tripped, and the
+very next call in the authoring path rejected them. Fixed in `crates/strategy-validator/src/lib.rs`
+(see S-5.3), so "compile, validate" now holds for all four.
+
 **What keeps it `PARTIAL`:** §8.2 asks the skeletons to "preview on BTC-USD 1h
 with non-zero entries and no warm-up violation". This crate has no bars and no
-`preview_signals` — they are proved to compile, declare exits and round-trip; they
+`preview_signals` — they are proved to compile, validate, declare exits and round-trip; they
 are not proved to fire.
 
 ### S-5.13 Rewrite the guide around the language — M

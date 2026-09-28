@@ -1,6 +1,6 @@
 # Phase 6 — The Research Desk
 
-**Completion: 33% (8 / 24 tasks), plus 16 `PARTIAL` — re-audited 2026-09-23: two more under-claimed (S-6.7, S-6.23), four notes corrected without a marker change (S-6.1, S-6.6, S-6.22, S-6.24), the rest confirmed. See the 2026-09-23 note below.**
+**Completion: 46% (11 / 24 tasks), plus 13 `PARTIAL` — 2026-09-27: S-6.22's 375px clause was false rather than unverifiable (two overlays whose dismiss controls did not dismiss), `esc` ended runs without confirming, a conflict nobody could pair rendered as no conflict, and four surfaces drew evidence chips that opened nothing. Every remaining `PARTIAL` now names a specific missing route. Re-audited 2026-09-23: two under-claimed (S-6.7, S-6.23), four notes corrected without a marker change (S-6.1, S-6.6, S-6.22, S-6.24), the rest confirmed.**
 
 > **This file was wrong.** Until 2026-09-16 it recorded all 24 tasks as `NOT STARTED`. The
 > Research Desk is in fact built and shipping: `pages/DeskPage.tsx` under 13 routes, 18
@@ -822,6 +822,17 @@ leaves `space` unbound, because a pause posted into it answers 409. The bounded 
 stated in both tooltips and carried as a deadline label beside Resume, because a pause that
 silently becomes a stop is the same class of false reading as one that never happened.
 
+**A second gap found and closed 2026-09-27: `esc` ended the run without asking.** §3.4 spells the
+binding "`esc` stop (**confirm**)". `useDeskKeymap` answered `Escape` with `k.onStop()` —
+`deskApi.cancel(conversationId)`, the request itself — skipping the dialog the *button* goes through.
+Two further consequences followed from where the branch sat: it ran before the `isTyping` guard, so
+Escape while typing in the composer ended the run; and `Modal`/`Overlay` close on Escape without
+stopping propagation, so dismissing a model picker ended the run behind it. The binding moved into
+`ControlsRow`, which owns the dialog, and is ignored while a `dialog`/`tooltip`/`listbox`/`menu` is
+open. Reaching Stop from inside a text field is the property worth keeping and is still asserted.
+`__tests__/a-keystroke-is-not-a-confirmation.test.tsx`, 11 cases; two existing assertions changed to
+expect the confirmation and then the confirmed send.
+
 **What keeps it `PARTIAL`:** the acceptance says *every* control works from the keyboard
 mid-call, and this task's own body names **Escalate** among them. `…/runs/{id}/escalate` is
 still unmounted, so Escalate is still absent and still should be. The second half — "on a
@@ -869,7 +880,10 @@ mid-run produces a steer card rather than a queued turn.
 **Traces:** AGENT-012 §3.3 (amended 2026-09-14); AGENT-008 §3.1; AGENT-013 §2.
 
 ### S-6.8 Right panel — State — M
-`PARTIAL` 2026-09-16 — The State tab in `RightPanel.tsx` (690 lines), asserted by `__tests__/state-panel.test.tsx`. Fixed on 2026-09-16: `mode` and `kind` both render "research" and both rendered bare, so the panel showed two identical badges meaning different things. The mode is labelled now, as the ring already was.
+`DONE` 2026-09-27 — re-read against its literal acceptance. Every one of the five named clauses is
+asserted by `__tests__/state-panel.test.tsx:56` — goal kind, stage, current step, evidence count and
+what it waits on — with honest-absence branches at `:79`, `:84` and `:93`, so an unmeasured budget
+does not render as zero spend. Earlier note: `PARTIAL` 2026-09-16 — The State tab in `RightPanel.tsx` (690 lines), asserted by `__tests__/state-panel.test.tsx`. Fixed on 2026-09-16: `mode` and `kind` both render "research" and both rendered bare, so the panel showed two identical badges meaning different things. The mode is labelled now, as the ring already was.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
@@ -885,7 +899,25 @@ opening a card.
 **Traces:** AGENT-012 §3.5, principle 8; §19.1.
 
 ### S-6.9 Right panel — Evidence — L
-`PARTIAL` 2026-09-16 — The Evidence tab in `RightPanel.tsx`.
+`PARTIAL` 2026-09-16, **half of it repaired 2026-09-27** — The Evidence tab in `RightPanel.tsx`.
+
+**A chip that opens nothing is not a link.** `EvidenceChip`'s resolved branch was
+`<button onClick={() => onOpen?.(id)}>`, and the optional call is the defect: **four live call sites
+pass no `onOpen`** — `Conversation.tsx`'s `<EvidenceTab>` (the Evidence panel this task is about),
+`ApprovalsInbox.tsx:117`, and the dossier's evidence table and funnel tickets
+(`Dossier.tsx:137,191`). On all four, every resolved id had a pointer, a focus ring and `role=button`
+and did nothing on click. There is now a fourth rendering — `span`, `data-openable="false"`,
+`cursor: default`, a tooltip saying this surface opens nothing — keeping the id, the label, the
+provenance mark and the evidence class. The chip's sibling branch had already argued the point in
+prose: *"a `<button>` here would invite the click that an unverified id must not get"*.
+`__tests__/a-chip-that-opens-nothing-is-not-a-link.test.tsx`, 6 cases.
+
+**What keeps it `PARTIAL`, restated as a server-side blocker:** "every id resolves on click" needs a
+route that returns the tool result behind an evidence id, and there is none — which is why
+`EvidenceEntry.view` was deleted rather than fed. Minimum shape:
+`GET /api/agent/runs/{id}/evidence/{evidence_id}` returning the stored `ToolResult` summary, enough
+for the experiment-summary viewer; the study surface, gate ledger, trade list, bars chart and
+data-quality viewers each need their own.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
@@ -1004,7 +1036,12 @@ from `agent_events`, with per-layer token sizes matching AGENT-005's accounting.
 **Traces:** AGENT-012 §4; §19.4.
 
 ### S-6.17 The dossier reader — L
-`PARTIAL` 2026-09-16 — `Dossier.tsx` (268 lines), including the Markdown export and the untrusted-chain check.
+`DONE` 2026-09-27 — the acceptance is verified against **unchanged** code, which makes this
+verification rather than repair. `__tests__/a-section-below-the-fold-is-not-a-section-read.test.tsx`
+(6 cases): verdict / evidence / unresolved questions / critique are the first four headings ahead of
+every optional one, none behind a `<details>` or `[hidden]`, a missing mandatory section is marked
+rather than omitted, and **verify** writes into the claim's own `<td>` without refetching the
+document or touching a sibling row. Earlier note: `PARTIAL` 2026-09-16 — `Dossier.tsx` (268 lines), including the Markdown export and the untrusted-chain check.
 
 Audited 2026-09-16 against the source. The desk is built: 18 components and `pages/DeskPage.tsx` under 13 routes, ~5,300 lines, `/agent` and `/research` already redirecting to it, 57 tests passing and `tsc -p tsconfig.app.json` clean.
 
@@ -1020,7 +1057,21 @@ the fold; **verify** updates in place.
 **Traces:** AGENT-012 §5; §19.5.
 
 ### S-6.18 The memory browser — L
-`PARTIAL` 2026-09-16 — `MemoryBrowser.tsx`. **The stated reason was false and is
+`PARTIAL` 2026-09-16, **both acceptance clauses now tested and a real defect fixed 2026-09-27** —
+`MemoryBrowser.tsx`.
+
+**A conflict nobody could pair rendered as no conflict.** `conflictPairs` — the function that exists
+for the first acceptance clause — did `const o = byId.get(other); if (!o) continue`. A row declaring
+`conflicts_with: ['f_99']` where `f_99` is in another bucket, or simply absent from the response,
+**dropped the conflict entirely**: the row vanished from the conflicts view, `Conflicts (0)` rendered
+as a measured zero, and "Nothing in this bucket disagrees with anything else" rendered over data
+saying otherwise. It now returns `{ row, otherId, other: null }` and the renderer names the missing
+half. Both clauses — side-by-side pair, per-row provenance (run / tool / data window) — had no tests
+at all and now have twelve cases in
+`__tests__/a-conflict-nobody-could-pair-is-not-no-conflict.test.tsx`, two of which fail before the
+change.
+
+The original note's correction stands: **the stated reason was false and is
 corrected here:** the store exists, `routes/memory.rs` serves all seven buckets and
 refuses `playbooks` by name, and this component genuinely calls it. The real gap is
 that `agent_memory.entry` has **0 rows**, so it browses an empty store rather than
@@ -1099,7 +1150,40 @@ one event and cannot be dismissed while tripped.
 **Traces:** AGENT-012 §8, §11, §12; §19.6.
 
 ### S-6.22 Retire what this replaces — M
-`PARTIAL` — **downgraded from `DONE` on 2026-09-21. It fails its own
+`DONE` 2026-09-27 — all four acceptance clauses hold, and the last two closed today.
+
+**The 28-file alias grep is clean.** `grep -rln` for the five aliases over all of `frontend/src`
+returns exactly one file: the guard that forbids them. `no-deprecated-aliases.test.ts` now walks all
+of `src/` rather than the desk directory plus five named files, bans the colour *names* in any
+utility position, and asserts `tailwind.theme.css` no longer declares them.
+
+**The 375px clause was not "unverifiable", as the note below said. It was false, in two independent
+ways, each a control that dismisses an overlay and does not.** First, `Hide panel` hid nothing:
+`Conversation.tsx` sets `hidden` and nothing else, and `.desk-side { … display: flex }` outranks the
+UA stylesheet's `[hidden] { display: none }` on *origin*, so specificity never enters it. `.desk-rail`
+has carried an explicit `[hidden]` rule since it was written; the panel never got one. Under 1200px
+that aside is `position: fixed; right: 0; width: min(380px, 92vw)` — at 375px, 345 of 375 pixels over
+the conversation, the controls row, the composer and every approval card in them, with the button
+that claims to close it underneath. Second, `.desk-rail-toggle` is `position: absolute` under 768px
+and nothing in its containing chain was positioned — not `.desk-main`, not `.desk`, not
+`<main id="main">`, not `.app` — so the only control that dismisses the rail sheet on a phone landed
+8px from the top-left of the *viewport*, under `.nav` (`z-index: 200` against its 32). Fixed with
+`.desk-side[hidden] { display: none }` and `position: relative` on `.desk > .desk-main`, which is
+also the box whose 40px `padding-left` was already reserving room for that button.
+
+A stated behaviour change: `railOpen`/`sideOpen` both defaulted to `true`, so at 375px the desk
+*opened* with both drawers over the composer. `lib/desk/viewport.ts` defaults them from the
+stylesheet's own breakpoints, and `viewportIsAtMost` returns **false** when the width cannot be read,
+so jsdom and every desk-width browser are unchanged.
+
+The test resolves the cascade itself rather than rendering, because `vitest.config.ts` deliberately
+wires no Tailwind and jsdom applies no stylesheet — a `render()` at width 375 would have passed
+*before* both fixes. It parses `desk.css`, keeps the blocks applying at 375px, matches them with
+nwsapi against a model of the real tree, and sorts by specificity and source order; a final
+`describe` pins that model to `DeskPage.tsx`/`Conversation.tsx` so it cannot drift. 35 cases.
+**Not verified in a real browser** — the cascade test and the production build are the evidence.
+
+Earlier note: `PARTIAL` — **downgraded from `DONE` on 2026-09-21. It failed its own
 acceptance by twenty-eight files.** The criterion is *"a grep for `bg-surface-2`,
 `text-text-muted`, `text-text-dim`, `bg-pnl-down`, `text-warning` returns nothing
 outside `compat.css`"*. That grep returns **28 files** — mlops 7, workbench 6,

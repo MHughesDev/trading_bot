@@ -1,6 +1,6 @@
 # The Agent Platform — Set S
 
-**Completion: 32% left (83 / 189 tasks). 83 done, 91 partial, 10 not started, 4 blocked upstream, 1 blocked on a human.**
+**Completion: 29% left (90 / 189 tasks). 90 done, 89 partial, 9 not started, 0 blocked upstream, 1 blocked on a human.** The last `BLOCKED:UPSTREAM` in the set closed 2026-09-27.
 
 > This line read *"this header was wrong and is superseded by the per-phase
 > files"* until 2026-09-21. Deferring to the phase files was the right instinct

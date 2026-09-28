@@ -246,7 +246,30 @@ shaped for a surface; the surface itself belongs with Phase 1's deployment UI an
 it rather than half-built here. **This criterion is not met.**
 
 ### T-0.4 Deploy one hand-authored strategy and start the clock — M
-`BLOCKED:HUMAN`
+`BLOCKED:HUMAN` — **and, found 2026-09-27, blocked on engineering too. Spending
+this gate today would still produce zero rows.**
+
+T-0.1's fill-stream wire is in place, so the process is observed. But three things
+between a deployment and a `forward_observation` row do not exist, and none was
+recorded in any plan file:
+
+1. **`deploy`, `on_submit`, `open`, `close_bar` and `store::insert_observation`
+   have zero production callers.** `install()` makes the process *attached*; it does
+   not make it *recording*. Those call sites are T-1.1/T-1.3 in `crates/api` and
+   `crates/domain`.
+2. **`mlops.paper_deployment` has no writer and no reader anywhere in Rust** —
+   `crates/api/src/routes/monitor.rs:160` already says so in a comment. Nothing
+   would record that a deployment exists.
+3. **`paper_deployment` has no opening-balance column, and `RealisedSeriesBuilder`
+   has no resume-from-stored-returns constructor.** So a restart mid-deployment
+   cannot reconstruct the equity chain from its original base — and rehydrating
+   from the *current* balance would silently make the realised series
+   non-comparable with the backtest's, which is the one failure this whole phase
+   exists to prevent. Two series that are nearly comparable produce a divergence
+   number that means nothing. Needs a migration.
+
+Recorded here rather than discovered after the gate is spent, which is what
+happened to T-0.1's blocker.
 
 The ops task, and the reason this phase is in Stage 0. Take a simple, hand-authored,
 already-validated strategy, run it through the existing Experiment path, deploy it to Alpaca
@@ -304,9 +327,35 @@ The contract, precisely, so it is a check rather than a guess.
 
 **The fill event consumed is `execution::fills::FillEvent`**, delivered through
 `execution::fills::FillObserver::on_fill`, which `ExecutionEngine` calls **only** on
-`FillResult::Applied` — never on a duplicate. Attach with
-`ExecutionEngine::with_fill_observer(recorder)`; `ExecutionEngine::new`'s signature is
-unchanged.
+`FillResult::Applied` — never on a duplicate.
+
+**Corrected 2026-09-27: do not attach with `ExecutionEngine::with_fill_observer`.**
+That method does not exist and must not be recreated.
+`crates/execution/src/lib.rs:79-91` records that the
+`Option<Arc<dyn FillObserver>>` field was **removed rather than completed**,
+because a per-engine observer makes "is this platform recording?" a question with
+one answer per engine instance — and the hot path builds its own engine. ADR-I-07
+reverses it. The mechanism is the process-wide registry:
+
+```rust
+// Startup, before the first order can be submitted. Idempotent; registers with
+// execution::fills before it returns. Already wired in apps/platform/src/main.rs.
+let forward_recorders = reconciliation::ForwardRecorders::install();
+
+// Assert the stream is observed. `execution::fills::require_recording()`, NOT
+// `ForwardRecorders::require_recording()` — the latter answers Err(NoDeployment)
+// until a strategy is deployed and would refuse every boot.
+execution::fills::require_recording().expect("the fill stream must be observed");
+
+// Per deployment, at H-1. Builds AND attaches in one step; there is no way to do
+// either separately, which is what makes a deployed recorder an attached one.
+let recorder = forward_recorders.deploy(spec, opening_balance, halts)?;
+```
+
+A recorder built with `ForwardRecorder::new` is **not** on the fill stream and
+cannot be put there — it does not implement `FillObserver`, so
+`register_observer` will not compile for it. That is deliberate and asserted by
+`a_recorder_built_outside_the_registry_never_sees_a_fill`.
 
 ```rust
 pub struct FillEvent {

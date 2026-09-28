@@ -1,6 +1,11 @@
 # Phase 7 — The monitor
 
-**Completion: 38% (5 / 13 tasks), plus 7 partial and 1 `BLOCKED:UPSTREAM`** (2026-09-15; counts corrected at integration — the labels in this file read 5 `DONE`, 7 `PARTIAL`, 1 blocked)
+**Completion: 46% (6 / 13 tasks), plus 7 partial.**
+
+> **2026-09-27.** S-7.11 closed: it was `BLOCKED:UPSTREAM` on S-3.18, S-3.18
+> landed, and both of its acceptance clauses are asserted by the whole-tree guard
+> that came with it. **Nothing in this phase is blocked any more**, and with it the
+> last `BLOCKED:UPSTREAM` in Set S is gone.
 
 The fail-closed core — the separate process, the lease, the scoped durable switch, the human-only
 reset, and dwell — is complete and drilled against a live database. What is partial is almost
@@ -487,8 +492,23 @@ and scope; the desk banner reflects a trip within one event.
 **Traces:** COMP-007 §6; AGENT-012 §13.
 
 ### S-7.11 The agent's read-only view — S
-`BLOCKED:UPSTREAM` — S-3.18 is not built, so there is no `portfolio.check_control_limits` tool to
-make read-only. **Unblocked by** S-3.18 landing; the read side it will use already exists
+`DONE` 2026-09-27 (was `BLOCKED:UPSTREAM`) — **S-3.18 landed, which is what this
+entry said would unblock it, and both acceptance clauses are now asserted by one
+test.**
+
+`crates/mcp-server/src/tools/control_limits.rs` exists and composes four existing
+monitor reads. Its acceptance here is *"the tool has no write path; the catalogue
+carries no monitor-mutating tool at any risk class"* — and
+`no_tool_anywhere_posts_to_the_monitor` covers both by scanning the **whole**
+`src/tools/` tree for a mutating verb near an `/api/monitor` path, plus pinning
+`ApiClient`'s verb set so a new verb fails the test rather than slipping past it.
+Its first version keyed on the path and failed on its own prose; keying on the verb
+is what lets a tool *say* "a human resets it with POST …" without tripping. Proved
+load-bearing by adding a wrapped-line `api
+.post("/api/monitor/kill-switch/global/
+trip")` to another tool file and watching it fail by name.
+
+The read side it uses already existed
 (`GET /api/monitor/{kill-switch,events,strategies,precision}` and
 `monitor::store::MonitorStore::load_limits`). What is already true and tested: no agent token can
 reach any monitor mutation (`api::monitor_authority::*`), the catalogue carries no

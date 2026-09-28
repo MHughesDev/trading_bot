@@ -1,6 +1,12 @@
 # Phase 2 — The paper fleet
 
-**Completion: 0% (0 / 4 tasks)**
+**Completion: 13% (0 / 4 tasks), plus 1 `PARTIAL`.**
+
+> **2026-09-27.** T-2.2's detector is built (`fleet.rs`): a systematic simulator
+> error is one common-mode finding rather than k strategy failures, and the module
+> refuses to mint the reproduction that would back a `platform_defect` because a
+> forward divergence cannot be replayed. The dashboard and the filing remain, and
+> nothing here can be exercised against real data until H-1.
 
 **Requirement IDs:** FE-DEP-05, FE-REC-06, FE-MON-01, FE-MON-02.
 **Spec:** [COMP-007 §8](../../../specs/COMP-007-live-monitor-and-kill-switch.md); SPEC §12.3;
@@ -31,7 +37,43 @@ configuration with no defaults that silently permit everything.
 **Traces:** SPEC capacity; COMP-002; ADR-P6 (`capacity::Exposure`).
 
 ### T-2.2 Fleet-level reconciliation and a divergence dashboard — M
-`NOT STARTED`
+`PARTIAL` 2026-09-27 (was `NOT STARTED`) — `crates/reconciliation/src/fleet.rs`
+(13 tests). The detector half is built; the dashboard and the automatic filing are
+not.
+
+**The acceptance clause is closed:** a planted systematic cost error in the
+simulator is detected as **one common-mode finding, not k separate strategy
+failures** (`a_planted_systematic_cost_error_is_one_common_mode_finding_not_five_
+strategy_failures`), with both contrast cases asserted — misses in disagreeing
+directions are not a finding against the simulator, and two agreeing misses in a
+fleet of five are not either. `FleetReport::assess` produces the per-deployment and
+aggregate realised-versus-expected numbers the dashboard's first clause needs.
+
+**It refuses to mint the `Reproduction` itself, and that is the design.** A forward
+divergence is an observation of live trading, which is the one thing that cannot be
+replayed — so minting a reproduction from generated steps would put this platform's
+most expensive claim, an `EvaluatorDefect` that outranks a promotion, behind a
+replay nobody ran. The finding supplies the wording and the steps
+(`expected_statement`, `observed_statement`, `replay_steps`); whoever actually
+re-ran the backtests supplies the artifact and the seed.
+`nothing_here_mints_a_reproduction_for_a_replay_nobody_ran` asserts this statically
+over the module's own source.
+
+Three further refusals rather than reassuring answers: `FleetInconclusive::
+FleetTooSmall` when breaches exist below quorum (calling that "idiosyncratic" is the
+comfortable reading of evidence that does not reach it), `NothingMeasurable`, and
+`slippage_excess_bps: None` for an untraded window. `FleetPolicy` has no `Default`:
+a quorum of 1, and a tolerance of 0 or infinity, are refused at construction.
+
+**What keeps it `PARTIAL`:** the React dashboard (`frontend`), and the automatic
+`platform_defect` filing (`crates/api`/`crates/harness`) — the finding is *shaped*
+for it but nothing files it. One note for whoever writes the route:
+`crates/reconciliation` has no `serde` dependency, so `FleetReport` is not
+`Serialize`. Either add it there, or map to a DTO in the API.
+
+**And it cannot be exercised against real data yet.** Every input is a realised
+series, which needs deployed strategies — gate H-1. The tests drive planted
+fixtures, which is the honest limit of what can be verified before then.
 
 Phase 0's per-strategy detector, aggregated: which deployments are diverging, by how much, and
 whether the divergence is idiosyncratic or **common across the fleet**. Common divergence is the
