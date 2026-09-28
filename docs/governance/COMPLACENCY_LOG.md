@@ -1,6 +1,26 @@
 # Complacency Log: Incomplete Work & Technical Debt
 
-**Last Updated:** 2026-06-10 (v2 — post-implementation pass)
+**Last Updated:** 2026-09-27 (v3 — the CRITICAL was stale; Set S ranges recorded)
+
+**Set S migration ranges, recorded here so concurrent tracks cannot collide**
+(MASTER §5). These are the *declared* ranges. Several were allocated against a
+tree that had already moved past them, and the real numbers are recorded per task
+in each phase file — the collision is documented as ADR-S3-08. Allocate from the
+actual head, not from this table, and check `migrations/` before you take a number.
+
+| Phase | Declared range | Actually shipped |
+|---|---|---|
+| 2 — One runtime | 0061–0064 | 0061, 0062 (as `0061_agent_effect_log.sql`) |
+| 4 — Memory and evaluation | 0065–0069 (memory), 0070–0073 (evaluation) | 0122, 0123, 0124, 0125 |
+| 7 — The monitor | 0074–0078 | 0074–0078 as declared |
+| 3 — The catalogue | 0079–0081 | — |
+| 5 — The language | 0082–0084 | — |
+| 8 — Integration and honesty | 0085–0088 | 0134, 0135, 0136 |
+| 9 — Context as retrieval | none needed | none — the range it declared was never used |
+| 10 — Modes and the lifecycle | 0089–0091 | 0126, 0128, 0131 |
+| 11 — Continuous research | 0092–0096 | 0138 |
+
+Highest migration on disk at the time of writing: **0140**.
 **Scope:** Entire repository — all stubs, placeholders, `#[ignore]` tests, incomplete integrations, and unimplemented features
 
 > **Implementation plan:** every open item below (plus 8 findings from the
@@ -31,7 +51,7 @@
 
 | File Path | Category | Severity | Issue | Current State | Required State | Phase | Blocker | Notes |
 |-----------|----------|----------|-------|----------------|----------------|-------|---------|-------|
-| `crates/api/src/auth/session.rs:9-14` | Auth | **CRITICAL** | Placeholder bearer token auth | Any non-empty `Authorization: Bearer x` accepted as valid | Token validation against session table with constant-time comparison | Phase 2 | None | **GUARDRAIL ACTIVE**: platform refuses to bind on non-loopback address. M-17. All 11 authenticated routes accept any token on loopback. |
+| ~~`crates/api/src/auth/session.rs:9-14`~~ | Auth | ~~**CRITICAL**~~ **RESOLVED 2026-09-27** | ~~Placeholder bearer token auth~~ | — | Done | — | — | **This entry was stale and is corrected, not closed by new work.** `session.rs:57-88` resolves the bearer token against `sessions` with `expires_at > now()` and returns that session's `scopes`; `auth::scopes::permits` gates on them, and `permits_monitor_control` is the single door every monitor POST goes through. The `!t.is_empty()` filter this entry described is a pre-check before the database lookup, not the authorisation. Verified by reading the extractor. |
 | `config/default.toml` | Config | **LOW** | Hardcoded dev credentials | Postgres password `trading:trading` in TOML | Move all secrets to environment variables for production | Phase 1 | None | Downgraded: values are dev-environment defaults, not real secrets. Still must be replaced before any production deployment. |
 | `crates/execution/src/coinbase.rs:1` | Adapter | **HIGH** | Coinbase execution adapter stub | Single comment: "stub (post-Phase 6 scope)" | Full REST implementation: place orders, query status, handle fills | Post-Phase 6 | Out of scope | Live Coinbase trading not possible. |
 | `crates/execution/src/account/tradovate.rs` | Adapter | **HIGH** | Tradovate account adapter not implemented | Returns `Err(AccountSourceError::NotImplemented)` for all methods | Fetch balances, positions, transactions from Tradovate REST | Phase 4 | REST endpoints unknown | Now fails loudly (was silently returning empty). Account state queries error out. |
@@ -82,12 +102,24 @@
 
 ## By Severity
 
-### 🔴 CRITICAL (Blocks Production Deployment) — 1 Item
+### 🔴 CRITICAL (Blocks Production Deployment) — 0 Items
 
-1. **Auth Placeholder (M-17)** — `crates/api/src/auth/session.rs`
-   - Status: Phase 2 upgrade required; loopback guardrail protects against accidental network exposure
-   - Action: Implement token validation + session table before removing loopback restriction
-   - Impact: **Do not remove loopback guardrail until Phase 2 auth lands**
+**The one CRITICAL this log carried was stale, and that is worse than it sounds.**
+
+1. ~~**Auth Placeholder (M-17)** — `crates/api/src/auth/session.rs`~~ —
+   **corrected 2026-09-27.** The entry said any non-empty bearer token was
+   accepted. `session.rs:57-88` resolves the token against `sessions` with an
+   `expires_at > now()` check and returns the session's scopes;
+   `auth::scopes::permits` gates on them. The claim had been false for some time.
+   - **Why this mattered more than the item itself:** a register whose only
+     CRITICAL is false trains its readers to discount the colour. The next real
+     CRITICAL entered a log where the top severity had already cried wolf. That is
+     the failure this correction is for, and it is the same shape as the leakage
+     claim this programme retracted and the `by_regime` empty array it served for
+     months — a signal that reads as measured when it was never checked.
+   - The loopback guardrail is a separate control and is **not** removed by this
+     correction. Whether to bind on a non-loopback address is a deployment
+     decision with its own review, not a consequence of the auth entry being wrong.
 
 ---
 
@@ -125,6 +157,19 @@
 | MCP dynamic discovery | Static data | Phase 5 | Agents use hardcoded instrument list |
 | WS serialization silent failure | `unwrap_or_default` | Phase 2 | Empty frame sent on serialize error (**new**) |
 | Ops documentation | Missing | Phase 2 | No runbooks for metrics/user mgmt |
+
+---
+
+### ⚪ Dead code — 2 items, recorded 2026-09-27 (Set S S-0.6)
+
+Recorded because a dead symbol is cheap to leave and expensive to read: the next
+person to touch the module has to work out whether it is load-bearing, and the
+honest answer belongs written down rather than re-derived.
+
+| Symbol | State | Who removes it |
+|---|---|---|
+| `Section::Tools` | **Already gone.** Removed by Set S phase 1 (S-1.x, "`Section::Tools` is deleted — nothing ever rendered it"): the schemas do not travel in that section, so it rendered nothing and was budgeted for anyway. Confirmed by grep — no hits anywhere in `crates/`. | Done; entry kept so the register shows the claim was checked rather than assumed. |
+| `harness::context::ContextReport::needs_model_summary` | **Still dead, and dead in the more awkward direction: it is written and never read.** Set twice (`context.rs:490`, `transcript.rs:257`) and read exactly once, by an assertion in `transcript.rs:331`. There is no production reader, so nothing acts on it — a run that needs a model summary is flagged to nobody. | **No Set S task claims it.** That is the finding, not an omission of this entry: it is either a control that was never finished (something should read it and decide to summarise) or a field that should go. Deciding which is a small piece of design work, not a deletion, so it is not being deleted here on the strength of a grep. |
 
 ---
 
@@ -166,7 +211,7 @@ Post-Phase 6:
 
 | Risk | Severity | Mitigation |
 |------|----------|-----------|
-| Auth completely bypassed | CRITICAL | Loopback-only guardrail active; fix before network access |
+| ~~Auth completely bypassed~~ | ~~CRITICAL~~ **not a risk** | Corrected 2026-09-27: the token is resolved against `sessions` with an expiry check and scopes are enforced. The loopback guardrail remains, as a separate control. |
 | Manual orders disabled | HIGH | 503 returned; safe state until Phase 2 |
 | Dashboard shows $0 P&L | HIGH | Users cannot see trading performance |
 | DEX trades unverified | MEDIUM | Implement on-chain tx verification before Phase 4 |

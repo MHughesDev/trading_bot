@@ -1,6 +1,14 @@
 # Phase 0 — Ground rules
 
-**Completion: 17% (1 / 6 tasks). 3 partial, 1 `BLOCKED:HUMAN` on gate H-1, 1 not started.**
+**Completion: 33% (2 / 6 tasks). 4 partial.**
+
+> **2026-09-27.** S-0.6 closed (the governance register's only CRITICAL was stale,
+> the Set S migration ranges are recorded, and both dead-code entries are written
+> down — one of them already removed, the other owned by nobody, which is itself
+> the finding). The old headline also said "1 `BLOCKED:HUMAN` on gate H-1, 1 not
+> started", which disagreed with its own markers: S-0.3 carries `PARTIAL` with the
+> H-1 block named inside its note, and nothing in this phase is marked
+> `BLOCKED:HUMAN` or `NOT STARTED` any more.
 
 **Requirement IDs:** GR-01…GR-06.
 **Spec:** none directly — this phase makes the other eight executable.
@@ -376,9 +384,40 @@ spec's own header (S-8.9, 2026-09-17), which is where a reader looks first anywa
 
 
 ### S-0.6 Correct the governance register, and reserve the migration ranges — S
-`NOT STARTED` — not reached by track 1.
+`DONE` 2026-09-27 — all three acceptance clauses met in
+`docs/governance/COMPLACENCY_LOG.md`.
 
-The stale CRITICAL it describes is still there. Nothing in this track depended on it, and
+**The auth entry was stale and is corrected with the evidence.** It claimed any
+non-empty bearer token was accepted. `session.rs:57-88` resolves the token against
+`sessions` with an `expires_at > now()` check and returns that session's scopes;
+`auth::scopes::permits` gates on them and `permits_monitor_control` is the single
+door every monitor POST passes through. The `!t.is_empty()` filter the entry
+described is a pre-check before the database lookup, not the authorisation.
+Verified by reading the extractor, not by trusting the register.
+
+**Why the correction mattered more than the item.** This was the log's *only*
+CRITICAL, and it was false — so the top severity had already cried wolf before any
+real CRITICAL could arrive. Same shape as the leakage claim this programme
+retracted and the empty `by_regime` array it served for months: a signal that reads
+as measured when it was never checked. The loopback guardrail is untouched, because
+whether to bind a non-loopback address is its own decision and not a consequence of
+this entry being wrong.
+
+**The Set S migration ranges are recorded** in the log's header, declared beside
+actually-shipped, with the ADR-S3-08 collision named and an instruction to allocate
+from the real head rather than from the table.
+
+**Both dead-code entries are recorded**, and neither is what the task assumed.
+`Section::Tools` is **already gone** — removed by phase 1, confirmed by grep — so
+its row records that the claim was checked rather than assumed.
+`needs_model_summary` is still dead and dead in the more awkward direction: written
+twice and read only by a test assertion, so nothing acts on it and a run that needs
+a summary is flagged to nobody. **No Set S task claims its removal**, which is the
+finding; whether it is an unfinished control or a field that should go is design
+work, so it was not deleted on the strength of a grep.
+
+The original note read: *"not reached by track 1. The stale CRITICAL it describes is
+still there."* Nothing in this track depended on it, and
 correcting a governance register on a branch that also rewrites the tool catalogue would put an
 unrelated change in a diff reviewers are reading for something else.
 

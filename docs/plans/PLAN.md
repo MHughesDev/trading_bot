@@ -39,7 +39,7 @@ than pick one and present it as precision.
 
 | set | subject | tasks | units | done | partial | % left |
 |---|---|---:|---:|---:|---:|---:|
-| **S** | The Agent Platform | 189 | 446 | 194 | 229 | **31%** |
+| **S** | The Agent Platform | 189 | 446 | 195 | 229 | **31%** |
 | **P** | Data Reach | 30 | 51 | 6 | 9 | **79%** |
 | **T** | Forward Evidence | 17 | 34 | 2 | 4 | **88%** |
 
@@ -76,10 +76,10 @@ discovered only after H-1 was spent.
 | **3 — The catalogue** | 19 | 50 | 20 | 28 | 2 | **0** | **32%** |
 | **6 — The Research Desk** | 24 | **66** | 22 | 44 | 0 | 0 | **33%** |
 | 7 — The monitor | 13 | 29 | 10 | 18 | 0 | 1 | 34% |
+| 0 — Ground rules | 6 | 7 | 2 | 5 | 0 | 0 | 36% |
 | 10 — Modes and the lifecycle | 16 | 41 | 9 | 32 | 0 | 0 | 39% |
 | 2 — One runtime | 16 | 32 | 9 | 19 | 4 | 0 | 42% |
 | 5 — The language | 15 | 36 | 12 | 15 | 9 | 0 | 46% |
-| 0 — Ground rules | 6 | 7 | 1 | 5 | 1 | 0 | 50% |
 | **11 — Continuous research** | 14 | 32 | 0 | 28 | 4 | 0 | **56%** |
 
 **Phase 3 moved 42% → 32% and its blocked column reached zero**, which is the
