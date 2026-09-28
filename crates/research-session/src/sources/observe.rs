@@ -53,7 +53,7 @@ use super::{admitted, offer_all, Ingest};
 use crate::agenda::{AgendaItem, Source};
 use crate::charter::Charter;
 use crate::harvest::{SkipReason, Skipped};
-use crate::sources::memory::session_of;
+use uuid::Uuid;
 
 /// The monitor event kinds §4.7 subscribes to.
 ///
@@ -317,6 +317,7 @@ impl Raised {
 /// Source 4.7 — observations in scope become items, at most one per event.
 #[must_use]
 pub fn observations(
+    session: Uuid,
     charter: &Charter,
     seen: &[Observation],
     already: &Raised,
@@ -361,14 +362,9 @@ pub fn observations(
         }
         already.record(&fp);
         candidates.push(
-            AgendaItem::new(
-                session_of(agenda),
-                &o.question(),
-                o.subject(),
-                Source::Observation,
-            )
-            .with_workflow(o.workflow())
-            .with_source_ref(&fp),
+            AgendaItem::new(session, &o.question(), o.subject(), Source::Observation)
+                .with_workflow(o.workflow())
+                .with_source_ref(&fp),
         );
     }
     out.inserted = offer_all(agenda, candidates);
@@ -418,6 +414,7 @@ mod tests {
         assert!(!o.is_subscribed());
         let mut agenda = empty_agenda();
         let out = observations(
+            session(),
             &charter_over(&["s_1"]),
             &[o],
             &Raised::default(),
@@ -436,7 +433,13 @@ mod tests {
         let mut already = Raised::default();
 
         for _run in 0..3 {
-            let out = observations(&charter, &[flip("2026-09-01")], &already, &mut agenda);
+            let out = observations(
+                session(),
+                &charter,
+                &[flip("2026-09-01")],
+                &already,
+                &mut agenda,
+            );
             for item in out.added() {
                 already = Raised::from_refs(
                     already
@@ -464,7 +467,13 @@ mod tests {
         let charter = charter_over(&["btc"]);
         let mut agenda = empty_agenda();
         let already = Raised::from_refs([flip("2026-09-01").fingerprint()]);
-        let _ = observations(&charter, &[flip("2026-11-14")], &already, &mut agenda);
+        let _ = observations(
+            session(),
+            &charter,
+            &[flip("2026-11-14")],
+            &already,
+            &mut agenda,
+        );
         assert_eq!(agenda.len(), 2);
     }
 
@@ -474,6 +483,7 @@ mod tests {
         let mut agenda = empty_agenda();
         let o = flip("2026-09-01");
         let _ = observations(
+            session(),
             &charter,
             std::slice::from_ref(&o),
             &Raised::default(),
@@ -489,6 +499,7 @@ mod tests {
         let charter = charter_over(&["btc"]);
         let mut agenda = empty_agenda();
         let out = observations(
+            session(),
             &charter,
             &[flip("2026-09-01"), flip("2026-09-01")],
             &Raised::default(),
@@ -504,7 +515,13 @@ mod tests {
         let charter = charter_over(&["btc"]);
         let mut agenda = empty_agenda();
         let already = Raised::default();
-        let _ = observations(&charter, &[flip("2026-09-01")], &already, &mut agenda);
+        let _ = observations(
+            session(),
+            &charter,
+            &[flip("2026-09-01")],
+            &already,
+            &mut agenda,
+        );
         assert!(already.is_empty(), "the driver's copy is its own to update");
     }
 
@@ -513,6 +530,7 @@ mod tests {
         let charter = charter_over(&["s_1", "btc"]);
         let mut agenda = empty_agenda();
         let _ = observations(
+            session(),
             &charter,
             &[
                 Observation::MonitorEvent {
@@ -537,6 +555,7 @@ mod tests {
         let charter = charter_over(&["btc"]);
         let mut agenda = empty_agenda();
         let out = observations(
+            session(),
             &charter,
             &[Observation::MonitorEvent {
                 subject: "s_elsewhere".into(),
@@ -562,6 +581,7 @@ mod tests {
             detail: "drawdown".into(),
         };
         let _ = observations(
+            session(),
             &charter,
             &[ev("e_1"), ev("e_2")],
             &Raised::default(),
@@ -608,7 +628,7 @@ mod tests {
         let mut agenda = empty_agenda();
         let mut already = Raised::default();
         for day in ["2026-09-21", "2026-09-22", "2026-09-23"] {
-            let out = observations(&charter, &[reading(day)], &already, &mut agenda);
+            let out = observations(session(), &charter, &[reading(day)], &already, &mut agenda);
             assert!(
                 out.added().next().is_none(),
                 "a reading of the frontier is not an event: {out:?}"
@@ -659,6 +679,7 @@ mod tests {
         let mut already = Raised::default();
         for to in ["2026-09-21", "2026-09-22", "2026-09-23"] {
             let out = observations(
+                session(),
                 &charter,
                 &[crossing("2026-01-31", to)],
                 &already,
@@ -714,6 +735,7 @@ mod tests {
         let mut agenda = empty_agenda();
         let already = Raised::from_refs([crossing("2026-01-31", "2026-09-21").fingerprint()]);
         let _ = observations(
+            session(),
             &charter,
             &[crossing("2026-06-30", "2026-09-23")],
             &already,
@@ -726,6 +748,7 @@ mod tests {
     fn coverage_out_of_the_charters_scope_inserts_nothing() {
         let mut agenda = empty_agenda();
         let out = observations(
+            session(),
             &charter_over(&["eth"]),
             &[crossing("2026-01-31", "2026-09-23")],
             &Raised::default(),
@@ -745,6 +768,7 @@ mod tests {
         let charter = charter_over(&["btc"]);
         let mut agenda = empty_agenda();
         let _ = observations(
+            session(),
             &charter,
             std::slice::from_ref(&c),
             &Raised::default(),

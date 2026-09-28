@@ -1443,26 +1443,27 @@ impl SessionWorker {
             .filter(|i| !i.status.is_terminal())
             .cloned()
             .collect();
-        if live.is_empty() {
-            self.note_once(
-                session.id,
-                "subscriptions_need_an_item_to_hang_from",
-                json!({
-                    "subscriptions_need_an_item_to_hang_from": true,
-                    "why": "`sources::session_of` reads the session id off the agenda it is \
-                            given and yields nil for an empty one, and `agenda_items.session_id` \
-                            is NOT NULL with a foreign key — so the items the subscriptions \
-                            built would be refused by the database. A session with nothing \
-                            non-terminal on its board gets its seeds first. MISSING: a `session: \
-                            Uuid` parameter on `sources::ingest`.",
-                }),
-            )
-            .await?;
-            return Ok(0);
-        }
-
+        // No early return on an empty board, and that is the whole point of this
+        // call site.
+        //
+        // This used to skip sources 4.3–4.7 entirely whenever nothing on the board
+        // was non-terminal, because `sources::session_of` read the session id off
+        // the agenda and yielded nil for an empty one, while
+        // `agenda_items.session_id` is NOT NULL with a foreign key. The note it
+        // left named the missing piece exactly — a `session: Uuid` parameter on
+        // `sources::ingest` — and that parameter exists now, so the guard goes.
+        //
+        // **The drained board is the case where these subscriptions matter most.**
+        // This loop deliberately answers `HoldReason::NothingClaimable` rather than
+        // obeying it, so the sources get their iteration *before*
+        // `replenish::on_drain` decides. The drained board was the one iteration on
+        // which they returned 0 without asking anything. So a continuous session
+        // whose agenda had drained ran `on_drain` over a `World` nobody was allowed
+        // to read, and under `replenish = false` answered `Drain::Complete` and
+        // **ended for good** — while a retry condition, a contradiction, a stale
+        // finding or a monitor event may have just fired.
         let world = self.world(user_id, agenda).await?;
-        let ingest = sources::ingest(charter, &world, &mut live);
+        let ingest = sources::ingest_for(session.id, charter, &world, &mut live);
         let added = self
             .write_inserts(
                 session.id,

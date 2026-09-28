@@ -339,6 +339,25 @@ pub enum SkipReason {
     AlreadyRaised,
     /// An event of a kind the session does not subscribe to.
     NotSubscribed,
+    /// The subscriptions were handed an agenda that names no session, and no
+    /// session was given either.
+    ///
+    /// Every item a subscription builds carries a `session_id`, and
+    /// `agenda_items.session_id` is `NOT NULL` with a foreign key. The old
+    /// shape read the id off `agenda.first()` and answered `Uuid::nil()` for an
+    /// empty board, so the only defence against writing a nil was a caller that
+    /// skipped all five subscriptions whenever the board had nothing on it —
+    /// which switched the session's eyes off at the moment it had nothing else
+    /// to do. See [`crate::sources::ingest_for`].
+    SessionNotNamed,
+    /// An item on the agenda handed in belongs to a different session.
+    ///
+    /// Reading the session off the agenda gave one property away for free: a
+    /// subscription could not build an item for a session other than the one
+    /// whose board it was looking at. Naming the session explicitly would have
+    /// dropped that property silently, so it is checked instead, and this is
+    /// the refusal.
+    NotThisSessionsAgenda,
 }
 
 impl SkipReason {
@@ -352,6 +371,8 @@ impl SkipReason {
             SkipReason::NotEvaluable => "not_evaluable",
             SkipReason::AlreadyRaised => "already_raised",
             SkipReason::NotSubscribed => "not_subscribed",
+            SkipReason::SessionNotNamed => "session_not_named",
+            SkipReason::NotThisSessionsAgenda => "not_this_sessions_agenda",
         }
     }
 }

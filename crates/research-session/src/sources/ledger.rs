@@ -45,12 +45,12 @@
 use std::collections::BTreeMap;
 
 use chrono::NaiveDate;
+use uuid::Uuid;
 
 use super::{admitted, offer_all, Fired, Ingest};
 use crate::agenda::{AgendaItem, Source};
 use crate::charter::Charter;
 use crate::harvest::{SkipReason, Skipped};
-use crate::sources::memory::session_of;
 
 /// The failure-class words this module knows.
 ///
@@ -315,6 +315,7 @@ impl Measured {
 /// source *is* the marker.
 #[must_use]
 pub fn retry_conditions(
+    session: Uuid,
     charter: &Charter,
     rows: &[NegativeRow],
     measured: &Measured,
@@ -337,7 +338,7 @@ pub fn retry_conditions(
         match r.trigger().evaluate(&r.subject, measured) {
             Fired::Yes => candidates.push(
                 AgendaItem::new(
-                    session_of(agenda),
+                    session,
                     &r.question(),
                     &r.subject,
                     Source::RetryConditionMet,
@@ -485,6 +486,7 @@ mod tests {
         let charter = charter_over(&["btc"]);
         let mut agenda = seeded();
         let out = retry_conditions(
+            session(),
             &charter,
             &[
                 NegativeRow::new("n_1", "btc", "momentum at 1h", "insufficient_data")
@@ -511,6 +513,7 @@ mod tests {
         let charter = charter_over(&["btc"]);
         let mut agenda = seeded();
         let out = retry_conditions(
+            session(),
             &charter,
             &[
                 // measured false

@@ -27,6 +27,18 @@
 //! log saying the session is carrying a rule it cannot evaluate. Folding the
 //! second into the first is how a subscription comes to look like it is working
 //! when nothing has ever asked it anything.
+//!
+//! # The session is named, not inferred from the board
+//!
+//! [`ingest_for`] takes the session id. The shape before it read the id off
+//! `agenda.first()`, which yielded `Uuid::nil()` for an empty agenda and left
+//! the caller no choice but to skip all five subscriptions whenever the board
+//! held nothing non-terminal. That is the worst possible moment to stop looking:
+//! a drained agenda is where §4.9 chooses between replenishing and completing,
+//! and it was choosing over a `World` these subscriptions had never been allowed
+//! to read. The property that shape bought — a subscription cannot build an item
+//! for another session — is kept as a check rather than as a side effect; see
+//! [`crate::harvest::SkipReason::NotThisSessionsAgenda`].
 
 pub mod ledger;
 pub mod memory;
@@ -189,37 +201,99 @@ pub struct World {
 /// should be one card whose first source is the blocking question, and the
 /// order of a `BTreeMap` iteration is not a reason for it to be the other way
 /// round.
+/// # An empty board is the case this exists for
+///
+/// The session is a parameter and not read off `agenda.first()`, and that is the
+/// fix rather than a tidy-up. Reading it off the agenda answered `Uuid::nil()`
+/// for an empty one, so the caller's only defence was to run none of the five
+/// subscriptions whenever the board held nothing non-terminal — which turned the
+/// session's eyes off at the one moment it had nothing else to do. A drained
+/// agenda is where §4.9 decides between replenishing and completing, and it
+/// decided that with a `World` nobody had been allowed to ingest.
+///
+/// What is *not* given away by naming the session: reading it off the agenda
+/// also meant a subscription could not build an item for some other session.
+/// That is now checked — an agenda carrying an item of another session is
+/// refused with [`SkipReason::NotThisSessionsAgenda`] and nothing is ingested,
+/// because growing another session's board is worse than ingesting nothing.
 #[must_use]
-pub fn ingest(charter: &Charter, world: &World, agenda: &mut Vec<AgendaItem>) -> Ingest {
+pub fn ingest_for(
+    session: uuid::Uuid,
+    charter: &Charter,
+    world: &World,
+    agenda: &mut Vec<AgendaItem>,
+) -> Ingest {
     let mut out = Ingest::default();
+    if let Some(foreign) = foreign_agenda(session, agenda) {
+        out.skipped.push(foreign);
+        return out;
+    }
     out.absorb(memory::open_questions(
+        session,
         charter,
         &world.open_questions,
         agenda,
     ));
     out.absorb(ledger::retry_conditions(
+        session,
         charter,
         &world.negatives,
         &world.measured,
         agenda,
     ));
     out.absorb(memory::contradictions(
+        session,
         charter,
         &world.contradictions,
         agenda,
     ));
     out.absorb(memory::stale_findings(
+        session,
         charter,
         &world.stale_findings,
         agenda,
     ));
     out.absorb(observe::observations(
+        session,
         charter,
         &world.observations,
         &world.already_raised,
         agenda,
     ));
     out
+}
+
+/// [`ingest_for`] with the session taken from the agenda it is given.
+///
+/// The door that cannot answer for an empty board, kept so a caller that has an
+/// agenda and no session id still compiles. It **refuses** rather than ingesting
+/// under a nil session: an empty agenda yields one
+/// [`SkipReason::SessionNotNamed`] line and nothing else, so the gap is a line
+/// in the log rather than five subscriptions that silently did not run.
+///
+/// Prefer [`ingest_for`]. A caller that knows which session it is driving
+/// always does.
+#[must_use]
+pub fn ingest(charter: &Charter, world: &World, agenda: &mut Vec<AgendaItem>) -> Ingest {
+    match memory::session_of(agenda) {
+        Some(session) => ingest_for(session, charter, world, agenda),
+        None => Ingest {
+            inserted: Vec::new(),
+            skipped: vec![Skipped {
+                what: "sources 4.3-4.7".to_string(),
+                why: SkipReason::SessionNotNamed,
+            }],
+        },
+    }
+}
+
+/// The refusal for an agenda that is not the named session's.
+fn foreign_agenda(session: uuid::Uuid, agenda: &[AgendaItem]) -> Option<Skipped> {
+    let other = agenda.iter().find(|i| i.session_id != session)?;
+    Some(Skipped {
+        what: other.id.to_string(),
+        why: SkipReason::NotThisSessionsAgenda,
+    })
 }
 
 #[cfg(test)]
@@ -276,7 +350,7 @@ mod tests {
             ..World::default()
         };
         let mut agenda = Vec::new();
-        let out = ingest(&charter, &world, &mut agenda);
+        let out = ingest_for(session(), &charter, &world, &mut agenda);
 
         assert_eq!(agenda.len(), 1, "one item, not two: {agenda:?}");
         assert_eq!(out.merged_count(), 1);
@@ -307,7 +381,7 @@ mod tests {
             },
             ..AgendaItem::new(session(), "does x hold", "btc", Source::CharterSeed)
         }];
-        let out = ingest(&charter, &world, &mut agenda);
+        let out = ingest_for(session(), &charter, &world, &mut agenda);
         assert_eq!(out.merged_count(), 0);
         assert_eq!(agenda.len(), 2);
     }
@@ -321,7 +395,7 @@ mod tests {
             ..World::default()
         };
         let mut agenda = Vec::new();
-        let out = ingest(&charter, &world, &mut agenda);
+        let out = ingest_for(session(), &charter, &world, &mut agenda);
         assert!(agenda.is_empty());
         assert_eq!(out.skipped.len(), 2, "{:?}", out.skipped);
         assert!(out.skipped.iter().all(|s| s.why == SkipReason::OutOfScope));
@@ -339,7 +413,7 @@ mod tests {
             ..World::default()
         };
         let mut agenda = Vec::new();
-        let out = ingest(&charter, &world, &mut agenda);
+        let out = ingest_for(session(), &charter, &world, &mut agenda);
         assert!(agenda.is_empty());
         assert_eq!(out.skipped[0].why, SkipReason::Excluded);
     }
@@ -354,7 +428,7 @@ mod tests {
             ..World::default()
         };
         let mut agenda = Vec::new();
-        let _ = ingest(&charter, &world, &mut agenda);
+        let _ = ingest_for(session(), &charter, &world, &mut agenda);
         assert_eq!(agenda.len(), 1);
     }
 
@@ -369,7 +443,7 @@ mod tests {
             ..World::default()
         };
         let mut agenda = Vec::new();
-        let _ = ingest(&charter, &world, &mut agenda);
+        let _ = ingest_for(session(), &charter, &world, &mut agenda);
         assert_eq!(agenda[0].sources[0], Source::OpenQuestionBlocking);
     }
 
@@ -388,12 +462,137 @@ mod tests {
             ..World::default()
         };
         let mut agenda = Vec::new();
-        let out = ingest(&charter, &world, &mut agenda);
+        let out = ingest_for(session(), &charter, &world, &mut agenda);
         assert!(
             agenda.is_empty(),
             "an unanswerable condition inserts nothing"
         );
         assert_eq!(out.skipped.len(), 1);
         assert_eq!(out.skipped[0].why, SkipReason::NotEvaluable);
+    }
+
+    // ── The session is named, not read off the board ─────────────────────────
+
+    /// A world with something for each of the five subscriptions.
+    fn a_busy_world() -> World {
+        World {
+            open_questions: vec![memory::QuestionRow::new(
+                "q_1",
+                "does funding predict",
+                "btc",
+            )],
+            negatives: vec![ledger::NegativeRow::new(
+                "n_1",
+                "btc",
+                "momentum needs more data",
+                "insufficient_data",
+            )
+            .measured_to("2026-01-31")],
+            contradictions: vec![memory::ContradictionPair::new(
+                "f_a",
+                "f_b",
+                "btc",
+                "which way does carry go",
+            )],
+            stale_findings: vec![
+                memory::FindingRow::new("f_1", "btc", "x holds").stale_since("2026-06-19")
+            ],
+            measured: ledger::Measured::default(),
+            observations: vec![observe::Observation::RegimeFlip {
+                subject: "btc".into(),
+                from: "calm".into(),
+                to: "stressed".into(),
+                since: "2026-09-01".into(),
+            }],
+            already_raised: observe::Raised::default(),
+        }
+    }
+
+    /// The bug this parameter exists for: a board with nothing on it.
+    ///
+    /// Before the session was named, every item's `session_id` came from
+    /// `agenda.first()`, so an empty board produced `Uuid::nil()` and the only
+    /// caller had to skip all five subscriptions to keep those rows out of a
+    /// `NOT NULL` column. A drained agenda is where §4.9 chooses between
+    /// replenishing and completing, so the session stopped watching the world at
+    /// the one moment it had nothing else to do.
+    #[test]
+    fn a_drained_board_still_lets_the_subscriptions_insert_and_never_under_a_nil_session() {
+        let charter = charter_over(&["btc"]);
+        let world = a_busy_world();
+        let mut agenda = Vec::new();
+        let out = ingest_for(session(), &charter, &world, &mut agenda);
+
+        assert!(
+            !agenda.is_empty(),
+            "an empty board is the case the subscriptions are for, not the case they refuse"
+        );
+        assert!(
+            out.skipped
+                .iter()
+                .all(|s| s.why != SkipReason::SessionNotNamed),
+            "nothing was skipped for want of a session: {:?}",
+            out.skipped
+        );
+        for item in &agenda {
+            assert_eq!(
+                item.session_id,
+                session(),
+                "an item built for the session it was given, never for the nil one a \
+                 `NOT NULL` column would refuse: {item:?}"
+            );
+        }
+    }
+
+    /// The property naming the session would otherwise have given away.
+    #[test]
+    fn no_subscription_can_grow_the_board_of_a_session_it_was_not_given() {
+        let charter = charter_over(&["btc"]);
+        let world = a_busy_world();
+        let someone_else = Uuid::from_u128(0x5e55_1042);
+        let mut agenda = vec![AgendaItem::new(
+            someone_else,
+            "a question on another session's board",
+            "btc",
+            Source::CharterSeed,
+        )];
+        let out = ingest_for(session(), &charter, &world, &mut agenda);
+
+        assert_eq!(agenda.len(), 1, "nothing was added: {agenda:?}");
+        assert_eq!(out.inserted.len(), 0);
+        assert_eq!(out.skipped.len(), 1);
+        assert_eq!(out.skipped[0].why, SkipReason::NotThisSessionsAgenda);
+    }
+
+    /// The derived door says so rather than keying on a nil.
+    #[test]
+    fn the_agenda_derived_door_refuses_an_empty_board_rather_than_ingesting_under_a_nil_session() {
+        let charter = charter_over(&["btc"]);
+        let world = a_busy_world();
+        let mut agenda = Vec::new();
+        let out = ingest(&charter, &world, &mut agenda);
+
+        assert!(agenda.is_empty(), "nothing was built: {agenda:?}");
+        assert_eq!(out.inserted.len(), 0);
+        assert_eq!(out.skipped.len(), 1);
+        assert_eq!(
+            out.skipped[0].why,
+            SkipReason::SessionNotNamed,
+            "the gap is a word on the log, not five subscriptions that quietly did not run"
+        );
+        assert_ne!(
+            SkipReason::SessionNotNamed.as_str(),
+            SkipReason::NotEvaluable.as_str(),
+            "an unnamed session is not an unanswerable condition"
+        );
+    }
+
+    #[test]
+    fn the_board_names_a_session_only_when_it_has_one() {
+        assert_eq!(memory::session_of(&[]), None);
+        assert_eq!(
+            memory::session_of(&[AgendaItem::new(session(), "q", "btc", Source::User)]),
+            Some(session())
+        );
     }
 }

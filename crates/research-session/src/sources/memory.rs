@@ -82,6 +82,7 @@ impl QuestionRow {
 /// (§5.4). An unsorted ingest makes that tie-break random.
 #[must_use]
 pub fn open_questions(
+    session: Uuid,
     charter: &Charter,
     rows: &[QuestionRow],
     agenda: &mut Vec<AgendaItem>,
@@ -104,7 +105,7 @@ pub fn open_questions(
         match admitted(charter, &r.subject, &r.id) {
             Err(s) => out.skipped.push(s),
             Ok(()) => candidates.push(
-                AgendaItem::new(session_of(agenda), &r.question, &r.subject, r.source())
+                AgendaItem::new(session, &r.question, &r.subject, r.source())
                     .with_source_ref(&r.id),
             ),
         }
@@ -165,6 +166,7 @@ impl ContradictionPair {
 /// reads the brief reads both halves until somebody settles it.
 #[must_use]
 pub fn contradictions(
+    session: Uuid,
     charter: &Charter,
     pairs: &[ContradictionPair],
     agenda: &mut Vec<AgendaItem>,
@@ -182,14 +184,9 @@ pub fn contradictions(
         match admitted(charter, &p.subject, &p.key()) {
             Err(s) => out.skipped.push(s),
             Ok(()) => candidates.push(
-                AgendaItem::new(
-                    session_of(agenda),
-                    &p.question,
-                    &p.subject,
-                    Source::Contradiction,
-                )
-                .with_source_ref(&p.left)
-                .with_source_ref(&p.right),
+                AgendaItem::new(session, &p.question, &p.subject, Source::Contradiction)
+                    .with_source_ref(&p.left)
+                    .with_source_ref(&p.right),
             ),
         }
     }
@@ -255,6 +252,7 @@ impl FindingRow {
 /// thing that has a reason to pay for checking it.
 #[must_use]
 pub fn stale_findings(
+    session: Uuid,
     charter: &Charter,
     rows: &[FindingRow],
     agenda: &mut Vec<AgendaItem>,
@@ -272,13 +270,8 @@ pub fn stale_findings(
         match admitted(charter, &r.subject, &r.id) {
             Err(s) => out.skipped.push(s),
             Ok(()) => candidates.push(
-                AgendaItem::new(
-                    session_of(agenda),
-                    &r.question(),
-                    &r.subject,
-                    Source::StaleFinding,
-                )
-                .with_source_ref(&r.id),
+                AgendaItem::new(session, &r.question(), &r.subject, Source::StaleFinding)
+                    .with_source_ref(&r.id),
             ),
         }
     }
@@ -286,15 +279,23 @@ pub fn stale_findings(
     out
 }
 
-/// The session every item on this agenda belongs to.
+/// The session the items on this agenda belong to, if it has any.
 ///
-/// Read off the agenda rather than passed, so a subscription cannot create an
-/// item for a session other than the one whose agenda it is looking at. An
-/// empty agenda has no session to read and yields nil — the driver writes the
-/// row and the `session_id` column is `NOT NULL` with a foreign key, so a nil
-/// reaching the database is refused there rather than stored.
-pub(crate) fn session_of(agenda: &[AgendaItem]) -> Uuid {
-    agenda.first().map_or_else(Uuid::nil, |i| i.session_id)
+/// **This used to return `Uuid::nil()` for an empty agenda and that was the
+/// bug.** The five subscriptions built every item's `session_id` from it, and
+/// `agenda_items.session_id` is `NOT NULL` with a foreign key, so the only
+/// thing standing between a drained board and a batch of rejected inserts was a
+/// caller that skipped all five subscriptions whenever nothing non-terminal was
+/// on the board. A session watches the world *hardest* when its own agenda has
+/// run out; that guard switched the watching off at exactly that moment, and
+/// with it sources 4.3–4.7 and their three acceptance clauses.
+///
+/// The `Option` is what makes the absence impossible to spend. The session is
+/// now named by [`crate::sources::ingest_for`]'s caller, and this is the
+/// fallback the one legacy door uses — see [`crate::sources::ingest`].
+#[must_use]
+pub fn session_of(agenda: &[AgendaItem]) -> Option<Uuid> {
+    agenda.first().map(|i| i.session_id)
 }
 
 #[cfg(test)]
@@ -320,7 +321,7 @@ mod tests {
             QuestionRow::new("q_block", "the blocking one", "btc").blocking(),
         ];
         let mut agenda = seeded(session());
-        let _ = open_questions(&charter, &rows, &mut agenda);
+        let _ = open_questions(session(), &charter, &rows, &mut agenda);
         assert_eq!(agenda[1].source_refs, vec!["q_block".to_string()]);
         assert_eq!(agenda[2].source_refs, vec!["q_plain".to_string()]);
     }
@@ -333,7 +334,7 @@ mod tests {
             QuestionRow::new("q_2", "second", "btc").blocking(),
         ];
         let mut agenda = seeded(session());
-        let _ = open_questions(&charter, &rows, &mut agenda);
+        let _ = open_questions(session(), &charter, &rows, &mut agenda);
         assert_eq!(agenda[1].source_refs, vec!["q_1".to_string()]);
         assert_eq!(agenda[2].source_refs, vec!["q_2".to_string()]);
     }
@@ -343,6 +344,7 @@ mod tests {
         let charter = charter_over(&["btc"]);
         let mut agenda = seeded(session());
         let _ = open_questions(
+            session(),
             &charter,
             &[QuestionRow::new("q_1", "does x hold", "btc")],
             &mut agenda,
@@ -355,6 +357,7 @@ mod tests {
         let charter = charter_over(&["btc"]);
         let mut agenda = seeded(session());
         let _ = contradictions(
+            session(),
             &charter,
             &[ContradictionPair::new(
                 "f_47c",
@@ -413,6 +416,7 @@ mod tests {
         let charter = charter_over(&["btc"]);
         let mut agenda = seeded(session());
         let _ = stale_findings(
+            session(),
             &charter,
             &[FindingRow::new("f_1", "btc", "x holds").stale_since("2026-06-19")],
             &mut agenda,
@@ -426,6 +430,7 @@ mod tests {
         let charter = charter_over(&["btc"]);
         let mut agenda = seeded(session());
         let _ = open_questions(
+            session(),
             &charter,
             &[QuestionRow::new("q_1", "does x hold", "btc")],
             &mut agenda,
@@ -440,6 +445,7 @@ mod tests {
         let charter = charter_over(&["btc"]);
         let mut agenda = seeded(session());
         let out = open_questions(
+            session(),
             &charter,
             &[QuestionRow::new("q_1", "   ", "btc")],
             &mut agenda,
