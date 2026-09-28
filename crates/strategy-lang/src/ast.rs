@@ -410,6 +410,71 @@ pub struct SizeClause {
     pub comments: Comments,
 }
 
+/// The order type an `order` clause names (FEAT-004 §3.1).
+///
+/// The canonical [`domain::strategy_def::actions::OrderSpec`] carries a side, a
+/// size mode and a size — **there is no order-type field at all** — so the only
+/// one of these the platform can store is [`OrderType::Market`], which FEAT-004
+/// also names as the default. The other three are parsed so the compiler can
+/// refuse them *where they are written*, which is the same treatment `cooldown`
+/// and `max_daily_loss` get: a clause the spec lists and the schema cannot hold
+/// is worth a named refusal rather than an `unknown_clause`, because the author
+/// of `order limit offset 0.1 %` has not made a spelling mistake.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OrderType {
+    Market,
+    Limit,
+    Stop,
+    StopLimit,
+}
+
+impl OrderType {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Market => "market",
+            Self::Limit => "limit",
+            Self::Stop => "stop",
+            Self::StopLimit => "stop_limit",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "market" => Self::Market,
+            "limit" => Self::Limit,
+            "stop" => Self::Stop,
+            "stop_limit" => Self::StopLimit,
+            _ => return None,
+        })
+    }
+
+    pub const ALL: [Self; 4] = [Self::Market, Self::Limit, Self::Stop, Self::StopLimit];
+}
+
+impl std::fmt::Display for OrderType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// `order limit offset 0.1 % tif gtc` — FEAT-004 §3.1's optional order clause.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OrderClause {
+    pub order_type: OrderType,
+    /// The type word itself, so a refusal points at `limit` rather than at the
+    /// whole line.
+    pub type_span: Span,
+    /// `offset 0.1 %`, the distance a limit or stop price sits from the
+    /// reference. Kept with its own span for the same reason.
+    pub offset: Option<(Num, Span)>,
+    /// `tif gtc` — the word as written, so the refusal can quote it back.
+    pub tif: Option<(String, Span)>,
+    pub span: Span,
+    pub comments: Comments,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RiskKind {
     MaxPosition,
@@ -486,6 +551,9 @@ pub struct Strategy {
     pub entries: Vec<Entry>,
     pub size: Option<SizeClause>,
     pub exits: Vec<Exit>,
+    /// `order …`. Parsed so the compiler can refuse a type the canonical
+    /// `OrderSpec` has no field for by name; see [`OrderType`].
+    pub orders: Vec<OrderClause>,
     pub risk: Vec<RiskItem>,
     pub constraints: Vec<ConstraintClause>,
 }

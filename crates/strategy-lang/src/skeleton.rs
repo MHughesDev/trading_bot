@@ -274,13 +274,7 @@ const TREND_NOTES: &str = "\
 bars into the window — check `warmup_ok` before reading a preview that shows no \
 entries.
 
-The textbook form of this rule is a crossover — enter on the bar where the fast \
-line crosses the slow one. `crossed_above` is refused by name \
-(`needs_history`): a condition expression is a pure function of the current bar \
-and the runtime has no previous-value register. The level comparison here fires \
-on every bar the trend holds rather than on the one bar it starts, which the \
-exits and the risk gate then bound. `macd(close, fast, slow) > 0` says the same \
-thing in one feature.";
+The textbook form of this rule is a crossover — enter on the bar where the fast line crosses the slow one. `crossed_above` is refused by name (`needs_history`). The refusal is **not** that the runtime cannot do it: `crates/strategy-runtime` has the cross operations, a previous-value register and a stateful evaluator, and drives a cross end to end in its own tests. What is missing is that the canonical expression grammar has no such function, so a strategy using one cannot be stored, and replay evaluates conditions without history, so it could not be backtested either. The level comparison here fires on every bar the trend holds rather than on the one bar it starts, which the exits and the risk gate then bound. `macd(close, fast, slow) > 0` says the same thing in one feature.";
 
 const MEAN_REVERSION: &str = "\
 # Mean reversion: buy a stretch away from the mean, but only while the series is

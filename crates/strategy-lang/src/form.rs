@@ -739,10 +739,11 @@ pub enum Limitation {
     ExitAnchor,
     SizeModeBeyondTheThree,
     MaxDailyLoss,
+    OrderType,
 }
 
 impl Limitation {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::ComposedOperand,
         Self::Negation,
         Self::NestedCondition,
@@ -756,6 +757,7 @@ impl Limitation {
         Self::ExitAnchor,
         Self::SizeModeBeyondTheThree,
         Self::MaxDailyLoss,
+        Self::OrderType,
     ];
 
     /// Every limitation, for a tool that lists what the form cannot do.
@@ -780,6 +782,7 @@ impl Limitation {
             Self::ExitAnchor => "exit_anchor",
             Self::SizeModeBeyondTheThree => "size_mode_beyond_the_three",
             Self::MaxDailyLoss => "max_daily_loss",
+            Self::OrderType => "order_type",
         }
     }
 
@@ -839,6 +842,9 @@ impl Limitation {
                  `equity_fraction` and `risk_per_trade`"
             }
             Self::MaxDailyLoss => "`RiskOverrides` carries position size and order rate only",
+            Self::OrderType => {
+                "the canonical order specification carries a side, a size mode and a size, and nothing that names an order type, an offset or a time-in-force"
+            }
         }
     }
 
@@ -882,6 +888,9 @@ impl Limitation {
                 "set a daily loss limit in the platform risk configuration; a strategy \
                  override may only tighten what exists there"
             }
+            Self::OrderType => {
+                "drop the clause — every entry is a market order at the close of the bar that emitted it"
+            }
         }
     }
 
@@ -909,6 +918,11 @@ impl Limitation {
                 Reach::RefusedByTheCompiler(Code::SizeModeNotRepresentable)
             }
             Self::MaxDailyLoss => Reach::RefusedByTheCompiler(Code::RiskItemNotRepresentable),
+            // Was unreachable: all four order types hit `unknown_clause` in the
+            // parser, so the form had nothing to be narrower *than*. The
+            // language now parses the clause and refuses the three types the
+            // schema cannot hold, which is what makes this a real entry.
+            Self::OrderType => Reach::RefusedByTheCompiler(Code::ClauseNotRepresentable),
         }
     }
 
@@ -1023,6 +1037,15 @@ exit time 3 bars
 risk max_daily_loss 100
 "
             }
+            Self::OrderType => {
+                "\
+strategy s on $bound_at_init timeframe 1h
+entry long when close > 1
+size fixed 1
+order limit offset 0.1 %
+exit time 3 bars
+"
+            }
         }
     }
 }
@@ -1101,6 +1124,13 @@ impl Projector<'_> {
         }
         if let Some((_, span)) = &ast.trust {
             self.refuse(Limitation::TrustTier, *span, "a `trust` clause");
+        }
+        // Refused rather than dropped, including `order market`. A projection
+        // that silently discarded the clause would hand back a form whose
+        // `to_text()` is a document the author did not write, which is the
+        // "decompiler that loses a clause" failure in the other direction.
+        if let Some(order) = ast.orders.first() {
+            self.refuse(Limitation::OrderType, order.span, "an `order` clause");
         }
 
         let params: Vec<Param> = ast.params.iter().filter_map(|d| self.param(d)).collect();
@@ -2074,7 +2104,7 @@ mod tests {
     fn every_limitation_is_real_and_reachable() {
         assert_eq!(
             Limitation::all().len(),
-            13,
+            14,
             "the list shrank; each entry is a case"
         );
         let mut seen = BTreeSet::new();

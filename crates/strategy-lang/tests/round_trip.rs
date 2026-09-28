@@ -548,6 +548,45 @@ exit none
     assert_round_trips("nick", &def);
 }
 
+/// `order market` is the one order clause the canonical form can hold, and it
+/// holds it by holding nothing: FEAT-004 §3.1 names market as the default and
+/// `OrderSpec` has no order-type field, so the clause compiles to the same
+/// definition as its absence and cannot come back out of one.
+///
+/// Recorded as a test rather than left to be discovered, because a clause that
+/// is accepted and then invisible on the next read is the shape this file's
+/// corpus guard exists to catch — and here it is the honest answer rather than a
+/// dropped clause: there is nothing in the definition for `decompile` to have
+/// seen. The three types that would mean something (`limit`, `stop`,
+/// `stop_limit`) are refused where they are written instead.
+#[test]
+fn order_market_compiles_to_nothing_and_so_cannot_come_back() {
+    let with_clause = "strategy plain on $bound_at_init timeframe 1h
+entry long when close > 1
+size fixed 1
+order market
+exit time 3 bars
+";
+    let without = "strategy plain on $bound_at_init timeframe 1h
+entry long when close > 1
+size fixed 1
+exit time 3 bars
+";
+    let def = definition_of(with_clause);
+    assert_eq!(
+        def,
+        definition_of(without),
+        "`order market` must not change the definition; it is the default said out loud"
+    );
+    let text = decompile(&def).expect("decompiles");
+    assert!(
+        !text.contains("order"),
+        "nothing in the definition records the clause, so emitting one would be an invention:
+{text}"
+    );
+    assert_round_trips("plain", &def);
+}
+
 /// Exit rule order is semantic (`exits.rs`: "a policy whose stop is listed after
 /// its target behaves differently"), so the round trip must not sort it.
 #[test]

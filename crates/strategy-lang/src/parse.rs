@@ -38,8 +38,9 @@ use std::collections::HashMap;
 use domain::strategy_def::exits::{MAX_UNIT_PERIOD, MIN_UNIT_PERIOD};
 
 use crate::ast::{
-    Anchor, Binding, ConstraintClause, Distance, Entry, Exit, ExitKind, Expr, Num, ParamDecl,
-    ParamKind, RiskItem, RiskKind, Side, SizeClause, SizeKind, Strategy, Unit,
+    Anchor, Binding, ConstraintClause, Distance, Entry, Exit, ExitKind, Expr, Num, OrderClause,
+    OrderType, ParamDecl, ParamKind, RiskItem, RiskKind, Side, SizeClause, SizeKind, Strategy,
+    Unit,
 };
 use crate::diagnostic::{Code, Diagnostic, Expected, Span};
 use crate::lex::{lex, Comment, Spanned, Tok};
@@ -61,6 +62,7 @@ pub const CLAUSES: &[&str] = &[
     "entry",
     "size",
     "exit",
+    "order",
     "risk",
     "constraint",
 ];
@@ -365,6 +367,7 @@ impl<'a> Parser<'a> {
             entries: Vec::new(),
             size: None,
             exits: Vec::new(),
+            orders: Vec::new(),
             risk: Vec::new(),
             constraints: Vec::new(),
         })
@@ -433,6 +436,11 @@ impl<'a> Parser<'a> {
             "exit" => {
                 let e = self.exit(comments)?;
                 s.exits.push(e);
+                Ok(())
+            }
+            "order" => {
+                let o = self.order(comments)?;
+                s.orders.push(o);
                 Ok(())
             }
             "risk" => {
@@ -845,6 +853,66 @@ impl<'a> Parser<'a> {
         Ok(RiskItem {
             kind,
             value,
+            span: start.to(end),
+            comments,
+        })
+    }
+
+    /// `order market`, `order limit offset 0.1 % tif gtc` (FEAT-004 §3.1).
+    ///
+    /// Parsed in full and then judged by the compiler, which is the only place
+    /// that knows what the canonical form can hold. Refusing the type here would
+    /// put half the answer in the parser and report a *syntax* error for a
+    /// clause whose syntax is right — and `order limit` is the shape a model
+    /// reading FEAT-004 will write, so it is worth answering precisely.
+    fn order(&mut self, comments: Vec<String>) -> Parsed<OrderClause> {
+        let start = self.expect_kw("order")?;
+        let types =
+            || Expected::any(OrderType::ALL.iter().map(|t| format!("`{t}`"))).expect("four types");
+        let (word, type_span) = self.eat_ident(types())?;
+        let Some(order_type) = OrderType::parse(&word) else {
+            return Err(Diagnostic::syntax(
+                Code::UnexpectedToken,
+                type_span,
+                format!("`{word}` is not an order type"),
+                types(),
+            )
+            .with_fix("the default is `market`, which is the one the platform can store")
+            .with_see("guide#orders"));
+        };
+        let mut end = type_span;
+
+        let mut offset = None;
+        if self.at_ident("offset") {
+            let kw = self.bump().span;
+            let n = self.eat_num(Expected::one("an offset"))?;
+            // The `%` is required for the same reason every other distance in
+            // this language carries a unit: a bare `0.1` is a tenth of a percent
+            // to one reader and a tenth of the price to the next.
+            let pct = self.expect(
+                &Tok::Percent,
+                Expected::one("`%` — an order offset is a percentage of the reference price"),
+            )?;
+            end = pct;
+            offset = Some((n, kw.to(pct)));
+        }
+
+        let mut tif = None;
+        if self.at_ident("tif") {
+            let kw = self.bump().span;
+            let (word, word_span) = self.eat_ident(
+                Expected::any(["`gtc`", "`ioc`", "`fok`", "`day`"]).expect("four alternatives"),
+            )?;
+            end = word_span;
+            tif = Some((word, kw.to(word_span)));
+        }
+
+        self.end_of_clause()?;
+        Ok(OrderClause {
+            order_type,
+            type_span,
+            offset,
+            tif,
             span: start.to(end),
             comments,
         })

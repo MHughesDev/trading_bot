@@ -69,7 +69,8 @@ use domain::strategy_def::{
 use serde_json::{json, Value};
 
 use crate::ast::{
-    Anchor, BinOp, ExitKind, Expr, Num, ParamKind, RiskKind, Side, SizeKind, Strategy, UnOp, Unit,
+    Anchor, BinOp, ExitKind, Expr, Num, OrderType, ParamKind, RiskKind, Side, SizeKind, Strategy,
+    UnOp, Unit,
 };
 use crate::catalogue::Catalogue;
 use crate::diagnostic::{Code, Diagnostic, Span};
@@ -93,6 +94,33 @@ pub const BARS_LANE_PREFIX: &str = "market.bars.";
 pub const FEATURES_LANE: &str = "features.technical";
 
 /// Functions SLv2 offers that need a bar other than the current one.
+///
+/// **The reason these are refused changed on 2026-09-27; the old one is no
+/// longer true.** It used to be that nothing under them existed:
+/// `strategy-runtime`'s bytecode had no cross operation and there was no
+/// previous-value register anywhere. Both now exist —
+/// `strategy_runtime::bytecode::Op::{CrossedAbove, CrossedBelow, Rising,
+/// Falling}`, `strategy_runtime::history::HistoryRegisters` and
+/// `strategy_runtime::interpreter::SignalEvaluator`, which carries the history
+/// bar to bar — and `crates/strategy-runtime/tests/crossing.rs` drives a cross
+/// end to end through the live evaluator.
+///
+/// Two things outside this crate still say no, and either one on its own makes
+/// emitting a cross a promise the platform would break:
+///
+/// 1. `strategy-validator::expressions::check_call` accepts `feature` and `bar`
+///    and nothing else, and the persist route runs `validate()` first — so a
+///    definition carrying a cross cannot be stored.
+/// 2. `crates/backtest/src/sim.rs` evaluates conditions with the **stateless**
+///    `strategy_runtime::evaluate_signals`, which reports `NeedsHistory` rather
+///    than an answer. `nodes_need_history` and `nodes_history_warmup_bars` exist
+///    for the caller that switches to `SignalEvaluator`; replay has not
+///    switched.
+///
+/// So the refusal stands and names those two rather than a missing operation. A
+/// language that compiled a cross today would produce strategies that validate
+/// nowhere and backtest nowhere, which is worse than a refusal the author reads
+/// before spending anything.
 const NEEDS_HISTORY: &[&str] = &["crossed_above", "crossed_below", "rising", "falling"];
 /// Functions SLv2 offers that need a bytecode operation that does not exist.
 const NEEDS_OPERATOR: &[&str] = &["abs", "min", "max", "clip", "log", "exp", "sqrt", "sign"];
@@ -232,6 +260,7 @@ impl<'a> Compiler<'a> {
         }
 
         let exits = self.exits(ast, &mut nodes);
+        self.orders(ast);
         let risk_overrides = self.risk(ast);
         let parameters = self.params(ast);
         // A constraint's text used to be stored verbatim and never read here, so
@@ -496,14 +525,11 @@ impl<'a> Compiler<'a> {
                         Code::NeedsHistory,
                         *span,
                         format!(
-                            "`{name}` compares this bar with an earlier one, and a condition \
-                             expression sees only the current bar"
+                            "`{name}` compares this bar with an earlier one. The live runtime can evaluate that; the canonical expression grammar cannot hold it and replay cannot answer it, so a strategy written with it could be stored nowhere and backtested nowhere"
                         ),
                     )
                     .with_fix(
-                        "compare levels instead — `macd(close, 7, 21) > 0` for what \
-                         `crossed_above(ema(close,7), ema(close,21))` would have meant — or add \
-                         the bytecode operation FEAT-004 §3.3 lists as an extension",
+                        "compare levels instead — `macd(close, 7, 21) > 0` for what `crossed_above(ema(close,7), ema(close,21))` would have meant — or ask for the canonical grammar and the replay evaluator to be widened together, which is what this refusal is waiting on",
                     )
                     .with_see("guide#functions.history"),
                 );
@@ -1195,6 +1221,64 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    /// FEAT-004 §3.1's `order` clauses, refused where the schema cannot hold
+    /// them.
+    ///
+    /// `OrderSpec` is `{ side, size_mode, size }` — there is no order-type
+    /// field, no offset and no time-in-force — so `market`, which FEAT-004 names
+    /// as the default, is the only type that survives, and it survives by
+    /// compiling to nothing. The other three are refused *by name* rather than
+    /// silently downgraded to market: an author who wrote `order limit offset
+    /// 0.1 %` and got a market order would be filled at a price they had
+    /// explicitly declined, and a backtest of the two is not the same backtest.
+    ///
+    /// Before this, all four hit `unknown_clause` in the parser, which told an
+    /// author reading FEAT-004 §3.1 that a clause the spec lists is a misspelled
+    /// keyword.
+    fn orders(&mut self, ast: &Strategy) {
+        for order in &ast.orders {
+            if order.order_type != OrderType::Market {
+                self.err(
+                    Diagnostic::semantic(
+                        Code::ClauseNotRepresentable,
+                        order.type_span,
+                        format!("`order {}` has no field on the canonical definition: an order specification carries a side, a size mode and a size, and nothing that names an order type", order.order_type),
+                    )
+                    .with_fix(
+                        "drop the clause — every entry is a market order at the close of the bar that emitted it — or, if the fill price is the hypothesis, model the difference as a cost assumption on the run",
+                    )
+                    .with_see("guide#orders"),
+                );
+                // One refusal per clause: the offset and the `tif` below belong
+                // to the type that was already refused, and repeating the same
+                // news three times is three lines a small model has to read.
+                continue;
+            }
+            if let Some((_, span)) = &order.offset {
+                self.err(
+                    Diagnostic::semantic(
+                        Code::ClauseNotRepresentable,
+                        *span,
+                        "an `offset` is a limit price, and `order market` has no price to offset from",
+                    )
+                    .with_fix("delete the offset")
+                    .with_see("guide#orders"),
+                );
+            }
+            if let Some((word, span)) = &order.tif {
+                self.err(
+                    Diagnostic::semantic(
+                        Code::ClauseNotRepresentable,
+                        *span,
+                        format!("`tif {word}` has no field on the canonical definition: a market order at a bar close has no resting life for a time-in-force to bound"),
+                    )
+                    .with_fix("delete the `tif`")
+                    .with_see("guide#orders"),
+                );
+            }
+        }
+    }
+
     fn risk(&mut self, ast: &Strategy) -> RiskOverrides {
         let mut map = serde_json::Map::new();
         let mut seen: BTreeSet<&str> = BTreeSet::new();
@@ -1635,7 +1719,7 @@ exit none
     // ── the refusals, each naming what is missing ────────────────────────────
 
     #[test]
-    fn crossed_above_says_the_grammar_sees_one_bar() {
+    fn crossed_above_is_refused_for_the_two_reasons_that_are_still_true() {
         let d = code(
             "\
 strategy s on $bound_at_init timeframe 1h
@@ -1647,8 +1731,123 @@ exit none
 ",
             Code::NeedsHistory,
         );
-        assert!(d.message.contains("only the current bar"), "{}", d.message);
-        assert!(d.fix.as_ref().unwrap().contains("macd"));
+        let fix = d.fix.as_deref().expect("a refusal carries an edit");
+        assert!(fix.contains("macd"), "{fix}");
+        // A refusal whose stated reason has been fixed elsewhere is how a
+        // capability stays unbuilt after the hard part is done. `strategy-runtime`
+        // gained the cross operations, the history registers and a stateful
+        // evaluator on 2026-09-27, so these two phrases became false while the
+        // refusal itself stayed correct — see the note on `NEEDS_HISTORY`.
+        for stale in ["bytecode operation", "previous-value register"] {
+            assert!(
+                !d.message.contains(stale) && !fix.contains(stale),
+                "the refusal still claims `{stale}`, which `crates/strategy-runtime` now has: {d:?}"
+            );
+        }
+        assert!(
+            d.message.contains("replay") || fix.contains("replay"),
+            "the refusal must name what is actually missing: {d:?}"
+        );
+    }
+
+    /// FEAT-004 §3.1 lists `order limit offset 0.1% tif gtc`, and before this
+    /// the whole clause hit `unknown_clause` — a *syntax* error telling an author
+    /// who had read the spec that `order` is a misspelled keyword. The refusal
+    /// has to name the missing field, or the author's next move is to try
+    /// another spelling.
+    #[test]
+    fn an_order_type_the_schema_cannot_hold_is_refused_by_name_and_not_as_a_typo() {
+        for ty in ["limit", "stop", "stop_limit"] {
+            let src = format!(
+                "\
+strategy s on $bound_at_init timeframe 1h
+entry long when close > 1
+size fixed 1
+order {ty}
+exit time 3 bars
+"
+            );
+            let ds = refuse(&src);
+            assert!(
+                ds.iter().all(|d| d.code != Code::UnknownClause),
+                "`order {ty}` is a clause FEAT-004 lists, not an unknown keyword: {ds:#?}"
+            );
+            let d = ds
+                .iter()
+                .find(|d| d.code == Code::ClauseNotRepresentable)
+                .unwrap_or_else(|| panic!("`order {ty}` was not refused by name: {ds:#?}"));
+            assert!(
+                d.message.contains("order type"),
+                "the refusal must name the missing field: {}",
+                d.message
+            );
+            assert!(d.fix.is_some(), "a refusal with no edit to make: {d:?}");
+        }
+    }
+
+    /// The type FEAT-004 names as the default is the one the schema can hold, so
+    /// writing it out loud is legal and changes nothing. A refusal here would
+    /// mean the language cannot say what it already does.
+    #[test]
+    fn order_market_is_the_default_said_out_loud_and_compiles_to_the_same_definition() {
+        let base = "\
+strategy s on $bound_at_init timeframe 1h
+entry long when close > 1
+size fixed 1
+exit time 3 bars
+";
+        let with_order = "\
+strategy s on $bound_at_init timeframe 1h
+entry long when close > 1
+size fixed 1
+order market
+exit time 3 bars
+";
+        assert_eq!(def(base), def(with_order));
+    }
+
+    /// An offset or a time-in-force on a market order is refused too. Accepting
+    /// them silently would be the worse failure: the author would believe the
+    /// platform had honoured a resting price it has no field for.
+    #[test]
+    fn an_offset_or_a_tif_on_a_market_order_is_refused_rather_than_ignored() {
+        for tail in ["order market offset 0.1 %", "order market tif gtc"] {
+            let src = format!(
+                "\
+strategy s on $bound_at_init timeframe 1h
+entry long when close > 1
+size fixed 1
+{tail}
+exit time 3 bars
+"
+            );
+            let ds = refuse(&src);
+            assert!(
+                ds.iter().any(|d| d.code == Code::ClauseNotRepresentable),
+                "`{tail}` was accepted: {ds:#?}"
+            );
+        }
+    }
+
+    /// Every other distance in this language carries a unit, and an order offset
+    /// is a distance. A bare `0.1` is a tenth of a percent to one reader and a
+    /// tenth of the price to the next.
+    #[test]
+    fn an_order_offset_without_a_percent_sign_is_refused_rather_than_assumed() {
+        let ds = refuse(
+            "\
+strategy s on $bound_at_init timeframe 1h
+entry long when close > 1
+size fixed 1
+order limit offset 0.1
+exit time 3 bars
+",
+        );
+        assert!(
+            ds.iter()
+                .any(|d| d.expected().is_some_and(|e| e.joined().contains('%'))),
+            "the `%` was not asked for: {ds:#?}"
+        );
     }
 
     #[test]

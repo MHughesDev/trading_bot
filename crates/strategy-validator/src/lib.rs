@@ -109,15 +109,19 @@ impl ValidatedDefinition {
 
 /// Validate a strategy definition against the frozen v1.0 rules.
 ///
-/// Runs four passes in order:
+/// Runs six passes in order:
 /// 1. Schema — structural correctness (version, IDs, references).
 /// 2. Parameters (v1.2) — declarations are well-formed, every `param('x')` /
 ///    `{{x}}` reference resolves, cross-parameter constraints hold on defaults.
-/// 3. Expressions — condition expression syntax per the frozen grammar,
-///    checked on the definition **materialized with its defaults** so the
-///    grammar itself never has to know about parameters.
-/// 4. Risk — tighten-only invariant against `GlobalRiskLimits::default()`.
-/// 5. Exits (v1.3) — the `exits` block is present, non-empty when it claims to
+/// 3. Feature names — every name an `inputs` declaration asks for resolves in
+///    the engine registry, checked on the definition **materialized with its
+///    defaults**, so a swept period (`ema_{{fast}}`) is read as the name the
+///    engine will be asked for rather than as a misspelling.
+/// 4. Expressions — condition expression syntax per the frozen grammar, checked
+///    on the same materialized definition so the grammar itself never has to
+///    know about parameters.
+/// 5. Risk — tighten-only invariant against `GlobalRiskLimits::default()`.
+/// 6. Exits (v1.3) — the `exits` block is present, non-empty when it claims to
 ///    be, and its rules are in range. See [`exits`] for why silence is refused.
 ///
 /// All errors from all passes are collected before returning, so an agent
@@ -127,14 +131,8 @@ pub fn validate(def: &StrategyDefinition) -> Result<ValidatedDefinition, Vec<Val
 
     errors.extend(schema::validate_schema(def));
 
-    // Declared features must resolve. Before this pass a typo validated cleanly
-    // and failed inside `features::runtime::feature` during the run — which for
-    // an agent is after a trial was spent, so the cheapest error in the system
-    // was charged at its most expensive point.
-    errors.extend(feature_names::check(def));
-
     // Parameters: declarations, references, constraints — then materialize
-    // defaults so the expression pass sees plain literals.
+    // defaults so the feature-name and expression passes see plain literals.
     if let Err(e) = params::validate_declarations(def) {
         errors.push(ValidationError {
             code: "parameter_out_of_range",
@@ -142,17 +140,45 @@ pub fn validate(def: &StrategyDefinition) -> Result<ValidatedDefinition, Vec<Val
             message: e.to_string(),
         });
     }
-    let materialized = match params::materialize(def, &params::ParamValues::new()) {
-        Ok(m) => m,
+    let substituted = match params::materialize(def, &params::ParamValues::new()) {
+        Ok(m) => Some(m),
         Err(e) => {
             errors.push(ValidationError {
                 code: "parameter_out_of_range",
                 path: "parameters".into(),
                 message: e.to_string(),
             });
-            def.clone()
+            None
         }
     };
+
+    // Declared features must resolve. Before this pass a typo validated cleanly
+    // and failed inside `features::runtime::feature` during the run — which for
+    // an agent is after a trial was spent, so the cheapest error in the system
+    // was charged at its most expensive point.
+    //
+    // **Read on the substituted copy, not on the definition as written.** A
+    // swept indicator period is stored as `ema_{{fast}}` (v1.2 interpolation,
+    // which is what `strategy-lang` emits for `input x = ema(close, fast)`), and
+    // `features::resolve_feature` has never heard of it — so this pass refused
+    // every strategy a sweep can run, and offered `ema_20` as the repair. An
+    // author who takes that advice deletes their own parameter, the document
+    // then validates, and the suggestion has confirmed itself by removing the
+    // thing it could not read. Substituting the defaults first is what the
+    // expression pass below has always done, for the same reason.
+    //
+    // Skipped entirely when substitution failed: the parameter error pushed
+    // above is the answer, and reporting `unknown_feature` for `ema_{{nope}}` on
+    // top of it would send the author to the `inputs` clause to fix something
+    // that is wrong in the `parameters` clause.
+    if let Some(m) = &substituted {
+        errors.extend(feature_names::check(m));
+    }
+
+    // The expression pass keeps its fallback to the definition as written: a
+    // malformed expression is worth reporting even when the parameters could not
+    // be resolved, because the two are independent mistakes.
+    let materialized = substituted.unwrap_or_else(|| def.clone());
 
     for node in &materialized.nodes {
         if let NodeKind::Condition { expr } = &node.kind {
