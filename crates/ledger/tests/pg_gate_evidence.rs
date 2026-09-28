@@ -146,7 +146,11 @@ fn full_bundle(members: &[uuid::Uuid]) -> TrialEvidence {
                 daily_vol: None,
             },
         ],
-        neighbourhood: (8..=12)
+        // `8i32`, not `8`: `f64::from` is implemented for six integer widths, so
+        // `f64::from(v)` gives inference no single candidate, and `(v - 10).abs()`
+        // is resolved before the i32 fallback would apply. Without the suffix this
+        // target does not compile (E0689).
+        neighbourhood: (8i32..=12)
             .map(|v| NeighbourhoodPoint {
                 param: "fast".into(),
                 param_value: f64::from(v),
