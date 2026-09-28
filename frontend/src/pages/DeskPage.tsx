@@ -15,6 +15,7 @@ import { Button } from '@/components/primitives/Button'
 import { conversationsApi } from '@/api/agent'
 import { deskApi } from '@/api/desk'
 import { childrenFromAgendas, railGroups } from '@/lib/desk/rail'
+import { RAIL_BECOMES_SHEET_PX, viewportIsAtMost } from '@/lib/desk/viewport'
 import { ApprovalsInbox } from '@/components/desk/ApprovalsInbox'
 import { Catalogue } from '@/components/desk/Catalogue'
 import { Conversation } from '@/components/desk/Conversation'
@@ -178,7 +179,16 @@ function DossierRoute() {
 
 export function DeskPage() {
   const navigate = useNavigate()
-  const [railOpen, setRailOpen] = useState(true)
+  /**
+   * A column beside the conversation, a sheet over it.
+   *
+   * Under 768px `desk.css` makes the rail `position: fixed; left: 0;
+   * width: min(280px, 88vw)`, so at 375px an open rail covers 280 of 375 pixels
+   * of the conversation it is meant to navigate. `viewportIsAtMost` answers
+   * `false` where the read is unavailable, so every existing test and every
+   * desk-width browser still gets the rail open.
+   */
+  const [railOpen, setRailOpen] = useState(() => !viewportIsAtMost(RAIL_BECOMES_SHEET_PX))
 
   async function newConversation() {
     const { data } = await conversationsApi.create()

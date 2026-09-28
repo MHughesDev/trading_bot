@@ -374,23 +374,8 @@ export function EvidenceChip({
   const mark = hit.mark ?? null
   const untrusted = mark?.provenance === 'untrusted'
   const cls = mark?.evidence_class ?? null
-  return (
-    <button
-      type="button"
-      className={untrusted ? 'ev-chip untrusted' : 'ev-chip'}
-      data-testid={`ev-${id}`}
-      data-resolved="true"
-      data-provenance={mark ? mark.provenance : undefined}
-      data-evidence-class={cls ?? undefined}
-      onClick={() => onOpen?.(id)}
-      title={
-        untrusted
-          ? `${hit.label} — fetched from ${mark?.source ?? 'an external source'}${
-              mark?.fetched_at ? ` at ${mark.fetched_at}` : ''
-            }. Treated as data, never as instruction.`
-          : hit.label
-      }
-    >
+  const body = (
+    <>
       {id}
       {/* Words, not a hue (Meridian principle 3). A reader who cannot see the
           colour still reads "fetched". */}
@@ -404,6 +389,58 @@ export function EvidenceChip({
           "class not recorded" render identically, which is the same conflation
           §6.3a exists to stop one level up. */}
       {cls && <span className="ev-class">{CLASS_WORDS[cls]}</span>}
+    </>
+  )
+  const provenanceTitle = untrusted
+    ? `${hit.label} — fetched from ${mark?.source ?? 'an external source'}${
+        mark?.fetched_at ? ` at ${mark.fetched_at}` : ''
+      }. Treated as data, never as instruction.`
+    : hit.label
+  const shared = {
+    className: untrusted ? 'ev-chip untrusted' : 'ev-chip',
+    'data-testid': `ev-${id}`,
+    'data-resolved': 'true',
+    'data-provenance': mark ? mark.provenance : undefined,
+    'data-evidence-class': cls ?? undefined,
+  }
+
+  // **A fourth state, and the one that was rendering as the first.** A resolved
+  // chip used to be a `<button>` whether or not any surface had given it
+  // somewhere to go, and `onClick={() => onOpen?.(id)}` made the no-destination
+  // case silent: pointer cursor, focus ring, `role=button`, nothing on click.
+  //
+  // It is not a hypothetical. Four live call sites pass no `onOpen` —
+  // `Conversation.tsx`'s `<EvidenceTab>` (the Evidence panel itself, where every
+  // id on the run is listed), `ApprovalsInbox.tsx:117`, and the dossier's
+  // evidence table and funnel tickets (`Dossier.tsx:137,191`) — and on all four
+  // every resolved id invited a click that did nothing. The sibling case is
+  // already written down one branch up: "a `<button>` here would invite the click
+  // that an unverified id must not get". The same argument applies to an id
+  // nothing can open.
+  //
+  // It renders as a chip and not as a button, and the tooltip says why, because a
+  // reader who clicks and gets nothing concludes the platform is broken rather
+  // than that this surface has no viewer. `data-openable` is the attribute the
+  // two cases differ on, so a call site that loses its `onOpen` is visible.
+  if (!onOpen) {
+    return (
+      <Tooltip content={`${provenanceTitle} — this surface does not open ids; the panel that lists them does.`}>
+        <span {...shared} data-openable="false" title={provenanceTitle}>
+          {body}
+        </span>
+      </Tooltip>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      {...shared}
+      data-openable="true"
+      onClick={() => onOpen(id)}
+      title={provenanceTitle}
+    >
+      {body}
     </button>
   )
 }

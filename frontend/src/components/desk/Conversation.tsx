@@ -31,6 +31,7 @@ import { isIrreversibleEnvelope } from '@/components/desk/Cards.helpers'
 import { useDeskKeymap } from '@/components/desk/useDeskKeymap'
 import { pendingApprovals } from '@/components/desk/RightPanel.helpers'
 import { tierTiles } from '@/components/desk/Shared.helpers'
+import { PANEL_BECOMES_DRAWER_PX, viewportIsAtMost } from '@/lib/desk/viewport'
 
 export function Conversation({
   conversationId,
@@ -56,7 +57,19 @@ export function Conversation({
   const [events, setEvents] = useState<WireEvent[]>([])
   const [tab, setTab] = useState<PanelTab>('state')
   const [detailsAll, setDetailsAll] = useState(false)
-  const [sideOpen, setSideOpen] = useState(true)
+  /**
+   * Open beside the conversation, closed over it.
+   *
+   * Above 1200px this aside is the third grid column and there is no reason to
+   * start it closed. Below 1200px `desk.css` makes it `position: fixed;
+   * right: 0; width: min(380px, 92vw)` — at 375px that is 345 of 375 pixels laid
+   * over the conversation, the controls row and the composer. Defaulting to open
+   * there meant the first thing the desk asked a phone operator to do was
+   * dismiss it, which is S-6.22's 375px clause. The read is unavailable in jsdom,
+   * where `viewportIsAtMost` answers `false` and the panel starts open as it
+   * always did.
+   */
+  const [sideOpen, setSideOpen] = useState(() => !viewportIsAtMost(PANEL_BECOMES_DRAWER_PX))
   const [model, setModel] = useState('')
   const composer = useRef<ComposerHandle>(null)
 

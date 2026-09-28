@@ -18,7 +18,16 @@
   background: var(--bg-canvas);
 }
 .desk > .desk-rail { border-right: 1px solid var(--line-hairline); min-height: 0; overflow: auto; }
-.desk > .desk-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* `position: relative` is load-bearing and not cosmetic (S-6.22, the 375px
+   clause). `.desk-rail-toggle` is `position: absolute` under 768px and this is
+   the box it has to resolve against: nothing above it is positioned — not
+   `.desk`, not the `<main id="main">` in `AppLayout.tsx`, not `.app` — so
+   without this the only control that dismisses the rail sheet on a phone
+   resolved against the initial containing block and landed 8px from the top-left
+   of the *viewport*, under `.nav` (`position: relative; z-index: 200`, against
+   the toggle's 32). The header below reserves 40px of padding-left for a toggle
+   that was never in that box. */
+.desk > .desk-main { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 /* Three columns at wide width: rail | centre | panel. The panel is a child of
    the main column rather than of the grid so a route without one (the memory
    browser, the catalogue) simply does not render it. */
@@ -28,6 +37,15 @@
   width: 360px; flex: none; border-left: 1px solid var(--line-hairline);
   min-height: 0; display: flex; flex-direction: column; background: var(--bg-canvas);
 }
+/* `Hide panel` sets `hidden` and nothing else, and the rule above outranks the
+   user agent's `[hidden] { display: none }` on origin whatever the specificity —
+   so without this the button closed nothing. `.desk-rail` has carried the same
+   rule since it was written; the panel never got one. It matters most at the
+   width where it is least visible in review: under 1200px this aside is
+   `position: fixed; right: 0; width: min(380px, 92vw)`, which at 375px is 345 of
+   375 pixels laid over the conversation, the controls row, the composer and any
+   approval card in them — with the button that claims to close it underneath. */
+.desk-side[hidden] { display: none; }
 .desk-rail-toggle { display: none; }
 
 .desk-rail-hd, .desk-side-hd {
@@ -103,6 +121,10 @@
 /* Nobody looked. Not struck through — a strike is the answer "no", and this
    chip has no answer. Words carry it, not the border (Meridian principle 3). */
 .ev-chip.unchecked { border-style: dotted; cursor: default; }
+/* A resolved id on a surface that has no viewer for it. The resolution is real,
+   so the chip stays a chip — but the pointer is a promise, and this one opens
+   nothing. `EvidenceChip` renders it as a `span` for the same reason. */
+.ev-chip[data-openable="false"] { cursor: default; }
 .ev-chip[disabled] { cursor: not-allowed; }
 /* A chip whose id traces to fetched content (§6.3a). The dashed edge is the
    second signal; the word "fetched" inside it is the first, because a reader who

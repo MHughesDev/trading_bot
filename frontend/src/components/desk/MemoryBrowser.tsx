@@ -329,18 +329,30 @@ export function MemoryBrowser({ onOpenConversation }: { onOpenConversation?: (se
         !readable ? null : pairs.length === 0 ? (
           <EmptyState message="No conflicts" detail="Nothing in this bucket disagrees with anything else." />
         ) : (
-          pairs.map(([a, b]) => (
+          pairs.map(({ row, other, otherId }) => (
             <section
-              key={`${a.id}|${b.id}`}
+              key={`${row.id}|${otherId}`}
               style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--s-3)', marginTop: 'var(--s-3)' }}
-              aria-label={`conflict between ${a.id} and ${b.id}`}
+              aria-label={`conflict between ${row.id} and ${otherId}`}
             >
-              <MemoryRowCard row={a} />
-              <MemoryRowCard row={b} />
+              <MemoryRowCard row={row} />
+              {other ? (
+                <MemoryRowCard row={other} />
+              ) : (
+                /* The half this bucket does not hold. Stated, because the
+                   alternative was tried and it was worse: `conflictPairs` used to
+                   drop the pair, so a declared disagreement whose counterpart sat
+                   in another bucket disappeared and the button above read
+                   `Conflicts (0)` over data that says otherwise. */
+                <EmptyState
+                  message={`${otherId} is not in this bucket`}
+                  detail="This row records a disagreement with an id the bucket does not hold — another bucket, or a row the store did not return. The conflict is real and is counted; the other side of it is not on this page, so it is named rather than drawn."
+                />
+              )}
               <div className="full">
                 <Button
                   size="xs"
-                  onClick={() => onOpenConversation?.(`diagnose the conflict between ${a.id} and ${b.id}`)}
+                  onClick={() => onOpenConversation?.(`diagnose the conflict between ${row.id} and ${otherId}`)}
                 >
                   Resolve
                 </Button>

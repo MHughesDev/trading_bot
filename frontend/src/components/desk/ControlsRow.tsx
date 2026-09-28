@@ -10,7 +10,7 @@
 // The one thing that *does* disable Steer and Approve is a dropped event stream
 // (§14): they need the stream to land, and a button that silently does nothing is
 // worse than one that says why.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/primitives/Button'
 import { ConfirmDialog } from '@/components/primitives/Modal'
 import { Tooltip } from '@/components/primitives/Overlay'
@@ -108,9 +108,42 @@ function pausedTooltip(until: string | null): string {
   return `Held until ${t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. ${tail}`
 }
 
+/**
+ * Is some transient surface already holding `Escape`?
+ *
+ * `Escape` is the universal dismiss key. `Modal` renders `role="dialog"`,
+ * `Overlay` renders `role="tooltip"` and its popovers and selects close on
+ * `Escape` — and none of them stop propagation, so a document-level listener sees
+ * every one of those dismissals. A run must not end because somebody shut a model
+ * picker, and the stop dialog must not re-open the moment it is open.
+ */
+function escapeBelongsToSomethingElse(): boolean {
+  return document.querySelector('[role="dialog"], [role="tooltip"], [role="listbox"], [role="menu"]') !== null
+}
+
 export function ControlsRow(props: DeskControls) {
   const [confirmStop, setConfirmStop] = useState(false)
   const needsStream = props.disconnected ? 'the event stream is down; this cannot land' : undefined
+
+  // `esc` stop (confirm) — §3.4, both words. Bound here rather than in
+  // `useDeskKeymap` because the dialog it has to open is this component's state,
+  // and the hook's version reached past it to `onStop` — the cancel request
+  // itself. One keystroke, from anywhere on the page, including from inside the
+  // composer, ended a run with no statement of what it cost.
+  //
+  // Deliberately no `isTyping` guard: stopping a run is the one thing a person
+  // should not have to click out of a text field to do, which is why the hook
+  // handled `Escape` first. That property is kept; only the destination moved.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.metaKey || e.ctrlKey || e.altKey) return
+      if (escapeBelongsToSomethingElse()) return
+      e.preventDefault()
+      setConfirmStop(true)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
 
   return (
     <div className="desk-controls" role="toolbar" aria-label="Run controls">

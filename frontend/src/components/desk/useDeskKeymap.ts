@@ -4,8 +4,20 @@ import type { DeskControls } from './ControlsRow'
 /**
  * The desk keyboard map (§3.4).
  *
- * `esc` works even from inside the composer, because stopping a run is the one
- * thing a person should never have to click out of a text field to do.
+ * **`esc` is not here, and that is the fix.** §3.4 spells the binding
+ * "`esc` stop (confirm)", and this hook used to answer `Escape` by calling
+ * `onStop()` — which in `Conversation.tsx` is `deskApi.cancel(conversationId)`,
+ * the request itself. So the mouse path went through `ControlsRow`'s
+ * `ConfirmDialog`, stating what is lost and what is not refunded, and the
+ * keyboard path ended the run outright. On the universal dismiss key: the branch
+ * ran *before* the `isTyping` guard, so `Escape` while typing in the composer
+ * cancelled the run, and `Overlay`'s popovers and selects close on `Escape`
+ * without stopping propagation, so dismissing a model picker did too.
+ *
+ * `esc` still reaches Stop from inside the composer — that property was worth
+ * keeping and is tested — but it now opens the dialog the button opens.
+ * `ControlsRow` owns that dialog, so `ControlsRow` owns the key: a shortcut bound
+ * in one file to state held in another is how these two came to disagree.
  */
 export function useDeskKeymap(c: DeskControls) {
   // The latest-controls ref is refreshed in an effect, not during render.
@@ -23,10 +35,6 @@ export function useDeskKeymap(c: DeskControls) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const k = ref.current
-      if (e.key === 'Escape') {
-        k.onStop()
-        return
-      }
       if (isTyping(e.target) || e.metaKey || e.ctrlKey || e.altKey) return
       switch (e.key) {
         case ' ':

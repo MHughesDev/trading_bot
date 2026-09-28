@@ -58,23 +58,50 @@ export function citedCount(row: MemoryRow): number | null {
 }
 
 /**
- * Pairs every conflict exactly once.
+ * One declared disagreement, and whichever half of it this bucket holds.
+ *
+ * `other` is `null` when the id a row names is not in `rows` — a record in
+ * another bucket, or one the store did not return. That is a third thing, and it
+ * has to be, because it used to be nothing at all: see `conflictPairs`.
+ */
+export interface ConflictPair {
+  /** The row that declares the conflict. */
+  row: MemoryRow
+  /** The id it says it disagrees with. */
+  otherId: string
+  /** That row, when this bucket holds it. */
+  other: MemoryRow | null
+}
+
+/**
+ * Pairs every declared conflict exactly once.
  *
  * Both sides are returned together so the renderer cannot show one and rank the
- * other below the fold.
+ * other below the fold — which is the acceptance clause (S-6.18).
+ *
+ * **A dangling counterpart is returned, not dropped.** This function used to do
+ * `const o = byId.get(other); if (!o) continue`, so a row declaring
+ * `conflicts_with: ['f_99']` where `f_99` is in a different bucket, or was simply
+ * not in the response, vanished from the conflicts view along with the conflict
+ * it declared — and `Conflicts (0)` then rendered over a bucket that says in its
+ * own data that it disagrees with itself, under the sentence "Nothing in this
+ * bucket disagrees with anything else". That is the failure shape this file's
+ * header is about, committed by the ranking-proof function: an unresolvable
+ * reference read as an absence of the thing it refers to. The renderer says which
+ * half is missing instead.
  */
-export function conflictPairs(rows: MemoryRow[]): Array<[MemoryRow, MemoryRow]> {
+export function conflictPairs(rows: MemoryRow[]): ConflictPair[] {
   const byId = new Map(rows.map((r) => [r.id, r]))
   const seen = new Set<string>()
-  const out: Array<[MemoryRow, MemoryRow]> = []
+  const out: ConflictPair[] = []
   for (const r of rows) {
-    for (const other of r.conflicts_with ?? []) {
-      const key = [r.id, other].sort().join('|')
+    for (const otherId of r.conflicts_with ?? []) {
+      // A row that lists itself is a malformed row, not a disagreement.
+      if (otherId === r.id) continue
+      const key = [r.id, otherId].sort().join('|')
       if (seen.has(key)) continue
-      const o = byId.get(other)
-      if (!o) continue
       seen.add(key)
-      out.push([r, o])
+      out.push({ row: r, otherId, other: byId.get(otherId) ?? null })
     }
   }
   return out

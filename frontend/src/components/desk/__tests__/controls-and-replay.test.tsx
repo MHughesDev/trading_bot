@@ -64,12 +64,18 @@ describe('every control works from the keyboard while the agent is mid-call (§1
     expect(s.onShortcuts).toHaveBeenCalled()
   })
 
-  it('esc stops even from inside a text field', () => {
+  it('esc reaches Stop even from inside a text field, and asks before ending the run', () => {
+    // Changed 2026-09-27: §3.4's binding is "esc stop (**confirm**)". It used to
+    // call `onStop` — `deskApi.cancel(…)` — directly, so the keyboard skipped the
+    // dialog the button goes through. Reaching Stop from inside a text field is
+    // the property worth keeping and is still asserted here; ending the run on one
+    // keystroke is not. See `a-keystroke-is-not-a-confirmation.test.tsx`.
     const s = harness()
     const input = document.createElement('input')
     document.body.appendChild(input)
     fireEvent.keyDown(input, { key: 'Escape' })
-    expect(s.onStop).toHaveBeenCalled()
+    expect(s.onStop).not.toHaveBeenCalled()
+    expect(screen.getByText('Stop this run?')).toBeTruthy()
     input.remove()
   })
 

@@ -268,9 +268,15 @@ describe('a run control the platform cannot serve is not drawn', () => {
   })
 
   it('[held before] keeps Stop, which reaches a route that is mounted', () => {
+    // `esc` opens the confirmation rather than sending the cancel (§3.4,
+    // "esc stop (confirm)"; changed 2026-09-27). The point this case was written to
+    // make — that Stop, unlike the three deleted controls, is in front of a route
+    // that exists — is now made through the dialog's own confirm.
     const s = controls()
     expect(screen.getByTestId('stop')).toBeTruthy()
     fireEvent.keyDown(document, { key: 'Escape' })
+    expect(s.onStop).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
     expect(s.onStop).toHaveBeenCalled()
   })
 
