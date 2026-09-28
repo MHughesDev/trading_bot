@@ -834,6 +834,27 @@ done: `get_funding_history` still needs the route and the rows. This marker stay
 where it is, correctly, and the missing piece is one item shorter than the note
 said.
 
+**The route landed 2026-09-28: `GET /api/data/funding`.** It is the first caller
+`read_funding` has ever had, and it serves S-3.14's `apply_funding_costs` as well, so
+it is one door against two tasks. What it carries across the wire is the distinction
+the store already draws with types: an **absent series** answers `funding: null` with
+`manifest.unmeasured` naming the table, the database and what the absence is *not*,
+while an **empty window** answers `[]` with `measured: true`. That matters more for
+funding than for any other series in this platform, because funding is a *cost*: a
+missing interval read as zero makes a perpetual free to hold and biases every
+carry-paying strategy upward. It is the one series where the absent measurement looks
+like good news, so `null` and `[]` have to be different answers -- mutation-checked,
+two tests fail if the absent branch returns `[]`. `forward_evidence_rows` is stated
+beside `rows` because a backfilled knowledge time is not a receipt (D-P3) and that is
+invisible from a count. `FundingRate`'s seal was left intact: no test-only constructor
+was added to `storage`, and the shaping was extracted as a pure function instead.
+
+**What is still missing for `get_funding_history` is the rows**, and that is a
+collection nobody has switched on: `KrakenFuturesClient::funding_history` and
+`write_funding` are wired to each other and have never run here, so `funding_rates`
+holds 0. Until then this route answers the empty-window case honestly, which is the
+right behaviour and not the acceptance.
+
 `audit_survivorship` **is** genuinely blocked: **no membership calendar exists
 anywhere** in the workspace, `instruments` has four rows all `active = true`
 with no `delisted_at`, and `DataSlice.universe_ref` is documented as pinned by a
@@ -943,12 +964,34 @@ corrected). Nothing re-derives a breach — `ControlLimit::breached_by` treats a
 reading as a breach, and a second `>` here would read the same failed measurement
 as a pass.
 
-**One recorded deviation from §5.7:** `window=30d|60d|90d` is not accepted, because
-`GET /api/monitor/events` serves no `occurred_at` and a window that cannot be
-applied should not be in a schema. The payload says `time_bounded: false` with the
-reason, and `events_truncated` separates "no events" from "older than the most
-recent thousand". Adding `occurred_at` and a `scope` filter to that route is the
-one-field change that would close it.
+~~**One recorded deviation from §5.7:** `window=30d|60d|90d` is not accepted, because
+`GET /api/monitor/events` serves no `occurred_at`.~~ **Discharged 2026-09-28**, and the
+diagnosis held: it was one column, and `recent_events`' SQL had been **ordering by
+`occurred_at` all along** without selecting it.
+
+The route now selects it and takes `scope`, `window` and `since`, applied in SQL rather
+than to the page it would otherwise have returned -- filtering a thousand-row page
+client-side would make "this strategy's last 30 days" mean "whichever of the last
+thousand events platform-wide happen to be this strategy's, inside 30 days", an answer
+that shrinks as the platform gets busier with nothing in it to say so. `window` and
+`since` together are refused rather than merged, because two lower bounds reduced to the
+stricter one is how a caller comes to believe it read 90 days.
+
+**The part worth keeping is where `time_bounded` now comes from: the bound the *route*
+echoed, never the argument that was sent.** A tool that reports its own request as the
+applied bound cannot tell a caller when the server ignored it, which is the lie the
+outright refusal existed to avoid in the first place. So an older monitor that echoes no
+bound still answers `time_bounded: false`, truthfully, and an echoed `"since": null` is
+not a bound either -- a route is free to echo the shape empty, and reading that as
+bounded would be the original lie with an extra step. `events_truncated` comes from the
+route for the same reason: a short page might be all there is, or a server with a lower
+ceiling than `EVENT_SCAN`.
+
+Two tests were replaced rather than kept. They pinned the deviation, and the deviation is
+gone; the property they protected is asserted in five tests now, including that omitting
+`window` still means "the most recent regardless of age", which is what every existing
+caller expects. `recent_events` also stopped returning a tuple: three of its four fields
+were `String`, so swapping two at a call site compiled.
 
 This task needed a **second materialisation kind** first, and that is the reusable half:
 `SeriesKind::TrialReturns` gives a template the recorded return series of every run in an
