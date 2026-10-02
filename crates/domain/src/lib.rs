@@ -25,6 +25,7 @@ pub mod order;
 pub mod payloads;
 pub mod position;
 pub mod strategy_def;
+pub mod strategy_graph;
 pub mod timestamp;
 pub mod trust;
 pub mod venue;

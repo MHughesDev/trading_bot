@@ -4,6 +4,7 @@
 //! definitions keep validating and training without modification.
 
 pub mod adapter;
+pub mod contract;
 pub mod cv;
 pub mod kinds;
 pub mod target;

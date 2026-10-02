@@ -56,7 +56,17 @@ impl RevisionHash {
     /// # Errors
     /// When the definition cannot be serialized to JSON at all.
     pub fn of(def: &StrategyDefinition) -> Result<Self, serde_json::Error> {
-        let canonical = canonical_json(&serde_json::to_value(def)?);
+        Self::of_json(&serde_json::to_value(def)?)
+    }
+
+    /// Hash any document by its canonical JSON. The v3 strategy graph
+    /// (`strategy_graph::StrategyGraph::revision`) uses this, so both formats are
+    /// addressed by one rule.
+    ///
+    /// # Errors
+    /// Never today; `Result` keeps the signature beside [`Self::of`].
+    pub fn of_json(v: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        let canonical = canonical_json(v);
         Ok(Self(hex::encode(Sha256::digest(canonical.as_bytes()))))
     }
 
