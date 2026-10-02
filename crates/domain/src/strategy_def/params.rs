@@ -282,18 +282,29 @@ pub fn resolve(
     def: &StrategyDefinition,
     overrides: &ParamValues,
 ) -> Result<ParamValues, ParamError> {
+    resolve_declared(&def.parameters, &def.constraints, overrides)
+}
+
+/// [`resolve`] over a bare parameter block, so the v3 strategy graph resolves its
+/// parameters by exactly the same rules — one implementation of defaults,
+/// range checks, undeclared-override refusal and constraints for both formats.
+pub fn resolve_declared(
+    parameters: &BTreeMap<String, ParamSpec>,
+    constraints: &[Constraint],
+    overrides: &ParamValues,
+) -> Result<ParamValues, ParamError> {
     let mut out = ParamValues::new();
-    for (name, spec) in &def.parameters {
+    for (name, spec) in parameters {
         let v = match overrides.get(name) {
             Some(v) => spec.check(name, v)?,
             None => spec.default_value(),
         };
         out.insert(name.clone(), v);
     }
-    if let Some(extra) = overrides.keys().find(|k| !def.parameters.contains_key(*k)) {
+    if let Some(extra) = overrides.keys().find(|k| !parameters.contains_key(*k)) {
         return Err(ParamError::Undeclared(extra.clone()));
     }
-    for c in &def.constraints {
+    for c in constraints {
         if !eval_constraint(c, &out)? {
             return Err(ParamError::ConstraintViolated {
                 constraint: c.clone(),

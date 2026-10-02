@@ -35,8 +35,6 @@ pub enum Ty {
     /// A list of numbers / of truth values (each element a wire).
     NumList,
     BoolList,
-    /// A map from label to a value of the variable's type — `switch`'s cases.
-    CasesOf(char),
     /// A feature window for a model input (built by `features`).
     Window,
     /// The model's output record, typed by its contract.
@@ -132,8 +130,8 @@ pub struct OpSpec {
     /// Keeps state between ticks (and therefore per instrument in a selection).
     pub stateful: bool,
     pub warmup: Warmup,
-    /// Takes further named inputs beyond `inputs` — the model operator, whose
-    /// inputs are the contract's.
+    /// Takes further named inputs beyond `inputs` — `model`, whose inputs are its
+    /// contract's, and `switch`, whose cases are one input per label.
     pub open_inputs: bool,
     /// Only meaningful across a universe; refused in a trading strategy.
     pub cross_sectional: bool,
@@ -221,9 +219,20 @@ static OPS: &[OpSpec] = &[
     // ── branching ────────────────────────────────────────────────────────────
     op!("if", Branch, [wire("cond", Bool), wire("then", T), wire("else", T)] -> T, Stateless,
         "Choose between two branches — each may be its own chain of models and indicators."),
-    op!("switch", Branch, [wire("on", Ty::CatOf('L')), wire("cases", Ty::CasesOf('T')), wire("default", T)] -> T,
-        Stateless,
-        "Choose a branch per label — e.g. a different sizing per detected regime."),
+    // `switch` takes one further argument per label — `{"on": "regime",
+    // "calm": "a", "stress": "b", "default": "c"}` — so its cases are ordinary
+    // wires rather than a nested map, which keeps the canonical form flat.
+    OpSpec {
+        name: "switch",
+        family: Family::Branch,
+        inputs: &[wire("on", Ty::CatOf('L')), wire("default", T)],
+        output: T,
+        stateful: false,
+        warmup: Stateless,
+        open_inputs: true,
+        cross_sectional: false,
+        use_when: "Choose a branch per label — e.g. a different sizing per detected regime.",
+    },
     // ── over time ────────────────────────────────────────────────────────────
     op!("prev", Temporal, [wire("x", T), lit("n", Num)] -> T, FromPort("n"),
         "The value n decision ticks ago."),
@@ -533,7 +542,7 @@ mod tests {
     fn a_type_variable_in_the_output_is_bound_by_some_input() {
         fn vars(t: Ty) -> Option<char> {
             match t {
-                Ty::Var(c) | Ty::CatOf(c) | Ty::ProbsOf(c) | Ty::CasesOf(c) => Some(c),
+                Ty::Var(c) | Ty::CatOf(c) | Ty::ProbsOf(c) => Some(c),
                 _ => None,
             }
         }

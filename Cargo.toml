@@ -13,6 +13,7 @@ members = [
     "crates/execution",
     "crates/reconciliation",
     "crates/strategy-runtime",
+    "crates/strategy-engine",
     "crates/strategy-validator",
     "crates/demand-manager",
     "crates/venue-router",
@@ -131,6 +132,7 @@ risk = { path = "crates/risk" }
 execution = { path = "crates/execution" }
 reconciliation = { path = "crates/reconciliation" }
 strategy-runtime = { path = "crates/strategy-runtime" }
+strategy-engine = { path = "crates/strategy-engine" }
 strategy-validator = { path = "crates/strategy-validator" }
 demand-manager = { path = "crates/demand-manager" }
 venue-router = { path = "crates/venue-router" }

@@ -5340,6 +5340,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "strategy-engine"
+version = "0.1.0"
+dependencies = [
+ "dataplane",
+ "domain",
+ "features",
+ "hex",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "strategy-lang"
 version = "0.1.0"
 dependencies = [

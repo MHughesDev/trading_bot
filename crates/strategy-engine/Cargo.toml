@@ -1,0 +1,25 @@
+[package]
+name = "strategy-engine"
+version = "0.1.0"
+edition = "2021"
+description = "The one strategy engine: pure, synchronous, deterministic. Every environment — backtest, preview, paper, live — drives it (FEAT-007, ADR-0039)."
+
+# Deliberately short. The engine may not depend on `execution`, `risk`,
+# `storage`, `model-registry`, `tokio` or anything that reads a clock or a socket
+# (Set U §5). A Cargo-graph test in `tests/` enforces it.
+[dependencies]
+domain = { workspace = true }
+features = { workspace = true }
+dataplane = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rust_decimal = { workspace = true }
+thiserror = { workspace = true }
+sha2 = "0.10"
+hex = "0.4"
+
+[dev-dependencies]
+rust_decimal_macros = "1"
+
+[lints]
+workspace = true
