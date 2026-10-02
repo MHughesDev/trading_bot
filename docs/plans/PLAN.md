@@ -17,20 +17,20 @@ worse than no map, because people steer by it.
 
 ---
 
-## 1. Where we are — **43% left**
+## 1. Where we are — **42% left**
 
-Derived 2026-10-01 from the `### <TASK-ID>` headings and their status markers
+Derived 2026-10-02 from the `### <TASK-ID>` headings and their status markers
 across sets P, S, T and U. Size-weighted **S = 1, M = 2, L = 4**: 189 tasks of
 wildly different sizes averaged flat would flatter us.
 
 | counting rule | % of the work left |
 |---|---|
-| strict — only `DONE` counts | 61% |
-| **`PARTIAL` counts half** | **43%** |
-| generous — `PARTIAL` counts done | 25% |
+| strict — only `DONE` counts | 59% |
+| **`PARTIAL` counts half** | **42%** |
+| generous — `PARTIAL` counts done | 24% |
 
 Take the middle number and treat it as **±10**, not as a measurement. `PARTIAL`
-is 239 of 668 units and in this repository it spans "complete, one database test
+is 239 of 670 units and in this repository it spans "complete, one database test
 unwritten" to "the types exist and nothing calls them". The spread between the
 strict and generous rows *is* the uncertainty, and it is honest to show it rather
 than pick one and present it as precision.
@@ -47,7 +47,7 @@ model in any mode — work no previous set had planned. See [Set U](plan-sets/se
 | **S** | The Agent Platform | 189 | 446 | 208 | 217 | **29%** |
 | **P** | Data Reach | 30 | 51 | 14 | 16 | **57%** |
 | **T** | Forward Evidence | 17 | 34 | 2 | 6 | **85%** |
-| **U** | Unified Strategy Engine | 53 | 137 | 35 | 0 | **74%** |
+| **U** | Unified Strategy Engine | 54 | 139 | 48 | 0 | **65%** |
 
 P and T are 16% of the weight and almost entirely ahead of us — and they are the
 two that carry a **calendar**, which is why §3 puts them first despite Set S
@@ -338,7 +338,7 @@ cost while they wait.
 
 | # | what is needed | what it unblocks | tracked as |
 |---|---|---|---|
-| H-1 | **Deploy one hand-authored strategy to paper** | The evidence clock. DONE-3 is the only condition with a calendar in it, and this is the day it starts. **Its engineering prerequisite is discharged as of 2026-09-27**: reconciliation is now installed on the fill stream at startup, so a deployment will actually produce `forward_observation` rows. Until 2026-09-27 this gate would have been spent and produced nothing | T-0.4 |
+| H-1 | **Deploy one hand-authored strategy to paper** — *no longer needs a credential: paper runs in the app (ADR-0048, 2026-10-02); what blocks it is T-0.4's recorded engineering* | The evidence clock. DONE-3 is the only condition with a calendar in it, and this is the day it starts. **Its engineering prerequisite is discharged as of 2026-09-27**: reconciliation is now installed on the fill stream at startup, so a deployment will actually produce `forward_observation` rows. Until 2026-09-27 this gate would have been spent and produced nothing | T-0.4 |
 | H-2 | **A frontier provider credential** | No live agent session has ever run. Two Set S acceptance criteria sit behind it, and Set L phases 3–4 are "built, never run live" for the same reason | S-4.14, Set L §4 |
 | ~~H-3~~ | ~~Sort the working tree~~ | **Discharged 2026-09-21.** The ~20-file tree the triage describes is gone — every file has been landed in a commit. `git status --short` now shows one file that is not an agent's in-flight work, and it is the one the user has confirmed is theirs. No decision was needed in the end | S-0.1 |
 | H-4 | Decide the capital gate | Stage 6 | ROADMAP §8 |
@@ -370,6 +370,7 @@ Newest first. One line per closing, with the evidence.
 
 | date | what | evidence |
 |---|---|---|
+| 2026-10-02 | **Set U Phase 2: backtest and paper are one venue with two drivers, and paper trades in the app.** `PaperTradingEngine` reads time and ids only through injected `VenueClock`/`OrderIds`; `SimulatedVenue` drives it from bars on a `SimClock` (next-bar-open fills, stops-first intrabar, `CurrentClose` flagged optimistic); `Venue` is the one port and `PaperVenue`/`SimulatedVenue` both sit behind it. Stop, trailing-stop, reduce-only, post-only and OCO now execute — **every stop-limit in the platform had been a plain limit**, with no field for its trigger, and two broker adapters sent it as one. The production risk gate runs in front of backtests with simulated rate counts and a per-day halt; **the gate's position cap ignored side**, so a strategy at its cap could not sell out — fixed. **Owner decision (ADR-0048): paper trading runs in the app, never on Alpaca's paper account** — `PaperVenue::Platform`, migration 0141, H-7 withdrawn; forward evidence on it is labelled as resting on modelled fills, and fill realism moves to a check on the first live trades. U-2.6 (one fee schedule for both venues) added. | `cargo test -p execution` all green incl. `tests/sim_venue.rs` 11, `tests/sim_risk.rs` 5, `tests/venue_core_is_environment_neutral.rs` 2; the oracle loses through the venue and wins with costs zeroed; mutations fail the tests they target; `-p risk` 76/76; `-p reconciliation` green; 0141 validated on a scratch PG17 database; workspace check and clippy clean |
 | 2026-10-01 | **Set U Phase 1: the one strategy engine exists.** `crates/strategy-engine` — pure, synchronous, deterministic, and depending on nothing an environment owns (a Cargo.lock walk proves it reaches none of execution, risk, storage, model-registry, tokio, sqlx or reqwest). One compiler typechecks every strategy against the operator, indicator and model-contract registries and reports every problem in one pass with did-you-mean fixes. The engine **computes its own indicators from raw bars** through the DATA-006 routine — an EMA-cross fed only bars matches the feature engine bar for bar, and before warm-up its condition is `missing(warming_up)`, not `false` — which is the structural fix for paper trading never computing an indicator. Models are called by request and resume: a classifier feeding a sizing model resolves in two layers and drives an order; an upstream abstain means the downstream model is never called; an incomplete input row is never sent, so nothing is zero-filled. A target sized by a model that timed out holds with that reason. The order planner covers every intent in the terminal's vocabulary: idempotent targets, brackets whose protection is placed on the entry's fill at the fill price, emulated OCO, breakeven stops, and a refusal by name — never a silent downgrade — for an order type a venue lacks. Two mutation checks (temporal state re-stepped on resume; a zero-filled model input) each fail exactly the test written for them. | strategy-engine 38 unit + 22 acceptance tests, clippy clean, no hash-ordered collection anywhere in the crate, byte-identical traces over 150 ticks; Set U 93% → 74%; headline 47% → 43% |
 | 2026-10-01 | **Set U Phase 0: the contracts every later phase speaks.** Values where absence is a value (`missing(reason)`) and a number cannot be `NaN`; Kleene three-valued logic defined once; the canonical `tbot.strategy/3` graph with its sink typed per kind, so a trading graph with a selection sink is unrepresentable; trade intents covering the terminal; selections that account for every universe member, selected or excluded with a reason; deployments that cannot be confused with backtests; typed model contracts with derived contracts for every existing kind and three new ones (`classifier`, `regressor`, `transform`); and a 74-operator registry that the checker, palette, text language and agent catalogue will all be generated from. One acceptance line was corrected rather than the code: a forecaster's derived `direction` is a label (`cat`), not `probs`, because today's server returns a label and deriving `probs` would promise what the serving path does not deliver. FEAT-007's examples were aligned with the format as built (a bare string is always a reference; literals are `{"str": …}`; no expression strings in the canonical form). | domain 217 lib tests (41 new in `strategy_graph`, 8 in `contract`), clippy clean on the new files, `cargo check --workspace --all-targets` clean; Set U 100% → 93%; headline 49% → 47% |
 | 2026-10-01 | **The strategy system was audited end to end, and redesigned.** The audit traced every path a strategy takes and found ten verified defects, of which four mean the platform cannot do what it appears to: **three different programs evaluate a strategy** (the backtester's own loop over a stateless interpreter, a third copy of that loop for the agent's preview, and `StrategyInstance` on paper), and they have drifted; **on paper, indicators are never computed** — the hot path emits only bars, nothing in production emits feature values, and the slots start at `NaN`, so an indicator strategy never trades (the one passing paper test injects indicator values by hand); **no strategy can call a model in any mode** — the backtester has no inference and `set_inference_outputs` has zero callers; and **every model answers as a forecast**, with missing inputs filled with `0.0`. Also: strategies can only place market orders, selection logic has no caller, backtests skip the risk gate, the grammar is implemented three or four times, and the backtest venue facade is market-only and reports no fills. The redesign, on the owner's direction: one pure deterministic engine every environment drives; typed dataflow graphs of two kinds (trading, selection); trade intents covering the terminal, planned into orders by one shared planner; decisions on bar close, own fills and schedules, never per tick; typed model contracts resolved point-in-time; a native simulated venue on the paper venue's core (**reversing the owner's 2026-06-08 choice of market_simulator as the default backtest venue**, flagged); the risk gate in every environment; and a nightly replay that proves paper and backtest still decide identically. | [FEAT-007](../specs/FEAT-007-unified-strategy-engine.md); ADR-0039…0047; [Set U](plan-sets/set-U/MASTER.md), 53 tasks, 137 units; headline 35% → 49% because the plan grew |

@@ -51,7 +51,9 @@ impl PaperFillSimulator for PredictionMarketFillSimulator {
         let p = mark.inner().clamp(Decimal::ZERO, Decimal::ONE);
 
         let (fill_price, qty) = match intent.order_type {
-            OrderType::Market => {
+            // A stop reaching a simulator has already triggered: it fills as a
+            // market order (the engine converts it before asking).
+            OrderType::Market | OrderType::Stop | OrderType::TrailingStop => {
                 // Market orders cross the spread.
                 let fill_raw = match intent.side {
                     Side::Buy => p + self.half_spread_cents,

@@ -469,10 +469,11 @@ impl RiskGate {
         limits::check_halt(&intent.instrument_id, &ctx.halt_policy, ctx.is_halted)?;
         limits::check_rate_second(&effective, rate_counts.last_second)?;
         limits::check_rate_minute(&effective, rate_counts.last_minute)?;
-        limits::check_position(
+        limits::check_position_after(
             &effective,
             &intent.instrument_id,
             ctx.current_position,
+            intent.side,
             intent.size,
         )?;
         limits::check_price_sanity(

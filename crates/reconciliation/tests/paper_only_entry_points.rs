@@ -79,14 +79,14 @@ fn code_only(path: &Path) -> String {
 /// string somebody types, it is a source change and a review.
 #[test]
 fn the_only_venue_this_set_can_name_is_paper() {
-    let v = PaperVenue::AlpacaPaper;
+    let v = PaperVenue::Platform;
     match v {
         // Exhaustive deliberately, and stronger than a loop over the variants
         // somebody remembered to list: adding one that is not paper makes this
         // fail to compile rather than fail to be checked.
-        PaperVenue::AlpacaPaper => assert!(v.is_paper(), "{v:?} is not a paper venue"),
+        PaperVenue::Platform => assert!(v.is_paper(), "{v:?} is not a paper venue"),
     }
-    assert_eq!(PaperVenue::AlpacaPaper.as_str(), "alpaca_paper");
+    assert_eq!(PaperVenue::Platform.as_str(), "platform_paper");
 
     // And the source says so: one variant, no `Live`.
     let src = code_only(&repo_root().join("crates/reconciliation/src/forward.rs"));
@@ -103,7 +103,7 @@ fn every_entry_point_added_by_this_phase_takes_a_paper_venue() {
         deployment_id: Uuid::new_v4(),
         strategy_id: "sma-cross-1".into(),
         trial_id: Uuid::new_v4(),
-        venue: PaperVenue::AlpacaPaper,
+        venue: PaperVenue::Platform,
         numeraire: Numeraire::Usd,
         bar_seconds: 60,
         thresholds: DivergenceThresholds {
@@ -149,14 +149,19 @@ fn no_module_added_by_this_phase_names_a_live_venue() {
     );
 }
 
-/// The database says it too. Migration 0105's `venue` CHECK admits one value,
-/// so widening it is a migration, a review, and roadmap gate H-4.
+/// The database says it too. Migration 0141 replaced 0105's `venue` CHECK with
+/// one that admits the platform's paper venue alone, so widening it is a
+/// migration, a review, and roadmap gate H-4.
 #[test]
 fn the_deployment_table_admits_only_the_paper_venue() {
-    let sql = std::fs::read_to_string(repo_root().join("migrations/0105_forward_observation.sql"))
-        .expect("migration 0105");
+    let sql = std::fs::read_to_string(repo_root().join("migrations/0141_paper_runs_in_app.sql"))
+        .expect("migration 0141");
     assert!(
-        sql.contains("venue             TEXT NOT NULL CHECK (venue IN ('alpaca_paper'))"),
-        "0105 must constrain `venue` to the paper venue alone"
+        sql.contains("CHECK (venue IN ('platform_paper'))"),
+        "0141 must constrain `venue` to the platform's paper venue alone"
+    );
+    assert!(
+        !sql.to_lowercase().contains("check (venue in ('alpaca"),
+        "Alpaca's paper account is not a paper venue (ADR-0048)"
     );
 }

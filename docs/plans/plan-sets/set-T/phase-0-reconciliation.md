@@ -1,6 +1,6 @@
 # Phase 0 — Reconciliation and the first observation
 
-**Completion: 75% (1 / 4 tasks). T-0.4 `BLOCKED:HUMAN` on gate H-7 (venue credential); its code blocker cleared in integration wave 3.** T-0.1 and T-0.3 were downgraded from `DONE` on 2026-09-21. T-0.1's wire is not in place — the observer is constructed only in tests and the method the file tells a track to call does not exist — and T-0.3's own note says its criterion is not met.
+**Completion: 75% (1 / 4 tasks). T-0.4 blocked on engineering only — gate H-7 (venue credential) was withdrawn 2026-10-02 when the owner decided paper trading runs in the app ([ADR-0048](../../../adr/0048-paper-trading-runs-in-the-app.md)).** T-0.1 and T-0.3 were downgraded from `DONE` on 2026-09-21. T-0.1's wire is not in place — the observer is constructed only in tests and the method the file tells a track to call does not exist — and T-0.3's own note says its criterion is not met.
 
 > **Status, 2026-09-15 — track 5, `claude/set-t-phase-0-reconciliation`.**
 >
@@ -246,8 +246,13 @@ shaped for a surface; the surface itself belongs with Phase 1's deployment UI an
 it rather than half-built here. **This criterion is not met.**
 
 ### T-0.4 Deploy one hand-authored strategy and start the clock — M
-`BLOCKED:HUMAN` — **and, found 2026-09-27, blocked on engineering too. Spending
-this gate today would still produce zero rows.**
+`BLOCKED:UPSTREAM` — **on engineering only, since 2026-10-02.** The human half of
+this block (gate H-7, Alpaca paper credentials) is gone: the owner decided paper
+trading runs on the platform's own paper venue
+([ADR-0048](../../../adr/0048-paper-trading-runs-in-the-app.md)), and
+`PaperVenue::Platform` / migration 0141 make `platform_paper` the only venue a
+deployment may name. What remains is the three engineering gaps below. Found
+2026-09-27, still true: deploying today would produce zero rows.
 
 T-0.1's fill-stream wire is in place, so the process is observed. But three things
 between a deployment and a `forward_observation` row do not exist, and none was
@@ -272,8 +277,8 @@ Recorded here rather than discovered after the gate is spent, which is what
 happened to T-0.1's blocker.
 
 The ops task, and the reason this phase is in Stage 0. Take a simple, hand-authored,
-already-validated strategy, run it through the existing Experiment path, deploy it to Alpaca
-paper, and let it run.
+already-validated strategy, run it through the existing Experiment path, deploy it to the
+platform's paper venue (ADR-0048), and let it run.
 
 It does not need to be good. It needs to **exist and produce observations**, because every day
 without a deployed strategy is a day Gate 15 has no evidence, and Gate 15's evidence is a
@@ -299,6 +304,14 @@ is recorded here and on the coverage surface as the date the forward clock start
 
 **Nothing to record yet: no strategy, no thresholds, no deployment date, no first comparison.
 The forward clock has not started.**
+
+**Reversed by the owner 2026-10-02 ([ADR-0048](../../../adr/0048-paper-trading-runs-in-the-app.md)).**
+The finding below was right that in-app forward evidence cannot test fill realism — after
+ADR-0044 paper and backtest share one fill model by construction. ADR-0048 records what
+it does measure (the strategy on unseen data, the pipeline in observed time, replay
+parity) and moves the fill-realism question to a separate fill-model check on the first
+live trades. Gate 15 verdicts on `platform_paper` are labelled as resting on modelled
+fills. The original finding, kept for the record:
 
 **A finding that changes what T-0.4 may deploy to.** The internal `PaperTradingEngine`
 (`crates/execution/src/paper/`) needs no credentials and could produce "fills" today. It must

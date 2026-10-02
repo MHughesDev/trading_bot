@@ -51,7 +51,7 @@ fn spec() -> DeploymentSpec {
         deployment_id: Uuid::new_v4(),
         strategy_id: "late-1".to_owned(),
         trial_id: Uuid::new_v4(),
-        venue: PaperVenue::AlpacaPaper,
+        venue: PaperVenue::Platform,
         numeraire: Numeraire::Usd,
         bar_seconds: 60,
         thresholds: DivergenceThresholds {

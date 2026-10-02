@@ -22,7 +22,7 @@ use dashmap::DashMap;
 use domain::{
     instrument::{AssetClass, MarketStructure},
     money::{Price, Size},
-    order::{OrderIntent, OrderType, TimeInForce},
+    order::{OrderIntent, OrderType, Side, TimeInForce},
 };
 use rust_decimal::Decimal;
 use serde::Serialize;
@@ -229,11 +229,21 @@ pub struct PaperOrderRecord {
     pub state: BrokerOrderState,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// A stop-type order whose trigger has traded. A triggered stop-limit rests
+    /// as a limit; a triggered stop fills at once.
+    pub triggered: bool,
+    /// A trailing stop's best price since placement — the high for a sell stop,
+    /// the low for a buy stop.
+    pub best: Option<Decimal>,
 }
 
 impl PaperOrderRecord {
-    fn new(order_id: String, asset_class: AssetClass, intent: OrderIntent) -> Self {
-        let now = Utc::now();
+    fn new(
+        order_id: String,
+        asset_class: AssetClass,
+        intent: OrderIntent,
+        now: DateTime<Utc>,
+    ) -> Self {
         Self {
             order_id,
             asset_class,
@@ -244,11 +254,63 @@ impl PaperOrderRecord {
             state: BrokerOrderState::New,
             created_at: now,
             updated_at: now,
+            triggered: false,
+            best: None,
         }
     }
 
+    /// Whether a stop-type order's trigger is met at `price`; for a trailing
+    /// stop, also moves its best price when it is not.
+    ///
+    /// A sell stop triggers at or below its stop, a buy stop at or above. A
+    /// trailing sell stop sits `trail` below the best high seen and a trailing
+    /// buy stop `trail` above the best low; the check happens **before** the best
+    /// price moves, so a single print cannot both raise the stop and trigger it.
+    fn trigger_met(&mut self, price: Decimal) -> Option<Decimal> {
+        let side = self.intent.side;
+        match self.intent.order_type {
+            OrderType::Stop | OrderType::StopLimit => {
+                let stop = self.intent.stop_price?.inner();
+                let hit = match side {
+                    Side::Sell => price <= stop,
+                    Side::Buy => price >= stop,
+                };
+                hit.then_some(stop)
+            }
+            OrderType::TrailingStop => {
+                let trail = self.intent.trail?.inner();
+                let best = self.best.unwrap_or(price);
+                let (level, hit) = match side {
+                    Side::Sell => (best - trail, price <= best - trail),
+                    Side::Buy => (best + trail, price >= best + trail),
+                };
+                if !hit {
+                    self.best = Some(match side {
+                        Side::Sell => best.max(price),
+                        Side::Buy => best.min(price),
+                    });
+                }
+                hit.then_some(level)
+            }
+            OrderType::Market | OrderType::Limit => None,
+        }
+    }
+
+    /// The order as it executes once live, for `qty`: a triggered stop or
+    /// trailing stop is a market order; a triggered stop-limit is a limit.
+    fn live_probe(&self, qty: Decimal) -> OrderIntent {
+        let mut probe = self.intent.clone();
+        probe.size = Size::from_decimal(qty);
+        probe.order_type = match self.intent.order_type {
+            OrderType::Stop | OrderType::TrailingStop => OrderType::Market,
+            OrderType::StopLimit => OrderType::Limit,
+            other => other,
+        };
+        probe
+    }
+
     /// Fold a fill into the record's cumulative quantity / VWAP / state.
-    fn record_fill(&mut self, fill: &PaperFill) {
+    fn record_fill(&mut self, fill: &PaperFill, now: DateTime<Utc>) {
         let prev_notional = self
             .avg_fill_price
             .map_or(Decimal::ZERO, |p| p.inner() * self.filled_qty);
@@ -264,7 +326,7 @@ impl PaperOrderRecord {
         } else {
             BrokerOrderState::PartiallyFilled
         };
-        self.updated_at = Utc::now();
+        self.updated_at = now;
     }
 
     fn is_open(&self) -> bool {
@@ -313,7 +375,6 @@ pub struct PaperOrderView {
 
 impl PaperOrderView {
     fn from_record(r: &PaperOrderRecord) -> Self {
-        use domain::order::{OrderType, Side};
         let status = match &r.state {
             BrokerOrderState::New => "new",
             BrokerOrderState::PartiallyFilled => "partially_filled",
@@ -326,11 +387,7 @@ impl PaperOrderView {
             Side::Buy => "buy",
             Side::Sell => "sell",
         };
-        let order_type = match r.intent.order_type {
-            OrderType::Market => "market",
-            OrderType::Limit => "limit",
-            OrderType::StopLimit => "stop_limit",
-        };
+        let order_type = r.intent.order_type.as_str();
         Self {
             order_id: r.order_id.clone(),
             idempotency_key: r.intent.idempotency_key,
@@ -346,6 +403,16 @@ impl PaperOrderView {
             updated_at: r.updated_at,
         }
     }
+}
+
+/// What one attempt to fill an order did.
+enum Attempt {
+    Filled,
+    NotMarketable,
+    Rejected(PaperTradeError),
+    /// Withdrawn rather than rejected: a reduce-only order with nothing left to
+    /// reduce.
+    Cancelled(PaperTradeError),
 }
 
 /// Latest observed mark for one instrument.
@@ -401,6 +468,10 @@ pub struct PaperTradingEngine {
     terminal_fifo: Mutex<VecDeque<String>>,
     sims: SimulatorSet,
     config: PaperEngineConfig,
+    /// The time, for every stamp and every gate (Set U U-2.1).
+    clock: Arc<dyn crate::clock::VenueClock>,
+    /// Order ids: random for paper, sequential in a backtest.
+    ids: Arc<dyn crate::clock::OrderIds>,
 }
 
 impl Default for PaperTradingEngine {
@@ -438,6 +509,25 @@ impl PaperTradingEngine {
         sims: SimulatorSet,
         config: PaperEngineConfig,
     ) -> Self {
+        Self::with_clock(
+            starting_cash_overrides,
+            sims,
+            config,
+            Arc::new(crate::clock::WallClock),
+            Arc::new(crate::clock::RandomIds),
+        )
+    }
+
+    /// [`Self::with_config`] with an explicit clock and id source — the
+    /// simulated venue's constructor (ADR-0044). Everything else about the
+    /// engine is identical, which is the point.
+    pub fn with_clock(
+        starting_cash_overrides: &HashMap<AssetClass, Decimal>,
+        sims: SimulatorSet,
+        config: PaperEngineConfig,
+        clock: Arc<dyn crate::clock::VenueClock>,
+        ids: Arc<dyn crate::clock::OrderIds>,
+    ) -> Self {
         let mut starting_cash = HashMap::new();
         let accounts = ALL_ASSET_CLASSES
             .into_iter()
@@ -447,7 +537,10 @@ impl PaperTradingEngine {
                     .copied()
                     .unwrap_or_else(|| AccountPolicy::for_asset_class(ac).default_starting_cash);
                 starting_cash.insert(ac, cash);
-                (ac, Mutex::new(PaperAccount::new(ac, cash)))
+                (
+                    ac,
+                    Mutex::new(PaperAccount::with_clock(ac, cash, Arc::clone(&clock))),
+                )
             })
             .collect();
         info!(
@@ -465,7 +558,14 @@ impl PaperTradingEngine {
             terminal_fifo: Mutex::new(VecDeque::new()),
             sims,
             config,
+            clock,
+            ids,
         }
+    }
+
+    /// The engine's current time — wall or simulated.
+    pub fn now(&self) -> DateTime<Utc> {
+        self.clock.now()
     }
 
     /// A [`super::PaperBroker`] view of this engine for one asset class.
@@ -500,7 +600,7 @@ impl PaperTradingEngine {
     pub fn on_mark(&self, instrument_id: &str, mark: Price) {
         let entry = MarkEntry {
             price: mark,
-            at: Utc::now(),
+            at: self.clock.now(),
         };
         if let Some(mut existing) = self.marks.get_mut(instrument_id) {
             *existing = entry;
@@ -538,7 +638,7 @@ impl PaperTradingEngine {
         asset_class: AssetClass,
         intent: &OrderIntent,
     ) -> Result<String, PaperTradeError> {
-        self.submit_at(asset_class, intent, Utc::now())
+        self.submit_at(asset_class, intent, self.clock.now())
     }
 
     /// [`Self::submit`] with an explicit clock — the realism gates (session
@@ -554,8 +654,8 @@ impl PaperTradingEngine {
             return Ok(existing.value().clone());
         }
 
-        let order_id = Uuid::new_v4().to_string();
-        let mut record = PaperOrderRecord::new(order_id.clone(), asset_class, intent.clone());
+        let order_id = self.ids.next_id();
+        let mut record = PaperOrderRecord::new(order_id.clone(), asset_class, intent.clone(), now);
 
         // Session gate: a live venue would reject this order outright.
         if self.config.enforce_sessions && !super::session::is_open(asset_class, now) {
@@ -603,28 +703,64 @@ impl PaperTradingEngine {
             }
         }
 
-        let fill = self
-            .sims
-            .for_asset_class(asset_class)
-            .simulate_fill(intent, mark);
-
-        if fill.filled_qty > Decimal::ZERO {
-            let applied = {
-                let mut account = self
-                    .account(asset_class)
-                    .lock()
-                    .expect("paper account lock");
-                let result =
-                    account.apply_fill(&order_id, &fill, &|id| self.mark(id).map(Price::inner));
-                if let Err(ref e) = result {
-                    account.record_rejection(&order_id, &intent.instrument_id, &e.to_string());
-                }
-                result
+        if let Err(e) = intent.check_shape() {
+            record.state = BrokerOrderState::Rejected;
+            self.account(asset_class)
+                .lock()
+                .expect("paper account lock")
+                .record_rejection(&order_id, &intent.instrument_id, &e.to_string());
+            self.insert_record(record);
+            return Err(PaperTradeError::InvalidOrder(e.to_string()));
+        }
+        // Post-only: a limit that would trade against the current mark is
+        // refused rather than allowed to take.
+        if intent.post_only {
+            let limit = intent.limit_price.map(Price::inner).unwrap_or_default();
+            let takes = match intent.side {
+                Side::Buy => mark.inner() <= limit,
+                Side::Sell => mark.inner() >= limit,
             };
-            match applied {
-                Ok(()) => record.record_fill(&fill),
-                Err(e) => {
+            if takes {
+                record.state = BrokerOrderState::Rejected;
+                let e = PaperTradeError::PostOnlyWouldTake {
+                    instrument_id: intent.instrument_id.clone(),
+                };
+                self.account(asset_class)
+                    .lock()
+                    .expect("paper account lock")
+                    .record_rejection(&order_id, &intent.instrument_id, &e.to_string());
+                self.insert_record(record);
+                return Err(e);
+            }
+        }
+
+        // A stop-type order is live only once its trigger has traded.
+        let live = if intent.order_type.is_triggered() {
+            record.best = Some(mark.inner());
+            if record.trigger_met(mark.inner()).is_some() {
+                record.triggered = true;
+            }
+            record.triggered
+        } else {
+            true
+        };
+
+        let mut filled_any = false;
+        if live {
+            match self.attempt(&mut record, mark) {
+                Attempt::Filled => filled_any = true,
+                Attempt::NotMarketable => {}
+                Attempt::Rejected(e) => {
                     record.state = BrokerOrderState::Rejected;
+                    self.insert_record(record);
+                    return Err(e);
+                }
+                Attempt::Cancelled(e) => {
+                    record.state = BrokerOrderState::Cancelled;
+                    self.account(asset_class)
+                        .lock()
+                        .expect("paper account lock")
+                        .record_rejection(&order_id, &intent.instrument_id, &e.to_string());
                     self.insert_record(record);
                     return Err(e);
                 }
@@ -633,9 +769,17 @@ impl PaperTradingEngine {
 
         // Decide what happens to any unfilled remainder.
         let mut rests = false;
-        if record.filled_qty < intent.size.inner() {
-            rests = matches!(intent.order_type, OrderType::Limit | OrderType::StopLimit)
-                && matches!(intent.time_in_force, TimeInForce::Gtc | TimeInForce::Day);
+        if record.is_open() && record.filled_qty < intent.size.inner() {
+            let resting_type = match intent.order_type {
+                OrderType::Limit => true,
+                // An untriggered stop waits for its trigger; a triggered
+                // stop-limit waits as a limit.
+                OrderType::Stop | OrderType::TrailingStop => !record.triggered,
+                OrderType::StopLimit => true,
+                OrderType::Market => false,
+            };
+            rests =
+                resting_type && matches!(intent.time_in_force, TimeInForce::Gtc | TimeInForce::Day);
             if !rests {
                 // Unfilled IOC/FOK, or a partially-filled taker remainder: kill it.
                 record.state = BrokerOrderState::Cancelled;
@@ -659,6 +803,11 @@ impl PaperTradingEngine {
                 .or_default()
                 .push(order_id.clone());
         }
+        if filled_any {
+            if let Some(group) = &intent.oco_group {
+                self.cancel_oco_siblings(group, &order_id);
+            }
+        }
         Ok(order_id)
     }
 
@@ -674,12 +823,18 @@ impl PaperTradingEngine {
                 return Ok(());
             }
             record.state = BrokerOrderState::Cancelled;
-            record.updated_at = Utc::now();
+            record.updated_at = self.clock.now();
             record.intent.instrument_id.clone()
         };
         self.remove_from_resting(&instrument_id, &[order_id.to_owned()]);
         self.push_terminal(order_id.to_owned());
         Ok(())
+    }
+
+    /// The venue order id an idempotency key was given, once it reached the
+    /// engine (accepted or rejected).
+    pub fn order_id_for(&self, key: Uuid) -> Option<String> {
+        self.idempotency.get(&key).map(|e| e.value().clone())
     }
 
     /// Status of any order the engine still retains.
@@ -740,7 +895,7 @@ impl PaperTradingEngine {
             .account(asset_class)
             .lock()
             .expect("paper account lock")
-            .realized_pnl_on(Utc::now().date_naive());
+            .realized_pnl_on(self.clock.now().date_naive());
         let unrealized: Decimal = self
             .snapshot(asset_class)
             .positions
@@ -800,7 +955,7 @@ impl PaperTradingEngine {
                 .account(asset_class)
                 .lock()
                 .expect("paper account lock");
-            *account = PaperAccount::new(asset_class, cash);
+            *account = PaperAccount::with_clock(asset_class, cash, Arc::clone(&self.clock));
         }
         self.purge_orders(|r| r.asset_class == asset_class);
         info!(asset_class = %asset_class.as_str(), "paper account reset to opening balance");
@@ -817,7 +972,7 @@ impl PaperTradingEngine {
                 .copied()
                 .unwrap_or_else(|| AccountPolicy::for_asset_class(ac).default_starting_cash);
             let mut account = self.account(ac).lock().expect("paper account lock");
-            *account = PaperAccount::new(ac, cash);
+            *account = PaperAccount::with_clock(ac, cash, Arc::clone(&self.clock));
         }
         self.orders.clear();
         self.resting.clear();
@@ -903,15 +1058,203 @@ impl PaperTradingEngine {
 
     // ── Internals ────────────────────────────────────────────────────────────
 
+    /// How much of a reduce-only order may fill now: the size of an opposite
+    /// position, or nothing.
+    fn reduce_capacity(&self, asset_class: AssetClass, instrument_id: &str, side: Side) -> Decimal {
+        let pos = self
+            .account(asset_class)
+            .lock()
+            .expect("paper account lock")
+            .position(instrument_id)
+            .map_or(Decimal::ZERO, |p| p.quantity);
+        match side {
+            Side::Buy if pos < Decimal::ZERO => -pos,
+            Side::Sell if pos > Decimal::ZERO => pos,
+            _ => Decimal::ZERO,
+        }
+    }
+
+    /// Try to fill what remains of `record` at `mark`. Applies reduce-only
+    /// capping, prices through the asset class's simulator, books the fill.
+    fn attempt(&self, record: &mut PaperOrderRecord, mark: Price) -> Attempt {
+        let remaining = record.intent.size.inner() - record.filled_qty;
+        if remaining <= Decimal::ZERO {
+            return Attempt::NotMarketable;
+        }
+        let mut qty = remaining;
+        if record.intent.reduce_only {
+            let cap = self.reduce_capacity(
+                record.asset_class,
+                &record.intent.instrument_id,
+                record.intent.side,
+            );
+            if cap <= Decimal::ZERO {
+                return Attempt::Cancelled(PaperTradeError::ReduceOnlyWouldIncrease {
+                    instrument_id: record.intent.instrument_id.clone(),
+                });
+            }
+            qty = qty.min(cap);
+        }
+        let probe = record.live_probe(qty);
+        let fill = self
+            .sims
+            .for_asset_class(record.asset_class)
+            .simulate_fill(&probe, mark);
+        if fill.filled_qty <= Decimal::ZERO {
+            return Attempt::NotMarketable;
+        }
+        let applied = {
+            let mut account = self
+                .account(record.asset_class)
+                .lock()
+                .expect("paper account lock");
+            let result = account.apply_fill(&record.order_id, &fill, &|id| {
+                self.mark(id).map(Price::inner)
+            });
+            if let Err(ref e) = result {
+                account.record_rejection(
+                    &record.order_id,
+                    &record.intent.instrument_id,
+                    &e.to_string(),
+                );
+            }
+            result
+        };
+        match applied {
+            Ok(()) => {
+                record.record_fill(&fill, self.clock.now());
+                // A reduce-only order capped at the position has nothing left to
+                // reduce: its remainder is cancelled, never left to open a new
+                // position later.
+                if record.is_open()
+                    && record.intent.reduce_only
+                    && self.reduce_capacity(
+                        record.asset_class,
+                        &record.intent.instrument_id,
+                        record.intent.side,
+                    ) <= Decimal::ZERO
+                {
+                    record.state = BrokerOrderState::Cancelled;
+                }
+                Attempt::Filled
+            }
+            Err(e) => Attempt::Rejected(e),
+        }
+    }
+
+    /// Cancel every other open order in `group` — one-cancels-other.
+    fn cancel_oco_siblings(&self, group: &str, filled_order_id: &str) {
+        let siblings: Vec<String> = self
+            .orders
+            .iter()
+            .filter(|r| {
+                r.is_open()
+                    && r.order_id != filled_order_id
+                    && r.intent.oco_group.as_deref() == Some(group)
+            })
+            .map(|r| r.order_id.clone())
+            .collect();
+        for id in siblings {
+            let _ = self.cancel(&id);
+        }
+    }
+
     fn account(&self, asset_class: AssetClass) -> &Mutex<PaperAccount> {
         self.accounts
             .get(&asset_class)
             .expect("every asset class has a paper account")
     }
 
-    /// Try to fill resting orders on `instrument_id` at the new mark.
+    /// Try to fill resting orders on `instrument_id` at the new mark — the
+    /// paper path, one print at a time.
     fn fill_resting(&self, instrument_id: &str, mark: Price, resting_ids: &[String]) {
+        let p = mark.inner();
+        self.resting_pass(instrument_id, resting_ids, &|record| {
+            if record.intent.order_type.is_triggered() && !record.triggered {
+                // Triggered at this print: a stop fills here, a stop-limit
+                // then checks its limit against the same print.
+                record.trigger_met(p)?;
+                record.triggered = true;
+            }
+            Some(mark)
+        });
+    }
+
+    /// Process one closed bar's range on `instrument_id` — the simulated
+    /// venue's path (ADR-0044). **Stops first:** every stop-type order is
+    /// checked against the whole range before any limit is, so when a bar spans
+    /// both a bracket's stop and its take-profit the stop wins and its OCO
+    /// sibling is cancelled before the take-profit can fill. That is the
+    /// pessimistic intrabar rule (FEAT-005 §3.4), and it is the only ordering a
+    /// bar cannot contradict: the bar does not say which extreme came first.
+    ///
+    /// A stop that triggers inside the range fills at its own level (plus the
+    /// simulator's costs); one the bar *opened* through has already filled at
+    /// the open, because the driver marks the open first.
+    pub fn on_bar_range(&self, instrument_id: &str, low: Price, high: Price) {
+        let (lo, hi) = (low.inner(), high.inner());
+        // Pass 1: stops.
+        if let Some(ids) = self.resting.get(instrument_id).map(|v| v.clone()) {
+            self.resting_pass(instrument_id, &ids, &|record| {
+                if !record.intent.order_type.is_triggered() || record.triggered {
+                    return None;
+                }
+                // The adverse extreme for this order's trigger.
+                let probe = match record.intent.side {
+                    Side::Sell => lo,
+                    Side::Buy => hi,
+                };
+                let level = record.trigger_met(probe)?;
+                record.triggered = true;
+                if record.intent.order_type == OrderType::StopLimit {
+                    return None; // a triggered stop-limit is a limit: pass 2
+                }
+                Some(Price::from_decimal(level.clamp(lo, hi)))
+            });
+            // A trailing stop that survived the bar ratchets to its favourable
+            // extreme — after the trigger check, never before.
+            for id in ids {
+                if let Some(mut r) = self.orders.get_mut(&id) {
+                    if r.is_open() && r.intent.order_type == OrderType::TrailingStop && !r.triggered
+                    {
+                        let fav = match r.intent.side {
+                            Side::Sell => hi,
+                            Side::Buy => lo,
+                        };
+                        let _ = r.trigger_met(fav);
+                    }
+                }
+            }
+        }
+        // Pass 2: limits, and stop-limits triggered in pass 1.
+        if let Some(ids) = self.resting.get(instrument_id).map(|v| v.clone()) {
+            self.resting_pass(instrument_id, &ids, &|record| {
+                let is_limit = record.intent.order_type == OrderType::Limit
+                    || (record.intent.order_type == OrderType::StopLimit && record.triggered);
+                if !is_limit {
+                    return None;
+                }
+                let limit = record.intent.limit_price?.inner();
+                let touched = match record.intent.side {
+                    Side::Buy => lo <= limit,
+                    Side::Sell => hi >= limit,
+                };
+                // Filled at the limit, as a maker: the bar traded through it.
+                touched.then_some(Price::from_decimal(limit))
+            });
+        }
+    }
+
+    /// One pass over resting orders. `price_for` decides, per order, whether it
+    /// is live and at what price it would fill; `None` leaves it resting.
+    fn resting_pass(
+        &self,
+        instrument_id: &str,
+        resting_ids: &[String],
+        price_for: &dyn Fn(&mut PaperOrderRecord) -> Option<Price>,
+    ) {
         let mut done: Vec<String> = Vec::new();
+        let mut oco: Vec<(String, String)> = Vec::new();
         for order_id in resting_ids {
             // Hold the order entry while applying so cancel() cannot interleave
             // between the marketability check and the account update.
@@ -923,45 +1266,29 @@ impl PaperTradingEngine {
                 done.push(order_id.clone());
                 continue;
             }
-            let remaining = record.intent.size.inner() - record.filled_qty;
-            if remaining <= Decimal::ZERO {
-                done.push(order_id.clone());
+            let Some(price) = price_for(&mut record) else {
                 continue;
-            }
-            let mut probe = record.intent.clone();
-            probe.size = Size::from_decimal(remaining);
-            let fill = self
-                .sims
-                .for_asset_class(record.asset_class)
-                .simulate_fill(&probe, mark);
-            if fill.filled_qty <= Decimal::ZERO {
-                continue; // still not marketable — keep resting
-            }
-            let applied = {
-                let mut account = self
-                    .account(record.asset_class)
-                    .lock()
-                    .expect("paper account lock");
-                let result =
-                    account.apply_fill(order_id, &fill, &|id| self.mark(id).map(Price::inner));
-                if let Err(ref e) = result {
-                    account.record_rejection(order_id, instrument_id, &e.to_string());
-                }
-                result
             };
-            match applied {
-                Ok(()) => {
-                    record.record_fill(&fill);
-                    if record.state == BrokerOrderState::Filled {
+            match self.attempt(&mut record, price) {
+                Attempt::NotMarketable => {}
+                Attempt::Filled => {
+                    if let Some(g) = &record.intent.oco_group {
+                        oco.push((g.clone(), order_id.clone()));
+                    }
+                    if !record.is_open() {
                         done.push(order_id.clone());
                         drop(record);
                         self.push_terminal(order_id.clone());
                     }
                 }
-                Err(e) => {
-                    debug!(%order_id, error = %e, "resting paper order rejected at fill time");
-                    record.state = BrokerOrderState::Rejected;
-                    record.updated_at = Utc::now();
+                Attempt::Rejected(e) | Attempt::Cancelled(e) => {
+                    debug!(%order_id, error = %e, "resting paper order did not fill");
+                    record.state = if matches!(e, PaperTradeError::ReduceOnlyWouldIncrease { .. }) {
+                        BrokerOrderState::Cancelled
+                    } else {
+                        BrokerOrderState::Rejected
+                    };
+                    record.updated_at = self.clock.now();
                     done.push(order_id.clone());
                     drop(record);
                     self.push_terminal(order_id.clone());
@@ -970,6 +1297,9 @@ impl PaperTradingEngine {
         }
         if !done.is_empty() {
             self.remove_from_resting(instrument_id, &done);
+        }
+        for (group, filled) in oco {
+            self.cancel_oco_siblings(&group, &filled);
         }
     }
 
@@ -1326,5 +1656,254 @@ mod tests {
         .unwrap();
         let realized = eng.settle_binary("KX-EVENT", true).unwrap();
         assert!(realized > Decimal::ZERO);
+    }
+
+    // ── Set U U-2.3: the order vocabulary means what it says ────────────────
+
+    const C: AssetClass = AssetClass::CryptoSpotCex;
+
+    fn px(v: Decimal) -> Price {
+        Price::from_decimal(v)
+    }
+
+    fn mark(eng: &PaperTradingEngine, v: Decimal) {
+        eng.on_mark("BTC-USD", px(v));
+    }
+
+    fn long_one(eng: &PaperTradingEngine) {
+        mark(eng, dec!(50_000));
+        eng.submit(C, &market("BTC-USD", Side::Buy, dec!(1)))
+            .unwrap();
+    }
+
+    fn held(eng: &PaperTradingEngine) -> Decimal {
+        eng.positions(C)
+            .first()
+            .map_or(Decimal::ZERO, |p| p.quantity)
+    }
+
+    fn typed(mut i: OrderIntent, t: OrderType) -> OrderIntent {
+        i.order_type = t;
+        i
+    }
+
+    fn stop_sell(qty: Decimal, stop: Decimal) -> OrderIntent {
+        typed(
+            market("BTC-USD", Side::Sell, qty).with_stop(px(stop)),
+            OrderType::Stop,
+        )
+    }
+
+    fn trailing_sell(trail: Decimal) -> OrderIntent {
+        typed(
+            market("BTC-USD", Side::Sell, dec!(1)).with_trail(px(trail)),
+            OrderType::TrailingStop,
+        )
+    }
+
+    #[test]
+    fn a_stop_rests_until_its_trigger_trades_then_fills_as_a_market_order() {
+        let eng = engine();
+        long_one(&eng);
+        let id = eng.submit(C, &stop_sell(dec!(1), dec!(49_000))).unwrap();
+        assert_eq!(eng.order_status(&id).unwrap().state, BrokerOrderState::New);
+        mark(&eng, dec!(49_500));
+        assert_eq!(held(&eng), dec!(1), "above the stop: nothing happens");
+        mark(&eng, dec!(48_900));
+        assert_eq!(
+            eng.order_status(&id).unwrap().state,
+            BrokerOrderState::Filled
+        );
+        assert_eq!(held(&eng), Decimal::ZERO);
+    }
+
+    #[test]
+    fn a_stop_limit_becomes_a_limit_when_triggered_not_before() {
+        let eng = engine();
+        long_one(&eng);
+        // Before 2026-10-02 this was a plain sell limit at 48 500 — marketable at
+        // 50 000, it would have sold at once.
+        let mut i = typed(stop_sell(dec!(1), dec!(49_000)), OrderType::StopLimit);
+        i.limit_price = Some(px(dec!(48_500)));
+        let id = eng.submit(C, &i).unwrap();
+        assert_eq!(held(&eng), dec!(1), "untriggered: does not sell at 50 000");
+        // Gaps through both the stop and the limit: triggered, but the limit
+        // protects it — it rests as a sell limit at 48 500.
+        mark(&eng, dec!(48_000));
+        assert_eq!(eng.order_status(&id).unwrap().state, BrokerOrderState::New);
+        assert_eq!(held(&eng), dec!(1));
+        mark(&eng, dec!(48_600));
+        assert_eq!(
+            eng.order_status(&id).unwrap().state,
+            BrokerOrderState::Filled
+        );
+    }
+
+    #[test]
+    fn a_trailing_stop_follows_the_high_and_fires_on_the_pullback() {
+        let eng = engine();
+        long_one(&eng);
+        let id = eng.submit(C, &trailing_sell(dec!(1_000))).unwrap();
+        mark(&eng, dec!(49_200)); // 800 off the 50 000 best: holds
+        mark(&eng, dec!(53_000)); // new best; stop now 52 000
+        mark(&eng, dec!(52_100));
+        assert_eq!(held(&eng), dec!(1));
+        mark(&eng, dec!(51_900));
+        assert_eq!(
+            eng.order_status(&id).unwrap().state,
+            BrokerOrderState::Filled
+        );
+        assert_eq!(held(&eng), Decimal::ZERO);
+    }
+
+    #[test]
+    fn reduce_only_is_capped_at_the_position_and_never_opens_one() {
+        let eng = engine();
+        long_one(&eng);
+        let id = eng
+            .submit(C, &market("BTC-USD", Side::Sell, dec!(3)).reduce_only())
+            .unwrap();
+        assert_eq!(held(&eng), Decimal::ZERO, "sold the one held, not three");
+        assert_eq!(eng.order_status(&id).unwrap().filled_qty, dec!(1));
+        // Flat: a reduce-only order has nothing to reduce.
+        let err = eng
+            .submit(C, &market("BTC-USD", Side::Sell, dec!(1)).reduce_only())
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            PaperTradeError::ReduceOnlyWouldIncrease { .. }
+        ));
+        // A same-side reduce-only order would increase the position.
+        long_one(&eng);
+        let err = eng
+            .submit(C, &market("BTC-USD", Side::Buy, dec!(1)).reduce_only())
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            PaperTradeError::ReduceOnlyWouldIncrease { .. }
+        ));
+        assert_eq!(held(&eng), dec!(1));
+    }
+
+    #[test]
+    fn post_only_refuses_to_take_and_rests_when_it_would_not() {
+        let eng = engine();
+        mark(&eng, dec!(50_000));
+        let err = eng
+            .submit(
+                C,
+                &limit("BTC-USD", Side::Buy, dec!(1), dec!(50_100)).post_only(),
+            )
+            .unwrap_err();
+        assert!(matches!(err, PaperTradeError::PostOnlyWouldTake { .. }));
+        let id = eng
+            .submit(
+                C,
+                &limit("BTC-USD", Side::Buy, dec!(1), dec!(49_000)).post_only(),
+            )
+            .unwrap();
+        assert_eq!(eng.order_status(&id).unwrap().state, BrokerOrderState::New);
+    }
+
+    #[test]
+    fn a_malformed_order_is_rejected_by_name() {
+        let eng = engine();
+        mark(&eng, dec!(50_000));
+        let i = typed(market("BTC-USD", Side::Sell, dec!(1)), OrderType::Stop);
+        let err = eng.submit(C, &i).unwrap_err();
+        assert!(
+            matches!(err, PaperTradeError::InvalidOrder(ref m) if m.contains("stop")),
+            "{err}"
+        );
+    }
+
+    fn bracket(eng: &PaperTradingEngine) -> (String, String) {
+        let stop = eng
+            .submit(
+                C,
+                &stop_sell(dec!(1), dec!(49_000)).reduce_only().in_oco("b1"),
+            )
+            .unwrap();
+        let tp = eng
+            .submit(
+                C,
+                &limit("BTC-USD", Side::Sell, dec!(1), dec!(52_000))
+                    .reduce_only()
+                    .in_oco("b1"),
+            )
+            .unwrap();
+        (stop, tp)
+    }
+
+    #[test]
+    fn one_cancels_other_when_either_leg_fills() {
+        let eng = engine();
+        long_one(&eng);
+        let (stop, tp) = bracket(&eng);
+        mark(&eng, dec!(52_100));
+        assert_eq!(
+            eng.order_status(&tp).unwrap().state,
+            BrokerOrderState::Filled
+        );
+        assert_eq!(
+            eng.order_status(&stop).unwrap().state,
+            BrokerOrderState::Cancelled
+        );
+        assert!(eng.open_orders(Some(C)).is_empty());
+        assert_eq!(held(&eng), Decimal::ZERO);
+    }
+
+    #[test]
+    fn a_bar_spanning_both_bracket_legs_takes_the_stop() {
+        // Pessimistic intrabar rule: the bar does not say which extreme came
+        // first, so the stop is assumed to have.
+        let eng = engine();
+        long_one(&eng);
+        let (stop, tp) = bracket(&eng);
+        eng.on_bar_range("BTC-USD", px(dec!(48_000)), px(dec!(53_000)));
+        let s = eng.order_status(&stop).unwrap();
+        assert_eq!(s.state, BrokerOrderState::Filled);
+        assert_eq!(
+            eng.order_status(&tp).unwrap().state,
+            BrokerOrderState::Cancelled
+        );
+        // Filled near its own level, not at the bar's low.
+        let avg = s.avg_fill_price.unwrap().inner();
+        assert!(
+            avg > dec!(48_500) && avg <= dec!(49_000),
+            "stop filled at {avg}"
+        );
+    }
+
+    #[test]
+    fn a_bar_touching_a_limit_fills_it_at_the_limit() {
+        let eng = engine();
+        mark(&eng, dec!(50_000));
+        let id = eng
+            .submit(C, &limit("BTC-USD", Side::Buy, dec!(1), dec!(49_000)))
+            .unwrap();
+        eng.on_bar_range("BTC-USD", px(dec!(49_500)), px(dec!(50_500)));
+        assert_eq!(eng.order_status(&id).unwrap().state, BrokerOrderState::New);
+        eng.on_bar_range("BTC-USD", px(dec!(48_800)), px(dec!(50_200)));
+        let s = eng.order_status(&id).unwrap();
+        assert_eq!(s.state, BrokerOrderState::Filled);
+        assert_eq!(s.avg_fill_price.unwrap().inner(), dec!(49_000));
+    }
+
+    #[test]
+    fn a_trailing_stop_ratchets_after_the_bar_never_within_it() {
+        let eng = engine();
+        long_one(&eng);
+        let id = eng.submit(C, &trailing_sell(dec!(1_000))).unwrap();
+        // High 54 000 then: had the stop ratcheted to 53 000 inside the bar, a
+        // low of 49 500 would have fired it; it ratchets only after the bar.
+        eng.on_bar_range("BTC-USD", px(dec!(49_500)), px(dec!(54_000)));
+        assert_eq!(eng.order_status(&id).unwrap().state, BrokerOrderState::New);
+        // Next bar: the stop is 53 000 now.
+        eng.on_bar_range("BTC-USD", px(dec!(52_900)), px(dec!(53_500)));
+        assert_eq!(
+            eng.order_status(&id).unwrap().state,
+            BrokerOrderState::Filled
+        );
     }
 }

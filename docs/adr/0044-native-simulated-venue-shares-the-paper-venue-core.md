@@ -1,6 +1,6 @@
 # ADR-0044: A Native Simulated Venue Shares the Paper Venue's Core; market_simulator Becomes a Reference Venue
 
-**Status:** Accepted
+**Status:** Accepted — **confirmed by the owner 2026-10-02** ("yes, move off market_simulator")
 **Date:** 2026-10-01
 **Deciders:** platform architect, on the owner's direction that backtest and paper "should work
 similarly but not exactly the same"
@@ -52,4 +52,4 @@ cross-check fills on the instruments it supports. It is not the default.
 - Bad: the platform now owns its backtest fill model. Mitigated by the reference venue, the oracle
   test, and Set T's forward reconciliation of paper fills against backtest expectations — the
   measurement that tells us whether the simulator is telling the truth.
-- **This reverses a decision the owner made on 2026-06-08** and is flagged to the owner as such.
+- **This reverses a decision the owner made on 2026-06-08.** It was flagged before any of it was built, and the owner confirmed it on 2026-10-02.

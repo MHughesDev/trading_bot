@@ -1,6 +1,6 @@
 # Unified Strategy Engine — Set U
 
-**Completion: 74% left (14 / 53 tasks). 14 done, 0 partial, 39 not started.**
+**Completion: 65% left (19 / 54 tasks). 19 done, 0 partial, 35 not started.**
 
 **Status:** ACCEPTED (2026-10-01) — Phase 0 starts immediately.
 **Created:** 2026-10-01
@@ -8,7 +8,7 @@
 ADR-0047, written after the 2026-10-01 audit of every path a strategy takes. Folds in the unbuilt
 halves of FEAT-004 §3, FEAT-005 §3–§4 and §9, and FEAT-006 §5–§6.
 **Requirement IDs:** SU-CON, SU-ENG, SU-VEN, SU-BT, SU-LIVE, SU-MOD, SU-SEL, SU-AUTH, SU-PAR.
-**Migration range:** 0141–0148.
+**Migration range:** 0141–0149. 0141 went to [ADR-0048](../../../adr/0048-paper-trading-runs-in-the-app.md) (paper runs in the app, 2026-10-02); the phases' own migrations moved up one.
 **Scope class:** End-state architecture.
 
 ---
@@ -73,6 +73,7 @@ decide identically.
 | [0045](../../../adr/0045-one-language-front-end-graph-is-canonical.md) | one language front-end; the graph is canonical |
 | [0046](../../../adr/0046-risk-gate-in-every-environment.md) | the risk gate in every environment |
 | [0047](../../../adr/0047-decision-journal-and-replay-parity.md) | decision journal and nightly replay parity |
+| [0048](../../../adr/0048-paper-trading-runs-in-the-app.md) | paper trading runs in the app, never on a broker's paper account (owner, 2026-10-02) |
 
 ---
 
@@ -82,11 +83,11 @@ decide identically.
 |---|---|---|---|---|
 | 0 | [The contracts](phase-0-contracts.md) | 5 | — | DONE 2026-10-01 |
 | 1 | [The engine core](phase-1-engine-core.md) | 9 | — | DONE 2026-10-01 |
-| 2 | [Venues and the risk gate](phase-2-venues-and-risk.md) | 5 | — | NOT STARTED |
+| 2 | [Venues and the risk gate](phase-2-venues-and-risk.md) | 6 | — | 5 / 6 — U-2.6 open |
 | 3 | [The backtest environment](phase-3-backtest-environment.md) | 5 | — | NOT STARTED |
-| 4 | [Paper and live](phase-4-paper-and-live.md) | 6 | 0141–0143 | NOT STARTED |
-| 5 | [Models](phase-5-models.md) | 7 | 0144–0146 | NOT STARTED |
-| 6 | [Selection strategies](phase-6-selection.md) | 5 | 0147–0148 | NOT STARTED |
+| 4 | [Paper and live](phase-4-paper-and-live.md) | 6 | 0142–0144 | NOT STARTED |
+| 5 | [Models](phase-5-models.md) | 7 | 0145–0147 | NOT STARTED |
+| 6 | [Selection strategies](phase-6-selection.md) | 5 | 0148–0149 | NOT STARTED |
 | 7 | [Authoring — identical for people and models](phase-7-authoring.md) | 6 | — | NOT STARTED |
 | 8 | [Parity, proven; old paths retired](phase-8-parity-and-retirement.md) | 5 | — | NOT STARTED |
 
@@ -109,7 +110,7 @@ Phases 1, 2, 5 and 7 can proceed in parallel once Phase 0 lands; they share only
 
 As [Set S §5](../set-S/MASTER.md#5-the-agent-contract), with these differences:
 
-- **Migration numbers come only from 0141–0148.**
+- **Migration numbers come only from 0142–0149** (0141 is ADR-0048's).
 - **The engine stays pure.** `strategy-engine` may not depend on `execution`, `risk`, `storage`,
   `model-registry`, `tokio` or any clock; a Cargo-graph test enforces it from Phase 3 on. A task that
   needs I/O inside the engine is a design error, not a dependency to add.

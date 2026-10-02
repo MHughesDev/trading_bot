@@ -5,7 +5,8 @@
 //! * Crypto → Kraken (data)
 //! * Equity → Alpaca data feed
 //!
-//! Execution routing is separate: live→Coinbase, paper→Alpaca.
+//! Execution routing is separate: live→Coinbase; paper→the platform's own paper
+//! venue (`execution::paper`), never a broker's paper account (ADR-0048).
 
 pub mod exec_router;
 pub mod lifecycle;

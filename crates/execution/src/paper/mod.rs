@@ -25,6 +25,7 @@ pub mod ledger;
 pub mod policy;
 pub mod prediction;
 pub mod session;
+pub mod venue;
 pub mod wallet;
 
 use domain::{
@@ -51,6 +52,7 @@ pub use engine::{
 pub use ledger::{PaperLedgerEntry, PaperLedgerKind};
 pub use policy::{AccountKind, AccountPolicy, ALL_ASSET_CLASSES};
 pub use prediction::PredictionMarketFillSimulator;
+pub use venue::PaperVenue;
 pub use wallet::DexPaperWallet;
 
 /// Result of a simulated fill — carries all information needed to write a

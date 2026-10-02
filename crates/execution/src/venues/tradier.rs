@@ -83,9 +83,19 @@ impl Broker for TradierBroker {
             Side::Buy => "buy_to_open",
             Side::Sell => "sell_to_close",
         };
+        // Stop-type orders are refused by name. This adapter used to send a
+        // stop-limit as a plain limit — the trigger silently dropped — which is a
+        // different order from the one the strategy placed (Set U U-2.3).
+        if order.intent.order_type.is_triggered() {
+            return Err(BrokerError::Rejected(format!(
+                "{} orders are not supported by the {} adapter",
+                order.intent.order_type.as_str(),
+                "Tradier"
+            )));
+        }
         let order_type = match order.intent.order_type {
             OrderType::Market => "market",
-            OrderType::Limit | OrderType::StopLimit => "limit",
+            _ => "limit",
         };
         let duration = "gtc";
 

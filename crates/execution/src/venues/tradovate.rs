@@ -89,9 +89,19 @@ impl Broker for TradovateBroker {
             Side::Buy => "Buy",
             Side::Sell => "Sell",
         };
+        // Stop-type orders are refused by name. This adapter used to send a
+        // stop-limit as a plain limit — the trigger silently dropped — which is a
+        // different order from the one the strategy placed (Set U U-2.3).
+        if order.intent.order_type.is_triggered() {
+            return Err(BrokerError::Rejected(format!(
+                "{} orders are not supported by the {} adapter",
+                order.intent.order_type.as_str(),
+                "Tradovate"
+            )));
+        }
         let ord_type = match order.intent.order_type {
             OrderType::Market => "Market",
-            OrderType::Limit | OrderType::StopLimit => "Limit",
+            _ => "Limit",
         };
 
         let mut body = serde_json::json!({

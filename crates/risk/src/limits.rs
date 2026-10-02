@@ -5,6 +5,7 @@ use rust_decimal::Decimal;
 use domain::{
     instrument::HaltPolicy,
     money::{Price, Size},
+    order::Side,
     RiskRejection,
 };
 
@@ -35,13 +36,37 @@ impl Default for GlobalRiskLimits {
     }
 }
 
+/// The position cap for a buy of `requested` from `current`.
+///
+/// Kept for the callers that only ever buy; the gate calls
+/// [`check_position_after`], which knows the side.
 pub fn check_position(
     limits: &GlobalRiskLimits,
     instrument_id: &str,
     current: Decimal,
     requested: Size,
 ) -> Result<(), RiskRejection> {
-    let new_abs = (current + requested.inner()).abs();
+    check_position_after(limits, instrument_id, current, Side::Buy, requested)
+}
+
+/// The position cap against the position this order would leave.
+///
+/// Until 2026-10-02 the gate added the order's size to the position whatever
+/// its side, so a sell from a long counted as *growing* it: a strategy at its
+/// cap could not sell to get out, and a sell that halved a position near the
+/// cap was refused as a breach (Set U U-2.4).
+pub fn check_position_after(
+    limits: &GlobalRiskLimits,
+    instrument_id: &str,
+    current: Decimal,
+    side: Side,
+    requested: Size,
+) -> Result<(), RiskRejection> {
+    let delta = match side {
+        Side::Buy => requested.inner(),
+        Side::Sell => -requested.inner(),
+    };
+    let new_abs = (current + delta).abs();
     if new_abs > limits.max_position {
         return Err(RiskRejection::PositionLimitExceeded {
             instrument_id: instrument_id.to_owned(),
@@ -309,6 +334,24 @@ mod tests {
             err,
             Err(RiskRejection::PositionLimitExceeded { .. })
         ));
+    }
+
+    #[test]
+    fn a_sell_from_a_long_at_the_cap_reduces_it_and_passes() {
+        let lim = GlobalRiskLimits {
+            max_position: Decimal::from(10),
+            ..Default::default()
+        };
+        let five = Size::from_str("5").unwrap();
+        let ten = Decimal::from(10);
+        assert!(check_position_after(&lim, "X", ten, Side::Sell, five).is_ok());
+        assert!(check_position_after(&lim, "X", ten, Side::Buy, five).is_err());
+        // Short at the cap: buying covers, selling deepens.
+        assert!(check_position_after(&lim, "X", -ten, Side::Buy, five).is_ok());
+        assert!(check_position_after(&lim, "X", -ten, Side::Sell, five).is_err());
+        // A sell that reverses through flat is judged on the far side.
+        let twenty_five = Size::from_str("25").unwrap();
+        assert!(check_position_after(&lim, "X", ten, Side::Sell, twenty_five).is_err());
     }
 
     #[test]

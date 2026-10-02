@@ -386,6 +386,17 @@ mod tests {
         assert_eq!(a.run_id, b.run_id);
     }
 
+    /// Set U U-2.2: the simulated venue's fill policy is part of the run's
+    /// identity, so a run filled at the decision bar's close (optimistic) can
+    /// never share an id — or a cached result — with one filled at the next open.
+    #[test]
+    fn two_runs_with_different_fill_policies_get_different_ids() {
+        let next_open = builder().fill_model(FillModel::NextBarOpen).build();
+        let current_close = builder().fill_model(FillModel::CurrentClose).build();
+        assert_ne!(next_open.run_id, current_close.run_id);
+        assert!(next_open.id_is_valid() && current_close.id_is_valid());
+    }
+
     #[test]
     fn any_field_change_is_a_new_id() {
         let base = builder().seed(7).build();

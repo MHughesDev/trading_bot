@@ -55,6 +55,7 @@ ADR that replaces it.
 | [ADR-0045](0045-one-language-front-end-graph-is-canonical.md) | One Language Front-End — the Graph Is Canonical; Text, Visual and Builder Are Views | Accepted | 2026-10-01 |
 | [ADR-0046](0046-risk-gate-in-every-environment.md) | The Risk Gate Runs in Every Environment, Including Backtests | Accepted | 2026-10-01 |
 | [ADR-0047](0047-decision-journal-and-replay-parity.md) | Every Decision Is Journaled, and Paper Is Replayed Through the Backtest Nightly | Accepted | 2026-10-01 |
+| [ADR-0048](0048-paper-trading-runs-in-the-app.md) | Paper Trading Runs in the App, Never on a Broker's Paper Account | Accepted | 2026-10-02 |
 
 ## Decision Relationships
 

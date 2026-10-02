@@ -66,7 +66,9 @@ impl PaperFillSimulator for BrokerQuoteFillSimulator {
         let spread_adj = m * self.half_spread_bps / dec!(10000);
 
         let fill_price = match intent.order_type {
-            OrderType::Market => {
+            // A stop reaching a simulator has already triggered: it fills as a
+            // market order (the engine converts it before asking).
+            OrderType::Market | OrderType::Stop | OrderType::TrailingStop => {
                 let impact_adj = m * self.impact_bps(m, intent.size.inner()) / dec!(10000);
                 let raw = match intent.side {
                     Side::Buy => m + spread_adj + impact_adj,

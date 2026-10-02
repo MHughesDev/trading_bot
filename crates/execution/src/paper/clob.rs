@@ -95,7 +95,9 @@ impl ClobFillSimulator {
 impl PaperFillSimulator for ClobFillSimulator {
     fn simulate_fill(&self, intent: &OrderIntent, mark: Price) -> PaperFill {
         let (fill_price, fills) = match intent.order_type {
-            OrderType::Market => {
+            // A stop reaching a simulator has already triggered: it fills as a
+            // market order (the engine converts it before asking).
+            OrderType::Market | OrderType::Stop | OrderType::TrailingStop => {
                 let fp = self.market_fill_price(mark, intent.side, intent.size.inner());
                 (fp, true)
             }

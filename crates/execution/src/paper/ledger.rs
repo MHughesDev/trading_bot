@@ -71,6 +71,7 @@ pub struct PaperLedgerEntry {
 #[derive(Debug)]
 pub struct PaperLedger {
     asset_class: AssetClass,
+    clock: std::sync::Arc<dyn crate::clock::VenueClock>,
     entries: VecDeque<PaperLedgerEntry>,
     next_seq: u64,
     capacity: usize,
@@ -78,8 +79,18 @@ pub struct PaperLedger {
 
 impl PaperLedger {
     pub fn new(asset_class: AssetClass) -> Self {
+        Self::with_clock(asset_class, std::sync::Arc::new(crate::clock::WallClock))
+    }
+
+    /// A ledger that stamps entries from `clock` — the simulated clock in a
+    /// backtest, so a journal entry carries the instant it describes.
+    pub fn with_clock(
+        asset_class: AssetClass,
+        clock: std::sync::Arc<dyn crate::clock::VenueClock>,
+    ) -> Self {
         Self {
             asset_class,
+            clock,
             entries: VecDeque::new(),
             next_seq: 0,
             capacity: LEDGER_CAPACITY,
@@ -100,7 +111,7 @@ impl PaperLedger {
         }
         self.entries.push_back(PaperLedgerEntry {
             seq: self.next_seq,
-            at: Utc::now(),
+            at: self.clock.now(),
             asset_class: self.asset_class,
             kind,
             instrument_id,

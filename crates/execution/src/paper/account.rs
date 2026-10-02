@@ -60,6 +60,12 @@ pub enum PaperTradeError {
     NoPosition { instrument_id: String },
     #[error("unknown paper order: {0}")]
     UnknownOrder(String),
+    #[error("malformed order: {0}")]
+    InvalidOrder(String),
+    #[error("post-only limit on {instrument_id} would take liquidity at the current mark")]
+    PostOnlyWouldTake { instrument_id: String },
+    #[error("reduce-only order on {instrument_id} would open or increase a position")]
+    ReduceOnlyWouldIncrease { instrument_id: String },
 }
 
 /// One open position inside a paper account (quantity is signed).
@@ -128,13 +134,29 @@ pub struct PaperAccount {
     closed_trades: u64,
     winning_trades: u64,
     ledger: PaperLedger,
+    /// Where the account reads the time: the wall for paper, the simulated
+    /// clock in a backtest (Set U U-2.1). Never `self.clock.now()` directly.
+    clock: std::sync::Arc<dyn crate::clock::VenueClock>,
 }
 
 impl PaperAccount {
     /// Open an account seeded with `starting_cash` of the policy's quote currency.
     pub fn new(asset_class: AssetClass, starting_cash: Decimal) -> Self {
+        Self::with_clock(
+            asset_class,
+            starting_cash,
+            std::sync::Arc::new(crate::clock::WallClock),
+        )
+    }
+
+    /// [`Self::new`] reading time from `clock`.
+    pub fn with_clock(
+        asset_class: AssetClass,
+        starting_cash: Decimal,
+        clock: std::sync::Arc<dyn crate::clock::VenueClock>,
+    ) -> Self {
         let policy = AccountPolicy::for_asset_class(asset_class);
-        let mut ledger = PaperLedger::new(asset_class);
+        let mut ledger = PaperLedger::with_clock(asset_class, std::sync::Arc::clone(&clock));
         ledger.record(
             PaperLedgerKind::Deposit,
             None,
@@ -153,6 +175,7 @@ impl PaperAccount {
             closed_trades: 0,
             winning_trades: 0,
             ledger,
+            clock,
         }
     }
 
@@ -195,7 +218,7 @@ impl PaperAccount {
     fn add_to_today(&mut self, amount: Decimal) {
         *self
             .realized_by_day
-            .entry(Utc::now().date_naive())
+            .entry(self.clock.now().date_naive())
             .or_insert(Decimal::ZERO) += amount;
     }
 
@@ -548,7 +571,7 @@ impl PaperAccount {
     }
 
     fn add_to_position(&mut self, instrument_id: &str, qty: Decimal, price: Decimal) {
-        let now = Utc::now();
+        let now = self.clock.now();
         let pos = self
             .positions
             .entry(instrument_id.to_owned())
@@ -570,7 +593,7 @@ impl PaperAccount {
     fn reduce_long(&mut self, instrument_id: &str, qty: Decimal) {
         if let Some(pos) = self.positions.get_mut(instrument_id) {
             pos.quantity -= qty;
-            pos.updated_at = Utc::now();
+            pos.updated_at = self.clock.now();
             if pos.quantity == Decimal::ZERO {
                 self.positions.remove(instrument_id);
             }
@@ -579,7 +602,7 @@ impl PaperAccount {
 
     /// Store a margin position's post-fill quantity and entry price.
     fn set_margin_position(&mut self, instrument_id: &str, new_qty: Decimal, new_avg: Decimal) {
-        let now = Utc::now();
+        let now = self.clock.now();
         if new_qty == Decimal::ZERO {
             self.positions.remove(instrument_id);
             return;

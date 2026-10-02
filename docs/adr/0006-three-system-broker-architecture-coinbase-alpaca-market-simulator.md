@@ -2,6 +2,8 @@
 
 **Status:** Accepted
 
+> **Partially superseded 2026-10-02 by [ADR-0048](0048-paper-trading-runs-in-the-app.md):** the Alpaca paper account is no longer a paper venue — paper trading runs on the platform's own paper venue (owner decision). Alpaca remains the equity data feed.
+>
 > **Partially superseded 2026-10-01 by [ADR-0044](0044-native-simulated-venue-shares-the-paper-venue-core.md):** market_simulator is no longer the *default* backtest venue (it remains a reference venue). This ADR's principle — one execution interface, strategy and risk code never branch on mode — stands and is what ADR-0044 implements.
 **Date:** 2026-06-08
 **Deciders:** Platform team

@@ -152,11 +152,7 @@ pub fn side_str(side: Side) -> &'static str {
 }
 
 pub fn order_type_str(t: OrderType) -> &'static str {
-    match t {
-        OrderType::Market => "market",
-        OrderType::Limit => "limit",
-        OrderType::StopLimit => "stop_limit",
-    }
+    t.as_str()
 }
 
 pub fn order_state_str(s: OrderState) -> &'static str {
@@ -382,7 +378,9 @@ pub fn parse_order_type(s: &str) -> Result<OrderType, JournalError> {
     match s {
         "market" => Ok(OrderType::Market),
         "limit" => Ok(OrderType::Limit),
+        "stop" => Ok(OrderType::Stop),
         "stop_limit" => Ok(OrderType::StopLimit),
+        "trailing_stop" => Ok(OrderType::TrailingStop),
         other => Err(JournalError::Database(format!(
             "unknown order type '{other}' — refusing to guess"
         ))),
@@ -520,9 +518,20 @@ mod tests {
 
     #[test]
     fn unknown_order_type_is_refused_not_defaulted_to_market() {
-        assert!(parse_order_type("stop").is_err());
-        assert!(parse_order_type("").is_err());
-        assert_eq!(parse_order_type("limit").unwrap(), OrderType::Limit);
+        // "stop" was the unknown example until 2026-10-02, when stop and
+        // trailing-stop orders joined the vocabulary (Set U U-2.3).
+        for bad in ["", "STOP", "stop_market", "trailing", "mkt"] {
+            assert!(parse_order_type(bad).is_err(), "'{bad}' must be refused");
+        }
+        for t in [
+            OrderType::Market,
+            OrderType::Limit,
+            OrderType::Stop,
+            OrderType::StopLimit,
+            OrderType::TrailingStop,
+        ] {
+            assert_eq!(parse_order_type(order_type_str(t)).unwrap(), t);
+        }
     }
 
     #[test]

@@ -37,22 +37,34 @@ use uuid::Uuid;
 
 /// The venues a Set T deployment may name.
 ///
-/// One variant. Not a placeholder — the set's hard boundary is that nothing it
+/// One variant: the platform's own paper venue — the same venue core every
+/// backtest runs on (ADR-0044), fed live marks on the wall clock. **Owner
+/// decision 2026-10-02 (ADR-0048):** paper trading happens in the app, not on
+/// Alpaca's paper account; `AlpacaPaper` was this enum's only variant until then
+/// and is gone.
+///
+/// What forward evidence on this venue does and does not measure is in
+/// ADR-0048: it is a test of the strategy on data nobody had when it was
+/// built, and of the pipeline end to end. It is **not** a test of whether the
+/// simulated fills match a real market's, because the paper fills and the
+/// backtest's come from the same fill model by construction.
+///
+/// One variant is not a placeholder — the set's hard boundary is that nothing it
 /// builds creates a live-venue code path, and an enum with no live variant is
 /// that sentence written where the compiler can read it. Adding one is a source
 /// change, a review, and roadmap gate H-4, rather than a string that happened to
 /// be typed into a config file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaperVenue {
-    /// Alpaca's paper endpoint (ADR-0006, Q-1).
-    AlpacaPaper,
+    /// The platform's own paper venue (`execution::paper`, ADR-0048).
+    Platform,
 }
 
 impl PaperVenue {
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::AlpacaPaper => "alpaca_paper",
+            Self::Platform => "platform_paper",
         }
     }
 
@@ -61,7 +73,7 @@ impl PaperVenue {
     /// its meaning if the enum ever grows.
     #[must_use]
     pub fn is_paper(self) -> bool {
-        matches!(self, Self::AlpacaPaper)
+        matches!(self, Self::Platform)
     }
 }
 
@@ -552,7 +564,7 @@ mod tests {
             deployment_id: Uuid::nil(),
             strategy_id: "sma-cross-1".into(),
             trial_id: Uuid::nil(),
-            venue: PaperVenue::AlpacaPaper,
+            venue: PaperVenue::Platform,
             numeraire,
             bar_seconds: 60,
             thresholds: thresholds(),
@@ -573,8 +585,8 @@ mod tests {
 
     #[test]
     fn the_only_venue_is_paper() {
-        assert!(PaperVenue::AlpacaPaper.is_paper());
-        assert_eq!(PaperVenue::AlpacaPaper.as_str(), "alpaca_paper");
+        assert!(PaperVenue::Platform.is_paper());
+        assert_eq!(PaperVenue::Platform.as_str(), "platform_paper");
     }
 
     #[test]

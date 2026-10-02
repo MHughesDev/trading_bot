@@ -5,6 +5,7 @@ pub mod account_source;
 pub mod alpaca;
 pub mod audit;
 pub mod broker;
+pub mod clock;
 pub mod coinbase;
 pub mod events;
 pub mod fills;
@@ -12,7 +13,12 @@ pub mod journal;
 pub mod order_state;
 pub mod paper;
 pub mod positions;
+pub mod sim_risk;
+pub mod sim_venue;
+pub mod venue_port;
 pub mod venues;
+
+pub use venue_port::Venue;
 
 use std::sync::Arc;
 

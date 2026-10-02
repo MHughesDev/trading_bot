@@ -6,7 +6,7 @@
 **Spec:** [FEAT-007](../../../specs/FEAT-007-unified-strategy-engine.md) §8; ADR-0043; FEAT-006 §5, §6.
 **Depends on:** Phase 0 (contracts); Phase 1 (request/resume).
 **Blocks:** model-driven acceptance in Phases 3, 4, 8.
-**Migration range:** 0144–0146.
+**Migration range:** 0145–0147.
 
 Any model in MLOps, any shape of answer, the right model at the right time. When this phase closes a strategy can chain a classifier, a distributional forecaster and an LLM, backtest them point-in-time, and paper-trade them — none of which is possible today.
 
@@ -17,7 +17,7 @@ Any model in MLOps, any shape of answer, the right model at the right time. When
 
 Every model version stores its `IoContract`; existing versions are backfilled with derived contracts; the registry serves contracts to the compiler.
 
-**Files:** `crates/model-registry/src/contracts.rs`, migration 0144.
+**Files:** `crates/model-registry/src/contracts.rs`, migration 0145.
 **Acceptance:** every existing model version has a contract after migration; the compiler resolves a contract by pinned version; a model with no contract cannot be referenced by a v3 strategy (refused with a fix).
 **Traces:** ADR-0043 decision 1.
 

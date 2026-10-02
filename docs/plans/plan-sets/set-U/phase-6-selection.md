@@ -6,7 +6,7 @@
 **Spec:** [FEAT-007](../../../specs/FEAT-007-unified-strategy-engine.md) §4, §5.2, §5.3; ADR-0040.
 **Depends on:** Phases 1 and 3.
 **Blocks:** nothing in this set.
-**Migration range:** 0147–0148.
+**Migration range:** 0148–0149.
 
 *What should we buy.* A selection strategy returns the assets that meet its criteria, ranked, with the attributes that decided it; a deployment can then run a trading strategy on whatever it selects.
 
@@ -35,7 +35,7 @@ The engine evaluates a selection plan by mapping the per-instrument sub-graph ov
 
 An API and agent tool run a selection strategy now or as of a past instant and return the ranked list with scores and attributes; results are journaled; scheduled runs follow the strategy's triggers.
 
-**Files:** `crates/api/src/routes/selections.rs`, `crates/mcp-server/src/tools/`, migration 0147.
+**Files:** `crates/api/src/routes/selections.rs`, `crates/mcp-server/src/tools/`, migration 0148.
 **Acceptance:** a person and the agent get the same list for the same strategy and instant; a run as of a past date uses that date's membership and data only.
 **Traces:** FEAT-007 §4, §10.
 
@@ -44,7 +44,7 @@ An API and agent tool run a selection strategy now or as of a past instant and r
 
 A deployment's target may be a selection: on each rebalance the allocator diffs membership, starts trading instances for entrants, applies `on_removal` (`close`, `let_strategy_exit`, `hold`) to leavers, and allocates capital equal-weight or by the selection's `weight` attribute.
 
-**Files:** `apps/platform/src/allocator.rs`, `crates/domain/src/strategy_graph/deployment.rs`, migration 0148.
+**Files:** `apps/platform/src/allocator.rs`, `crates/domain/src/strategy_graph/deployment.rs`, migration 0149.
 **Acceptance:** membership changes start and stop instances within one rebalance; `close` flattens a leaver; capital allocations sum to the deployment's capital; every change is journaled.
 **Traces:** FEAT-007 §4; ADR-0040 decision 4.
 

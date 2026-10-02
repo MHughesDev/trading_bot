@@ -92,7 +92,7 @@ the loop existed**.
   from the table — so a global trip with no `scope='global'` row is erased within
   one cadence too. Closing it needs a global `Fact::ReconciliationMismatch`, or
   venue attribution the recorder does not have: `DeploymentSpec.venue` is
-  `PaperVenue::AlpacaPaper` → `"alpaca_paper"`, which is **not** the `venue_id`
+  `PaperVenue::Platform` → `"platform_paper"` (was `AlpacaPaper` until ADR-0048, 2026-10-02), which is **not** the `venue_id`
   the gate sees from instrument metadata, so halting on it would refuse nothing.
   Documented on the function; behaviour left alone rather than a venue name
   invented.

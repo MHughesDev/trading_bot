@@ -413,13 +413,13 @@ Everything else is delegated. These are not.
 | ~~H-1~~ | The dirty working tree | — | **CLOSED 2026-09-15, commit `37faade`.** 161 files, +27,518. The two `Cargo.toml` workspace-member lines, the 13 untracked catalogue tools, `ExitTracker`, `FeeBook`, the falsification ledger, `webfetch`, `skills`, migrations 0058–0060, `.gitattributes` — and the plan corpus itself (`ROADMAP`, `EXECUTION-BOARD`, plan-sets P/S/T, AGENT-005…014, ADR-0034–0037), which was also untracked. **Every worktree can now rebase onto a baseline that contains what its task depends on**, and the mirrored "user's work" commits on ~25 branches should be dropped rather than deduplicated at integration |
 | **H-2** | A model provider credential in the encrypted store | the **only two** acceptance criteria in all of Set S an agent cannot close (AGENT-005 §10.2's cache-hit measurement, AGENT-009's `decode` suite); every live agent session | **open — track 22 is building everything either side of it** |
 | **H-3** | Monthly research budget ceiling (the platform default is $25/day per continuous session) | continuous research at scale | default set, revisit at Stage 2 |
-| **H-7** | **Alpaca paper credentials.** Track 5 built the whole forward-evidence pipeline and cannot start it: T-0.4 is blocked on a paper fill (track 16) **and** on credentials in `.env`, which an agent must not enter. This is the second of the two locks on the Gate 15 clock | **DONE-3, the only calendar-bound condition** | **open — minutes of your time** |
+| ~~H-7~~ | ~~**Alpaca paper credentials.**~~ **Withdrawn 2026-10-02 (ADR-0048): the owner decided paper trading runs in the app, so no paper credential is needed.** T-0.4 is now blocked only on its recorded engineering. Original text: Track 5 built the whole forward-evidence pipeline and cannot start it: T-0.4 is blocked on a paper fill (track 16) **and** on credentials in `.env`, which an agent must not enter. This is the second of the two locks on the Gate 15 clock | **DONE-3, the only calendar-bound condition** | **open — minutes of your time** |
 | **H-4** | **Q-4: capital and liability.** Whose broker, whose money, who is liable when a friend's strategy loses | **all of Stage 6** | **open since inception** |
 | ~~H-5~~ | Whether Set C and Set F are retired or re-derived | — | **closed 2026-09-15 without needing you.** The audit answered both from evidence: Set F is 9/11 shipped with 2 deliberately reversed; Set C is 54/68 shipped with 2 open items worth doing |
 | **H-6** | Whether equities/futures onboarding is coming, which turns several vacuous invariants live (INV-03, INV-07, INV-08, corporate actions) | Set P scope beyond crypto | open |
 
-**H-2 and H-7 are now the only gates blocking work.** Both are a credential in a file —
-minutes of human action, not engineering. H-1 is closed.
+**H-2 is now the only credential gate blocking work** — minutes of human action, not
+engineering. H-7 was withdrawn on 2026-10-02 (ADR-0048: paper trading runs in the app). H-1 is closed.
 
 ---
 

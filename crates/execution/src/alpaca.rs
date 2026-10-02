@@ -124,11 +124,18 @@ impl Broker for AlpacaBroker {
             Side::Buy => "buy",
             Side::Sell => "sell",
         };
-        let order_type = match order.intent.order_type {
-            OrderType::Market => "market",
-            OrderType::Limit => "limit",
-            OrderType::StopLimit => "stop_limit",
-        };
+        // Alpaca's order API takes every type the platform has. Until 2026-10-02
+        // a stop-limit was sent with no `stop_price` — there was no field to read
+        // it from — so Alpaca would have refused it; now the trigger is sent.
+        if let Err(e) = order.intent.check_shape() {
+            return Err(BrokerError::Rejected(e.to_string()));
+        }
+        if order.intent.post_only {
+            return Err(BrokerError::Rejected(
+                "Alpaca has no post-only flag; a post-only order cannot be placed there".into(),
+            ));
+        }
+        let order_type = order.intent.order_type.as_str();
 
         let mut body = serde_json::json!({
             "symbol": symbol,
@@ -141,6 +148,12 @@ impl Broker for AlpacaBroker {
 
         if let Some(lp) = order.intent.limit_price {
             body["limit_price"] = serde_json::json!(lp.inner().to_string());
+        }
+        if let Some(sp) = order.intent.stop_price {
+            body["stop_price"] = serde_json::json!(sp.inner().to_string());
+        }
+        if let Some(tr) = order.intent.trail {
+            body["trail_price"] = serde_json::json!(tr.inner().to_string());
         }
 
         let resp = self
