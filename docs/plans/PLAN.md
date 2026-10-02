@@ -17,7 +17,7 @@ worse than no map, because people steer by it.
 
 ---
 
-## 1. Where we are — **40% left**
+## 1. Where we are — **38% left**
 
 Derived 2026-10-02 from the `### <TASK-ID>` headings and their status markers
 across sets P, S, T and U. Size-weighted **S = 1, M = 2, L = 4**: 189 tasks of
@@ -25,12 +25,12 @@ wildly different sizes averaged flat would flatter us.
 
 | counting rule | % of the work left |
 |---|---|
-| strict — only `DONE` counts | 58% |
-| **`PARTIAL` counts half** | **40%** |
-| generous — `PARTIAL` counts done | 22% |
+| strict — only `DONE` counts | 56% |
+| **`PARTIAL` counts half** | **38%** |
+| generous — `PARTIAL` counts done | 20% |
 
 Take the middle number and treat it as **±10**, not as a measurement. `PARTIAL`
-is 241 of 670 units and in this repository it spans "complete, one database test
+is 243 of 672 units and in this repository it spans "complete, one database test
 unwritten" to "the types exist and nothing calls them". The spread between the
 strict and generous rows *is* the uncertainty, and it is honest to show it rather
 than pick one and present it as precision.
@@ -47,7 +47,7 @@ model in any mode — work no previous set had planned. See [Set U](plan-sets/se
 | **S** | The Agent Platform | 189 | 446 | 208 | 217 | **29%** |
 | **P** | Data Reach | 30 | 51 | 14 | 16 | **57%** |
 | **T** | Forward Evidence | 17 | 34 | 2 | 6 | **85%** |
-| **U** | Unified Strategy Engine | 54 | 139 | 60 | 2 | **56%** |
+| **U** | Unified Strategy Engine | 55 | 141 | 72 | 4 | **48%** |
 
 P and T are 16% of the weight and almost entirely ahead of us — and they are the
 two that carry a **calendar**, which is why §3 puts them first despite Set S
@@ -370,6 +370,7 @@ Newest first. One line per closing, with the evidence.
 
 | date | what | evidence |
 |---|---|---|
+| 2026-10-02 | **Set U Phase 4: v3 strategies run on paper through the one strategy engine.** `LiveRunner` (the async twin of `cycle`) steps the engine on completed bars of each declared timeframe — folded from the pipeline's minute bars, published to a new `live_bars` hub — and orders through the risk gate and execution engine; models are asked concurrently under their contract timeouts; every decision is journaled (0144, append-only, pruned daily) and checkpointed (0143) — a journal or checkpoint failure halts the deployment; a restart restores and resumes. Deployments are **recorded** (0142, `strategy_deployment`, the writer forward evidence never had), declared in the one registry where stage 3 cannot see them, and resumed at boot; `POST/GET/DELETE /api/deployments`. **U-4.2 PARTIAL** (Set T's readers of the record do not exist yet); **U-4.7 added**: the paper engine has one account per asset class, so deployments share positions and equity. | `apps/platform` 24/24 incl. the live runner's 6 (EMA 7/21 fires from aggregated trades alone; one decision per bar; model timeout holds on time; two models asked at once — a sequential mutation fails it; restart mid-position places the same orders tag for tag; journal failure halts; withdrawal stops within one tick); `checkpoint_restore.rs` (a planner-restore mutation fails it); `pg_strategy_deployment.rs` 3/3 on a scratch PostgreSQL 17 with 0142–0144; strategy-runtime registry tests; `-p api --lib` 421/421; workspace check clean |
 | 2026-10-02 | **Set U Phase 3: a v3 strategy backtests through the code that will run it on paper.** `strategy_engine::env` holds the environment ports and `cycle`, the one loop every environment drives; `backtest::runner` runs a compiled graph over every declared input point-in-time on the simulated venue behind the risk gate, as a `RunExecutor` so the trial ledger holds each run before it computes; `RunResult.manifest` records fill policy, model pins, holds and unknowns by reason, gate rejections and a journal digest; a Set J study accepts v3 runs with no code change; preview is the runner's own loop reporting decisions only. Production reach: `AppState` builds `FormatRoutedExecutor` (v3 → new runner, v1 → `market_simulator`), the backtest endpoint and manager take a graph, the preview route takes one. **U-3.4 is `PARTIAL`**: its HTTP criterion was not run, because starting the platform starts live collectors. Model requests are answered `unavailable` until Phase 5. | `backtest/tests/v3_runner.rs` 9/9 (end to end indicator and bracket strategies, multi-timeframe PIT incl. the day-boundary hour, trial ledger, Set J sweep, fill policy, preview = backtest trace for trace, first-fire and held-before reasons, intent-only); `strategy-engine/tests/env_cycle.rs`; mutation on the merge order fails the PIT test; `-p backtest` 437 lib + suites green, `-p api --lib` 421/421, `-p strategy-engine` green; workspace check and clippy clean on touched crates |
 | 2026-10-02 | **Set U Phase 2: backtest and paper are one venue with two drivers, and paper trades in the app.** `PaperTradingEngine` reads time and ids only through injected `VenueClock`/`OrderIds`; `SimulatedVenue` drives it from bars on a `SimClock` (next-bar-open fills, stops-first intrabar, `CurrentClose` flagged optimistic); `Venue` is the one port and `PaperVenue`/`SimulatedVenue` both sit behind it. Stop, trailing-stop, reduce-only, post-only and OCO now execute — **every stop-limit in the platform had been a plain limit**, with no field for its trigger, and two broker adapters sent it as one. The production risk gate runs in front of backtests with simulated rate counts and a per-day halt; **the gate's position cap ignored side**, so a strategy at its cap could not sell out — fixed. **Owner decision (ADR-0048): paper trading runs in the app, never on Alpaca's paper account** — `PaperVenue::Platform`, migration 0141, H-7 withdrawn; forward evidence on it is labelled as resting on modelled fills, and fill realism moves to a check on the first live trades. **U-2.6: one fee schedule for both venues** — `FeeSchedule` moved to `domain::fees`, `paper_crypto()` is the one definition the backtest's FeeBook and the paper simulator both read, and resting limits pay maker while crossing orders pay taker in both venues (paper crypto's half-spread moved 5 → 2 bps to match what backtests were already charged). | `cargo test -p execution` all green incl. `tests/sim_venue.rs` 11, `tests/sim_risk.rs` 5, `tests/venue_core_is_environment_neutral.rs` 2; the oracle loses through the venue and wins with costs zeroed; mutations fail the tests they target; `-p risk` 76/76; `-p reconciliation` green; 0141 validated on a scratch PG17 database; `-p backtest --lib` 432/432; workspace check and clippy clean |
 | 2026-10-01 | **Set U Phase 1: the one strategy engine exists.** `crates/strategy-engine` — pure, synchronous, deterministic, and depending on nothing an environment owns (a Cargo.lock walk proves it reaches none of execution, risk, storage, model-registry, tokio, sqlx or reqwest). One compiler typechecks every strategy against the operator, indicator and model-contract registries and reports every problem in one pass with did-you-mean fixes. The engine **computes its own indicators from raw bars** through the DATA-006 routine — an EMA-cross fed only bars matches the feature engine bar for bar, and before warm-up its condition is `missing(warming_up)`, not `false` — which is the structural fix for paper trading never computing an indicator. Models are called by request and resume: a classifier feeding a sizing model resolves in two layers and drives an order; an upstream abstain means the downstream model is never called; an incomplete input row is never sent, so nothing is zero-filled. A target sized by a model that timed out holds with that reason. The order planner covers every intent in the terminal's vocabulary: idempotent targets, brackets whose protection is placed on the entry's fill at the fill price, emulated OCO, breakeven stops, and a refusal by name — never a silent downgrade — for an order type a venue lacks. Two mutation checks (temporal state re-stepped on resume; a zero-filled model input) each fail exactly the test written for them. | strategy-engine 38 unit + 22 acceptance tests, clippy clean, no hash-ordered collection anywhere in the crate, byte-identical traces over 150 ticks; Set U 93% → 74%; headline 47% → 43% |

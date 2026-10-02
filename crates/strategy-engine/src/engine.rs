@@ -97,12 +97,15 @@ struct Pending {
 
 /// One running strategy instance on one instrument.
 pub struct Engine {
-    plan: Arc<Plan>,
+    pub(crate) plan: Arc<Plan>,
     histories: Vec<History>,
     temporal: Vec<Option<Temporal>>,
-    planner: PlannerState,
-    tick: u64,
+    pub(crate) planner: PlannerState,
+    pub(crate) tick: u64,
     pending: Option<Pending>,
+    /// The close of the last bar seen on each input — where a checkpoint's
+    /// history replay stops (U-4.4).
+    pub(crate) last_close: Vec<Option<i64>>,
 }
 
 impl Engine {
@@ -158,6 +161,7 @@ impl Engine {
                 _ => None,
             })
             .collect();
+        let inputs = plan.inputs.len();
         Ok(Self {
             plan,
             histories,
@@ -165,12 +169,19 @@ impl Engine {
             planner: PlannerState::default(),
             tick: 0,
             pending: None,
+            last_close: vec![None; inputs],
         })
     }
 
     #[must_use]
     pub fn plan(&self) -> &Plan {
         &self.plan
+    }
+
+    /// Whether a tick is waiting for model answers.
+    #[must_use]
+    pub const fn is_pending(&self) -> bool {
+        self.pending.is_some()
     }
 
     /// Decision ticks so far.
@@ -198,6 +209,7 @@ impl Engine {
                     return Ok(Step::Idle);
                 };
                 h.push(bar);
+                self.last_close[input] = Some(bar.close_ns);
                 if input != PRIMARY || !self.plan.triggers.bar_close {
                     return Ok(Step::Idle);
                 }

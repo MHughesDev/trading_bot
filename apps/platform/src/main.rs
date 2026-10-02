@@ -9,9 +9,14 @@ mod health_jobs;
 mod hot_path;
 mod leakage_jobs;
 mod ledger_jobs;
+mod live_bars;
+mod live_deployments;
+mod live_runner;
 mod pipeline_manager;
 mod regime_jobs;
 mod tee;
+#[cfg(test)]
+mod test_support;
 
 use std::sync::Arc;
 
@@ -288,6 +293,22 @@ async fn main() -> anyhow::Result<()> {
         bar_rx,
         live_bus.clone(),
     ));
+
+    // v3 deployments (Set U Phase 4): one LiveRunner per declared deployment,
+    // on the one strategy engine, fed completed minute bars, ordering through
+    // the same risk gate and execution engine as everything else. Deployments
+    // the record says are running are resumed from their checkpoints.
+    live_deployments::spawn(
+        live_runner::LiveDeps {
+            paper: Arc::clone(&paper_engine),
+            exec: Arc::clone(&execution_engine),
+            gate: Arc::clone(&risk_gate),
+            models: Arc::new(live_runner::NoLiveModels),
+            store: Arc::new(live_runner::PgDeploymentStore(pg.clone())),
+        },
+        pg.clone(),
+        cfg.clickhouse.url.clone(),
+    );
 
     // Owns one in-process pipeline per initialized instrument.
     let pipeline_manager = Arc::new(pipeline_manager::PipelineManager::new(

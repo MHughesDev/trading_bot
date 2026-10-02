@@ -134,7 +134,7 @@ async fn stage_socket_reader(
 /// `-1` when no bucket is open.  Open/high/low/close track the trade prices and
 /// `volume` sums trade sizes; a bucket is finalized into a [`CollectedBar`] when
 /// a trade for a later minute arrives or the wall clock passes the minute end.
-struct Minute1Aggregator {
+pub(crate) struct Minute1Aggregator {
     bucket_start_secs: i64,
     open: Decimal,
     high: Decimal,
@@ -145,7 +145,7 @@ struct Minute1Aggregator {
 }
 
 impl Minute1Aggregator {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             bucket_start_secs: -1,
             open: Decimal::ZERO,
@@ -186,7 +186,12 @@ impl Minute1Aggregator {
 
     /// Fold a trade into the aggregator, returning the prior minute's completed
     /// bar when this trade rolls into a new minute.
-    fn on_trade(&mut self, price: Decimal, size: Decimal, ts_secs: i64) -> Option<CollectedBar> {
+    pub(crate) fn on_trade(
+        &mut self,
+        price: Decimal,
+        size: Decimal,
+        ts_secs: i64,
+    ) -> Option<CollectedBar> {
         let minute = ts_secs - ts_secs.rem_euclid(60);
         if self.bucket_start_secs < 0 {
             self.start(minute, price, size);
@@ -239,6 +244,8 @@ async fn stage_bar_builder(
 
     let mut agg = Minute1Aggregator::new();
     let emit_bar = |bar: CollectedBar| {
+        // v3 deployments decide on completed minutes (Set U U-4.1).
+        crate::live_bars::publish(&instrument_id, &bar);
         let _ = bar_sink.tx.send(PersistBar {
             instrument_id: instrument_id.clone(),
             venue_id: bar_sink.venue_id.clone(),
@@ -521,74 +528,25 @@ mod tests {
     use super::*;
 
     use std::str::FromStr;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::Mutex;
     use std::time::Duration;
 
-    use api::instrument_meta::{InstrumentMeta, InstrumentMetaCache};
-    use api::risk_context::PaperRiskContextProvider;
+    use api::instrument_meta::InstrumentMeta;
     use domain::instrument::{HaltPolicy, TradingSchedule};
     use domain::money::{Price, Size};
     use domain::order::{OrderIntent, OrderState, OrderType, Side};
     use domain::payloads::bar::{BarPayload, Timeframe};
     use domain::strategy_def::StrategyDefinition;
     use domain::{RiskRejection, TrustTier};
-    use execution::journal::{self, memory::MemoryOrderJournal};
+    use execution::journal;
     use risk::{GlobalRiskLimits, KillSwitch, RateKey, RiskGate};
     use strategy_runtime::live::{LiveSource, LiveStrategySpec};
     use strategy_runtime::world::WorldEvent;
 
-    /// The process-wide pieces.  `risk::context::install` and
-    /// `execution::journal::install` are `OnceLock`s — first install wins — so
-    /// every test in this binary shares one provider, one journal and one paper
-    /// engine, and uses its own instrument to stay independent.
-    struct Env {
-        paper: Arc<PaperTradingEngine>,
-        meta: Arc<InstrumentMetaCache>,
-    }
-
-    static ENV: OnceLock<Env> = OnceLock::new();
-
-    fn env() -> &'static Env {
-        ENV.get_or_init(|| {
-            let paper = Arc::new(PaperTradingEngine::new());
-            let meta = Arc::new(InstrumentMetaCache::new());
-
-            assert!(
-                risk::context::install(Arc::new(PaperRiskContextProvider::new(
-                    Arc::clone(&paper),
-                    Arc::clone(&meta),
-                ))),
-                "risk context provider must install"
-            );
-            assert!(
-                journal::install(Arc::new(MemoryOrderJournal::new())),
-                "order journal must install"
-            );
-
-            Env { paper, meta }
-        })
-    }
-
-    /// Register an instrument the way a live pipeline and asset-init would: an
-    /// asset class, a mark, and the venue's published increments.
-    fn ready_instrument(instrument_id: &str, mark: &str) {
-        let e = env();
-        e.paper
-            .register_instrument(instrument_id, AssetClass::CryptoSpotCex);
-        e.paper
-            .on_mark(instrument_id, Price::from_str(mark).unwrap());
-        e.meta.put(InstrumentMeta {
-            venue_id: "paper".into(),
-            instrument_id: instrument_id.to_owned(),
-            // Kraken's published increments for a USD spot pair.
-            tick_size: Decimal::from_str("0.1").unwrap(),
-            lot_size: Decimal::from_str("0.00000001").unwrap(),
-            trading_hours: TradingSchedule::always_open(),
-            halt_policy: HaltPolicy::NonHaltable,
-            trust_tier: TrustTier::CentralizedExchange,
-            active: true,
-        });
-    }
+    // The process-wide pieces live in `crate::test_support`, shared with the
+    // live-runner tests: `risk::context::install` and `journal::install` are
+    // first-install-wins, so one binary can hold only one of each.
+    use crate::test_support::{env, ready_instrument};
 
     fn gate_with(limits: GlobalRiskLimits) -> Arc<RiskGate> {
         Arc::new(RiskGate::new(limits, Arc::new(KillSwitch::new(false))))

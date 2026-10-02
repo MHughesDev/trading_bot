@@ -23,6 +23,11 @@ execution = { workspace = true }
 # first broker that talks to something outside this process.
 reconciliation = { workspace = true }
 strategy-runtime = { workspace = true }
+# Set U Phase 4: v3 deployments run on the one strategy engine (live_runner.rs).
+strategy-engine = { workspace = true }
+uuid = { workspace = true }
+sha2 = "0.10"
+thiserror = { workspace = true }
 storage = { workspace = true }
 ui-gateway = { workspace = true }
 demand-manager = { workspace = true }

@@ -3853,13 +3853,17 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "sqlx",
  "storage",
+ "strategy-engine",
  "strategy-runtime",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite 0.24.0",
  "tracing",
  "ui-gateway",
+ "uuid",
 ]
 
 [[package]]

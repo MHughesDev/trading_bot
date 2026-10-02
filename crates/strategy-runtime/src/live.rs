@@ -93,13 +93,44 @@ pub enum LiveRegistryError {
     },
     #[error("live strategy registry lock poisoned")]
     Poisoned,
+    #[error("'{name}' is already deployed for user '{user_id}' on '{instrument_id}' (deployment {deployment_id})")]
+    AlreadyDeployed {
+        user_id: String,
+        instrument_id: String,
+        name: String,
+        deployment_id: uuid::Uuid,
+    },
 }
 
 /// The registry itself.
+/// A `tbot.strategy/3` deployment declared live (Set U U-4.6).
+///
+/// Run by the platform's `LiveRunner` — the one strategy engine on decision
+/// ticks — and **never** by hot-path stage 3. The two are kept in separate maps
+/// on purpose: stage 3 reads only [`LiveStrategyRegistry::snapshot_for`], which
+/// cannot return one of these, so there is no code path by which a v3 strategy
+/// is evaluated twice.
+#[derive(Clone, Debug)]
+pub struct V3Deployment {
+    /// The deployment record's id (`strategy_deployment.deployment_id`).
+    pub deployment_id: uuid::Uuid,
+    pub user_id: String,
+    /// The instrument the strategy is bound to.
+    pub instrument_id: String,
+    pub graph: domain::strategy_graph::StrategyGraph,
+    /// The graph's content-addressed revision.
+    pub revision: String,
+    /// What the deployment was started with — the base its realised series is
+    /// measured from.
+    pub starting_capital: rust_decimal::Decimal,
+}
+
 #[derive(Debug, Default)]
 pub struct LiveStrategyRegistry {
     generation: AtomicU64,
     by_instrument: Mutex<HashMap<String, Vec<Arc<LiveStrategySpec>>>>,
+    v3_generation: AtomicU64,
+    v3: Mutex<std::collections::BTreeMap<uuid::Uuid, Arc<V3Deployment>>>,
 }
 
 impl LiveStrategyRegistry {
@@ -223,6 +254,69 @@ impl LiveStrategyRegistry {
             self.generation.fetch_add(1, Ordering::AcqRel);
         }
         removed
+    }
+
+    // ── v3 deployments (Set U U-4.6) ─────────────────────────────────────────
+
+    /// Moves whenever a v3 deployment is added or removed. The live runners'
+    /// supervisor re-reads [`Self::v3_snapshot`] only when it changes.
+    #[must_use]
+    pub fn v3_generation(&self) -> u64 {
+        self.v3_generation.load(Ordering::Acquire)
+    }
+
+    /// Declare a v3 deployment. One strategy name per (user, instrument).
+    ///
+    /// # Errors
+    /// The same graph already deployed for this user on this instrument.
+    pub fn register_v3(&self, d: V3Deployment) -> Result<(), LiveRegistryError> {
+        let mut map = self.v3.lock().map_err(|_| LiveRegistryError::Poisoned)?;
+        if let Some(existing) = map.values().find(|e| {
+            e.user_id == d.user_id
+                && e.instrument_id == d.instrument_id
+                && e.graph.name == d.graph.name
+        }) {
+            return Err(LiveRegistryError::AlreadyDeployed {
+                user_id: d.user_id,
+                instrument_id: d.instrument_id,
+                name: d.graph.name.clone(),
+                deployment_id: existing.deployment_id,
+            });
+        }
+        map.insert(d.deployment_id, Arc::new(d));
+        self.v3_generation.fetch_add(1, Ordering::AcqRel);
+        Ok(())
+    }
+
+    /// Withdraw a v3 deployment. Its runner stops at its next decision tick.
+    pub fn deregister_v3(&self, deployment_id: uuid::Uuid) -> bool {
+        let Ok(mut map) = self.v3.lock() else {
+            return false;
+        };
+        let removed = map.remove(&deployment_id).is_some();
+        if removed {
+            self.v3_generation.fetch_add(1, Ordering::AcqRel);
+        }
+        removed
+    }
+
+    /// Whether a v3 deployment is still declared — what a runner checks before
+    /// every decision.
+    #[must_use]
+    pub fn is_v3_declared(&self, deployment_id: uuid::Uuid) -> bool {
+        self.v3
+            .lock()
+            .is_ok_and(|map| map.contains_key(&deployment_id))
+    }
+
+    /// Every declared v3 deployment, in id order. Empty on a poisoned lock —
+    /// fail closed: nothing runs rather than an unknown set.
+    #[must_use]
+    pub fn v3_snapshot(&self) -> Vec<Arc<V3Deployment>> {
+        self.v3
+            .lock()
+            .map(|m| m.values().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Total live bindings, for diagnostics.
@@ -349,5 +443,57 @@ mod tests {
         r.register(spec("u1", "BTC-USD", "manual_started")).unwrap();
         assert_eq!(r.deregister_automation("a1"), 2);
         assert_eq!(r.len(), 1, "a hand-started strategy is untouched");
+    }
+
+    fn v3(user: &str, instrument: &str) -> V3Deployment {
+        let graph: domain::strategy_graph::StrategyGraph =
+            serde_json::from_value(serde_json::json!({
+              "format": "tbot.strategy/3", "kind": "trading", "name": "ema_v3",
+              "asset_class": "crypto_spot_cex", "timeframe": "1m",
+              "nodes": [{"id":"go","op":"ge","args":{"a":"close","b":0}}],
+              "decide": {"rules": [{"when":"go","then":{"kind":"hold"}}]}
+            }))
+            .unwrap();
+        V3Deployment {
+            deployment_id: uuid::Uuid::new_v4(),
+            user_id: user.into(),
+            instrument_id: instrument.into(),
+            revision: graph.revision().unwrap().as_str().to_string(),
+            graph,
+            starting_capital: rust_decimal::Decimal::from(10_000),
+        }
+    }
+
+    /// Set U U-4.6: a v3 deployment is never also evaluated by stage 3. Stage 3
+    /// reads `snapshot_for` and nothing else; a v3 deployment cannot appear in
+    /// it, and declaring one does not even move the generation stage 3 watches.
+    #[test]
+    fn a_v3_deployment_is_invisible_to_stage_3() {
+        let r = LiveStrategyRegistry::new();
+        let g = r.generation();
+        let d = v3("u1", "BTC-USD");
+        let id = d.deployment_id;
+        r.register_v3(d).unwrap();
+        assert!(r.snapshot_for("BTC-USD").is_empty());
+        assert_eq!(r.generation(), g, "stage 3 is not even woken");
+        assert!(r.is_empty(), "the v1 set is untouched");
+        assert_eq!(r.v3_snapshot().len(), 1);
+        assert!(r.is_v3_declared(id));
+        assert!(r.deregister_v3(id));
+        assert!(!r.is_v3_declared(id));
+        assert!(!r.deregister_v3(id), "withdrawing twice is a no-op");
+    }
+
+    #[test]
+    fn the_same_graph_twice_on_one_instrument_is_refused() {
+        let r = LiveStrategyRegistry::new();
+        r.register_v3(v3("u1", "BTC-USD")).unwrap();
+        assert!(matches!(
+            r.register_v3(v3("u1", "BTC-USD")),
+            Err(LiveRegistryError::AlreadyDeployed { .. })
+        ));
+        r.register_v3(v3("u2", "BTC-USD")).unwrap();
+        r.register_v3(v3("u1", "ETH-USD")).unwrap();
+        assert_eq!(r.v3_snapshot().len(), 3);
     }
 }

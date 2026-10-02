@@ -276,6 +276,14 @@ recorded in any plan file:
 Recorded here rather than discovered after the gate is spent, which is what
 happened to T-0.1's blocker.
 
+**2026-10-02, Set U Phase 4:** a deployment record now exists —
+`strategy_deployment` (migration 0142) is written by `POST /api/deployments` and carries
+`starting_capital`, which answers gap 3's missing opening balance, and a
+`forward_deployment_id` column for `paper_deployment` to attach to. v3 deployments run on
+paper through the one strategy engine with a decision journal and checkpoints. Gaps 1 and 2
+stand as written: nothing writes or reads `mlops.paper_deployment`, and `ForwardRecorder` has
+no production caller.
+
 The ops task, and the reason this phase is in Stage 0. Take a simple, hand-authored,
 already-validated strategy, run it through the existing Experiment path, deploy it to the
 platform's paper venue (ADR-0048), and let it run.

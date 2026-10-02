@@ -13,6 +13,7 @@
 //! - [`env`] — the ports an environment implements, and [`cycle`], the one loop
 //!   that drives the engine through them.
 
+pub mod checkpoint;
 pub mod compile;
 pub mod decide;
 pub mod diagnostic;
@@ -28,6 +29,7 @@ pub mod registry;
 pub mod temporal;
 pub mod trace;
 
+pub use checkpoint::{Checkpoint, RestoreError};
 pub use compile::compile;
 pub use diagnostic::Diagnostic;
 pub use engine::{Engine, EngineError, Event, Step};

@@ -10,6 +10,7 @@ pub mod backtests;
 pub mod code;
 pub mod dashboard;
 pub mod data;
+pub mod deployments;
 pub mod desk_catalogue;
 pub mod desk_charter;
 pub mod desk_digest;
@@ -597,6 +598,15 @@ pub fn router(state: AppState) -> Router {
             get(backtests::get_backtest).delete(backtests::delete_backtest),
         )
         .route("/api/backtests/{id}/stop", post(backtests::stop_backtest))
+        // v3 deployments to paper (Set U U-4.2, U-4.6)
+        .route(
+            "/api/deployments",
+            get(deployments::list_deployments).post(deployments::create_deployment),
+        )
+        .route(
+            "/api/deployments/{id}",
+            delete(deployments::stop_deployment),
+        )
         .route("/api/backtests/{id}/rerun", post(backtests::rerun_backtest))
         // Backtest Suite (Set J) — honest-evaluation core: experiments, studies,
         // nulls, the staged-gate funnel, the one-shot vault, reconciliation.
