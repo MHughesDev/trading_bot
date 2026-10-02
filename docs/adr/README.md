@@ -46,6 +46,15 @@ ADR that replaces it.
 | [ADR-0036](0036-context-as-retrieval.md) | Context Assembly Is Retrieval Over a Run Store, Not Accumulation in a Buffer | Proposed | 2026-09-14 |
 | [ADR-0037](0037-two-modes-continuous-toggle.md) | Two Agent Modes — Chat and Research — with a Continuous Toggle on Research; "Endless" Is the Toggle's `replenish` Setting | Proposed | 2026-09-15 |
 | [ADR-0038](0038-one-live-evaluation-path.md) | One Live Evaluation Path — Automations Declare, the Hot Path Evaluates | Accepted | 2026-09-15 |
+| [ADR-0039](0039-one-deterministic-strategy-engine-environments-are-adapters.md) | One Deterministic Strategy Engine — Environments Are Adapters | Accepted | 2026-10-01 |
+| [ADR-0040](0040-strategies-are-typed-dataflow-graphs-of-two-kinds.md) | Strategies Are Typed Dataflow Graphs, of Two Kinds (Trading, Selection) | Accepted | 2026-10-01 |
+| [ADR-0041](0041-decisions-are-trade-intents-planned-into-orders.md) | Decisions Are Trade Intents, Planned Into Orders by One Shared Planner | Accepted | 2026-10-01 |
+| [ADR-0042](0042-decision-cadence-bar-close-fills-and-schedules.md) | Decision Cadence — Bar Close, Own Fills and Schedules; Never Every Tick | Accepted | 2026-10-01 |
+| [ADR-0043](0043-typed-model-contracts-resolved-per-environment.md) | Typed Model Contracts, Resolved Per Environment and Point-in-Time | Accepted | 2026-10-01 |
+| [ADR-0044](0044-native-simulated-venue-shares-the-paper-venue-core.md) | A Native Simulated Venue Shares the Paper Venue's Core; market_simulator Becomes a Reference Venue | Accepted | 2026-10-01 |
+| [ADR-0045](0045-one-language-front-end-graph-is-canonical.md) | One Language Front-End — the Graph Is Canonical; Text, Visual and Builder Are Views | Accepted | 2026-10-01 |
+| [ADR-0046](0046-risk-gate-in-every-environment.md) | The Risk Gate Runs in Every Environment, Including Backtests | Accepted | 2026-10-01 |
+| [ADR-0047](0047-decision-journal-and-replay-parity.md) | Every Decision Is Journaled, and Paper Is Replayed Through the Backtest Nightly | Accepted | 2026-10-01 |
 
 ## Decision Relationships
 

@@ -1,6 +1,8 @@
 # ADR-0006: Three-System Broker Architecture — Coinbase, Alpaca, market_simulator
 
 **Status:** Accepted
+
+> **Partially superseded 2026-10-01 by [ADR-0044](0044-native-simulated-venue-shares-the-paper-venue-core.md):** market_simulator is no longer the *default* backtest venue (it remains a reference venue). This ADR's principle — one execution interface, strategy and risk code never branch on mode — stands and is what ADR-0044 implements.
 **Date:** 2026-06-08
 **Deciders:** Platform team
 

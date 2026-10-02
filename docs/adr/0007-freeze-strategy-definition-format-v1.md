@@ -1,6 +1,8 @@
 # ADR-0007: Freeze Strategy Definition Format v1.0
 
 **Status:** Accepted
+
+> **Superseded as the authoring and execution model 2026-10-01 by [ADR-0040](0040-strategies-are-typed-dataflow-graphs-of-two-kinds.md):** v1 definitions remain readable and translate mechanically to `tbot.strategy/3` (FEAT-007 §12).
 **Date:** 2026-06-08
 **Deciders:** Platform team
 

@@ -1,6 +1,8 @@
 # ADR: Backtesting via the market_simulator SDK (Set D)
 
 **Status:** Accepted (2026-06-13)
+
+> **Partially superseded 2026-10-01 by [ADR-0044](0044-native-simulated-venue-shares-the-paper-venue-core.md):** the SDK facade is market-only, single-instrument and reports no fills back; backtests now run on a native SimulatedVenue sharing the paper venue's core. The SDK path remains available as a reference venue.
 **Scope:** The `backtest` crate (`crates/backtest`), the `/api/backtests`
 surface, the `backtest_runs` table, and the `market_simulator` git dependency.
 **Supersedes the scope note:** backtesting was deliberately removed on

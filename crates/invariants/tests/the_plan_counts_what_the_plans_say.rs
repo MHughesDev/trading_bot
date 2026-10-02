@@ -34,7 +34,7 @@ use std::path::{Path, PathBuf};
 /// The sets with per-task status markers. A–L use one `Completion:` line per
 /// MASTER instead and are counted by hand in PLAN.md §1's last table — stated
 /// here so a reader does not take their absence for completeness.
-const LIVE_SETS: &[&str] = &["set-P", "set-S", "set-T"];
+const LIVE_SETS: &[&str] = &["set-P", "set-S", "set-T", "set-U"];
 
 /// How much a task of each declared size is worth.
 fn weight(size: char) -> f64 {

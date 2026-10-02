@@ -1,6 +1,8 @@
 # ADR-0038: One Live Evaluation Path — Automations Declare, the Hot Path Evaluates
 
 **Status:** Accepted
+
+> **Extended 2026-10-01 by [ADR-0039](0039-one-deterministic-strategy-engine-environments-are-adapters.md):** one evaluation path for *every* environment — backtest, preview, paper and live — not only the live doors.
 **Date:** 2026-09-15
 **Deciders:** track 16 (the execution path to a fill)
 **Supersedes:** the two-evaluator arrangement implied by Set E phase 5 task 5.4 and
