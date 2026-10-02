@@ -273,7 +273,10 @@ impl AppState {
         // outside one (unit tests) it falls back to the synthetic executor.
         let suite = match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
-                let executor = backtest::sim_executor::SimRunExecutor::new(
+                // v3 graphs run on the one strategy engine, v1 definitions on
+                // market_simulator; the router reads which from the stored
+                // document (Set U U-3.4).
+                let executor = backtest::runner::FormatRoutedExecutor::new(
                     handle,
                     pg.clone(),
                     clickhouse_url.clone(),

@@ -135,6 +135,98 @@ pub struct RunResult {
     /// Carries the `unsafe` bit of the producing config (INV-1).
     #[serde(default)]
     pub unsafe_: bool,
+    /// How a run on the one strategy engine ran (Set U U-3.3). `None` for runs
+    /// from the older executors, which recorded none of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest: Option<EngineManifest>,
+}
+
+/// What a v3 run records about how it ran: the facts a reader needs to know
+/// what its numbers rest on (Set U U-3.3, FEAT-007 §9.4).
+///
+/// The numbers alone cannot say whether a quiet strategy was quiet because its
+/// signal never fired, because a model never answered, or because the risk gate
+/// refused it; this can.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct EngineManifest {
+    /// `strategy-engine/v3`.
+    pub engine: String,
+    /// The graph revision hash the run compiled.
+    pub revision: String,
+    /// `next_bar_open` or `current_close`.
+    pub fill_policy: String,
+    /// The fill policy traded at prices nobody could have traded at.
+    pub optimistic_fills: bool,
+    /// Where orders executed.
+    pub venue: String,
+    /// The risk limits every order passed, by name.
+    pub risk_limits: std::collections::BTreeMap<String, String>,
+    /// Every model the plan calls, at the version it was pinned to.
+    pub model_pins: Vec<ModelPin>,
+    /// Walk-forward folds used to answer model requests point-in-time. Empty
+    /// when the plan calls no model.
+    pub folds: Vec<FoldUse>,
+    /// Decision ticks taken inside the evaluation window.
+    pub decisions: u64,
+    /// Matched rules that held because a value their intent needed was
+    /// `missing`, by reason.
+    pub holds_by_reason: std::collections::BTreeMap<String, u64>,
+    /// Rules whose condition was `missing` and so did not match, by reason.
+    pub unknown_by_reason: std::collections::BTreeMap<String, u64>,
+    /// Intents the planner could not carry out, by reason.
+    pub planner_refusals: std::collections::BTreeMap<String, u64>,
+    /// Every order the risk gate refused.
+    pub gate_rejections: Vec<GateRejectionRecord>,
+    /// SHA-256 over every decision trace's digest, in order — one value that
+    /// changes if any decision changes (ADR-0047).
+    pub journal_digest: String,
+    /// The decisions that did something: placed or cancelled an order, held, or
+    /// had an intent refused.
+    pub journal: Vec<JournalEntry>,
+}
+
+/// A model the plan calls, pinned.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelPin {
+    pub node: String,
+    pub model: String,
+    pub version: u32,
+}
+
+/// One walk-forward fold's use in a run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FoldUse {
+    pub model: String,
+    pub version: u32,
+    pub fold: String,
+    /// Requests this fold answered.
+    pub answered: u64,
+}
+
+/// An order the risk gate refused.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GateRejectionRecord {
+    pub at: DateTime<Utc>,
+    pub instrument: String,
+    /// The planner's tag for the order.
+    pub tag: String,
+    /// The check that failed, e.g. `PositionLimitExceeded`.
+    pub check: String,
+    pub detail: String,
+}
+
+/// One decision in the journal.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JournalEntry {
+    pub at_ns: i64,
+    pub tick: u64,
+    /// What caused it: `bar_close`, `fill`, `order_closed`, `schedule`.
+    pub cause: String,
+    /// The decision trace's digest.
+    pub digest: String,
+    pub actions: u32,
+    pub refusals: u32,
+    pub holds: u32,
 }
 
 impl RunResult {
@@ -166,6 +258,7 @@ impl RunResult {
             produced_at: Utc::now(),
             produced_by: produced_by.into(),
             unsafe_: cfg.unsafe_,
+            manifest: None,
         }
     }
 
@@ -189,6 +282,7 @@ impl RunResult {
             produced_at: Utc::now(),
             produced_by: produced_by.into(),
             unsafe_: cfg.unsafe_,
+            manifest: None,
         }
     }
 }
@@ -242,6 +336,7 @@ mod tests {
             produced_at: Utc::now(),
             produced_by: "engine@test".into(),
             unsafe_: false,
+            manifest: None,
         };
         let back: RunResult = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
         assert_eq!(r, back);

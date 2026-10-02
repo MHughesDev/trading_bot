@@ -561,3 +561,198 @@ fn span_months(bars: &[LoadedBar]) -> Option<f64> {
     let seconds = (last - first) as f64 / 1e9;
     (seconds > 0.0).then(|| seconds / (365.25 / 12.0 * 86_400.0))
 }
+
+// ── v3: a preview is a short backtest (Set U U-3.5) ──────────────────────────
+//
+// For a `tbot.strategy/3` graph there is no separate preview loop. A preview
+// runs the backtest runner — the same engine, the same bars, the same merge,
+// the same venue — over a short window and reports only what was decided:
+// decisions, intents, holds and their reasons. No fills, no P&L and no trial,
+// for the same reason as above: a preview that reported a return would be a
+// backtest with the ledger switched off. Because it *is* the backtest's loop,
+// its decisions match a backtest over the same window by construction, and a
+// test holds it to that.
+
+/// Which venue a v3 preview runs against.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewVenue {
+    /// The simulated venue, exactly as a backtest uses it: positions open and
+    /// close, so every later decision sees the account a backtest would.
+    #[default]
+    Simulated,
+    /// Orders are recorded and never executed; the account stays flat. Answers
+    /// "when would it act?" for a strategy whose entries do not depend on its
+    /// position.
+    IntentOnly,
+}
+
+/// One decision that did something worth showing.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PreviewDecision {
+    pub at: DateTime<Utc>,
+    pub tick: u64,
+    /// `bar_close`, `fill`, `order_closed`.
+    pub cause: String,
+    /// (rule index, the intent it resolved to).
+    pub intents: Vec<(usize, strategy_engine::planner::ResolvedIntent)>,
+    pub actions: Vec<strategy_engine::planner::OrderAction>,
+    /// (rule index, why it held).
+    pub holds: Vec<(usize, Vec<String>)>,
+    pub refusals: Vec<String>,
+}
+
+/// One rule across the window: when it could first have fired, and what
+/// stopped it before then.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RulePreview {
+    pub rule: usize,
+    /// The first decision at which the rule fired, if it ever did.
+    pub first_fired_at: Option<DateTime<Utc>>,
+    pub fired: u64,
+    pub held: u64,
+    /// Outcomes before the first firing (or over the whole window if it never
+    /// fired): `not_matched`, `shadowed`, `unknown:<reason>`, `held:<reason>`.
+    pub before_first_fire: std::collections::BTreeMap<String, u64>,
+}
+
+/// What a v3 preview reports.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct V3Preview {
+    pub venue: PreviewVenue,
+    /// Bar-close decisions inside the window.
+    pub decisions: u64,
+    pub rules: Vec<RulePreview>,
+    /// Every decision that placed an order, held, or was refused.
+    pub notable: Vec<PreviewDecision>,
+    /// The same digest a backtest's manifest carries over the same decisions.
+    pub journal_digest: String,
+}
+
+fn reason_key(m: &domain::strategy_graph::MissingReason) -> String {
+    serde_json::to_value(m)
+        .ok()
+        .and_then(|v| v.get("reason").and_then(|r| r.as_str()).map(str::to_string))
+        .unwrap_or_else(|| "unknown".into())
+}
+
+fn cause_key(c: &strategy_engine::trace::Cause) -> &'static str {
+    use strategy_engine::trace::Cause;
+    match c {
+        Cause::BarClose => "bar_close",
+        Cause::Fill { .. } => "fill",
+        Cause::OrderClosed { .. } => "order_closed",
+        Cause::Schedule => "schedule",
+    }
+}
+
+/// Summarise a run's decisions as a preview.
+#[must_use]
+pub fn summarise(
+    venue: PreviewVenue,
+    rule_count: usize,
+    traces: &[strategy_engine::DecisionTrace],
+) -> V3Preview {
+    use sha2::Digest;
+    use strategy_engine::decide::RuleOutcome;
+    use strategy_engine::trace::Cause;
+
+    let mut rules: Vec<RulePreview> = (0..rule_count)
+        .map(|rule| RulePreview {
+            rule,
+            first_fired_at: None,
+            fired: 0,
+            held: 0,
+            before_first_fire: std::collections::BTreeMap::new(),
+        })
+        .collect();
+    let mut notable = Vec::new();
+    let mut chain = sha2::Sha256::new();
+    let mut decisions = 0u64;
+    for t in traces {
+        chain.update(t.digest().as_bytes());
+        if t.cause == Cause::BarClose {
+            decisions += 1;
+        }
+        let at = DateTime::from_timestamp_nanos(t.at_ns);
+        let mut holds = Vec::new();
+        for (&i, outcome) in &t.rules {
+            let Some(r) = rules.get_mut(i) else { continue };
+            let key = match outcome {
+                RuleOutcome::Fired => {
+                    r.fired += 1;
+                    if r.first_fired_at.is_none() {
+                        r.first_fired_at = Some(at);
+                    }
+                    continue;
+                }
+                RuleOutcome::Held { reasons } => {
+                    r.held += 1;
+                    holds.push((i, reasons.iter().map(ToString::to_string).collect()));
+                    format!(
+                        "held:{}",
+                        reasons.first().map_or_else(|| "unknown".into(), reason_key)
+                    )
+                }
+                RuleOutcome::NotMatched => "not_matched".into(),
+                RuleOutcome::Shadowed => "shadowed".into(),
+                RuleOutcome::Unknown { reason } => format!("unknown:{}", reason_key(reason)),
+            };
+            if r.first_fired_at.is_none() {
+                *r.before_first_fire.entry(key).or_insert(0) += 1;
+            }
+        }
+        if !t.intents.is_empty()
+            || !t.actions.is_empty()
+            || !holds.is_empty()
+            || !t.refusals.is_empty()
+        {
+            notable.push(PreviewDecision {
+                at,
+                tick: t.tick,
+                cause: cause_key(&t.cause).to_string(),
+                intents: t.intents.clone(),
+                actions: t.actions.clone(),
+                holds,
+                refusals: t.refusals.iter().map(|r| r.reason.clone()).collect(),
+            });
+        }
+    }
+    V3Preview {
+        venue,
+        decisions,
+        rules,
+        notable,
+        journal_digest: hex::encode(chain.finalize()),
+    }
+}
+
+/// Preview a v3 run: the backtest loop over its window, reporting decisions
+/// only.
+///
+/// # Errors
+/// As [`crate::runner::run`].
+pub fn preview_v3(
+    r: crate::runner::V3Run,
+    venue: PreviewVenue,
+    models: &mut dyn strategy_engine::env::ModelProvider,
+) -> Result<(V3Preview, Vec<strategy_engine::DecisionTrace>), crate::runner::RunnerError> {
+    let rule_count = r.plan.rules.len();
+    let traces = match venue {
+        PreviewVenue::Simulated => crate::runner::run(r, models)?.traces,
+        PreviewVenue::IntentOnly => {
+            let primary = crate::runner::primary_bars(&r)?;
+            let mut v = crate::env::IntentOnly::new(r.spec.clone(), r.initial_balance);
+            crate::runner::drive(
+                &r.plan,
+                &r.bars,
+                &primary,
+                r.start_ns,
+                &mut v,
+                models,
+                &mut strategy_engine::env::NoJournal,
+            )?
+        }
+    };
+    Ok((summarise(venue, rule_count, &traces), traces))
+}

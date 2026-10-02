@@ -70,6 +70,10 @@ pub struct BacktestRequest {
     /// Inline strategy definition (validated before use).
     #[serde(default)]
     pub definition: Option<StrategyDefinition>,
+    /// Inline `tbot.strategy/3` graph (Set U U-3.4) — compiled before use, and
+    /// run on the one strategy engine.
+    #[serde(default)]
+    pub graph: Option<domain::strategy_graph::StrategyGraph>,
     /// Instrument symbol, e.g. `"BTC-USDT"` or `"AAPL"`.
     pub instrument_id: String,
     /// Venue name shown on results (e.g. `"kraken"`); defaults per asset class.
@@ -106,11 +110,76 @@ fn default_true() -> bool {
     true
 }
 
+/// The strategy a backtest job runs (Set U U-3.4): a v1 definition on the
+/// legacy `market_simulator` path, or a `tbot.strategy/3` graph on the one
+/// strategy engine. Serialised as the document itself — which one it is, is read
+/// from its `format` — so `backtest_jobs.definition` holds exactly what was run.
+#[derive(Clone, Debug)]
+// A handful of jobs live at once; boxing the v1 definition would ripple through
+// every v1 path for no measurable gain.
+#[allow(clippy::large_enum_variant)]
+pub enum JobStrategy {
+    V1(StrategyDefinition),
+    V3(Box<domain::strategy_graph::StrategyGraph>),
+}
+
+impl JobStrategy {
+    /// Parse a stored or submitted document.
+    ///
+    /// # Errors
+    /// A document that is neither format.
+    pub fn from_json(v: serde_json::Value) -> Result<Self, serde_json::Error> {
+        if v.get("format").and_then(|f| f.as_str()) == Some(domain::strategy_graph::FORMAT) {
+            Ok(Self::V3(Box::new(serde_json::from_value(v)?)))
+        } else {
+            Ok(Self::V1(serde_json::from_value(v)?))
+        }
+    }
+
+    /// The strategy's name: the v1 slug, or the graph's name.
+    #[must_use]
+    pub fn slug(&self) -> &str {
+        match self {
+            Self::V1(d) => &d.strategy_id,
+            Self::V3(g) => &g.name,
+        }
+    }
+
+    /// What `RunConfig.strategy_version` records: the v1 version string, or the
+    /// graph's content-addressed revision.
+    #[must_use]
+    pub fn version(&self) -> String {
+        match self {
+            Self::V1(d) => d.definition_version.clone(),
+            Self::V3(g) => g
+                .revision()
+                .map(|r| r.as_str().to_string())
+                .unwrap_or_default(),
+        }
+    }
+}
+
+impl Serialize for JobStrategy {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::V1(d) => d.serialize(s),
+            Self::V3(g) => g.serialize(s),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for JobStrategy {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = serde_json::Value::deserialize(d)?;
+        Self::from_json(v).map_err(serde::de::Error::custom)
+    }
+}
+
 /// A fully resolved job specification (request + resolved definition).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResolvedSpec {
     pub name: String,
-    pub definition: StrategyDefinition,
+    pub definition: JobStrategy,
     pub instrument_id: String,
     pub venue_id: String,
     pub asset_class: String,
@@ -239,5 +308,38 @@ mod tests {
         assert!(BacktestStatus::Cancelled.is_terminal());
         assert!(!BacktestStatus::Simulating.is_terminal());
         assert!(!BacktestStatus::CollectingData.is_terminal());
+    }
+
+    /// Set U U-3.4: a job's strategy is stored as the document it ran, and read
+    /// back as the same format.
+    #[test]
+    fn a_job_strategy_round_trips_as_the_document_it_ran() {
+        let v3 = serde_json::json!({
+          "format": "tbot.strategy/3", "kind": "trading", "name": "g",
+          "asset_class": "crypto_spot_cex", "timeframe": "1h",
+          "nodes": [{"id":"go","op":"ge","args":{"a":"close","b":0}}],
+          "decide": {"rules": [{"when":"go","then":{"kind":"hold"}}]}
+        });
+        let s = JobStrategy::from_json(v3.clone()).expect("a v3 graph");
+        assert!(matches!(s, JobStrategy::V3(_)));
+        assert_eq!(s.slug(), "g");
+        assert_eq!(s.version().len(), 64, "the content-addressed revision");
+        let back: JobStrategy = serde_json::from_value(serde_json::to_value(&s).unwrap()).unwrap();
+        assert!(matches!(back, JobStrategy::V3(_)));
+        assert_eq!(back.version(), s.version());
+
+        // A request can carry the graph inline.
+        let req: BacktestRequest = serde_json::from_value(serde_json::json!({
+            "graph": v3, "instrument_id": "BTC-USD", "asset_class": "crypto_spot_cex",
+            "timeframe": "1h", "start": "2025-01-01T00:00:00Z", "end": "2025-02-01T00:00:00Z"
+        }))
+        .unwrap();
+        assert!(req.graph.is_some() && req.definition.is_none());
+    }
+
+    #[test]
+    fn a_document_that_is_neither_format_is_refused() {
+        assert!(JobStrategy::from_json(serde_json::json!({"format": "tbot.strategy/3"})).is_err());
+        assert!(JobStrategy::from_json(serde_json::json!({"nonsense": true})).is_err());
     }
 }

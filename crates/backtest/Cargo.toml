@@ -23,6 +23,12 @@ strategy-runtime = { workspace = true }
 storage = { workspace = true }
 ledger = { workspace = true }
 dataplane = { workspace = true }
+# Set U Phase 3: v3 strategies backtest through the one strategy engine, on the
+# simulated venue that shares the paper venue's core, behind the production
+# risk gate (ADR-0039, ADR-0044, ADR-0046).
+strategy-engine = { workspace = true }
+execution = { workspace = true }
+risk = { workspace = true }
 
 anyhow = { workspace = true }
 thiserror = { workspace = true }

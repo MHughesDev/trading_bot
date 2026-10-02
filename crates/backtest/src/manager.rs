@@ -23,10 +23,12 @@ use domain::payloads::bar::Timeframe;
 use crate::collect::{collect_ranges, CollectorPlan};
 use crate::gaps::{self, ScheduleKind};
 use crate::requirements::derive_requirements;
-use crate::run::{DataSlice, EvalResolution, RunConfig, RunConfigBuilder};
+use crate::run::{ComputeCost, DataSlice, EvalResolution, RunConfig, RunConfigBuilder};
 use crate::sim::{run_simulation_detailed, InstrumentPrecisions, SimulationInputs};
 use crate::store::{BarCoverage, BarStore};
-use crate::types::{BacktestSnapshot, BacktestStatus, DataCoverage, ResolvedSpec, TimeframeExt};
+use crate::types::{
+    BacktestSnapshot, BacktestStatus, DataCoverage, JobStrategy, ResolvedSpec, TimeframeExt,
+};
 use ledger::pg::PgTrialLedger;
 use ledger::{
     ActorKind, DispatchContext, Registration, TerminalReason, TrialEvent, TrialState, TrialTicket,
@@ -89,7 +91,7 @@ impl Job {
         BacktestSnapshot {
             id: self.id,
             name: self.spec.name.clone(),
-            strategy_slug: self.spec.definition.strategy_id.clone(),
+            strategy_slug: self.spec.definition.slug().to_string(),
             instrument_id: self.spec.instrument_id.clone(),
             venue_id: self.spec.venue_id.clone(),
             asset_class: self.spec.asset_class.clone(),
@@ -254,8 +256,8 @@ impl BacktestManager {
             eval_resolution_for(spec.timeframe),
         );
         RunConfigBuilder::new(
-            spec.definition.strategy_id.clone(),
-            spec.definition.definition_version.clone(),
+            spec.definition.slug().to_string(),
+            spec.definition.version(),
             slice,
             "cost:floor",
             "sizing:default",
@@ -284,7 +286,11 @@ impl BacktestManager {
         // The simulator supports fixed-size orders only (sim.rs enforces the
         // same at run time) — reject here so the caller gets an immediate 422
         // instead of a failure minutes later, after data collection.
-        for action in &spec.definition.actions {
+        let v1_actions = match &spec.definition {
+            JobStrategy::V1(d) => d.actions.as_slice(),
+            JobStrategy::V3(_) => &[],
+        };
+        for action in v1_actions {
             let domain::strategy_def::actions::ActionKind::PlaceOrder { order } = &action.kind;
             anyhow::ensure!(
                 order.size_mode == domain::strategy_def::actions::SizeMode::Fixed,
@@ -485,11 +491,16 @@ impl BacktestManager {
             move |e: anyhow::Error| PhaseFailure::new(phase, reason, humanize_error(&e.to_string()))
         };
 
+        let definition = match &spec.definition {
+            JobStrategy::V1(d) => d,
+            JobStrategy::V3(g) => return self.drive_v3(job, g).await,
+        };
+
         // ── Phase 1: check stored data against the strategy's requirements ──
         job.set_status(BacktestStatus::CheckingData);
         self.persist(job).await;
 
-        let requirements = derive_requirements(&spec.definition, spec.timeframe).map_err(|e| {
+        let requirements = derive_requirements(definition, spec.timeframe).map_err(|e| {
             PhaseFailure::new(
                 BacktestStatus::CheckingData,
                 TerminalReason::IntegrityRejected,
@@ -609,7 +620,7 @@ impl BacktestManager {
         })?;
         let precisions = self.instrument_precisions(&spec.instrument_id).await;
         let inputs = SimulationInputs {
-            definition: spec.definition.clone(),
+            definition: definition.clone(),
             instrument_id: spec.instrument_id.clone(),
             venue_id: spec.venue_id.clone(),
             asset_class: spec.asset_class.clone(),
@@ -655,6 +666,224 @@ impl BacktestManager {
         {
             let mut state = job.state.write().expect("job state lock poisoned");
             state.result = Some(outcome.result_document());
+            state.status = BacktestStatus::Completed;
+            state.finished_at = Some(Utc::now());
+        }
+        Ok(())
+    }
+
+    /// The v3 path (Set U U-3.4): the same phases and the same data checks as
+    /// v1, then [`crate::runner::run`] — the one strategy engine on the
+    /// simulated venue, behind the risk gate — instead of `market_simulator`.
+    ///
+    /// Every input the graph reads is checked and, with auto-collect on,
+    /// backfilled; a strategy reading BTC daily while trading ETH hourly needs
+    /// both series, and a missing one is refused by name rather than discovered
+    /// as a silent `missing` on every decision.
+    #[allow(clippy::too_many_lines)]
+    async fn drive_v3(
+        self: &Arc<Self>,
+        job: &Arc<Job>,
+        graph: &domain::strategy_graph::StrategyGraph,
+    ) -> Result<(), PhaseFailure> {
+        use strategy_engine::plan::PRIMARY;
+        let spec = &job.spec;
+        let fail = |phase: BacktestStatus, reason: TerminalReason| {
+            move |e: anyhow::Error| PhaseFailure::new(phase, reason, humanize_error(&e.to_string()))
+        };
+        job.set_status(BacktestStatus::CheckingData);
+        self.persist(job).await;
+
+        let plan =
+            crate::runner::compile_for_run(graph, &crate::run::ParamMap::new()).map_err(|e| {
+                PhaseFailure::new(
+                    BacktestStatus::CheckingData,
+                    TerminalReason::IntegrityRejected,
+                    e,
+                )
+            })?;
+        if plan.timeframe.timeframe() != spec.timeframe {
+            return Err(PhaseFailure::new(
+                BacktestStatus::CheckingData,
+                TerminalReason::IntegrityRejected,
+                format!(
+                    "the strategy decides on {} bars; the backtest asked for {}",
+                    plan.timeframe.key(),
+                    spec.timeframe.key()
+                ),
+            ));
+        }
+        let store = BarStore::connect(&self.ch_url);
+        let schedule = ScheduleKind::for_asset_class(&spec.asset_class);
+        let mut series = Vec::with_capacity(plan.inputs.len());
+        for (i, need) in plan.required_history() {
+            let input = &plan.inputs[i];
+            let instrument = match &input.instrument {
+                domain::strategy_graph::InstrumentRef::Bound => spec.instrument_id.clone(),
+                domain::strategy_graph::InstrumentRef::Fixed { instrument } => instrument.clone(),
+            };
+            let tf = input.timeframe.timeframe();
+            let lead = i64::from(need.saturating_add(1)) * i64::from(input.timeframe.seconds());
+            let from = spec.start - Duration::seconds(lead);
+            let counts = store
+                .daily_counts(&instrument, tf, from, spec.end)
+                .await
+                .map_err(fail(
+                    BacktestStatus::CheckingData,
+                    TerminalReason::DataError,
+                ))?;
+            let mut coverage = gaps::analyze(from, spec.end, &counts, tf, schedule);
+            if !coverage.missing_ranges.is_empty() && spec.auto_collect {
+                job.set_status(BacktestStatus::CollectingData);
+                self.persist(job).await;
+                let collector = CollectorPlan::for_asset_class(&spec.asset_class, &instrument)
+                    .map_err(fail(
+                        BacktestStatus::CollectingData,
+                        TerminalReason::IntegrityRejected,
+                    ))?;
+                coverage.collected_bars = collect_ranges(
+                    &self.http,
+                    &store,
+                    &collector,
+                    &instrument,
+                    &spec.venue_id,
+                    tf,
+                    &coverage.missing_ranges,
+                    &job.collected,
+                    &job.cancel,
+                )
+                .await
+                .map_err(fail(
+                    BacktestStatus::CollectingData,
+                    TerminalReason::DataError,
+                ))?;
+            }
+            if i == PRIMARY {
+                job.state.write().expect("job state lock poisoned").coverage = Some(coverage);
+            }
+            if job.cancel.load(Ordering::Relaxed) {
+                job.set_status(BacktestStatus::Cancelled);
+                return Ok(());
+            }
+            series.push((instrument, tf, from));
+        }
+
+        job.set_status(BacktestStatus::LoadingData);
+        self.persist(job).await;
+        let mut bars = Vec::with_capacity(series.len());
+        for (instrument, tf, from) in &series {
+            let loaded = store
+                .load_bars(instrument, *tf, *from, spec.end)
+                .await
+                .map_err(fail(BacktestStatus::LoadingData, TerminalReason::DataError))?;
+            if loaded.is_empty() {
+                return Err(PhaseFailure::new(
+                    BacktestStatus::LoadingData,
+                    TerminalReason::DataError,
+                    format!(
+                        "no historical {} bars available for {instrument} in the requested window{}",
+                        tf.key(),
+                        if spec.auto_collect { " (collection found nothing)" } else { " — enable auto-collect to backfill" }
+                    ),
+                ));
+            }
+            bars.push(loaded);
+        }
+
+        job.set_status(BacktestStatus::Simulating);
+        self.persist(job).await;
+        let initial_balance: Decimal = spec.initial_balance.parse().map_err(|e| {
+            PhaseFailure::new(
+                BacktestStatus::Simulating,
+                TerminalReason::IntegrityRejected,
+                format!("invalid balance: {e}"),
+            )
+        })?;
+        let asset_class: domain::instrument::AssetClass = serde_json::from_value(
+            serde_json::Value::String(spec.asset_class.clone()),
+        )
+        .map_err(|_| {
+            PhaseFailure::new(
+                BacktestStatus::Simulating,
+                TerminalReason::IntegrityRejected,
+                format!("unknown asset class '{}'", spec.asset_class),
+            )
+        })?;
+        let meta = storage::postgres::instruments::fetch_by_id(&self.pg, &spec.instrument_id)
+            .await
+            .map_err(|e| {
+                PhaseFailure::new(
+                    BacktestStatus::Simulating,
+                    TerminalReason::DependencyFailure,
+                    e.to_string(),
+                )
+            })?
+            .ok_or_else(|| {
+                PhaseFailure::new(
+                    BacktestStatus::Simulating,
+                    TerminalReason::DataError,
+                    format!(
+                        "no instrument metadata for '{}': the risk gate refuses an instrument it \
+                         cannot size, in a backtest as live (ADR-0046)",
+                        spec.instrument_id
+                    ),
+                )
+            })?;
+        let cfg = Self::run_config_for(spec);
+        let run = crate::runner::V3Run {
+            plan: Arc::new(plan),
+            instrument: spec.instrument_id.clone(),
+            asset_class,
+            bars,
+            start_ns: spec.start.timestamp_nanos_opt().unwrap_or(0),
+            spec: strategy_engine::InstrumentSpec {
+                instrument: spec.instrument_id.clone(),
+                lot_size: meta.lot_size,
+                tick_size: meta.tick_size,
+                min_qty: meta.lot_size,
+                caps: strategy_engine::VenueCaps::all(),
+            },
+            instrument_limits: risk::InstrumentLimits {
+                tick_size: meta.tick_size,
+                lot_size: meta.lot_size,
+            },
+            limits: risk::GlobalRiskLimits::default(),
+            initial_balance,
+            fill_policy: execution::sim_venue::FillPolicy::NextBarOpen,
+            strategy_id: graph.name.clone(),
+            sims: execution::paper::SimulatorSet::realistic(),
+        };
+        let started = std::time::Instant::now();
+        let outcome = tokio::task::spawn_blocking(move || {
+            crate::runner::run(run, &mut strategy_engine::env::NoModels)
+        })
+        .await
+        .map_err(|e| {
+            PhaseFailure::new(
+                BacktestStatus::Simulating,
+                TerminalReason::DependencyFailure,
+                format!("runner panicked: {e}"),
+            )
+        })?
+        .map_err(|e| {
+            PhaseFailure::new(
+                BacktestStatus::Simulating,
+                TerminalReason::IntegrityRejected,
+                e.to_string(),
+            )
+        })?;
+        if job.cancel.load(Ordering::Relaxed) {
+            job.set_status(BacktestStatus::Cancelled);
+            return Ok(());
+        }
+        let cost = ComputeCost {
+            wall_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            cpu_ms: 0,
+        };
+        let result = crate::runner::to_run_result(&cfg, outcome, cost);
+        {
+            let mut state = job.state.write().expect("job state lock poisoned");
+            state.result = Some(crate::runner::result_document(&result));
             state.status = BacktestStatus::Completed;
             state.finished_at = Some(Utc::now());
         }
@@ -774,7 +1003,7 @@ impl BacktestManager {
             if jobs.contains_key(&row.id) {
                 continue;
             }
-            let Ok(definition) = serde_json::from_value(row.definition) else {
+            let Ok(definition) = JobStrategy::from_json(row.definition) else {
                 continue;
             };
             let Some(timeframe) =

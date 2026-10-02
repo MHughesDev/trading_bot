@@ -28,6 +28,7 @@ pub mod capacity;
 pub mod census;
 pub mod collect;
 pub mod costs;
+pub mod env;
 pub mod experiment;
 pub mod factors;
 pub mod forensics;
@@ -43,6 +44,7 @@ pub mod reconcile;
 pub mod requirements;
 pub mod rng;
 pub mod run;
+pub mod runner;
 pub mod sim;
 pub mod sim_executor;
 pub mod stats;
@@ -65,7 +67,7 @@ pub use manager::BacktestManager;
 pub use store::{BarCoverage, BarStore, CollectedBar};
 pub use suite::SuiteManager;
 pub use types::{
-    BacktestRequest, BacktestSnapshot, BacktestStatus, DataCoverage, MissingRange, ResolvedSpec,
-    TimeframeExt,
+    BacktestRequest, BacktestSnapshot, BacktestStatus, DataCoverage, JobStrategy, MissingRange,
+    ResolvedSpec, TimeframeExt,
 };
 pub use warmup::{load_warm_state, run_indicators, WarmState};

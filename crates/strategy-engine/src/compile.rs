@@ -411,7 +411,7 @@ impl<'a> Compiler<'a> {
             };
             let name = after[..close].trim();
             if let Some(v) = self.params.get(name) {
-                out.push_str(&params::literal(v))
+                out.push_str(&params::literal(v));
             } else {
                 self.unknown_param(at, name);
                 return None;
@@ -1141,7 +1141,7 @@ impl<'a> Compiler<'a> {
                             let mut vals = Vec::new();
                             for x in xs {
                                 if let Some(n) = x.literal_num().and_then(Num::new) {
-                                    vals.push(Operand::Const(Value::Num(n)))
+                                    vals.push(Operand::Const(Value::Num(n)));
                                 } else {
                                     self.diag(Diagnostic::new(
                                         "literal_required",
@@ -1830,7 +1830,7 @@ pub(crate) fn visit_args_mut(i: &mut TradeIntent, f: &mut dyn FnMut(&mut Arg)) {
     fn size(s: &mut SizeSpec, f: &mut dyn FnMut(&mut Arg)) {
         match s {
             SizeSpec::Units { x } | SizeSpec::Notional { x } | SizeSpec::EquityFraction { x } => {
-                f(x)
+                f(x);
             }
             SizeSpec::Risk { fraction, stop } => {
                 f(fraction);

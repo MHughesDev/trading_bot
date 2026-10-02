@@ -67,6 +67,11 @@ pub struct PreviewBody {
     pub end: DateTime<Utc>,
     #[serde(default)]
     pub project_id: Option<Uuid>,
+    /// For a `tbot.strategy/3` graph: run against the simulated venue (the
+    /// default — decisions match a backtest exactly) or record orders without
+    /// executing them (`intent_only`). Ignored for v1 definitions.
+    #[serde(default)]
+    pub venue: backtest::preview::PreviewVenue,
 }
 
 fn default_timeframe() -> String {
@@ -151,6 +156,12 @@ pub async fn preview(
         Ok(p) => p,
         Err(e) => return project_error(&e),
     };
+
+    // A v3 graph previews as a short backtest through the one strategy engine
+    // (Set U U-3.5); the window rule below applies to it unchanged.
+    if backtest::runner::is_v3(&body.definition) {
+        return preview_v3(&state, &project, body).await;
+    }
 
     let definition: StrategyDefinition = match serde_json::from_value(body.definition) {
         Ok(d) => d,
@@ -284,6 +295,207 @@ pub async fn preview(
                 "error": "preview_failed",
                 "message": e.to_string(),
             })),
+        )
+            .into_response(),
+    }
+}
+
+fn unprocessable(error: &str, message: impl Into<String>) -> axum::response::Response {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({ "error": error, "message": message.into() })),
+    )
+        .into_response()
+}
+
+/// The v3 preview: the backtest runner over the window, decisions only.
+///
+/// The same window rule as v1 — the cutoff clips, the holdout refuses — and the
+/// same point-in-time bar read. Warm-up history before `start` is loaded so the
+/// window's first decision is not about cold indicators; it ends at the same
+/// `as_of`, so nothing past the effective end is read.
+#[allow(clippy::too_many_lines)]
+async fn preview_v3(
+    state: &AppState,
+    project: &Project,
+    body: PreviewBody,
+) -> axum::response::Response {
+    use strategy_engine::plan::PRIMARY;
+    let graph: domain::strategy_graph::StrategyGraph = match serde_json::from_value(body.definition)
+    {
+        Ok(g) => g,
+        Err(e) => return unprocessable("invalid_definition", e.to_string()),
+    };
+    let plan = match backtest::runner::compile_for_run(&graph, &backtest::run::ParamMap::new()) {
+        Ok(p) => p,
+        Err(message) => return unprocessable("invalid_strategy", message),
+    };
+    if plan.timeframe.key() != body.timeframe {
+        return unprocessable(
+            "timeframe_mismatch",
+            format!(
+                "the strategy decides on {} bars; the preview asked for {}",
+                plan.timeframe.key(),
+                body.timeframe
+            ),
+        );
+    }
+    let (effective_end, cutoff_applied) = match judge_window(project, body.start, body.end) {
+        WindowVerdict::Allowed {
+            effective_end,
+            cutoff_applied,
+        } => (effective_end, cutoff_applied),
+        WindowVerdict::HoldoutOverlap { sealed_from } => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": "holdout_overlap",
+                    "partition": "sealed_holdout",
+                    "sealed_from": sealed_from,
+                    "requested_end": body.end,
+                    "fix": format!("request end <= {sealed_from}"),
+                })),
+            )
+                .into_response();
+        }
+        WindowVerdict::Empty { effective_end } => {
+            return unprocessable(
+                "empty_window",
+                format!(
+                    "start {} is at or after the effective end {effective_end}",
+                    body.start
+                ),
+            )
+        }
+    };
+    let asset_class: domain::instrument::AssetClass =
+        match serde_json::from_value(serde_json::Value::String(graph.asset_class.clone())) {
+            Ok(a) => a,
+            Err(_) => return unprocessable("unknown_asset_class", graph.asset_class.clone()),
+        };
+    let meta =
+        match storage::postgres::instruments::fetch_by_id(&state.pg, &body.instrument_id).await {
+            Ok(Some(m)) => m,
+            Ok(None) => {
+                return unprocessable(
+                    "instrument_metadata_missing",
+                    format!(
+                    "no instrument metadata for '{}': orders cannot be sized or rounded without \
+                     its lot and tick, here as in a backtest",
+                    body.instrument_id
+                ),
+                )
+            }
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "internal", "message": e.to_string() })),
+                )
+                    .into_response()
+            }
+        };
+    let store = backtest::store::BarStore::connect(&state.clickhouse_url).as_of(effective_end);
+    let mut bars = Vec::with_capacity(plan.inputs.len());
+    for (i, need) in plan.required_history() {
+        let input = &plan.inputs[i];
+        let id = match &input.instrument {
+            domain::strategy_graph::InstrumentRef::Bound => body.instrument_id.clone(),
+            domain::strategy_graph::InstrumentRef::Fixed { instrument } => instrument.clone(),
+        };
+        let lead = chrono::Duration::seconds(
+            i64::from(need.saturating_add(1)) * i64::from(input.timeframe.seconds()),
+        );
+        match store
+            .load_bars(
+                &id,
+                input.timeframe.timeframe(),
+                body.start - lead,
+                effective_end,
+            )
+            .await
+        {
+            Ok(b) if !b.is_empty() => bars.push(b),
+            Ok(_) => {
+                return unprocessable(
+                    "bars_unavailable",
+                    format!(
+                        "no {} bars stored for {id} in the window",
+                        input.timeframe.key()
+                    ),
+                )
+            }
+            Err(e) => {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({ "error": "bars_unavailable", "message": e.to_string() })),
+                )
+                    .into_response()
+            }
+        }
+    }
+    let in_window = bars[PRIMARY]
+        .iter()
+        .filter(|b| b.ts_ns > body.start.timestamp_nanos_opt().unwrap_or(0))
+        .count();
+    if in_window < MIN_BARS {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "window_too_short", "have": in_window, "need": MIN_BARS })),
+        )
+            .into_response();
+    }
+    let run = backtest::runner::V3Run {
+        plan: std::sync::Arc::new(plan),
+        instrument: body.instrument_id.clone(),
+        asset_class,
+        bars,
+        start_ns: body.start.timestamp_nanos_opt().unwrap_or(0),
+        spec: strategy_engine::InstrumentSpec {
+            instrument: body.instrument_id.clone(),
+            lot_size: meta.lot_size,
+            tick_size: meta.tick_size,
+            min_qty: meta.lot_size,
+            caps: strategy_engine::VenueCaps::all(),
+        },
+        instrument_limits: risk::InstrumentLimits {
+            tick_size: meta.tick_size,
+            lot_size: meta.lot_size,
+        },
+        limits: risk::GlobalRiskLimits::default(),
+        initial_balance: rust_decimal::Decimal::from(10_000),
+        fill_policy: execution::sim_venue::FillPolicy::NextBarOpen,
+        strategy_id: graph.name.clone(),
+        sims: execution::paper::SimulatorSet::realistic(),
+    };
+    let venue = body.venue;
+    let outcome = tokio::task::spawn_blocking(move || {
+        backtest::preview::preview_v3(run, venue, &mut strategy_engine::env::NoModels)
+    })
+    .await;
+    match outcome {
+        Ok(Ok((preview, _traces))) => {
+            let mut out = serde_json::to_value(&preview).unwrap_or_else(|_| json!({}));
+            out["engine"] = json!("strategy-engine/v3");
+            out["window"] = json!({
+                "start": body.start,
+                "end": effective_end,
+                "as_of": effective_end,
+                "cutoff_applied": cutoff_applied,
+                "instrument_id": body.instrument_id,
+                "timeframe": body.timeframe,
+            });
+            out["spends_trial"] = json!(false);
+            out["note"] = json!(
+                "decisions only — the backtest's own loop over this window, with no fills, \
+                 costs or P&L reported and no ledger row. A backtest over the same window \
+                 makes exactly these decisions."
+            );
+            Json(out).into_response()
+        }
+        Ok(Err(e)) => unprocessable("preview_failed", e.to_string()),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "internal", "message": e.to_string() })),
         )
             .into_response(),
     }

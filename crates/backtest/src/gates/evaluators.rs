@@ -2366,6 +2366,7 @@ mod tests {
             produced_at: t0,
             produced_by: "sim@pre-exits".into(),
             unsafe_: false,
+            manifest: None,
         };
         crate::capacity::Exposure::from_run(&result).expect("has trades")
     }

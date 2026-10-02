@@ -8,6 +8,7 @@ domain = { workspace = true }
 cfg = { workspace = true }
 risk = { workspace = true }
 execution = { workspace = true }
+strategy-engine = { workspace = true }
 strategy-runtime = { workspace = true }
 strategy-validator = { workspace = true }
 storage = { workspace = true }

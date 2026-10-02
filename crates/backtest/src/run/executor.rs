@@ -110,6 +110,7 @@ pub fn map_sim_result(
         produced_at: Utc::now(),
         produced_by: produced_by.into(),
         unsafe_: cfg.unsafe_,
+        manifest: None,
     }
 }
 

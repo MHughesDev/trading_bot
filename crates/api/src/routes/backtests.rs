@@ -15,7 +15,9 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
-use backtest::{BacktestRequest, BarCoverage, CollectorPlan, ResolvedSpec, TimeframeExt};
+use backtest::{
+    BacktestRequest, BarCoverage, CollectorPlan, JobStrategy, ResolvedSpec, TimeframeExt,
+};
 use domain::payloads::bar::Timeframe;
 use domain::strategy_def::StrategyDefinition;
 use strategy_validator::validate;
@@ -45,6 +47,19 @@ pub async fn create_backtest(
     token: BearerToken,
     Json(req): Json<BacktestRequest>,
 ) -> impl IntoResponse {
+    // A v3 graph — inline, or the stored document a slug names — runs on the
+    // one strategy engine (Set U U-3.4). Everything v1 keeps its path below.
+    let stored_graph = match (&req.graph, &req.definition, &req.strategy_ref) {
+        (None, None, Some(slug)) => match stored_v3(&state, slug).await {
+            Ok(g) => g,
+            Err(resp) => return resp,
+        },
+        _ => None,
+    };
+    if let Some(graph) = req.graph.clone().or(stored_graph) {
+        return create_v3(&state, &token, &req, graph).await;
+    }
+
     // Resolve the strategy definition: inline body or stored slug.
     let definition: StrategyDefinition = match (&req.definition, &req.strategy_ref) {
         (Some(def), _) => def.clone(),
@@ -150,7 +165,7 @@ pub async fn create_backtest(
 
     let spec = ResolvedSpec {
         name,
-        definition,
+        definition: JobStrategy::V1(definition),
         instrument_id: req.instrument_id.clone(),
         venue_id,
         asset_class: req.asset_class.clone(),
@@ -164,6 +179,110 @@ pub async fn create_backtest(
 
     match state.backtest.create(token.user_id(), spec).await {
         Ok(id) => (StatusCode::CREATED, Json(json!({ "id": id }))).into_response(),
+        Err(e) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "invalid_request", "message": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// The stored definition `slug` names, when it is a v3 graph. `Ok(None)` for a
+/// v1 definition or an unknown slug, which the v1 path reports as it always has.
+async fn stored_v3(
+    state: &AppState,
+    slug: &str,
+) -> Result<Option<domain::strategy_graph::StrategyGraph>, axum::response::Response> {
+    let row: Option<(serde_json::Value,)> =
+        sqlx::query_as("SELECT definition_json FROM strategy_definitions WHERE strategy_id = $1")
+            .bind(slug)
+            .fetch_optional(&state.pg)
+            .await
+            .ok()
+            .flatten();
+    match row {
+        Some((json,)) if backtest::runner::is_v3(&json) => {
+            serde_json::from_value(json).map(Some).map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "invalid_definition", "detail": e.to_string() })),
+                )
+                    .into_response()
+            })
+        }
+        _ => Ok(None),
+    }
+}
+
+/// POST /api/backtests with a v3 graph: compile it — the one typechecker, the
+/// same errors an author sees anywhere else — then hand it to the manager.
+async fn create_v3(
+    state: &AppState,
+    token: &BearerToken,
+    req: &BacktestRequest,
+    graph: domain::strategy_graph::StrategyGraph,
+) -> axum::response::Response {
+    if let Err(message) = backtest::runner::compile_for_run(&graph, &backtest::run::ParamMap::new())
+    {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "invalid_strategy", "message": message })),
+        )
+            .into_response();
+    }
+    let Some(timeframe) = timeframe_from_key(&req.timeframe) else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "invalid_timeframe",
+                "message": "timeframe must be one of 1s,1m,5m,15m,1h,4h,1d" })),
+        )
+            .into_response();
+    };
+    if graph.timeframe.timeframe() != timeframe {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "timeframe_mismatch",
+                "message": format!("the strategy decides on {} bars; the backtest asked for {}",
+                    graph.timeframe.key(), req.timeframe) })),
+        )
+            .into_response();
+    }
+    if req.auto_collect {
+        if let Err(message) = CollectorPlan::auto_collect_support(&req.asset_class, timeframe) {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "error": "unsupported_auto_collect", "message": message })),
+            )
+                .into_response();
+        }
+    }
+    let venue_id = req
+        .venue_id
+        .clone()
+        .unwrap_or_else(|| default_venue(&req.asset_class).to_string());
+    let name = req
+        .name
+        .clone()
+        .unwrap_or_else(|| format!("{} · {} · {}", graph.name, req.instrument_id, req.timeframe));
+    let spec = ResolvedSpec {
+        name,
+        definition: JobStrategy::V3(Box::new(graph)),
+        instrument_id: req.instrument_id.clone(),
+        venue_id,
+        asset_class: req.asset_class.clone(),
+        timeframe,
+        start: req.start,
+        end: req.end,
+        initial_balance: req.initial_balance.clone(),
+        quote_currency: req.quote_currency.clone(),
+        auto_collect: req.auto_collect,
+    };
+    match state.backtest.create(token.user_id(), spec).await {
+        Ok(id) => (
+            StatusCode::CREATED,
+            Json(json!({ "id": id, "engine": "strategy-engine/v3" })),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(json!({ "error": "invalid_request", "message": e.to_string() })),

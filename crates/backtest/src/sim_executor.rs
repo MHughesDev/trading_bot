@@ -75,7 +75,7 @@ pub struct SimRunExecutor {
 /// high`) are dropped rather than repaired. A repaired bar is a third thing that
 /// is neither the real world nor the null, and a p-value computed against it
 /// means nothing.
-fn apply_null_world(
+pub(crate) fn apply_null_world(
     bars: &[crate::store::LoadedBar],
     nw: &crate::run::NullWorld,
 ) -> Vec<crate::store::LoadedBar> {

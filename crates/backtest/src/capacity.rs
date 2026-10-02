@@ -558,6 +558,7 @@ mod tests {
             produced_at: start,
             produced_by: "test".into(),
             unsafe_: false,
+            manifest: None,
         }
     }
 

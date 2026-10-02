@@ -10,11 +10,14 @@
 //! - [`Engine`] — events in, [`Step`]s out; models by request and resume.
 //! - [`planner`] — trade intents into orders, identically everywhere.
 //! - [`trace`] — what every step leaves behind, byte-stable for parity checks.
+//! - [`env`] — the ports an environment implements, and [`cycle`], the one loop
+//!   that drives the engine through them.
 
 pub mod compile;
 pub mod decide;
 pub mod diagnostic;
 pub mod engine;
+pub mod env;
 pub mod eval;
 mod history;
 pub mod models;
@@ -28,6 +31,7 @@ pub mod trace;
 pub use compile::compile;
 pub use diagnostic::Diagnostic;
 pub use engine::{Engine, EngineError, Event, Step};
+pub use env::{cycle, Clock, Journal, MarketData, MarketEvent, ModelProvider, VenuePort};
 pub use history::Bar;
 pub use models::{ModelInput, ModelOutcome, ModelRequest, ModelResponse};
 pub use plan::Plan;
