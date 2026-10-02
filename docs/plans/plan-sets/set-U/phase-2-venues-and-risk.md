@@ -1,6 +1,6 @@
 # Phase 2 — Venues and the risk gate
 
-**Completion: 83% (5 / 6 tasks).** U-2.1–U-2.5 DONE 2026-10-02; U-2.6 (one fee schedule) added and open.
+**Completion: 100% (6 / 6 tasks).** DONE 2026-10-02.
 
 **Requirement IDs:** SU-VEN-01…05.
 **Spec:** [FEAT-007](../../../specs/FEAT-007-unified-strategy-engine.md) §9.2, §9.3; ADR-0044, ADR-0046.
@@ -114,7 +114,23 @@ through `&dyn Venue`. Per ADR-0048 this is now *the* paper venue — no broker's
 account is one.
 
 ### U-2.6 One fee schedule for both venues — M
-`NOT STARTED`
+`DONE` 2026-10-02 — `FeeSchedule`, `ExecutionStyle` and a new `Liquidity` moved to
+`domain::fees` (re-exported from `backtest::costs`, so every existing path holds);
+`domain::fees::paper_crypto()` is the one definition the backtest's `FeeBook` lists and
+the paper venue's crypto simulator is built from (`ClobFillSimulator::from_schedule`).
+The simulator trait gained `simulate_fill_as(…, Liquidity)`; the venue core passes
+`Taker` for anything that fills on arrival and `Maker` for a limit (or an earlier-
+triggered stop-limit) the market came to, and the CLOB charges its `maker_fee_rate`.
+**One cost change, deliberate:** paper crypto's half-spread moved from the CLOB default
+5 bps to the schedule's 2 bps — the number every backtest was already charged — so the
+two venues agree; the schedule is now the only place to change it. Evidence:
+`a_resting_limit_pays_maker_and_a_market_order_pays_taker_in_either_venue` (both venues),
+`a_bar_range_fill_of_a_resting_limit_is_a_maker_fill`,
+`the_paper_venue_charges_the_shared_schedule`, `backtest` `costs::the_paper_venues_
+schedule_is_the_books_schedule`, the CLOB unit test, and the oracle test still failing
+the always-in oracle at 1m. A mutation charging resting fills as taker fails two tests.
+`cargo test -p backtest --lib` 432/432.
+
 
 `SimulatorSet` charges one taker `fee_rate` per asset class; the backtest's `FeeBook`
 (`backtest::costs::FeeSchedule`) carries maker and taker rates, half-spread, venue, tier

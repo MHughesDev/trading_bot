@@ -469,3 +469,71 @@ fn an_environment_is_built_with_either_venue_without_a_type_change() {
         assert_eq!(e.venue.snapshot(C).asset_class, C);
     }
 }
+
+// ── U-2.6: one fee schedule, maker and taker, in both venues ────────────────
+
+#[test]
+fn a_resting_limit_pays_maker_and_a_market_order_pays_taker_in_either_venue() {
+    let fees = domain::fees::paper_crypto();
+    let rate = |bps: f64| Decimal::from_f64_retain(bps).unwrap() / dec!(10000);
+    for d in both() {
+        d.price(0, dec!(50_000));
+        let buy = d.venue().submit(C, &mkt(Side::Buy, dec!(1))).unwrap();
+        d.price(1, dec!(50_000));
+        let s = d.venue().order(buy).unwrap();
+        let px = s.avg_fill_price.unwrap().inner();
+        assert_eq!(
+            s.commission,
+            Some(px * rate(fees.taker_bps)),
+            "market order: taker"
+        );
+
+        let sell = d
+            .venue()
+            .submit(C, &lim(Side::Sell, dec!(1), dec!(52_000)))
+            .unwrap();
+        d.price(2, dec!(50_000)); // rests
+        d.price(3, dec!(52_500)); // the market comes to it
+        let s = d.venue().order(sell).unwrap();
+        assert_eq!(s.state, BrokerOrderState::Filled);
+        assert_eq!(
+            s.commission,
+            Some(dec!(52_000) * rate(fees.maker_bps)),
+            "resting limit: maker"
+        );
+    }
+}
+
+#[test]
+fn a_bar_range_fill_of_a_resting_limit_is_a_maker_fill() {
+    let fees = domain::fees::paper_crypto();
+    let v = venue(FillPolicy::NextBarOpen);
+    v.on_bar(&flat(0, dec!(50_000)));
+    let k = v.submit(C, &lim(Side::Buy, dec!(1), dec!(49_000))).unwrap();
+    v.on_bar(&flat(1, dec!(50_000)));
+    v.on_bar(&bar(
+        2,
+        dec!(50_000),
+        dec!(50_100),
+        dec!(48_900),
+        dec!(49_500),
+    ));
+    let s = v.order(k).unwrap();
+    assert_eq!(s.state, BrokerOrderState::Filled);
+    let maker = Decimal::from_f64_retain(fees.maker_bps).unwrap() / dec!(10000);
+    assert_eq!(s.commission, Some(dec!(49_000) * maker));
+}
+
+#[test]
+fn the_paper_venue_charges_the_shared_schedule() {
+    let fees = domain::fees::paper_crypto();
+    let sims = SimulatorSet::realistic();
+    let crypto = &sims.clob_overrides[&C];
+    let rate = |bps: f64| Decimal::from_f64_retain(bps).unwrap() / dec!(10000);
+    assert_eq!(crypto.fee_rate, rate(fees.taker_bps));
+    assert_eq!(crypto.maker_fee_rate, Some(rate(fees.maker_bps)));
+    assert_eq!(
+        crypto.half_spread_bps,
+        Decimal::from_f64_retain(fees.half_spread_bps).unwrap()
+    );
+}

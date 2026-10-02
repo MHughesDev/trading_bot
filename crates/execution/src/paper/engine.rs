@@ -93,16 +93,20 @@ impl SimulatorSet {
         clob_overrides.insert(
             AssetClass::CryptoSpotCex,
             ClobFillSimulator {
+                // Costs from `domain::fees::paper_crypto()` — the same schedule
+                // object the backtest's FeeBook lists, so a fee change is one
+                // edit both venues see (Set U U-2.6). The note below is why the
+                // taker rate is 25 bps.
+                //
                 // Paper crypto mirrors the Alpaca crypto account (the v1 paper
                 // venue): 0.25% taker. The CLOB default's 0.1% matched no venue
                 // in this build — it was a Binance-style number, well below both
                 // Alpaca (25 bps) and the Coinbase Advanced live target (40 bps+),
                 // so paper P&L understated trading costs by 2.5–12×.
-                fee_rate: dec!(0.0025), // 25 bps — Alpaca crypto taker
                 depth_notional: Some(dec!(1_000_000)),
                 impact_bps_at_depth: dec!(5),
                 max_impact_bps: dec!(50),
-                ..ClobFillSimulator::default()
+                ..ClobFillSimulator::from_schedule(&domain::fees::paper_crypto())
             },
         );
         // ETFs route through the CLOB structure but trade like commission-free
@@ -127,6 +131,7 @@ impl SimulatorSet {
                 slippage_ticks: Decimal::ONE,
                 tick_size: dec!(0.0001),
                 fee_rate: Decimal::ZERO,
+                maker_fee_rate: None,
                 partial_fill_ratio: Decimal::ONE,
                 depth_notional: Some(dec!(5_000_000)),
                 impact_bps_at_depth: dec!(1),
@@ -140,6 +145,7 @@ impl SimulatorSet {
                 slippage_ticks: Decimal::ONE,
                 tick_size: dec!(0.25),
                 fee_rate: dec!(0.00005), // ~0.5 bps per side
+                maker_fee_rate: None,
                 partial_fill_ratio: Decimal::ONE,
                 depth_notional: Some(dec!(2_000_000)),
                 impact_bps_at_depth: dec!(2),
@@ -153,6 +159,7 @@ impl SimulatorSet {
                 slippage_ticks: Decimal::ONE,
                 tick_size: dec!(0.1),
                 fee_rate: dec!(0.0005), // 5 bps taker
+                maker_fee_rate: None,
                 partial_fill_ratio: Decimal::ONE,
                 depth_notional: Some(dec!(1_000_000)),
                 impact_bps_at_depth: dec!(5),
@@ -747,7 +754,8 @@ impl PaperTradingEngine {
 
         let mut filled_any = false;
         if live {
-            match self.attempt(&mut record, mark) {
+            // Anything that fills on arrival crossed the book: a taker fill.
+            match self.attempt(&mut record, mark, domain::fees::Liquidity::Taker) {
                 Attempt::Filled => filled_any = true,
                 Attempt::NotMarketable => {}
                 Attempt::Rejected(e) => {
@@ -1076,7 +1084,12 @@ impl PaperTradingEngine {
 
     /// Try to fill what remains of `record` at `mark`. Applies reduce-only
     /// capping, prices through the asset class's simulator, books the fill.
-    fn attempt(&self, record: &mut PaperOrderRecord, mark: Price) -> Attempt {
+    fn attempt(
+        &self,
+        record: &mut PaperOrderRecord,
+        mark: Price,
+        liquidity: domain::fees::Liquidity,
+    ) -> Attempt {
         let remaining = record.intent.size.inner() - record.filled_qty;
         if remaining <= Decimal::ZERO {
             return Attempt::NotMarketable;
@@ -1099,7 +1112,7 @@ impl PaperTradingEngine {
         let fill = self
             .sims
             .for_asset_class(record.asset_class)
-            .simulate_fill(&probe, mark);
+            .simulate_fill_as(&probe, mark, liquidity);
         if fill.filled_qty <= Decimal::ZERO {
             return Attempt::NotMarketable;
         }
@@ -1266,10 +1279,23 @@ impl PaperTradingEngine {
                 done.push(order_id.clone());
                 continue;
             }
+            // A limit that was resting before this price — including a
+            // stop-limit triggered on an earlier one — is a maker fill. A stop
+            // firing now, or a stop-limit triggered by this same price, crosses.
+            let was_live_limit = match record.intent.order_type {
+                OrderType::Limit => true,
+                OrderType::StopLimit => record.triggered,
+                _ => false,
+            };
             let Some(price) = price_for(&mut record) else {
                 continue;
             };
-            match self.attempt(&mut record, price) {
+            let liquidity = if was_live_limit {
+                domain::fees::Liquidity::Maker
+            } else {
+                domain::fees::Liquidity::Taker
+            };
+            match self.attempt(&mut record, price, liquidity) {
                 Attempt::NotMarketable => {}
                 Attempt::Filled => {
                     if let Some(g) = &record.intent.oco_group {

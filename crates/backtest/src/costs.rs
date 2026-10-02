@@ -56,89 +56,10 @@ use std::f64::consts::PI;
 /// standard deviation. The constant the whole horizon argument turns on.
 pub const MEAN_ABS_GAUSSIAN: f64 = 0.797_884_560_802_865_4;
 
-/// Which side of the book the candidate assumes it trades on.
-///
-/// This is part of the cost model rather than a strategy setting, because a
-/// candidate that assumes maker fills without a queue model is not making a
-/// cheaper assumption — it is making an unverified one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ExecutionStyle {
-    /// Cross the spread both ways. The only style honest against OHLCV alone.
-    TakerBoth,
-    /// Post both ways. Requires a fill model; see [`FeeSchedule::requires_fill_model`].
-    MakerBoth,
-    /// Post the entry, cross the exit.
-    MakerEntryTakerExit,
-}
-
-impl ExecutionStyle {
-    /// Whether a claim at this style is unverifiable from OHLCV alone.
-    ///
-    /// A maker fill is contingent on the book coming to you, which minute bars
-    /// cannot show. The verdict is not "forbidden" — it is "this number is only
-    /// as good as the fill model behind it", and something has to carry that.
-    #[must_use]
-    pub const fn requires_fill_model(self) -> bool {
-        !matches!(self, Self::TakerBoth)
-    }
-}
-
-/// A venue's fee schedule at one tier, in basis points.
-///
-/// Both sides are recorded even when a strategy only uses one, because the
-/// interesting question is almost always what the *other* side would have cost.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct FeeSchedule {
-    /// Venue this schedule was read from — e.g. `"coinbase_advanced"`.
-    pub venue: String,
-    /// The tier's own name at that venue — e.g. `"intro"`, `"tier_3"`.
-    pub tier: String,
-    /// Fee paid for removing liquidity, in bps of notional.
-    pub taker_bps: f64,
-    /// Fee paid for adding liquidity, in bps of notional. Negative is a rebate.
-    pub maker_bps: f64,
-    /// Half the quoted spread, in bps. Paid on every crossing fill and on
-    /// neither maker fill.
-    pub half_spread_bps: f64,
-    /// When this schedule was in force. A fee tier is point-in-time data: a
-    /// backtest over 2024 that pays 2026 fees is a different experiment.
-    pub effective_from: chrono::NaiveDate,
-}
-
-impl FeeSchedule {
-    /// The round-trip cost of one entry and one exit, in bps of notional.
-    #[must_use]
-    pub fn round_trip_bps(&self, style: ExecutionStyle) -> f64 {
-        let taker_leg = self.taker_bps + self.half_spread_bps;
-        let maker_leg = self.maker_bps;
-        match style {
-            ExecutionStyle::TakerBoth => 2.0 * taker_leg,
-            ExecutionStyle::MakerBoth => 2.0 * maker_leg,
-            ExecutionStyle::MakerEntryTakerExit => maker_leg + taker_leg,
-        }
-    }
-
-    /// A taker-both schedule from the two numbers a venue's fee page shows.
-    #[must_use]
-    pub fn new(
-        venue: impl Into<String>,
-        tier: impl Into<String>,
-        maker_bps: f64,
-        taker_bps: f64,
-        half_spread_bps: f64,
-        effective_from: chrono::NaiveDate,
-    ) -> Self {
-        Self {
-            venue: venue.into(),
-            tier: tier.into(),
-            maker_bps,
-            taker_bps,
-            half_spread_bps,
-            effective_from,
-        }
-    }
-}
+// `ExecutionStyle` and `FeeSchedule` live in `domain::fees` since 2026-10-02
+// (Set U U-2.6): the paper venue's simulators read the same schedule, so a fee
+// is defined once for both venues. Re-exported so every existing path holds.
+pub use domain::fees::{ExecutionStyle, FeeSchedule};
 
 /// The fee schedules the platform knows about.
 ///
@@ -173,8 +94,9 @@ impl FeeBook {
                 FeeSchedule::new("coinbase_advanced", "tier_3", 6.0, 9.0, 1.0, d),
                 // Kraken Pro, entry tier.
                 FeeSchedule::new("kraken", "starter", 25.0, 40.0, 1.0, d),
-                // Alpaca crypto — the paper venue's model.
-                FeeSchedule::new("alpaca", "standard", 15.0, 25.0, 2.0, d),
+                // The paper venue's crypto schedule — defined once, in
+                // `domain::fees`, and read by the paper simulators too.
+                domain::fees::paper_crypto(),
             ],
         }
     }
@@ -789,5 +711,16 @@ mod tests {
         assert!(analytic_frontier(20.0, 0.0, 7.0, 1.5).is_none());
         assert!(analytic_frontier(20.0, f64::NAN, 7.0, 1.5).is_none());
         assert!(analytic_frontier(-1.0, 0.05, 7.0, 1.5).is_none());
+    }
+
+    /// Set U U-2.6: the backtest's book and the paper venue read one schedule
+    /// object. Editing `domain::fees::paper_crypto` moves both.
+    #[test]
+    fn the_paper_venues_schedule_is_the_books_schedule() {
+        let book = FeeBook::platform_default();
+        assert_eq!(
+            book.resolve(Some("alpaca"), Some("standard")),
+            domain::fees::paper_crypto()
+        );
     }
 }

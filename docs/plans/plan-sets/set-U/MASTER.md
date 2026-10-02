@@ -1,6 +1,6 @@
 # Unified Strategy Engine — Set U
 
-**Completion: 65% left (19 / 54 tasks). 19 done, 0 partial, 35 not started.**
+**Completion: 64% left (20 / 54 tasks). 20 done, 0 partial, 34 not started.**
 
 **Status:** ACCEPTED (2026-10-01) — Phase 0 starts immediately.
 **Created:** 2026-10-01
@@ -83,7 +83,7 @@ decide identically.
 |---|---|---|---|---|
 | 0 | [The contracts](phase-0-contracts.md) | 5 | — | DONE 2026-10-01 |
 | 1 | [The engine core](phase-1-engine-core.md) | 9 | — | DONE 2026-10-01 |
-| 2 | [Venues and the risk gate](phase-2-venues-and-risk.md) | 6 | — | 5 / 6 — U-2.6 open |
+| 2 | [Venues and the risk gate](phase-2-venues-and-risk.md) | 6 | — | DONE 2026-10-02 |
 | 3 | [The backtest environment](phase-3-backtest-environment.md) | 5 | — | NOT STARTED |
 | 4 | [Paper and live](phase-4-paper-and-live.md) | 6 | 0142–0144 | NOT STARTED |
 | 5 | [Models](phase-5-models.md) | 7 | 0145–0147 | NOT STARTED |

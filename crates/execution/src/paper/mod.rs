@@ -75,6 +75,20 @@ pub trait PaperFillSimulator: Send + Sync {
     /// Simulate executing `intent` at `mark` price.  Returns a `PaperFill`
     /// describing the simulated execution.  Never makes external calls.
     fn simulate_fill(&self, intent: &OrderIntent, mark: Price) -> PaperFill;
+
+    /// [`Self::simulate_fill`] for a fill known to have added or removed
+    /// liquidity. The venue core knows which — a resting order the market came
+    /// to is a maker fill, an order that crossed on arrival is a taker fill —
+    /// and a simulator with a maker rate charges it (Set U U-2.6). Simulators
+    /// with one rate for both ignore the distinction.
+    fn simulate_fill_as(
+        &self,
+        intent: &OrderIntent,
+        mark: Price,
+        _liquidity: domain::fees::Liquidity,
+    ) -> PaperFill {
+        self.simulate_fill(intent, mark)
+    }
 }
 
 /// Select the correct simulator for a given market structure.

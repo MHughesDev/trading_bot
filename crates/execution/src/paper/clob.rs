@@ -22,8 +22,11 @@ pub struct ClobFillSimulator {
     pub slippage_ticks: Decimal,
     /// Tick size for slippage calculation.
     pub tick_size: Decimal,
-    /// Maker/taker fee rate (fraction, e.g. 0.001 = 0.1%).
+    /// Taker fee rate (fraction, e.g. 0.001 = 0.1%) — and the maker rate too
+    /// when `maker_fee_rate` is `None`.
     pub fee_rate: Decimal,
+    /// Maker fee rate, when the venue charges one (negative is a rebate).
+    pub maker_fee_rate: Option<Decimal>,
     /// Fraction of requested qty that fills immediately (1 = full, 0.5 = half).
     /// Models shallow order-book depth for deterministic partial-fill testing.
     pub partial_fill_ratio: Decimal,
@@ -44,6 +47,7 @@ impl Default for ClobFillSimulator {
             slippage_ticks: dec!(1),
             tick_size: dec!(0.01),
             fee_rate: dec!(0.001), // 0.1%
+            maker_fee_rate: None,
             partial_fill_ratio: Decimal::ONE,
             depth_notional: None,
             impact_bps_at_depth: Decimal::ZERO,
@@ -53,6 +57,21 @@ impl Default for ClobFillSimulator {
 }
 
 impl ClobFillSimulator {
+    /// A simulator charging `schedule`: its taker rate and half-spread on
+    /// crossing fills, its maker rate on resting ones. Everything else
+    /// (tick, slippage, impact) is the CLOB default; override with `..`.
+    #[must_use]
+    pub fn from_schedule(schedule: &domain::fees::FeeSchedule) -> Self {
+        let bps = |v: f64| Decimal::from_f64_retain(v).unwrap_or(Decimal::ZERO) / dec!(10000);
+        Self {
+            half_spread_bps: Decimal::from_f64_retain(schedule.half_spread_bps)
+                .unwrap_or(Decimal::ZERO),
+            fee_rate: bps(schedule.taker_bps),
+            maker_fee_rate: Some(bps(schedule.maker_bps)),
+            ..Self::default()
+        }
+    }
+
     /// Compute the simulated fill price for a **market** order, incorporating
     /// half-spread, tick slippage, and size impact in the trade's direction.
     fn market_fill_price(&self, mark: Price, side: Side, qty: Decimal) -> Price {
@@ -93,6 +112,21 @@ impl ClobFillSimulator {
 }
 
 impl PaperFillSimulator for ClobFillSimulator {
+    fn simulate_fill_as(
+        &self,
+        intent: &OrderIntent,
+        mark: Price,
+        liquidity: domain::fees::Liquidity,
+    ) -> PaperFill {
+        let mut fill = self.simulate_fill(intent, mark);
+        if liquidity == domain::fees::Liquidity::Maker {
+            if let Some(rate) = self.maker_fee_rate {
+                fill.fee = fill.filled_qty * fill.fill_price.inner() * rate;
+            }
+        }
+        fill
+    }
+
     fn simulate_fill(&self, intent: &OrderIntent, mark: Price) -> PaperFill {
         let (fill_price, fills) = match intent.order_type {
             // A stop reaching a simulator has already triggered: it fills as a
@@ -250,5 +284,25 @@ mod tests {
         let mark_at = Price::from_decimal(dec!(50100));
         let fill = sim.simulate_fill(&intent(OrderType::Limit, Side::Sell, Some(limit)), mark_at);
         assert!(fill.filled_qty > Decimal::ZERO);
+    }
+
+    #[test]
+    fn a_resting_fill_pays_the_maker_rate_and_a_crossing_one_the_taker_rate() {
+        let s = domain::fees::FeeSchedule::new(
+            "v",
+            "t",
+            10.0,
+            40.0,
+            2.0,
+            chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+        );
+        let sim = ClobFillSimulator::from_schedule(&s);
+        let limit = Price::from_decimal(dec!(50_000));
+        let i = intent(OrderType::Limit, Side::Buy, Some(limit));
+        let maker = sim.simulate_fill_as(&i, limit, domain::fees::Liquidity::Maker);
+        let taker = sim.simulate_fill_as(&i, limit, domain::fees::Liquidity::Taker);
+        assert_eq!(maker.fee, dec!(50)); // 1 × 50 000 × 10 bps
+        assert_eq!(taker.fee, dec!(200)); // 1 × 50 000 × 40 bps
+        assert_eq!(sim.half_spread_bps, dec!(2));
     }
 }
