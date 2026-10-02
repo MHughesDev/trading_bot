@@ -1637,6 +1637,42 @@ impl ModelManager {
                     .execute(&self.pg)
                     .await;
 
+                // How far this version's training data reached — a backtest may
+                // ask it only for decisions after that plus the embargo (Set U
+                // U-5.4) — and its contract, so a strategy can call the new
+                // version at once (U-5.1). Both from what the trainer reported;
+                // neither guessed when it did not.
+                if let Some(ns) = run_metrics
+                    .get("trained_through_ns")
+                    .and_then(serde_json::Value::as_i64)
+                {
+                    if let Err(e) = storage::postgres::models::set_trained_through(
+                        &self.pg,
+                        &model_id,
+                        version,
+                        chrono::DateTime::from_timestamp_nanos(ns),
+                    )
+                    .await
+                    {
+                        tracing::warn!(model_id, version, error = %e, "could not record trained_through");
+                    }
+                }
+                match serde_json::to_value(&definition)
+                    .map_err(|e| e.to_string())
+                    .and_then(|d| crate::contracts::derive_for(&d, Some(&run_metrics)))
+                {
+                    Ok(contract) => {
+                        let value = serde_json::to_value(&contract).unwrap_or_default();
+                        let _ = storage::postgres::models::set_version_contract(
+                            &self.pg, &model_id, version, &value, false,
+                        )
+                        .await;
+                    }
+                    Err(why) => {
+                        tracing::warn!(model_id, version, why, "new version has no contract")
+                    }
+                }
+
                 job.progress_pct.store(100, Ordering::Relaxed);
                 job.set_phase(RunStatus::Succeeded, "succeeded");
                 self.record_event(

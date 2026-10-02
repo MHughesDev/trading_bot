@@ -28,6 +28,12 @@ pub trait Registries {
     fn feature_set(&self, name: &str) -> Option<Vec<String>>;
     /// Resolve `name@version` or `name@alias` to a pinned model and contract.
     fn model(&self, reference: &str) -> Option<ResolvedModel>;
+    /// The model exists at that version but declares no contract, so no
+    /// strategy may call it (ADR-0043 decision 1). Lets the compiler say *why*
+    /// it refuses rather than that the model is unknown.
+    fn model_without_contract(&self, _reference: &str) -> bool {
+        false
+    }
 }
 
 /// Indicators and feature sets from the `features` crate — the one indicator

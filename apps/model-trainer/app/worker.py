@@ -15,6 +15,7 @@ from .schemas import (
     PostHocStep,
 )
 from . import failures
+from . import pit
 from . import posthoc as posthoc_mod
 from .artifact_store import get_store
 from .nats_client import NatsPublisher
@@ -104,6 +105,11 @@ async def run_training(req: TrainRequest) -> TrainResponse:
         artifact_bytes, metrics = await loop.run_in_executor(
             None, lambda: train_fn(req.definition, df, emit)
         )
+        # How far this model's data reached: a backtest may ask it only for
+        # decisions after this plus the embargo (Set U U-5.4).
+        through = pit.trained_through_ns(df, req.folds)
+        if through is not None:
+            metrics = {**(metrics or {}), "trained_through_ns": through}
 
         key = f"{req.output_prefix.rstrip('/')}/model.bin"
         key = key.replace("file://", "")

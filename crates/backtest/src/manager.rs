@@ -694,14 +694,18 @@ impl BacktestManager {
         job.set_status(BacktestStatus::CheckingData);
         self.persist(job).await;
 
-        let plan =
-            crate::runner::compile_for_run(graph, &crate::run::ParamMap::new()).map_err(|e| {
-                PhaseFailure::new(
-                    BacktestStatus::CheckingData,
-                    TerminalReason::IntegrityRejected,
-                    e,
-                )
-            })?;
+        let plan = crate::runner::compile_for_run(
+            graph,
+            &crate::run::ParamMap::new(),
+            &crate::models::RegistrySnapshot::load_or_empty(&self.pg).await,
+        )
+        .map_err(|e| {
+            PhaseFailure::new(
+                BacktestStatus::CheckingData,
+                TerminalReason::IntegrityRejected,
+                e,
+            )
+        })?;
         if plan.timeframe.timeframe() != spec.timeframe {
             return Err(PhaseFailure::new(
                 BacktestStatus::CheckingData,

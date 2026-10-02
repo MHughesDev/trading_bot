@@ -326,7 +326,11 @@ async fn preview_v3(
         Ok(g) => g,
         Err(e) => return unprocessable("invalid_definition", e.to_string()),
     };
-    let plan = match backtest::runner::compile_for_run(&graph, &backtest::run::ParamMap::new()) {
+    let plan = match backtest::runner::compile_for_run(
+        &graph,
+        &backtest::run::ParamMap::new(),
+        &backtest::models::RegistrySnapshot::load_or_empty(&state.pg).await,
+    ) {
         Ok(p) => p,
         Err(message) => return unprocessable("invalid_strategy", message),
     };

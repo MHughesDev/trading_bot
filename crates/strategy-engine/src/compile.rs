@@ -1302,6 +1302,15 @@ impl<'a> Compiler<'a> {
             return;
         };
         let Some(resolved) = self.reg.model(&reference) else {
+            if self.reg.model_without_contract(&reference) {
+                self.diag(Diagnostic::new(
+                    "model_without_contract",
+                    &raw.id,
+                    format!("'{reference}' has no IoContract, so nothing can check what it takes or gives"),
+                    "declare the version's contract (its inputs, outputs and timeout) in the model registry,                      or pin a version that has one",
+                ));
+                return;
+            }
             self.diag(Diagnostic::new(
                 "unknown_model",
                 &raw.id,

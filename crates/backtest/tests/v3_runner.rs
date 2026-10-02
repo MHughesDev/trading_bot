@@ -122,7 +122,8 @@ fn v3_run(
     inputs: Vec<Vec<LoadedBar>>,
     start_ns: i64,
 ) -> V3Run {
-    let plan = runner::compile_for_run(g, params).unwrap_or_else(|e| panic!("{e}"));
+    let plan = runner::compile_for_run(g, params, &strategy_engine::StdRegistries::new())
+        .unwrap_or_else(|e| panic!("{e}"));
     V3Run {
         plan: Arc::new(plan),
         instrument: "ETH-USD".into(),

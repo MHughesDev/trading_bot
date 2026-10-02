@@ -8,7 +8,12 @@ from .schemas import (
     Forecast,
     LLMPredictRequest,
     LLMPredictResponse,
+    V2Answer,
+    V2PredictRequest,
+    V2PredictResponse,
 )
+from . import v2 as v2_mod
+from .predictors import bundle as bundle_mod
 from .loader import CACHE
 from .predictors import base, run_predict
 from .predictors.llm_predictor import predict_llm
@@ -46,6 +51,18 @@ async def predict(req: PredictRequest):
             latency_ms=latency_ms,
         )
 
+    # A request missing a feature the model was trained on is refused by name —
+    # never zero-filled, and never turned into a flat forecast below.
+    header, _ = bundle_mod.read_bundle(artifact_bytes)
+    order = (header or {}).get("feature_order") or []
+    for i, inst in enumerate(req.instances):
+        missing = [k for k in order if inst.features.get(k) is None]
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail=f"instance {i} is missing required feature(s): {', '.join(missing)}",
+            )
+
     predictions: list[Forecast] | None = run_predict(
         artifact_bytes, req.instances, req.model_kind, DEFAULT_HORIZON
     )
@@ -60,6 +77,31 @@ async def predict(req: PredictRequest):
         version=req.version,
         predictions=predictions,
         latency_ms=latency_ms,
+    )
+
+
+@app.post("/v2/predict")
+async def predict_v2(req: V2PredictRequest) -> V2PredictResponse:
+    """Typed, named inputs and outputs (Set U U-5.2). Never a made-up answer:
+    a row missing a feature abstains naming it; an artifact that cannot answer
+    makes every row unavailable with the reason."""
+    start = time.time()
+    rows = [r.model_dump() for r in req.rows]
+    try:
+        artifact_bytes = CACHE.load(req.model_id, req.version, req.artifact_hash, req.artifact_uri)
+        answers = v2_mod.predict_v2(artifact_bytes, rows, req.model_kind)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="artifact hash verification failed")
+    except Exception as e:  # noqa: BLE001
+        answers = [
+            {"key": r["key"], "status": "unavailable", "outputs": {}, "detail": f"artifact unavailable: {e}"}
+            for r in rows
+        ]
+    return V2PredictResponse(
+        model_id=req.model_id,
+        version=req.version,
+        answers=[V2Answer(**a) for a in answers],
+        latency_ms=int((time.time() - start) * 1000),
     )
 
 

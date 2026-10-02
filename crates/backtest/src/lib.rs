@@ -35,6 +35,7 @@ pub mod forensics;
 pub mod gaps;
 pub mod gates;
 pub mod manager;
+pub mod models;
 pub mod nulls;
 pub mod perturb;
 pub mod preview;

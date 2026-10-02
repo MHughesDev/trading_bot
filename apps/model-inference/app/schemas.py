@@ -35,6 +35,39 @@ class PredictResponse(BaseModel):
     latency_ms: int
 
 
+class V2Row(BaseModel):
+    # The caller's handle for this row, echoed back.
+    key: str
+    # Feature name -> value. Every feature the model was trained on must be
+    # present; a row missing any abstains naming them.
+    features: dict
+
+
+class V2PredictRequest(BaseModel):
+    model_id: str
+    version: int
+    model_kind: str
+    artifact_uri: str
+    artifact_hash: str
+    rows: list[V2Row]
+
+
+class V2Answer(BaseModel):
+    key: Optional[str] = None
+    # "answered" | "abstained" | "unavailable"
+    status: str
+    # Named outputs in plain JSON, typed by the caller against the contract.
+    outputs: dict = {}
+    detail: Optional[str] = None
+
+
+class V2PredictResponse(BaseModel):
+    model_id: str
+    version: int
+    answers: list[V2Answer]
+    latency_ms: int
+
+
 class LLMPredictRequest(BaseModel):
     model_id: str
     version: int

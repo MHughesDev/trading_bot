@@ -391,12 +391,23 @@ pub fn fill_policy(model: FillModel) -> Result<FillPolicy, String> {
     }
 }
 
+/// Builds a run's model provider from the registry it compiled against and
+/// whether it declared `optimistic_models`. Supplied by the layer that can see
+/// the inference sidecar (`model-registry` depends on this crate, not the other
+/// way round).
+pub type ModelsFactory = Arc<
+    dyn Fn(Arc<crate::models::RegistrySnapshot>, bool) -> Box<dyn crate::models::RunModels>
+        + Send
+        + Sync,
+>;
+
 /// The real v3 executor: the database and ClickHouse in, a [`RunResult`] out.
 pub struct V3RunExecutor {
     handle: tokio::runtime::Handle,
     pg: sqlx::PgPool,
     ch_url: String,
     initial_balance: Decimal,
+    models: Option<ModelsFactory>,
 }
 
 impl V3RunExecutor {
@@ -411,12 +422,21 @@ impl V3RunExecutor {
             pg,
             ch_url: ch_url.into(),
             initial_balance: Decimal::from(10_000),
+            models: None,
         }
     }
 
     #[must_use]
     pub fn with_initial_balance(mut self, balance: Decimal) -> Self {
         self.initial_balance = balance;
+        self
+    }
+
+    /// Answer model requests through `factory` (point-in-time, cached).
+    /// Without one, every model request is unavailable and its rules hold.
+    #[must_use]
+    pub fn with_models(mut self, factory: ModelsFactory) -> Self {
+        self.models = Some(factory);
         self
     }
 
@@ -442,7 +462,10 @@ impl V3RunExecutor {
             .ok_or_else(|| anyhow::anyhow!("strategy '{}' not found", cfg.strategy_ref))
     }
 
-    async fn load(&self, cfg: &RunConfig) -> Result<V3Run, (TerminalReason, String)> {
+    async fn load(
+        &self,
+        cfg: &RunConfig,
+    ) -> Result<(V3Run, Arc<crate::models::RegistrySnapshot>), (TerminalReason, String)> {
         let integrity = |e: String| (TerminalReason::IntegrityRejected, e);
         let json = self
             .definition(cfg)
@@ -457,7 +480,8 @@ impl V3RunExecutor {
         }
         let graph: StrategyGraph = serde_json::from_value(json)
             .map_err(|e| integrity(format!("graph does not parse: {e}")))?;
-        let plan = compile_for_run(&graph, &cfg.params).map_err(integrity)?;
+        let registry = Arc::new(crate::models::RegistrySnapshot::load_or_empty(&self.pg).await);
+        let plan = compile_for_run(&graph, &cfg.params, registry.as_ref()).map_err(integrity)?;
         check_resolution(&plan, cfg).map_err(integrity)?;
 
         let asset_class: AssetClass =
@@ -520,29 +544,32 @@ impl V3RunExecutor {
             bars[PRIMARY] = crate::sim_executor::apply_null_world(&bars[PRIMARY], nw);
         }
         let lot = meta.lot_size;
-        Ok(V3Run {
-            plan: Arc::new(plan),
-            instrument: instrument.clone(),
-            asset_class,
-            bars,
-            start_ns,
-            spec: InstrumentSpec {
-                instrument,
-                lot_size: lot,
-                tick_size: meta.tick_size,
-                min_qty: lot,
-                caps: strategy_engine::VenueCaps::all(),
+        Ok((
+            V3Run {
+                plan: Arc::new(plan),
+                instrument: instrument.clone(),
+                asset_class,
+                bars,
+                start_ns,
+                spec: InstrumentSpec {
+                    instrument,
+                    lot_size: lot,
+                    tick_size: meta.tick_size,
+                    min_qty: lot,
+                    caps: strategy_engine::VenueCaps::all(),
+                },
+                instrument_limits: InstrumentLimits {
+                    tick_size: meta.tick_size,
+                    lot_size: lot,
+                },
+                limits: GlobalRiskLimits::default(),
+                initial_balance: self.initial_balance,
+                fill_policy: fill,
+                strategy_id: cfg.strategy_ref.clone(),
+                sims: SimulatorSet::realistic(),
             },
-            instrument_limits: InstrumentLimits {
-                tick_size: meta.tick_size,
-                lot_size: lot,
-            },
-            limits: GlobalRiskLimits::default(),
-            initial_balance: self.initial_balance,
-            fill_policy: fill,
-            strategy_id: cfg.strategy_ref.clone(),
-            sims: SimulatorSet::realistic(),
-        })
+            registry,
+        ))
     }
 }
 
@@ -553,18 +580,17 @@ impl V3RunExecutor {
 pub fn compile_for_run(
     graph: &StrategyGraph,
     params: &crate::run::ParamMap,
+    reg: &dyn strategy_engine::Registries,
 ) -> Result<Plan, String> {
     let overrides: domain::strategy_def::params::ParamValues =
         params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    strategy_engine::compile(graph, &strategy_engine::StdRegistries::new(), &overrides).map_err(
-        |diags| {
-            diags
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("; ")
-        },
-    )
+    strategy_engine::compile(graph, reg, &overrides).map_err(|diags| {
+        diags
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("; ")
+    })
 }
 
 /// A run's eval resolution must be the plan's decision timeframe: the metrics
@@ -627,22 +653,60 @@ pub fn result_document(r: &RunResult) -> serde_json::Value {
     doc
 }
 
+/// Map a v3 outcome into a run result, with what its models did: which
+/// versions answered (the manifest's fold usage), whether the run declared
+/// `optimistic_models`, and Gate 0's model check — a run that consumed an
+/// answer from a version trained past the decision is rejected, naming the
+/// first offending decision (Set U U-5.4).
+#[must_use]
+pub fn finish(
+    cfg: &RunConfig,
+    outcome: V3Outcome,
+    cost: ComputeCost,
+    models: &dyn crate::models::RunModels,
+) -> RunResult {
+    let mut outcome = outcome;
+    outcome.manifest.folds = models.fold_uses();
+    let mut result = to_run_result(cfg, outcome, cost);
+    if models.optimistic() {
+        result.integrity_flags.push(crate::run::Flag {
+            code: "models.optimistic".into(),
+            detail: "optimistic_models: versions answered without the point-in-time rule".into(),
+        });
+    }
+    if let Some(flag) = crate::gates::model_leakage::check(models.consumption()) {
+        result.status = crate::run::RunStatus::RejectedIntegrity;
+        result.integrity_flags.push(flag);
+    }
+    result
+}
+
 impl RunExecutor for V3RunExecutor {
     fn execute(&self, cfg: &RunConfig, ticket: &ledger::TrialTicket) -> RunResult {
         let started = Instant::now();
         tracing::debug!(trial_id = %ticket.trial_id(), run_id = cfg.run_id.as_str(), "v3 run dispatched");
         let loaded = tokio::task::block_in_place(|| self.handle.block_on(self.load(cfg)));
-        let r = match loaded {
+        let (r, registry) = match loaded {
             Ok(r) => r,
             Err((reason, detail)) => return RunResult::failed(cfg, reason, detail, RUNNER_TAG),
         };
-        let outcome = run(r, &mut strategy_engine::env::NoModels);
+        let optimistic = cfg.unsafe_flags.models_optimistic;
+        let mut models: Box<dyn crate::models::RunModels> = match &self.models {
+            Some(factory) => factory(registry, optimistic),
+            None => Box::new(crate::models::PitModels::new(
+                registry,
+                crate::models::NoSource,
+                Arc::new(crate::models::MemoryCache::default()),
+                optimistic,
+            )),
+        };
+        let outcome = run(r, models.as_mut());
         let cost = ComputeCost {
             wall_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             cpu_ms: 0,
         };
         match outcome {
-            Ok(o) => to_run_result(cfg, o, cost),
+            Ok(o) => finish(cfg, o, cost, models.as_ref()),
             Err(e) => RunResult::failed(
                 cfg,
                 TerminalReason::IntegrityRejected,
@@ -685,6 +749,13 @@ impl FormatRoutedExecutor {
             v3: V3RunExecutor::new(handle.clone(), pg, ch_url),
             handle,
         }
+    }
+
+    /// Answer v3 model requests through `factory`.
+    #[must_use]
+    pub fn with_models(mut self, factory: ModelsFactory) -> Self {
+        self.v3 = self.v3.with_models(factory);
+        self
     }
 }
 

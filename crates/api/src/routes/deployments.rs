@@ -102,7 +102,11 @@ pub async fn create_deployment(
             )
         }
     };
-    let plan = match backtest::runner::compile_for_run(&graph, &backtest::run::ParamMap::new()) {
+    let plan = match backtest::runner::compile_for_run(
+        &graph,
+        &backtest::run::ParamMap::new(),
+        &backtest::models::RegistrySnapshot::load_or_empty(&state.pg).await,
+    ) {
         Ok(p) => p,
         Err(message) => {
             return refuse(

@@ -177,6 +177,47 @@ pub struct EvalResult {
     pub terminal: Option<String>,
 }
 
+/// One row of a v2 request: named feature values, and a handle echoed back
+/// (Set U U-5.2).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct V2Row {
+    pub key: String,
+    pub features: std::collections::BTreeMap<String, f64>,
+}
+
+/// `POST /v2/predict`: typed, named inputs; the version is pinned by the
+/// caller and the artifact named exactly.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PredictV2Request {
+    pub model_id: String,
+    pub version: i32,
+    pub model_kind: String,
+    pub artifact_uri: String,
+    pub artifact_hash: String,
+    pub rows: Vec<V2Row>,
+}
+
+/// One row's answer: `answered` with named outputs in plain JSON, or
+/// `abstained` / `unavailable` with the reason.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct V2Answer {
+    #[serde(default)]
+    pub key: Option<String>,
+    pub status: String,
+    #[serde(default)]
+    pub outputs: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PredictV2Response {
+    pub model_id: String,
+    pub version: i32,
+    pub answers: Vec<V2Answer>,
+    pub latency_ms: u64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct LlmPredictRequest {
     pub model_id: String,
@@ -410,6 +451,35 @@ impl SidecarClient {
         }
         self.train_failures.store(0, Ordering::Relaxed);
         Ok(resp.json::<EvalResult>().await?)
+    }
+
+    /// Serving protocol v2 (Set U U-5.2).
+    ///
+    /// # Errors
+    /// The sidecar unreachable or refusing the request.
+    pub async fn predict_v2(&self, req: PredictV2Request) -> anyhow::Result<PredictV2Response> {
+        use std::sync::atomic::Ordering;
+        if self.infer_failures.load(Ordering::Relaxed) >= 5 {
+            anyhow::bail!("inference sidecar circuit-breaker open");
+        }
+        let resp = self
+            .http
+            .post(format!("{}/v2/predict", self.inference_url))
+            .json(&req)
+            .send()
+            .await
+            .map_err(|e| {
+                self.infer_failures.fetch_add(1, Ordering::Relaxed);
+                anyhow::anyhow!("inference unreachable: {e}")
+            })?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            self.infer_failures.fetch_add(1, Ordering::Relaxed);
+            anyhow::bail!("inference returned {status}: {body}");
+        }
+        self.infer_failures.store(0, Ordering::Relaxed);
+        Ok(resp.json::<PredictV2Response>().await?)
     }
 
     pub async fn predict_llm(&self, req: LlmPredictRequest) -> anyhow::Result<LlmPredictResponse> {

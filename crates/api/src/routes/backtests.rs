@@ -222,8 +222,11 @@ async fn create_v3(
     req: &BacktestRequest,
     graph: domain::strategy_graph::StrategyGraph,
 ) -> axum::response::Response {
-    if let Err(message) = backtest::runner::compile_for_run(&graph, &backtest::run::ParamMap::new())
-    {
+    if let Err(message) = backtest::runner::compile_for_run(
+        &graph,
+        &backtest::run::ParamMap::new(),
+        &backtest::models::RegistrySnapshot::load_or_empty(&state.pg).await,
+    ) {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(json!({ "error": "invalid_strategy", "message": message })),

@@ -6,6 +6,7 @@
 //! the driver body with real Python sidecar calls without changing the public API.
 
 pub mod backtest_bridge;
+pub mod contracts;
 pub mod data_view;
 pub mod datasets;
 pub mod inference_gateway;
@@ -14,6 +15,7 @@ pub mod leaderboard;
 pub mod manager;
 pub mod metrics;
 pub mod nats_bridge;
+pub mod provider;
 pub mod quality_monitor;
 pub mod regression;
 pub mod report;

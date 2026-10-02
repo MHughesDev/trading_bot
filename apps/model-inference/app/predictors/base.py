@@ -214,7 +214,13 @@ def features_matrix(instances, feature_order=None) -> np.ndarray:
 
     rows = []
     for f in feats:
-        rows.append([float(f.get(k, 0.0)) for k in feature_order])
+        missing = [k for k in feature_order if f.get(k) is None]
+        if missing:
+            # Never filled with 0.0 (Set U U-5.2, FEAT-007 §1 defect 4): a
+            # model asked about a world where its missing inputs are zero
+            # answers confidently about the wrong world.
+            raise ValueError("missing required feature(s): " + ", ".join(missing))
+        rows.append([float(f[k]) for k in feature_order])
 
     if not rows:
         return np.zeros((0, len(feature_order)), dtype=np.float32)

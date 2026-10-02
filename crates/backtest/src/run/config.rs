@@ -101,6 +101,9 @@ impl DataSlice {
 /// Which default protections (if any) were disabled. All `false` by default
 /// (INV-1). Any `true` makes the config permanently `unsafe`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+// Independent protections, each recorded on its own: folding them into an enum
+// would lose that two were disabled at once.
+#[allow(clippy::struct_excessive_bools)]
 pub struct UnsafeFlags {
     /// Costs were zeroed/removed (the cost floor disabled).
     #[serde(default)]
@@ -111,13 +114,22 @@ pub struct UnsafeFlags {
     /// The holdout lock was opened outside the vault path.
     #[serde(default)]
     pub holdout_unlocked: bool,
+    /// Models answered without the point-in-time rule (`optimistic_models`,
+    /// Set U U-5.4): a version could answer for decisions inside the data it
+    /// was trained on. Skipped from the hash when off, so every config written
+    /// before this flag existed keeps its `run_id`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub models_optimistic: bool,
 }
 
 impl UnsafeFlags {
     /// True if any protection was disabled.
     #[must_use]
     pub fn any(self) -> bool {
-        self.costs_disabled || self.counter_disabled || self.holdout_unlocked
+        self.costs_disabled
+            || self.counter_disabled
+            || self.holdout_unlocked
+            || self.models_optimistic
     }
 }
 
@@ -309,6 +321,7 @@ impl RunConfigBuilder {
         self.unsafe_flags.costs_disabled |= flags.costs_disabled;
         self.unsafe_flags.counter_disabled |= flags.counter_disabled;
         self.unsafe_flags.holdout_unlocked |= flags.holdout_unlocked;
+        self.unsafe_flags.models_optimistic |= flags.models_optimistic;
         self
     }
 

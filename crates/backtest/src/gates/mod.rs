@@ -11,6 +11,7 @@
 //! ```
 
 pub mod evaluators;
+pub mod model_leakage;
 pub mod profile;
 pub mod stack;
 pub mod tickets;

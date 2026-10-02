@@ -276,11 +276,32 @@ impl AppState {
                 // v3 graphs run on the one strategy engine, v1 definitions on
                 // market_simulator; the router reads which from the stored
                 // document (Set U U-3.4).
+                // v3 model requests answer point-in-time through the inference
+                // sidecar, with one prediction cache for the process, so a
+                // repeated run asks the sidecar nothing (Set U U-5.4).
+                let sidecar: Arc<dyn model_registry::provider::V2Client> =
+                    Arc::new(model_registry::sidecar::SidecarClient::from_env());
+                let cache: Arc<dyn backtest::models::PredictionCache> =
+                    Arc::new(backtest::models::MemoryCache::default());
+                let models_handle = handle.clone();
+                let factory: backtest::runner::ModelsFactory =
+                    Arc::new(move |snapshot, optimistic| {
+                        Box::new(backtest::models::PitModels::new(
+                            snapshot,
+                            model_registry::provider::backtest::SidecarSource::new(
+                                Arc::clone(&sidecar),
+                                models_handle.clone(),
+                            ),
+                            Arc::clone(&cache),
+                            optimistic,
+                        ))
+                    });
                 let executor = backtest::runner::FormatRoutedExecutor::new(
                     handle,
                     pg.clone(),
                     clickhouse_url.clone(),
-                );
+                )
+                .with_models(factory);
                 // The durable, hash-chained trial ledger. Inside a runtime this
                 // is the Postgres one: every dispatch writes a REGISTERED row
                 // before any compute runs, and that row survives a restart.

@@ -124,7 +124,7 @@ pub async fn run_one(
     registry: Arc<LiveStrategyRegistry>,
 ) {
     let id = d.deployment_id;
-    let runner = match build(&d, deps, &ch_url).await {
+    let runner = match build(&d, deps, &ch_url, &pg).await {
         Ok(r) => r,
         Err(reason) => {
             error!(deployment = %id, reason, "deployment could not start; closing the record");
@@ -184,8 +184,26 @@ pub async fn drive(
 }
 
 /// Compile, size and warm a deployment's runner.
-async fn build(d: &Arc<V3Deployment>, deps: LiveDeps, ch_url: &str) -> Result<LiveRunner, String> {
-    let plan = backtest::runner::compile_for_run(&d.graph, &backtest::run::ParamMap::new())?;
+async fn build(
+    d: &Arc<V3Deployment>,
+    deps: LiveDeps,
+    ch_url: &str,
+    pg: &sqlx::PgPool,
+) -> Result<LiveRunner, String> {
+    let registry = Arc::new(backtest::models::RegistrySnapshot::load_or_empty(pg).await);
+    let plan = backtest::runner::compile_for_run(
+        &d.graph,
+        &backtest::run::ParamMap::new(),
+        registry.as_ref(),
+    )?;
+    // Models answer through the gateway over the registry this deployment
+    // compiled against: pinned versions, batched per tick (U-5.3).
+    let mut deps = deps;
+    if let Some(client) = deps.sidecar.clone() {
+        deps.models = Arc::new(model_registry::provider::gateway::GatewayModels::new(
+            client, registry,
+        ));
+    }
     let asset_class: domain::instrument::AssetClass =
         serde_json::from_value(serde_json::Value::String(d.graph.asset_class.clone()))
             .map_err(|_| format!("unknown asset class '{}'", d.graph.asset_class))?;

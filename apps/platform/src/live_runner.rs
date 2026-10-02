@@ -61,11 +61,8 @@ use uuid::Uuid;
 
 // ── ports the runner needs from the process ─────────────────────────────────
 
-/// Answers model requests in a live environment.
-#[async_trait::async_trait]
-pub trait LiveModels: Send + Sync {
-    async fn answer(&self, req: ModelRequest) -> ModelOutcome;
-}
+/// The shared live model-provider interface (`model-registry`, Set U U-5.3).
+pub use model_registry::provider::LiveModels;
 
 /// Until Phase 5 wires model serving, no model answers live: every request is
 /// `unavailable`, and the engine holds rather than guessing.
@@ -158,6 +155,10 @@ pub struct LiveDeps {
     pub gate: Arc<risk::RiskGate>,
     pub models: Arc<dyn LiveModels>,
     pub store: Arc<dyn DeploymentStore>,
+    /// The inference sidecar. When set, each deployment answers its models
+    /// through a `GatewayModels` over the registry it compiled against, in place
+    /// of `models` (Set U U-5.3).
+    pub sidecar: Option<Arc<dyn model_registry::provider::V2Client>>,
 }
 
 // ── bars of a timeframe from bars of a minute ────────────────────────────────
@@ -635,15 +636,38 @@ impl LiveRunner {
             })
             .collect();
         let order: Vec<String> = requests.iter().map(|r| r.node.clone()).collect();
-        let asks = requests.into_iter().map(|req| {
+        // One batch per pinned version — a provider answers it in one call
+        // (U-5.3) — and the batches concurrently, each under the tightest
+        // timeout among its requests (U-4.3).
+        let mut groups: BTreeMap<(String, u32), Vec<ModelRequest>> = BTreeMap::new();
+        for r in requests {
+            groups
+                .entry((r.model.clone(), r.version))
+                .or_default()
+                .push(r);
+        }
+        let asks = groups.into_values().map(|batch| {
             let models = Arc::clone(&self.deps.models);
-            let ms = timeouts.get(&req.node).copied().unwrap_or(1_000);
+            let ms = batch
+                .iter()
+                .map(|r| timeouts.get(&r.node).copied().unwrap_or(1_000))
+                .min()
+                .unwrap_or(1_000);
             async move {
-                let node = req.node.clone();
-                tokio::time::timeout(Duration::from_millis(u64::from(ms)), models.answer(req))
-                    .await
-                    .ok()
-                    .map(|outcome| ModelResponse { node, outcome })
+                let nodes: Vec<String> = batch.iter().map(|r| r.node.clone()).collect();
+                match tokio::time::timeout(
+                    Duration::from_millis(u64::from(ms)),
+                    models.answer_batch(batch),
+                )
+                .await
+                {
+                    Ok(outcomes) => nodes
+                        .into_iter()
+                        .zip(outcomes)
+                        .map(|(node, outcome)| ModelResponse { node, outcome })
+                        .collect(),
+                    Err(_) => Vec::new(),
+                }
             }
         });
         let mut answered: Vec<ModelResponse> = futures_util::future::join_all(asks)
@@ -1036,6 +1060,7 @@ mod tests {
             gate: Arc::new(RiskGate::new(limits, Arc::new(KillSwitch::new(false)))),
             models,
             store,
+            sidecar: None,
         }
     }
 

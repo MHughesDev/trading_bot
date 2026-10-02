@@ -73,6 +73,26 @@ async fn main() -> anyhow::Result<()> {
     owner_pg.close().await;
     info!("runtime postgres pool connected as platform_app");
 
+    // Every model version a strategy may call carries a contract (Set U U-5.1,
+    // migration 0146). Versions that predate contracts get the one derived from
+    // their kind and definition; the ones that cannot (a `transform`) are named
+    // here and refused by the strategy compiler until one is declared.
+    match model_registry::contracts::backfill(&pg).await {
+        Ok(r) => {
+            info!(
+                derived = r.derived,
+                left = r.left.len(),
+                "model version contracts backfilled"
+            );
+            for (model, version, why) in &r.left {
+                tracing::warn!(model, version, why, "model version has no contract");
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "model contract backfill failed; will retry next start")
+        }
+    }
+
     // Ledger fixation (SPEC §4.6): signed daily anchors to WORM and whole-chain
     // verification. Required configuration; there is no way to run without it.
     let fixation = std::sync::Arc::new(
@@ -305,6 +325,7 @@ async fn main() -> anyhow::Result<()> {
             gate: Arc::clone(&risk_gate),
             models: Arc::new(live_runner::NoLiveModels),
             store: Arc::new(live_runner::PgDeploymentStore(pg.clone())),
+            sidecar: Some(Arc::new(model_registry::sidecar::SidecarClient::from_env())),
         },
         pg.clone(),
         cfg.clickhouse.url.clone(),
