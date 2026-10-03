@@ -78,7 +78,7 @@ impl Engine {
             revision: self.plan.revision.clone(),
             tick: self.tick,
             planner: self.planner.clone(),
-            last_close_ns: self.last_close.clone(),
+            last_close_ns: self.inst.last_close.clone(),
         })
     }
 
@@ -142,7 +142,7 @@ impl Engine {
         }
         engine.tick = checkpoint.tick;
         engine.planner = checkpoint.planner.clone();
-        engine.last_close.clone_from(&checkpoint.last_close_ns);
+        engine.inst.last_close.clone_from(&checkpoint.last_close_ns);
         Ok(engine)
     }
 }

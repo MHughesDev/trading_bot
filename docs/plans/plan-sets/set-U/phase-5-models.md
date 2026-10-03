@@ -6,7 +6,7 @@
 **Spec:** [FEAT-007](../../../specs/FEAT-007-unified-strategy-engine.md) §8; ADR-0043; FEAT-006 §5, §6.
 **Depends on:** Phase 0 (contracts); Phase 1 (request/resume).
 **Blocks:** model-driven acceptance in Phases 3, 4, 8.
-**Migration range:** 0146 used. 0145 was taken by another session's `0145_monitor_app_grants.sql` while this phase ran; 0147 is unused and stays reserved for Phase 6's range below it.
+**Migration range:** 0146 used. 0145 was taken by another session's `0145_monitor_app_grants.sql` while this phase ran; Phase 6 took 0147–0148.
 
 Any model in MLOps, any shape of answer, the right model at the right time. When this phase closes a strategy can chain a classifier, a distributional forecaster and an LLM, backtest them point-in-time, and paper-trade them — none of which is possible today.
 

@@ -373,7 +373,8 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
                     "holdout_start": { "type": "string", "description": ">= research_end" },
                     "holdout_end": { "type": "string" },
                     "eval_resolution": { "type": "string", "enum": ["1m", "5m", "15m", "1h", "1d"] },
-                    "objective": { "type": "object", "description": "See tool notes" }
+                    "objective": { "type": "object", "description": "See tool notes" },
+                    "target": { "type": "object" }
                 }
             }),
         )

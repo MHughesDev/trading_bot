@@ -337,6 +337,7 @@ fn funnel_evidence(f: Fixture) -> (Option<TrialEvidence>, BTreeMap<String, f64>,
                 strategy_ref: None,
                 objective: None,
                 delta_practical: 0.1,
+                target: None,
             },
         )
         .expect("experiment created");

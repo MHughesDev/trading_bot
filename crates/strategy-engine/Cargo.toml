@@ -11,6 +11,7 @@ description = "The one strategy engine: pure, synchronous, deterministic. Every 
 domain = { workspace = true }
 features = { workspace = true }
 dataplane = { workspace = true }
+chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 rust_decimal = { workspace = true }

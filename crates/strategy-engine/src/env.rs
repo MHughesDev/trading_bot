@@ -12,7 +12,10 @@
 //! the venue's refusals back" is a second place for backtest and paper to drift
 //! apart, and drift is the defect this whole set exists to remove.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+use chrono::DateTime;
+use dataplane::universe::{MembershipChange, MembershipEvent, UniverseError};
 
 use crate::engine::{Engine, EngineError, Event, Step};
 use crate::history::Bar;
@@ -148,5 +151,188 @@ impl ModelProvider for NoModels {
                 req.model, req.version
             ),
         }
+    }
+}
+
+// ── universes (U-6.1) ────────────────────────────────────────────────────────
+
+/// Which instruments a selection strategy's universe holds, at any instant.
+///
+/// One type answers for every environment: a backtest asks it at each decision
+/// instant, a live allocator asks it *now*, and both get their answer from the
+/// same code over the same definition — so a universe cannot hold one set of
+/// members in a backtest and another on paper for the same instant.
+///
+/// A **logged** universe (`dataplane::universe`) is point-in-time on both of its
+/// clocks: at `t` it holds what had taken effect by `t` *and* had been recorded
+/// by `t`. An instrument added later is not there; one removed since still is.
+/// A **fixed** universe — an explicit list, or every initialised asset of a
+/// class — is today's membership applied to every instant. It cannot know what
+/// was delisted before it was written down, and says so: [`Self::point_in_time`]
+/// is `false`, and a run over it records the survivorship caveat.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Membership {
+    source: MembershipSource,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum MembershipSource {
+    Fixed(Vec<String>),
+    Logged {
+        log: Vec<MembershipEvent>,
+        /// Instrument key → the symbol bars are stored under.
+        symbols: BTreeMap<i64, String>,
+    },
+}
+
+fn symbol_of(symbols: &BTreeMap<i64, String>, key: i64) -> String {
+    symbols
+        .get(&key)
+        .cloned()
+        .unwrap_or_else(|| format!("#{key}"))
+}
+
+impl Membership {
+    /// The same members at every instant: a list, or an asset class's
+    /// initialised instruments as they are today.
+    #[must_use]
+    pub fn fixed(instruments: impl IntoIterator<Item = String>) -> Self {
+        let set: BTreeSet<String> = instruments.into_iter().collect();
+        Self {
+            source: MembershipSource::Fixed(set.into_iter().collect()),
+        }
+    }
+
+    /// A universe resolved from its append-only membership log. `symbols` names
+    /// each instrument key; a key without a symbol is still a member — under
+    /// `#<key>`, so it is excluded for having no data rather than silently
+    /// dropped, which would shrink the universe the way survivorship does.
+    ///
+    /// # Errors
+    /// A log that is not internally consistent (`dataplane::universe`).
+    pub fn logged(
+        log: Vec<MembershipEvent>,
+        symbols: BTreeMap<i64, String>,
+    ) -> Result<Self, UniverseError> {
+        dataplane::universe::intervals(&log)?;
+        Ok(Self {
+            source: MembershipSource::Logged { log, symbols },
+        })
+    }
+
+    /// The members at `at_ns`, sorted.
+    ///
+    /// # Errors
+    /// A log that cannot be resolved at that instant.
+    pub fn members_at(&self, at_ns: i64) -> Result<Vec<String>, UniverseError> {
+        match &self.source {
+            MembershipSource::Fixed(xs) => Ok(xs.clone()),
+            MembershipSource::Logged { log, symbols } => {
+                let t = DateTime::from_timestamp_nanos(at_ns);
+                let keys = dataplane::universe::members_known_as_of(log, t, t)?;
+                let out: BTreeSet<String> =
+                    keys.into_iter().map(|k| symbol_of(symbols, k.0)).collect();
+                Ok(out.into_iter().collect())
+            }
+        }
+    }
+
+    /// Every instrument that is a member at any instant in `[from_ns, to_ns]` —
+    /// what a backtest must load bars for.
+    #[must_use]
+    pub fn ever_between(&self, from_ns: i64, to_ns: i64) -> Vec<String> {
+        match &self.source {
+            MembershipSource::Fixed(xs) => xs.clone(),
+            MembershipSource::Logged { log, symbols } => {
+                let from = DateTime::from_timestamp_nanos(from_ns);
+                let to = DateTime::from_timestamp_nanos(to_ns);
+                let mut out = BTreeSet::new();
+                // Members at the start, plus every addition that becomes known
+                // inside the window.
+                if let Ok(start) = dataplane::universe::members_known_as_of(log, from, from) {
+                    out.extend(start.into_iter().map(|k| symbol_of(symbols, k.0)));
+                }
+                for e in log {
+                    let known = e.effective.max(e.recorded_at);
+                    if e.change == MembershipChange::Added && known > from && known <= to {
+                        out.insert(symbol_of(symbols, e.instrument_id.0));
+                    }
+                }
+                out.into_iter().collect()
+            }
+        }
+    }
+
+    /// Whether membership is known as of each instant. `false` for a fixed
+    /// universe: today's list, applied to the past.
+    #[must_use]
+    pub const fn point_in_time(&self) -> bool {
+        matches!(self.source, MembershipSource::Logged { .. })
+    }
+}
+
+#[cfg(test)]
+mod universe_tests {
+    use super::Membership;
+    use chrono::{TimeZone, Utc};
+    use dataplane::universe::MembershipEvent;
+    use dataplane::InstrumentKey;
+    use std::collections::BTreeMap;
+
+    fn day(d: u32) -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2024, 1, d, 0, 0, 0).unwrap()
+    }
+
+    fn ns(d: u32) -> i64 {
+        day(d).timestamp_nanos_opt().unwrap()
+    }
+
+    fn universe() -> Membership {
+        let k = InstrumentKey;
+        let log = vec![
+            MembershipEvent::added("u", k(1), day(1), "seed"),
+            MembershipEvent::added("u", k(3), day(1), "seed"),
+            MembershipEvent::removed("u", k(3), day(4), "delisted"),
+            MembershipEvent::added("u", k(2), day(6), "listed"),
+            // Took effect on the 2nd, but nobody knew until the 8th.
+            MembershipEvent::added("u", k(4), day(2), "late").known_at(day(8)),
+            MembershipEvent::added("u", k(9), day(1), "no symbol"),
+        ];
+        let symbols = BTreeMap::from([
+            (1, "A".to_string()),
+            (2, "B".to_string()),
+            (3, "C".to_string()),
+            (4, "D".to_string()),
+        ]);
+        Membership::logged(log, symbols).unwrap()
+    }
+
+    #[test]
+    fn at_t_a_universe_excludes_later_additions_and_includes_later_removals() {
+        let u = universe();
+        assert!(u.point_in_time());
+        assert_eq!(
+            u.members_at(ns(3)).unwrap(),
+            ["#9", "A", "C"],
+            "B is added on the 6th and is not here; C is removed on the 4th and still is; \
+             a key with no symbol stays a member under its key"
+        );
+        assert_eq!(u.members_at(ns(5)).unwrap(), ["#9", "A"]);
+        assert_eq!(
+            u.members_at(ns(7)).unwrap(),
+            ["#9", "A", "B"],
+            "D took effect on the 2nd but was not known until the 8th"
+        );
+        assert_eq!(u.members_at(ns(9)).unwrap(), ["#9", "A", "B", "D"]);
+        assert_eq!(u.ever_between(ns(3), ns(9)), ["#9", "A", "B", "C", "D"]);
+        assert_eq!(u.ever_between(ns(5), ns(6)), ["#9", "A", "B"]);
+    }
+
+    #[test]
+    fn a_fixed_universe_is_the_same_at_every_instant_and_says_it_is_not_point_in_time() {
+        let u = Membership::fixed(["B".to_string(), "A".to_string(), "A".to_string()]);
+        assert!(!u.point_in_time());
+        assert_eq!(u.members_at(0).unwrap(), ["A", "B"]);
+        assert_eq!(u.members_at(ns(9)).unwrap(), u.members_at(0).unwrap());
     }
 }

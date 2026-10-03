@@ -86,7 +86,12 @@ async fn resume_recorded(registry: &LiveStrategyRegistry, pg: &sqlx::PgPool) {
             return;
         }
     };
-    for row in rows {
+    // A selection-bound deployment and its members are the allocator's to
+    // resume: a member needs the sleeve its allocator holds (U-6.4).
+    for row in rows
+        .into_iter()
+        .filter(|r| r.target.is_none() && r.parent_deployment_id.is_none())
+    {
         let graph = match serde_json::from_value(row.definition_json.clone()) {
             Ok(g) => g,
             Err(e) => {
@@ -107,6 +112,7 @@ async fn resume_recorded(registry: &LiveStrategyRegistry, pg: &sqlx::PgPool) {
             graph,
             revision: row.revision_hash,
             starting_capital: row.starting_capital,
+            sleeve: None,
         });
         if let Err(e) = declared {
             warn!(deployment = %row.deployment_id, error = %e, "recorded deployment not resumed");
@@ -168,6 +174,11 @@ pub async fn drive(
             info!(deployment = %id, "v3 deployment withdrawn; runner stopped");
             return None;
         }
+        // Left its selection (U-6.4): the runner carries out how.
+        if let Some(reason) = retire(&mut runner).await {
+            info!(deployment = %id, reason, "member left its selection; runner stopped");
+            return Some(reason);
+        }
         if !wanted.contains(&m.instrument_id) {
             continue;
         }
@@ -180,6 +191,37 @@ pub async fn drive(
         if let Some(reason) = runner.halted() {
             return Some(format!("halted: {reason}"));
         }
+    }
+}
+
+/// A member whose allocator dropped it leaves as its deployment says:
+/// `hold` stops deciding and keeps the position, `close` flattens through the
+/// runner's own gate first, `let_strategy_exit` keeps deciding until its own
+/// rules have it flat with nothing working. `Some(reason)` once it should stop.
+pub async fn retire(runner: &mut LiveRunner) -> Option<String> {
+    use domain::strategy_graph::deployment::OnRemoval;
+    match runner.retiring()? {
+        OnRemoval::Hold => Some("left its selection: holding the position".into()),
+        OnRemoval::Close => {
+            let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+            let verdicts = runner.flatten(now).await;
+            let refused: Vec<String> = verdicts
+                .iter()
+                .filter(|v| v.verdict != "approved")
+                .map(|v| format!("{}: {}", v.tag, v.verdict))
+                .collect();
+            Some(if refused.is_empty() {
+                "left its selection: flattened".into()
+            } else {
+                format!(
+                    "left its selection: flatten refused ({})",
+                    refused.join(", ")
+                )
+            })
+        }
+        OnRemoval::LetStrategyExit => runner
+            .is_idle()
+            .then(|| "left its selection: its strategy exited".into()),
     }
 }
 

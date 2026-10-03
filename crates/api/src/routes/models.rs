@@ -1302,15 +1302,19 @@ pub async fn register_transform(
     )
     .await
     {
-        Ok(()) => (
+        Ok(model_id) => (
             StatusCode::CREATED,
-            Json(
-                json!({"model": body.name, "version": 1, "reference": format!("{}@1", body.name)}),
-            ),
+            Json(json!({
+                "name": body.name,
+                "model": model_id,
+                "version": 1,
+                "reference": format!("{model_id}@1"),
+            })),
         )
             .into_response(),
         Err(
-            e @ (model_registry::contracts::TransformError::Contract(_)
+            e @ (model_registry::contracts::TransformError::Name(_)
+            | model_registry::contracts::TransformError::Contract(_)
             | model_registry::contracts::TransformError::DryRun(_)),
         ) => (
             StatusCode::UNPROCESSABLE_ENTITY,

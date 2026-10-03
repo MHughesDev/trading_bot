@@ -528,6 +528,10 @@ pub struct CreateExperimentSpec {
     /// so "how much better is worth caring about" can never be decided after
     /// seeing the results.
     pub delta_practical: f64,
+    /// Backtest the strategy deployed on a selection (Set U U-6.5): every Run
+    /// is then a portfolio run. `universe_ref` must read `selection:<ref>`.
+    #[serde(default)]
+    pub target: Option<domain::strategy_graph::deployment::DeploymentTarget>,
 }
 
 /// Run a research Study attached to an Experiment (auto-increments the counter).
@@ -621,6 +625,8 @@ struct Record {
     /// pre-registration (SPEC §4.1).
     delta_practical: f64,
     research_slice: DataSlice,
+    /// A selection target: every Run of this Experiment is a portfolio run.
+    target: Option<domain::strategy_graph::deployment::DeploymentTarget>,
     studies: Vec<StoredStudy>,
     gate_verdicts: Vec<GateVerdict>,
     gate3: Option<Gate3Outcome>,
@@ -762,6 +768,23 @@ impl SuiteManager {
                     .into(),
             ));
         }
+        if let Some(domain::strategy_graph::deployment::DeploymentTarget::Selection {
+            selection,
+            top_n,
+            ..
+        }) = &spec.target
+        {
+            if spec.universe_ref != format!("selection:{selection}") {
+                return Err(SuiteError::Invalid(format!(
+                    "a selection-bound Experiment's universe_ref is `selection:{selection}`, so the \
+                     slice says what it covers; got `{}`",
+                    spec.universe_ref
+                )));
+            }
+            if *top_n == 0 {
+                return Err(SuiteError::Invalid("top_n must be at least 1".into()));
+            }
+        }
         let res = Self::eval_resolution(spec.eval_resolution.as_deref());
         let research = DataSlice::new(
             spec.universe_ref.clone(),
@@ -806,6 +829,7 @@ impl SuiteManager {
             objective: spec.objective,
             delta_practical: spec.delta_practical,
             research_slice: research,
+            target: spec.target,
             studies: Vec::new(),
             gate_verdicts: Vec::new(),
             gate3: None,
@@ -907,7 +931,7 @@ impl SuiteManager {
                 .filter(|r| r.user_id == user_id)
                 .ok_or(SuiteError::NotFound)?;
             let ctx = Self::dispatch_ctx(user_id, r);
-            let mut base = Self::base_config(&r.strategy_ref, &r.research_slice);
+            let mut base = Self::base_config(&r.strategy_ref, &r.research_slice, r.target.as_ref());
             if let Some(p) = &spec.base_params {
                 base.params = p.clone();
                 base = base.rehashed();
@@ -1140,7 +1164,11 @@ impl SuiteManager {
         )
     }
 
-    fn base_config(strategy_family: &str, slice: &DataSlice) -> RunConfig {
+    fn base_config(
+        strategy_family: &str,
+        slice: &DataSlice,
+        target: Option<&domain::strategy_graph::deployment::DeploymentTarget>,
+    ) -> RunConfig {
         RunConfigBuilder::new(
             strategy_family,
             "v1",
@@ -1149,6 +1177,7 @@ impl SuiteManager {
             "sizing:default",
             "snapshot:latest",
         )
+        .target(target.cloned())
         .build()
     }
 
@@ -1386,7 +1415,7 @@ impl SuiteManager {
         // Run the evidence studies the gates consume (counter climbs honestly).
         let research = r.research_slice.clone();
         let family = r.exp.strategy_family.clone();
-        let base = Self::base_config(&family, &research);
+        let base = Self::base_config(&family, &research, r.target.as_ref());
 
         let wf = Self::evidence_study("funnel-wf", StudyKind::WalkForward, &base, 4);
         let cpcv = Self::evidence_study("funnel-cpcv", StudyKind::Cpcv, &base, 6);
@@ -2540,7 +2569,8 @@ impl SuiteManager {
             .get_mut(&id)
             .filter(|r| r.user_id == user_id)
             .ok_or(SuiteError::NotFound)?;
-        let candidate = Self::base_config(&r.exp.strategy_family, &r.research_slice);
+        let candidate =
+            Self::base_config(&r.exp.strategy_family, &r.research_slice, r.target.as_ref());
         self.emit(
             user_id,
             id,
@@ -2636,6 +2666,7 @@ mod tests {
             eval_resolution: None,
             strategy_ref: None,
             objective: None,
+            target: None,
         }
     }
 
@@ -2678,7 +2709,7 @@ mod tests {
             Utc.with_ymd_and_hms(2024, 6, 1, 0, 0, 0).unwrap(),
             EvalResolution::Day1,
         );
-        let base = SuiteManager::base_config("fam", &slice);
+        let base = SuiteManager::base_config("fam", &slice, None);
         let null = crate::nulls::Null::new(
             crate::nulls::NullKind::BlockPermutation,
             crate::nulls::NullParams::default(),

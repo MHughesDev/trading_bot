@@ -414,6 +414,16 @@ everywhere else.
 constraints: [{kind: min_trades, value: 50}, {kind: max_drawdown_lte, value: 0.15}, ...],
 aggregate: median|worst5_pct}`. **Win rate is never a primary.**
 
+To backtest a strategy **deployed on a selection** — trading whatever a screener
+picks — pass `target: {kind: "selection", selection: <selection strategy ref>,
+top_n: 5}` (optionally `on_removal: close|let_strategy_exit|hold`, `weighting:
+{kind: "equal"}` or `{kind: "attribute", name: "weight"}`, `rebalance: {kind:
+"schedule", cron: "0 0 * * 1"}`) and set `universe_ref` to `selection:<ref>`.
+Every Run is then a portfolio run: one account across every member over time,
+members entering and leaving as the selection does. A universe that is a list or
+an asset class is today's membership applied to the past; the result carries a
+`universe.not_point_in_time` flag when it is.
+
 ### run_sweep
 
 THE inner loop. A sampler (TPE by default) proposes batches; each batch is a

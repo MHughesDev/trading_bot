@@ -363,6 +363,7 @@ fn manifest(
         gate_rejections,
         journal_digest: hex::encode(chain.finalize()),
         journal,
+        portfolio: None,
     }
 }
 
@@ -443,23 +444,7 @@ impl V3RunExecutor {
     /// The stored definition: the exact revision when `strategy_version` names
     /// one, else the strategy's head.
     async fn definition(&self, cfg: &RunConfig) -> anyhow::Result<serde_json::Value> {
-        let by_revision: Option<(serde_json::Value,)> = sqlx::query_as(
-            "SELECT definition_json FROM strategy_revision WHERE revision_hash = $1",
-        )
-        .bind(&cfg.strategy_version)
-        .fetch_optional(&self.pg)
-        .await?;
-        if let Some((json,)) = by_revision {
-            return Ok(json);
-        }
-        let head: Option<(serde_json::Value,)> = sqlx::query_as(
-            "SELECT definition_json FROM strategy_definitions WHERE strategy_id = $1",
-        )
-        .bind(&cfg.strategy_ref)
-        .fetch_optional(&self.pg)
-        .await?;
-        head.map(|(j,)| j)
-            .ok_or_else(|| anyhow::anyhow!("strategy '{}' not found", cfg.strategy_ref))
+        stored_definition(&self.pg, &cfg.strategy_version, &cfg.strategy_ref).await
     }
 
     async fn load(
@@ -573,6 +558,33 @@ impl V3RunExecutor {
     }
 }
 
+/// A stored strategy definition: the revision `revision` names exactly, else
+/// the head of strategy `strategy_ref`.
+///
+/// # Errors
+/// Neither exists, or the database.
+pub async fn stored_definition(
+    pg: &sqlx::PgPool,
+    revision: &str,
+    strategy_ref: &str,
+) -> anyhow::Result<serde_json::Value> {
+    let by_revision: Option<(serde_json::Value,)> =
+        sqlx::query_as("SELECT definition_json FROM strategy_revision WHERE revision_hash = $1")
+            .bind(revision)
+            .fetch_optional(pg)
+            .await?;
+    if let Some((json,)) = by_revision {
+        return Ok(json);
+    }
+    let head: Option<(serde_json::Value,)> =
+        sqlx::query_as("SELECT definition_json FROM strategy_definitions WHERE strategy_id = $1")
+            .bind(strategy_ref)
+            .fetch_optional(pg)
+            .await?;
+    head.map(|(j,)| j)
+        .ok_or_else(|| anyhow::anyhow!("strategy '{strategy_ref}' not found"))
+}
+
 /// Compile a graph with a run's parameters.
 ///
 /// # Errors
@@ -681,10 +693,252 @@ pub fn finish(
     result
 }
 
+impl V3RunExecutor {
+    /// Everything a portfolio run needs: the trading plan, the selection, its
+    /// universe, and every member's bars for both plans, point-in-time.
+    #[allow(clippy::too_many_lines)]
+    async fn load_portfolio(
+        &self,
+        cfg: &RunConfig,
+    ) -> Result<
+        (
+            crate::portfolio::PortfolioRun,
+            Arc<crate::models::RegistrySnapshot>,
+        ),
+        (TerminalReason, String),
+    > {
+        use domain::strategy_graph::deployment::DeploymentTarget;
+        use domain::strategy_graph::{InstrumentRef, StrategyKind};
+        let integrity = |e: String| (TerminalReason::IntegrityRejected, e);
+        let Some(DeploymentTarget::Selection {
+            selection,
+            top_n,
+            rebalance,
+            on_removal,
+            weighting,
+        }) = cfg.target.clone()
+        else {
+            return Err(integrity("not a portfolio run".into()));
+        };
+        if cfg.null_world.is_some() {
+            return Err(integrity(
+                "a null world over a portfolio is not defined yet: which member's bars would it replace?".into(),
+            ));
+        }
+        let json = self
+            .definition(cfg)
+            .await
+            .map_err(|e| (TerminalReason::DependencyFailure, format!("{e:#}")))?;
+        if !is_v3(&json) {
+            return Err(integrity(format!(
+                "'{}' is not a {} graph",
+                cfg.strategy_ref,
+                domain::strategy_graph::FORMAT
+            )));
+        }
+        let graph: StrategyGraph = serde_json::from_value(json)
+            .map_err(|e| integrity(format!("graph does not parse: {e}")))?;
+        if graph.kind != StrategyKind::Trading {
+            return Err(integrity(
+                "a portfolio run deploys a trading strategy; the selection is its target".into(),
+            ));
+        }
+        let registry = Arc::new(crate::models::RegistrySnapshot::load_or_empty(&self.pg).await);
+        let plan = compile_for_run(&graph, &cfg.params, registry.as_ref()).map_err(integrity)?;
+        check_resolution(&plan, cfg).map_err(integrity)?;
+        let (sel_graph, sel_plan, _) = crate::selection_run::load_selection(&self.pg, &selection)
+            .await
+            .map_err(|e| integrity(e.to_string()))?;
+        let domain::strategy_graph::graph::Sink::Select { universe, .. } = &sel_graph.sink else {
+            return Err(integrity("the target is not a selection strategy".into()));
+        };
+        let membership = crate::env::universe::load(&self.pg, universe)
+            .await
+            .map_err(|e| (TerminalReason::DataError, e.to_string()))?;
+        let asset_class: AssetClass =
+            serde_json::from_value(serde_json::Value::String(graph.asset_class.clone()))
+                .map_err(|_| integrity(format!("unknown asset class '{}'", graph.asset_class)))?;
+        let fill = fill_policy(cfg.fill_model).map_err(integrity)?;
+
+        let start = cfg.data_slice.start;
+        let end = cfg.data_slice.end;
+        let start_ns = start.timestamp_nanos_opt().unwrap_or(0);
+        let lead_of = |need: u32, secs: u32| {
+            chrono::Duration::seconds(i64::from(need.saturating_add(1)) * i64::from(secs))
+        };
+        let warm = sel_plan
+            .required_history()
+            .iter()
+            .map(|(i, need)| lead_of(*need, sel_plan.inputs[*i].timeframe.seconds()))
+            .max()
+            .unwrap_or_default();
+        let members = membership.ever_between(
+            (start - warm).timestamp_nanos_opt().unwrap_or(0),
+            end.timestamp_nanos_opt().unwrap_or(i64::MAX),
+        );
+        let store = crate::store::BarStore::connect(&self.ch_url);
+        let load = |instrument: String, tf: domain::strategy_graph::TimeframeKey, need: u32| {
+            let store = &store;
+            async move {
+                let lead = lead_of(need, tf.seconds());
+                store
+                    .load_bars(&instrument, tf.timeframe(), start - lead, end)
+                    .await
+                    .map_err(|e| {
+                        (
+                            TerminalReason::DataError,
+                            format!("bar load for {instrument}: {e:#}"),
+                        )
+                    })
+            }
+        };
+        let mut trading_bars = BTreeMap::new();
+        let mut selection_bars = BTreeMap::new();
+        let mut specs = BTreeMap::new();
+        for m in &members {
+            let mut sel = Vec::with_capacity(sel_plan.inputs.len());
+            for (i, need) in sel_plan.required_history() {
+                sel.push(load(m.clone(), sel_plan.inputs[i].timeframe, need).await?);
+            }
+            selection_bars.insert(m.clone(), sel);
+            // A member with no instrument metadata can be selected but not
+            // traded: the run reports it as skipped when it would have entered.
+            let Some(meta) = storage::postgres::instruments::fetch_by_id(&self.pg, m)
+                .await
+                .map_err(|e| (TerminalReason::DependencyFailure, e.to_string()))?
+            else {
+                continue;
+            };
+            let mut tr = Vec::with_capacity(plan.inputs.len());
+            for (i, need) in plan.required_history() {
+                let input = &plan.inputs[i];
+                let id = match &input.instrument {
+                    InstrumentRef::Bound => m.clone(),
+                    InstrumentRef::Fixed { instrument } => instrument.clone(),
+                };
+                tr.push(load(id, input.timeframe, need).await?);
+            }
+            trading_bars.insert(m.clone(), tr);
+            specs.insert(
+                m.clone(),
+                (
+                    InstrumentSpec {
+                        instrument: m.clone(),
+                        lot_size: meta.lot_size,
+                        tick_size: meta.tick_size,
+                        min_qty: meta.lot_size,
+                        caps: strategy_engine::VenueCaps::all(),
+                    },
+                    InstrumentLimits {
+                        tick_size: meta.tick_size,
+                        lot_size: meta.lot_size,
+                    },
+                ),
+            );
+        }
+        Ok((
+            crate::portfolio::PortfolioRun {
+                trading: Arc::new(plan),
+                selection: sel_plan,
+                membership,
+                top_n,
+                on_removal,
+                weighting,
+                rebalance,
+                trading_bars,
+                selection_bars,
+                start_ns,
+                specs,
+                asset_class,
+                limits: GlobalRiskLimits::default(),
+                capital: self.initial_balance,
+                fill_policy: fill,
+                strategy_id: cfg.strategy_ref.clone(),
+                sims: SimulatorSet::realistic(),
+            },
+            registry,
+        ))
+    }
+
+    /// A portfolio run (U-6.5): the selection-bound deployment over history,
+    /// held in the trial ledger like every other run.
+    fn execute_portfolio(&self, cfg: &RunConfig, started: Instant) -> RunResult {
+        let loaded = tokio::task::block_in_place(|| self.handle.block_on(self.load_portfolio(cfg)));
+        let (r, registry) = match loaded {
+            Ok(r) => r,
+            Err((reason, detail)) => return RunResult::failed(cfg, reason, detail, RUNNER_TAG),
+        };
+        let optimistic = cfg.unsafe_flags.models_optimistic;
+        let mut models: Box<dyn crate::models::RunModels> = match &self.models {
+            Some(factory) => factory(registry, optimistic),
+            None => Box::new(crate::models::PitModels::new(
+                registry,
+                crate::models::NoSource,
+                Arc::new(crate::models::MemoryCache::default()),
+                optimistic,
+            )),
+        };
+        let plan = Arc::clone(&r.trading);
+        let policy = r.fill_policy;
+        let limits = r.limits.clone();
+        let selection = r.selection.revision.clone();
+        let out = match crate::portfolio::run_portfolio(r, models.as_mut()) {
+            Ok(o) => o,
+            Err(e) => {
+                return RunResult::failed(
+                    cfg,
+                    TerminalReason::IntegrityRejected,
+                    e.to_string(),
+                    RUNNER_TAG,
+                )
+            }
+        };
+        let traces: Vec<DecisionTrace> = out.traces.iter().map(|(_, t)| t.clone()).collect();
+        let mut m = manifest(&plan, policy, &limits, &traces, out.gate_rejections);
+        m.portfolio = Some(crate::run::result::PortfolioManifest {
+            selection,
+            universe_point_in_time: out.universe_point_in_time,
+            selections_run: u32::try_from(out.selections.len()).unwrap_or(u32::MAX),
+            changes: out.changes,
+            trade_instances: out.trades.iter().map(|t| t.instance.clone()).collect(),
+            pnl_by_numeraire: out.pnl_by_numeraire,
+            skipped: out.skipped,
+        });
+        let outcome = V3Outcome {
+            equity: out.equity,
+            net_exposure: out.net_exposure,
+            trades: out.trades.into_iter().map(|t| t.trade).collect(),
+            traces,
+            manifest: m,
+        };
+        let cost = ComputeCost {
+            wall_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            cpu_ms: 0,
+        };
+        let mut result = finish(cfg, outcome, cost, models.as_ref());
+        if !out.universe_point_in_time {
+            result.integrity_flags.push(crate::run::Flag {
+                code: "universe.not_point_in_time".into(),
+                detail: "the selection's universe is today's list (or today's initialised assets) \
+                         applied to the past: instruments that left before it was written down are \
+                         missing, which biases the result upward"
+                    .into(),
+            });
+        }
+        result
+    }
+}
+
 impl RunExecutor for V3RunExecutor {
     fn execute(&self, cfg: &RunConfig, ticket: &ledger::TrialTicket) -> RunResult {
         let started = Instant::now();
         tracing::debug!(trial_id = %ticket.trial_id(), run_id = cfg.run_id.as_str(), "v3 run dispatched");
+        if matches!(
+            cfg.target,
+            Some(domain::strategy_graph::deployment::DeploymentTarget::Selection { .. })
+        ) {
+            return self.execute_portfolio(cfg, started);
+        }
         let loaded = tokio::task::block_in_place(|| self.handle.block_on(self.load(cfg)));
         let (r, registry) = match loaded {
             Ok(r) => r,

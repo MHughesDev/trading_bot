@@ -572,19 +572,31 @@ impl LiveRunner {
             .find(|p| p.instrument_id == self.d.instrument_id);
         let unrealized: Decimal = snap.positions.iter().map(|p| p.unrealized_pnl).sum();
         let daily_loss = self.deps.paper.daily_loss_usd(self.asset_class);
+        let position = pos.map_or(Decimal::ZERO, |p| p.quantity);
+        let mark = self
+            .deps
+            .paper
+            .mark(&self.d.instrument_id)
+            .map(Price::inner);
+        // A member of a selection-bound deployment sizes against its share of
+        // the deployment's capital (U-6.4) — the same rule its portfolio
+        // backtest applies; a hand-bound deployment against the account.
+        let (equity, cash) = match &self.d.sleeve {
+            Some(s) => {
+                let c = s.capital();
+                (c, c - position * mark.unwrap_or_default())
+            }
+            None => (snap.equity, snap.cash),
+        };
         PortfolioView {
-            position: pos.map_or(Decimal::ZERO, |p| p.quantity),
+            position,
             avg_entry_price: pos.map(|p| p.average_entry_price),
             bars_in_position: self.bars_in_position,
             high_water: self.high_water,
-            equity: snap.equity,
-            cash: snap.cash,
+            equity,
+            cash,
             realized_pnl_today: -daily_loss - unrealized,
-            mark: self
-                .deps
-                .paper
-                .mark(&self.d.instrument_id)
-                .map(Price::inner),
+            mark,
             open_orders: self
                 .orders
                 .iter()
@@ -599,6 +611,50 @@ impl LiveRunner {
                 .collect(),
             last_fill_price: self.last_fill_price,
         }
+    }
+
+    /// How this member leaves its selection, once its allocator has said so.
+    #[must_use]
+    pub fn retiring(&self) -> Option<domain::strategy_graph::deployment::OnRemoval> {
+        self.d.sleeve.as_ref().and_then(|s| s.retiring())
+    }
+
+    /// Flat, with nothing working: a member letting its strategy exit is done.
+    #[must_use]
+    pub fn is_idle(&self) -> bool {
+        self.position().is_zero() && self.orders.values().all(|o| o.closed)
+    }
+
+    /// `close` for a member that left its selection: cancel what is working and
+    /// flatten with a reduce-only market order — through this runner's own gate,
+    /// like every order it sends. Returns the gate's verdicts.
+    pub async fn flatten(&mut self, at_ns: i64) -> Vec<GateVerdict> {
+        let mut actions: Vec<OrderAction> = self
+            .orders
+            .iter()
+            .filter(|(_, o)| !o.closed)
+            .map(|(tag, _)| OrderAction::Cancel { tag: tag.clone() })
+            .collect();
+        let pos = self.position();
+        if !pos.is_zero() {
+            actions.push(OrderAction::Submit(PlannedOrder {
+                tag: format!("allocator:close:{at_ns}"),
+                side: if pos.is_sign_positive() {
+                    Side::Sell
+                } else {
+                    Side::Buy
+                },
+                qty: pos.abs(),
+                style: PlannedStyle::Market,
+                tif: domain::order::TimeInForce::Gtc,
+                reduce_only: true,
+                post_only: false,
+                oco_group: None,
+                role: OrderRole::Exit,
+            }));
+        }
+        let (verdicts, _) = self.act(&actions, at_ns).await;
+        verdicts
     }
 
     /// The async `cycle`: one event through the engine to completion.
@@ -1100,6 +1156,7 @@ mod tests {
             revision: g.revision().unwrap().as_str().to_string(),
             graph: g.clone(),
             starting_capital: Decimal::from(10_000),
+            sleeve: None,
         })
     }
 
@@ -1595,5 +1652,126 @@ mod tests {
             matches!(ended, Ok(Ok(None))),
             "stopped at the next bar, withdrawn not halted: {ended:?}"
         );
+    }
+
+    // ── U-6.4: a member of a selection-bound deployment ──────────────────────
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_member_sizes_against_its_sleeve_and_a_close_flattens_it_through_the_gate() {
+        let inst = "LIVE-SLEEVE-USD";
+        ready_instrument(inst, "100");
+        let g = graph(serde_json::json!({
+          "format": "tbot.strategy/3", "kind": "trading", "name": "half_in",
+          "asset_class": "crypto_spot_cex", "timeframe": "1m",
+          "nodes": [{"id":"go","op":"ge","args":{"a":"close","b":0}}],
+          "decide": {"rules": [
+            {"when":"go","then":{"kind":"target","size":{"mode":"equity_fraction","x":0.5}}}
+          ]}
+        }));
+        let sleeve = Arc::new(strategy_runtime::live::SleeveHandle::new(
+            Uuid::new_v4(),
+            Decimal::from(2_000),
+        ));
+        let mut d = (*deployment(inst, &g)).clone();
+        d.sleeve = Some(Arc::clone(&sleeve));
+        let mut r = LiveRunner::start(
+            Arc::new(d),
+            plan_of(&g, &StdRegistries::new()),
+            AssetClass::CryptoSpotCex,
+            spec(inst),
+            deps(Arc::new(MemoryStore::default()), Arc::new(NoLiveModels)),
+            vec![Vec::new()],
+        )
+        .await
+        .unwrap();
+        let bar = Bar {
+            close_ns: (T0 + 60) * 1_000_000_000,
+            open: 100.0,
+            high: 100.0,
+            low: 100.0,
+            close: 100.0,
+            volume: 1.0,
+        };
+        let decided = r.on_minute_bar(inst, bar).await.unwrap();
+        // Half of its 2,000 sleeve at 100 is 10 units — not half the account.
+        assert_eq!(
+            submits(&decided)
+                .first()
+                .map(|s| s.ends_with(" Buy 10") || s.ends_with(" Buy 10.00000000")),
+            Some(true),
+            "{:?}",
+            submits(&decided)
+        );
+        assert_eq!(r.position(), Decimal::from(10));
+
+        assert!(
+            crate::live_deployments::retire(&mut r).await.is_none(),
+            "not retiring yet"
+        );
+        sleeve.retire(domain::strategy_graph::deployment::OnRemoval::Close);
+        let reason = crate::live_deployments::retire(&mut r)
+            .await
+            .expect("stops");
+        assert_eq!(reason, "left its selection: flattened");
+        assert!(
+            r.position().is_zero(),
+            "flattened through the runner's own gate"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_member_letting_its_strategy_exit_stops_only_when_flat() {
+        let inst = "LIVE-EXIT-USD";
+        ready_instrument(inst, "100");
+        let g = ema_7_21();
+        let sleeve = Arc::new(strategy_runtime::live::SleeveHandle::new(
+            Uuid::new_v4(),
+            Decimal::from(5_000),
+        ));
+        let mut d = (*deployment(inst, &g)).clone();
+        d.sleeve = Some(Arc::clone(&sleeve));
+        let mut r = LiveRunner::start(
+            Arc::new(d),
+            plan_of(&g, &StdRegistries::new()),
+            AssetClass::CryptoSpotCex,
+            spec(inst),
+            deps(Arc::new(MemoryStore::default()), Arc::new(NoLiveModels)),
+            vec![Vec::new()],
+        )
+        .await
+        .unwrap();
+        // Long enough for a full cycle of the price path: in, then out again.
+        let (minutes, _) = trades_to_minutes(inst, 360);
+        let mut bars = minutes.iter();
+        // Trade until it holds something, then drop it from the selection.
+        for m in bars.by_ref() {
+            r.on_minute_bar(inst, *m).await.unwrap();
+            if !r.position().is_zero() {
+                break;
+            }
+        }
+        assert!(!r.position().is_zero(), "the strategy entered");
+        sleeve.retire(domain::strategy_graph::deployment::OnRemoval::LetStrategyExit);
+        let mut held_while_long = 0;
+        let mut stopped = None;
+        for m in bars {
+            match crate::live_deployments::retire(&mut r).await {
+                None => held_while_long += 1,
+                Some(reason) => {
+                    stopped = Some(reason);
+                    break;
+                }
+            }
+            r.on_minute_bar(inst, *m).await.unwrap();
+        }
+        assert!(
+            held_while_long > 1,
+            "it kept deciding while it held a position"
+        );
+        assert_eq!(
+            stopped.as_deref(),
+            Some("left its selection: its strategy exited")
+        );
+        assert!(r.is_idle());
     }
 }

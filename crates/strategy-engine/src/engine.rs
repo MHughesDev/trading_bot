@@ -25,15 +25,12 @@ use domain::strategy_graph::{MissingReason, StrategyKind, Value};
 use serde::{Deserialize, Serialize};
 
 use crate::decide::{self, RuleOutcome};
-use crate::eval::{self, ArgVal};
-use crate::history::{Bar, History};
-use crate::models::{self, ModelInput, ModelRequest, ModelResponse};
-use crate::plan::{
-    BarField, InputIdx, ModelArg, NodeKind, Operand, Plan, Slot, StateField, PRIMARY,
-};
+use crate::history::Bar;
+use crate::instance::{Instance, TickCtx};
+use crate::models::{self, ModelRequest, ModelResponse};
+use crate::plan::{InputIdx, NodeKind, Plan, Slot, PRIMARY};
 use crate::planner::{self, Planned, PlannerState};
 use crate::portfolio::{Fill, InstrumentSpec, OrderClosed, PortfolioView};
-use crate::temporal::Temporal;
 use crate::trace::{Cause, DecisionTrace};
 
 /// Something that happened.
@@ -68,8 +65,10 @@ pub enum Step {
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum EngineError {
-    #[error("selection strategies are evaluated cross-sectionally, which arrives with Set U Phase 6; this engine runs trading strategies")]
-    SelectionNotYet,
+    #[error("a selection strategy is evaluated cross-sectionally over its universe: run it in a `SelectionEngine`, not an `Engine`")]
+    SelectionPlan,
+    #[error("a trading strategy decides for one instrument: run it in an `Engine`, not a `SelectionEngine`")]
+    TradingPlan,
     #[error("indicator '{0}' could not be constructed: {1}")]
     Feature(String, String),
     #[error("an event arrived while a tick is waiting for model answers; call `resume` first")]
@@ -98,78 +97,32 @@ struct Pending {
 /// One running strategy instance on one instrument.
 pub struct Engine {
     pub(crate) plan: Arc<Plan>,
-    histories: Vec<History>,
-    temporal: Vec<Option<Temporal>>,
+    /// Histories, stateful-operator state and last closes — the same per-
+    /// instrument state a selection engine keeps for each member.
+    pub(crate) inst: Instance,
     pub(crate) planner: PlannerState,
     pub(crate) tick: u64,
     pending: Option<Pending>,
-    /// The close of the last bar seen on each input — where a checkpoint's
-    /// history replay stops (U-4.4).
-    pub(crate) last_close: Vec<Option<i64>>,
 }
 
 impl Engine {
     /// Build an engine for a compiled plan.
     ///
     /// # Errors
-    /// A selection plan (Phase 6), or an indicator the features crate cannot
-    /// construct.
+    /// A selection plan (those run in a
+    /// [`SelectionEngine`](crate::selection::SelectionEngine)), or an indicator
+    /// the features crate cannot construct.
     pub fn new(plan: Arc<Plan>) -> Result<Self, EngineError> {
         if plan.kind == StrategyKind::Selection {
-            return Err(EngineError::SelectionNotYet);
+            return Err(EngineError::SelectionPlan);
         }
-        let mut histories = Vec::with_capacity(plan.inputs.len());
-        for (i, input) in plan.inputs.iter().enumerate() {
-            let mut impls = Vec::with_capacity(input.columns.len());
-            let mut rows_cap = 1usize;
-            for name in &input.columns {
-                let f = features::runtime::feature(name)
-                    .map_err(|e| EngineError::Feature(name.clone(), e.to_string()))?;
-                rows_cap = rows_cap.max(f.def().lookback_bars as usize);
-                impls.push(f);
-            }
-            let cols_cap = plan
-                .nodes
-                .iter()
-                .filter_map(|n| match &n.kind {
-                    NodeKind::Model(m) => Some(m.inputs.values()),
-                    _ => None,
-                })
-                .flatten()
-                .filter_map(|a| match a {
-                    ModelArg::Window {
-                        input, lookback, ..
-                    } if *input == i => Some(*lookback as usize),
-                    _ => None,
-                })
-                .max()
-                .unwrap_or(1);
-            histories.push(History::new(impls, rows_cap, cols_cap));
-        }
-        let temporal = plan
-            .nodes
-            .iter()
-            .map(|n| match &n.kind {
-                NodeKind::Op { op, args } if op.stateful => {
-                    let period = args.get("n").and_then(|o| match o {
-                        Operand::Const(v) => v.as_num(),
-                        _ => None,
-                    });
-                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                    Some(Temporal::new(op.name, period.unwrap_or(0.0) as u32))
-                }
-                _ => None,
-            })
-            .collect();
-        let inputs = plan.inputs.len();
+        let inst = Instance::new(&plan)?;
         Ok(Self {
             plan,
-            histories,
-            temporal,
+            inst,
             planner: PlannerState::default(),
             tick: 0,
             pending: None,
-            last_close: vec![None; inputs],
         })
     }
 
@@ -205,11 +158,9 @@ impl Engine {
         }
         match event {
             Event::Bar { input, bar, warmup } => {
-                let Some(h) = self.histories.get_mut(input) else {
+                if !self.inst.push(input, bar) {
                     return Ok(Step::Idle);
-                };
-                h.push(bar);
-                self.last_close[input] = Some(bar.close_ns);
+                }
                 if input != PRIMARY || !self.plan.triggers.bar_close {
                     return Ok(Step::Idle);
                 }
@@ -341,125 +292,26 @@ impl Engine {
     #[allow(clippy::too_many_lines)]
     fn evaluate(&mut self, mut p: Pending, warmup: bool) -> Result<Step, EngineError> {
         let plan = Arc::clone(&self.plan);
-        let mut new_requests = Vec::new();
-        for (slot, node) in plan.nodes.iter().enumerate() {
-            if p.values[slot].is_some() || p.waiting.contains_key(&node.id) {
-                continue;
-            }
-            match &node.kind {
-                NodeKind::Feature {
-                    input,
-                    column,
-                    lookback,
-                    name,
-                } => {
-                    let h = &self.histories[*input];
-                    p.values[slot] = Some(match h.latest(*column) {
-                        Some(x) => Value::num(x, name),
-                        None if h.bars_seen < u64::from(*lookback) => {
-                            Value::Missing(MissingReason::WarmingUp {
-                                needed: *lookback,
-                                have: u32::try_from(h.bars_seen).unwrap_or(u32::MAX),
-                            })
-                        }
-                        None => Value::Missing(MissingReason::Undefined { op: name.clone() }),
-                    });
-                }
-                NodeKind::Bar { input, field } => {
-                    p.values[slot] = Some(self.bar_value(*input, *field));
-                }
-                NodeKind::Hour => {
-                    let secs = p.at_ns.div_euclid(1_000_000_000);
-                    #[allow(clippy::cast_precision_loss)]
-                    let h = (secs.div_euclid(3_600)).rem_euclid(24) as f64;
-                    p.values[slot] = Some(Value::num(h, "hour"));
-                }
-                NodeKind::Weekday => {
-                    let days = p.at_ns.div_euclid(86_400_000_000_000);
-                    // 1970-01-01 was a Thursday; Monday = 0.
-                    #[allow(clippy::cast_precision_loss)]
-                    let d = (days + 3).rem_euclid(7) as f64;
-                    p.values[slot] = Some(Value::num(d, "weekday"));
-                }
-                NodeKind::Op { op, args } => {
-                    let mut vals: BTreeMap<String, ArgVal> = BTreeMap::new();
-                    let mut ready = true;
-                    for (port, operand) in args {
-                        if let Some(v) = self.arg_value(operand, &p.values, &p.view) {
-                            vals.insert(port.clone(), v);
-                        } else {
-                            ready = false;
-                            break;
-                        }
-                    }
-                    if !ready {
-                        continue;
-                    }
-                    let v = if let Some(state) = self.temporal[slot].as_mut() {
-                        let get = |port: &str| match vals.get(port) {
-                            Some(ArgVal::One(v)) => v.clone(),
-                            _ => Value::Missing(MissingReason::Undefined {
-                                op: format!("{} has no {port}", op.name),
-                            }),
-                        };
-                        state.step(op.name, self.tick, &get)
-                    } else {
-                        let ports: Vec<&str> = op.inputs.iter().map(|p| p.name).collect();
-                        eval::eval(op.name, &ports, &vals)
-                    };
-                    p.values[slot] = Some(v);
-                }
-                NodeKind::Model(call) => {
-                    if warmup {
-                        p.values[slot] = Some(Value::Missing(MissingReason::WarmingUp {
-                            needed: node.warmup,
-                            have: u32::try_from(self.tick).unwrap_or(u32::MAX),
-                        }));
-                        continue;
-                    }
-                    let mut inputs = BTreeMap::new();
-                    let mut ready = true;
-                    let mut missing: Option<MissingReason> = None;
-                    for (name, arg) in &call.inputs {
-                        match self.model_input(name, arg, &p.values, &p.view) {
-                            Ok(Some(input)) => {
-                                inputs.insert(name.clone(), input);
-                            }
-                            Ok(None) => {
-                                ready = false;
-                                break;
-                            }
-                            Err(reason) => {
-                                let optional =
-                                    call.contract.input(name).is_some_and(|c| c.optional);
-                                if !optional {
-                                    missing = Some(reason);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if !ready {
-                        continue;
-                    }
-                    if let Some(reason) = missing {
-                        // An input the engine cannot assemble: no call, no
-                        // zero in its place.
-                        p.values[slot] = Some(Value::Missing(reason));
-                        continue;
-                    }
-                    let req = ModelRequest {
-                        node: node.id.clone(),
-                        reference: call.reference.clone(),
-                        model: call.model.clone(),
-                        version: call.version,
-                        at_ns: p.at_ns,
-                        inputs,
-                    };
-                    p.waiting.insert(node.id.clone(), slot);
-                    new_requests.push(req);
-                }
-            }
+        let ctx = TickCtx {
+            plan: &plan,
+            tick: self.tick,
+            at_ns: p.at_ns,
+            view: &p.view,
+            warmup,
+        };
+        let made = {
+            let waiting = &p.waiting;
+            self.inst.pass(
+                &ctx,
+                &mut p.values,
+                &|slot| waiting.values().any(|s| *s == slot),
+                &|id| id.to_string(),
+            )
+        };
+        let mut new_requests = Vec::with_capacity(made.len());
+        for (slot, req) in made {
+            p.waiting.insert(req.node.clone(), slot);
+            new_requests.push(req);
         }
         if !new_requests.is_empty() {
             p.requests.extend(new_requests.iter().cloned());
@@ -497,7 +349,8 @@ impl Engine {
                 continue;
             }
             let when = self
-                .operand_value(&rule.when, &lookup, &p.view)
+                .inst
+                .operand_value(&plan, &rule.when, &lookup, &p.view)
                 .unwrap_or(Value::Bool(false));
             match when {
                 Value::Bool(true) => {
@@ -505,18 +358,18 @@ impl Engine {
                     let operand = |k: usize| {
                         rule.operands
                             .get(k)
-                            .and_then(|o| self.operand_value(o, &lookup, &p.view))
+                            .and_then(|o| self.inst.operand_value(&plan, o, &lookup, &p.view))
                             .unwrap_or(Value::Missing(MissingReason::Undefined {
                                 op: format!("#{k}"),
                             }))
                     };
                     let atr = |n: u32| match plan.atr_columns.get(&n) {
-                        Some(&c) => self.histories[PRIMARY].latest(c).map_or_else(
+                        Some(&c) => self.inst.histories[PRIMARY].latest(c).map_or_else(
                             || {
                                 Value::Missing(MissingReason::WarmingUp {
                                     needed: features::runtime::lookback_bars(&format!("atr_{n}"))
                                         .unwrap_or(n),
-                                    have: u32::try_from(self.histories[PRIMARY].bars_seen)
+                                    have: u32::try_from(self.inst.histories[PRIMARY].bars_seen)
                                         .unwrap_or(u32::MAX),
                                 })
                             },
@@ -565,197 +418,6 @@ impl Engine {
             intents,
             actions: planned.actions,
             refusals: planned.refusals,
-        }
-    }
-
-    fn bar_value(&self, input: InputIdx, field: BarField) -> Value {
-        let Some(b) = self.histories.get(input).and_then(|h| h.last) else {
-            return Value::Missing(MissingReason::NoData {
-                what: format!(
-                    "a closed bar on {}",
-                    self.plan.inputs.get(input).map_or("?", |i| i.id.as_str())
-                ),
-            });
-        };
-        let x = match field {
-            BarField::Open => b.open,
-            BarField::High => b.high,
-            BarField::Low => b.low,
-            BarField::Close => b.close,
-            BarField::Volume => b.volume,
-        };
-        Value::num(x, field.name())
-    }
-
-    fn state_value(view: &PortfolioView, f: StateField) -> Value {
-        use rust_decimal::prelude::ToPrimitive;
-        let num = |d: rust_decimal::Decimal, what: &str| {
-            d.to_f64().map_or_else(
-                || Value::Missing(MissingReason::Undefined { op: what.into() }),
-                |x| Value::num(x, what),
-            )
-        };
-        let opt = |d: Option<rust_decimal::Decimal>, what: &str| match d {
-            Some(d) => num(d, what),
-            None => Value::Missing(MissingReason::NoData {
-                what: format!("state.{what}"),
-            }),
-        };
-        match f {
-            StateField::Flat => Value::Bool(view.position.is_zero()),
-            StateField::Long => {
-                Value::Bool(view.position.is_sign_positive() && !view.position.is_zero())
-            }
-            StateField::Short => {
-                Value::Bool(view.position.is_sign_negative() && !view.position.is_zero())
-            }
-            StateField::Position => num(view.position, "position"),
-            StateField::PositionFraction => view.position_fraction().map_or_else(
-                || {
-                    Value::Missing(MissingReason::NoData {
-                        what: "state.position_fraction (needs a mark and equity)".into(),
-                    })
-                },
-                |x| Value::num(x, "position_fraction"),
-            ),
-            StateField::EntryPrice => opt(view.avg_entry_price, "entry_price"),
-            StateField::BarsInPosition => {
-                Value::num(f64::from(view.bars_in_position), "bars_in_position")
-            }
-            StateField::UnrealizedReturn => view.unrealized_return().map_or_else(
-                || {
-                    Value::Missing(MissingReason::NoData {
-                        what: "state.unrealized_return (flat, or no entry price or mark)".into(),
-                    })
-                },
-                |x| Value::num(x, "unrealized_return"),
-            ),
-            StateField::RealizedPnlToday => num(view.realized_pnl_today, "realized_pnl_today"),
-            StateField::Equity => num(view.equity, "equity"),
-            StateField::Cash => num(view.cash, "cash"),
-            #[allow(clippy::cast_precision_loss)]
-            StateField::OpenOrders => Value::num(view.open_orders.len() as f64, "open_orders"),
-            StateField::Mark => opt(view.mark, "mark"),
-        }
-    }
-
-    /// An operand's value; `None` if it reads a slot not yet evaluated this tick.
-    fn operand_value(
-        &self,
-        o: &Operand,
-        values: &[Option<Value>],
-        view: &PortfolioView,
-    ) -> Option<Value> {
-        Some(match o {
-            Operand::Slot(s) => values[*s].clone()?,
-            Operand::Field(s, f) => match values[*s].clone()? {
-                Value::Record(mut r) => {
-                    r.remove(f)
-                        .unwrap_or(Value::Missing(MissingReason::Undefined {
-                            op: format!("no field {f}"),
-                        }))
-                }
-                missing @ Value::Missing(_) => missing,
-                _ => Value::Missing(MissingReason::Undefined {
-                    op: format!("field {f} of a non-record"),
-                }),
-            },
-            Operand::Const(v) => v.clone(),
-            Operand::State(f) => Self::state_value(view, *f),
-            Operand::Bar(input, field) => self.bar_value(*input, *field),
-            Operand::List(xs) => {
-                // Lists are only read through `arg_value`; as a single value a
-                // list has no meaning.
-                let _ = xs;
-                Value::Missing(MissingReason::Undefined {
-                    op: "a list read as one value".into(),
-                })
-            }
-        })
-    }
-
-    fn arg_value(
-        &self,
-        o: &Operand,
-        values: &[Option<Value>],
-        view: &PortfolioView,
-    ) -> Option<ArgVal> {
-        match o {
-            Operand::List(xs) => {
-                let mut out = Vec::with_capacity(xs.len());
-                for x in xs {
-                    out.push(self.operand_value(x, values, view)?);
-                }
-                Some(ArgVal::Many(out))
-            }
-            other => self.operand_value(other, values, view).map(ArgVal::One),
-        }
-    }
-
-    /// Assemble one model input. `Ok(None)`: depends on a node not yet
-    /// evaluated. `Err`: cannot be assembled now, with why.
-    fn model_input(
-        &self,
-        name: &str,
-        arg: &ModelArg,
-        values: &[Option<Value>],
-        view: &PortfolioView,
-    ) -> Result<Option<ModelInput>, MissingReason> {
-        match arg {
-            ModelArg::Row { input, columns } => {
-                let h = &self.histories[*input];
-                let mut row = BTreeMap::new();
-                for (feature, col) in columns {
-                    match h.latest(*col) {
-                        Some(x) => {
-                            row.insert(feature.clone(), x);
-                        }
-                        None => {
-                            return Err(MissingReason::WarmingUp {
-                                needed: features::runtime::lookback_bars(feature).unwrap_or(1),
-                                have: u32::try_from(h.bars_seen).unwrap_or(u32::MAX),
-                            })
-                        }
-                    }
-                }
-                Ok(Some(ModelInput::Row { values: row }))
-            }
-            ModelArg::Window {
-                input,
-                columns,
-                lookback,
-            } => {
-                let h = &self.histories[*input];
-                let n = *lookback as usize;
-                let mut cols = Vec::with_capacity(columns.len());
-                for (feature, col) in columns {
-                    match h.window(*col, n) {
-                        Some(xs) => cols.push((feature.clone(), xs)),
-                        None => {
-                            return Err(MissingReason::WarmingUp {
-                                needed: features::runtime::lookback_bars(feature).unwrap_or(1)
-                                    + lookback.saturating_sub(1),
-                                have: u32::try_from(h.bars_seen).unwrap_or(u32::MAX),
-                            })
-                        }
-                    }
-                }
-                let rows = (0..n)
-                    .map(|i| cols.iter().map(|(_, xs)| xs[i]).collect())
-                    .collect();
-                Ok(Some(ModelInput::Window {
-                    features: cols.into_iter().map(|(f, _)| f).collect(),
-                    rows,
-                }))
-            }
-            ModelArg::Value(o) => match self.operand_value(o, values, view) {
-                None => Ok(None),
-                Some(Value::Missing(r)) => Err(r),
-                Some(v) => {
-                    let _ = name;
-                    Ok(Some(ModelInput::Value { value: v }))
-                }
-            },
         }
     }
 }

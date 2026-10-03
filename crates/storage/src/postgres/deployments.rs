@@ -28,6 +28,11 @@ pub struct NewDeployment {
     pub started_by: String,
     /// Set T's forward-evidence record, when one sits in front.
     pub forward_deployment_id: Option<Uuid>,
+    /// A selection-bound deployment's target (U-6.4); its `instrument_id` is
+    /// then `selection:<revision>`.
+    pub target: Option<serde_json::Value>,
+    /// A member of a selection-bound deployment names its parent.
+    pub parent_deployment_id: Option<Uuid>,
 }
 
 /// A deployment as recorded.
@@ -48,11 +53,13 @@ pub struct DeploymentRow {
     pub stopped_at: Option<DateTime<Utc>>,
     pub stop_reason: Option<String>,
     pub forward_deployment_id: Option<Uuid>,
+    pub target: Option<serde_json::Value>,
+    pub parent_deployment_id: Option<Uuid>,
 }
 
 const COLUMNS: &str = "deployment_id, user_id, strategy_name, revision_hash, definition_json, \
      instrument_id, environment, venue, starting_capital, model_pins, started_by, started_at, \
-     stopped_at, stop_reason, forward_deployment_id";
+     stopped_at, stop_reason, forward_deployment_id, target, parent_deployment_id";
 
 /// Record a paper deployment on the platform's paper venue.
 ///
@@ -64,8 +71,8 @@ pub async fn start(pool: &PgPool, d: &NewDeployment) -> Result<(), PgError> {
         "INSERT INTO strategy_deployment (
              deployment_id, user_id, strategy_name, revision_hash, definition_json,
              instrument_id, environment, venue, starting_capital, model_pins, started_by,
-             forward_deployment_id
-         ) VALUES ($1,$2,$3,$4,$5,$6,'paper','platform_paper',$7,$8,$9,$10)",
+             forward_deployment_id, target, parent_deployment_id
+         ) VALUES ($1,$2,$3,$4,$5,$6,'paper','platform_paper',$7,$8,$9,$10,$11,$12)",
     )
     .bind(d.deployment_id)
     .bind(&d.user_id)
@@ -77,9 +84,84 @@ pub async fn start(pool: &PgPool, d: &NewDeployment) -> Result<(), PgError> {
     .bind(&d.model_pins)
     .bind(&d.started_by)
     .bind(d.forward_deployment_id)
+    .bind(&d.target)
+    .bind(d.parent_deployment_id)
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// The running members of a selection-bound deployment.
+///
+/// # Errors
+/// A database error.
+pub async fn running_children(pool: &PgPool, parent: Uuid) -> Result<Vec<DeploymentRow>, PgError> {
+    let sql = format!(
+        "SELECT {COLUMNS} FROM strategy_deployment \
+          WHERE parent_deployment_id = $1 AND stopped_at IS NULL ORDER BY instrument_id"
+    );
+    Ok(sqlx::query_as(&sql).bind(parent).fetch_all(pool).await?)
+}
+
+/// One allocation change of a selection-bound deployment (migration 0148).
+#[derive(Clone, Debug, PartialEq)]
+pub struct AllocationEvent {
+    pub deployment_id: Uuid,
+    pub at: DateTime<Utc>,
+    pub selection_run_id: Option<Uuid>,
+    /// `entered`, `left`, `exiting`, `reweighted`.
+    pub change: String,
+    pub instrument_id: String,
+    pub member_deployment_id: Option<Uuid>,
+    pub weight: Decimal,
+    pub capital: Decimal,
+    /// How a leaver leaves: `close`, `let_strategy_exit`, `hold`.
+    pub action: Option<String>,
+}
+
+/// Append an allocation change; `seq` follows the deployment's last.
+///
+/// # Errors
+/// A database error.
+pub async fn record_allocation(pool: &PgPool, e: &AllocationEvent) -> Result<i64, PgError> {
+    let (seq,): (i64,) = sqlx::query_as(
+        "INSERT INTO deployment_allocation_event \
+           (deployment_id, seq, at, selection_run_id, change, instrument_id, member_deployment_id, \
+            weight, capital, action) \
+         SELECT $1, COALESCE(MAX(seq), 0) + 1, $2, $3, $4, $5, $6, $7, $8, $9 \
+           FROM deployment_allocation_event WHERE deployment_id = $1 \
+         RETURNING seq",
+    )
+    .bind(e.deployment_id)
+    .bind(e.at)
+    .bind(e.selection_run_id)
+    .bind(&e.change)
+    .bind(&e.instrument_id)
+    .bind(e.member_deployment_id)
+    .bind(e.weight)
+    .bind(e.capital)
+    .bind(&e.action)
+    .fetch_one(pool)
+    .await?;
+    Ok(seq)
+}
+
+/// The latest weight and capital the journal holds for each member.
+///
+/// # Errors
+/// A database error.
+pub async fn latest_allocation(
+    pool: &PgPool,
+    deployment_id: Uuid,
+) -> Result<Vec<(String, Decimal, Decimal, String)>, PgError> {
+    Ok(sqlx::query_as(
+        "SELECT DISTINCT ON (instrument_id) instrument_id, weight, capital, change \
+           FROM deployment_allocation_event WHERE deployment_id = $1 \
+          ORDER BY instrument_id, seq DESC",
+    )
+    .bind(deployment_id)
+    .fetch_all(pool)
+    .await?)
 }
 
 /// Close a running deployment. `false` when it was already stopped or unknown.

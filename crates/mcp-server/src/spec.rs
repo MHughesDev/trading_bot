@@ -379,6 +379,8 @@ pub fn catalog() -> &'static [ToolSpec] {
         specs.extend(crate::tools::audit::specs());
         specs.extend(crate::tools::venues::specs());
         specs.extend(crate::tools::strategy::specs());
+        // Set U U-6.3: the screener, through the same route a person uses.
+        specs.extend(crate::tools::selections::specs());
         specs.extend(crate::tools::falsification::specs());
         // S-3.12. Statistics over a run the ledger already holds, so both
         // declare `TrialKind::None`; see the module docs for why that is a

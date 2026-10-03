@@ -137,6 +137,31 @@ impl<'a> Compiler<'a> {
                 "every parameter needs a value inside its declared range, and every constraint must hold",
             )),
         }
+        if let Some(s) = &self.graph.triggers.schedule {
+            if let Err(e) = crate::schedule::Cron::parse(s) {
+                self.diag(
+                    Diagnostic::new(
+                        "bad_schedule",
+                        "triggers.schedule",
+                        e,
+                        "five fields, in UTC: minute hour day-of-month month day-of-week",
+                    )
+                    .example("\"55 23 * * *\""),
+                );
+            }
+        }
+        if self.graph.kind == StrategyKind::Selection {
+            for d in &self.graph.inputs {
+                if let InstrumentRef::Fixed { instrument } = &d.instrument {
+                    self.diag(Diagnostic::new(
+                        "fixed_input_in_selection",
+                        &d.id,
+                        format!("a selection evaluates each member on its own bars; input `{}` reads `{instrument}` for every member, which selections do not support yet", d.id),
+                        "declare the input on the member itself (`{\"kind\":\"bound\"}`, another timeframe), or gate on the market in the trading strategy",
+                    ));
+                }
+            }
+        }
         self.lift_nodes();
         let Some(order) = self.topological_order() else {
             return;
@@ -322,8 +347,16 @@ impl<'a> Compiler<'a> {
             return;
         }
         match spec.name {
-            "parse" => self.not_yet(raw, "U-5.6 (LLM outputs as typed values)"),
-            "selection_attr" => self.not_yet(raw, "U-6.3 (running a selection)"),
+            "parse" => self.diag(Diagnostic::new(
+                "parse_in_graph",
+                &raw.id,
+                "`parse` does not run inside a strategy: text is parsed before it reaches the graph",
+                "declare the fields in the LLM model's contract outputs; its reply arrives already typed (U-5.6), so read `m.<field>` directly",
+            )),
+            "selection_attr" => self.not_yet(
+                raw,
+                "U-6.6 (a trading strategy reading its selection's attributes)",
+            ),
             "feature" => self.compile_feature(raw, spec),
             "bar" => self.compile_bar(raw, spec),
             "hour" | "weekday" => self.compile_clock(raw, spec),
@@ -895,6 +928,15 @@ impl<'a> Compiler<'a> {
                 }
             },
             RefPath::State(f) => {
+                if self.graph.kind == StrategyKind::Selection {
+                    self.diag(Diagnostic::new(
+                        "state_in_selection",
+                        at,
+                        format!("`state.{f}` reads an account, and a selection strategy has none: it ranks a universe, it does not hold positions"),
+                        "move position-dependent logic into the trading strategy the selection feeds",
+                    ));
+                    return None;
+                }
                 if let Some(field) = StateField::parse(&f) {
                     Some((Operand::State(field), CType::Value(field.value_type())))
                 } else {

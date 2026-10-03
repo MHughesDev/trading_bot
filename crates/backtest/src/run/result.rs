@@ -183,6 +183,29 @@ pub struct EngineManifest {
     /// The decisions that did something: placed or cancelled an order, held, or
     /// had an intent refused.
     pub journal: Vec<JournalEntry>,
+    /// A portfolio run's membership over time (Set U U-6.5); absent for a run
+    /// on one instrument.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub portfolio: Option<PortfolioManifest>,
+}
+
+/// What a portfolio run adds to its manifest: the selection it followed, every
+/// allocation change, and which instance opened each trade.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PortfolioManifest {
+    /// The selection's revision.
+    pub selection: String,
+    /// `false`: today's membership applied to the past — a survivorship caveat.
+    pub universe_point_in_time: bool,
+    pub selections_run: u32,
+    /// `(instant ns, change)` for every allocation change.
+    pub changes: Vec<(i64, strategy_engine::allocation::AllocationChange)>,
+    /// `trade_instances[i]` opened `trades[i]`.
+    pub trade_instances: Vec<String>,
+    /// Realised P&L per quote currency.
+    pub pnl_by_numeraire: std::collections::BTreeMap<String, rust_decimal::Decimal>,
+    /// Entrants that could not start, and why.
+    pub skipped: Vec<(i64, String, String)>,
 }
 
 /// A model the plan calls, pinned.

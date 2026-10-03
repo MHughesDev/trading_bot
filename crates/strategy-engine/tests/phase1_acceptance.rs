@@ -933,7 +933,7 @@ fn the_engine_depends_on_nothing_an_environment_owns() {
 }
 
 #[test]
-fn an_engine_for_a_selection_plan_is_refused_until_phase_6() {
+fn a_trading_engine_refuses_a_selection_plan() {
     let s = graph(serde_json::json!({
       "format": "tbot.strategy/3", "kind": "selection", "name": "s", "asset_class": "x", "timeframe": "1d",
       "universe": {"kind":"list","instruments":["A","B"]},
@@ -943,6 +943,6 @@ fn an_engine_for_a_selection_plan_is_refused_until_phase_6() {
     let plan = compile(&s, &StdRegistries::new(), &ParamValues::new()).unwrap();
     assert!(matches!(
         Engine::new(Arc::new(plan)),
-        Err(strategy_engine::EngineError::SelectionNotYet)
+        Err(strategy_engine::EngineError::SelectionPlan)
     ));
 }

@@ -115,6 +115,13 @@ const SHADOWED: &[(&str, &str, &str)] = &[
          route answers a question about a pipeline node rather than about one model",
     ),
     (
+        "/api/models/transforms",
+        "/api/models/{id}",
+        "DELETE, GET and PATCH on this path are unreachable; `transforms` is not a model id — \
+         every id is generated with a prefix (`mdl_…`, and `tfm_<name>` for a transform), so no \
+         model, a transform named `transforms` included, is ever that bare word",
+    ),
+    (
         "/api/models/leaderboard",
         "/api/models/{id}",
         "DELETE and PATCH on this path are unreachable; `leaderboard` is not a model id — it \

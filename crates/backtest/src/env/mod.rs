@@ -11,6 +11,8 @@
 //! Nothing here decides anything. Decisions are the engine's, driven through
 //! [`strategy_engine::cycle`] exactly as paper drives them.
 
+pub mod universe;
+
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
@@ -182,23 +184,98 @@ pub struct FillRecord {
     pub at_ns: i64,
 }
 
-/// The engine's venue port over the simulated venue and the risk gate.
-pub struct SimOrders {
-    venue: SimulatedVenue,
-    risk: SimulatedRisk,
-    asset_class: AssetClass,
+/// A round trip and the trading instance that opened it (U-6.5).
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttributedTrade {
+    pub instance: String,
+    pub trade: Trade,
+}
+
+/// One instrument's book inside the account: its orders, its position's own
+/// clock and anchor, and its round trips. A single-instrument run has one; a
+/// portfolio run has one per instrument it ever traded.
+struct Sleeve {
     spec: InstrumentSpec,
-    strategy_id: String,
+    /// The trading instance currently deciding for this instrument, if any.
+    instance: String,
+    /// Idempotency keys are `v5(key_prefix/tag)`: a portfolio's instances may
+    /// reuse planner tags, so each instance gets its own prefix.
+    key_prefix: String,
     orders: BTreeMap<String, Tracked>,
-    seq: u64,
     mark: Option<Decimal>,
     bars_in_position: u32,
     high_water: Option<Decimal>,
     last_fill_price: Option<Decimal>,
+    book: TradeBook,
+    /// The instance that opened the position now held.
+    opened_by: String,
+    attributed: Vec<AttributedTrade>,
+    /// This instance's share of the deployment's capital. `None`: the whole
+    /// account, as a single-instrument run sees it.
+    capital: Option<Decimal>,
+}
+
+impl Sleeve {
+    fn new(
+        spec: InstrumentSpec,
+        instance: String,
+        key_prefix: String,
+        capital: Option<Decimal>,
+    ) -> Self {
+        Self {
+            book: TradeBook::new(spec.instrument.clone()),
+            spec,
+            opened_by: instance.clone(),
+            instance,
+            key_prefix,
+            orders: BTreeMap::new(),
+            mark: None,
+            bars_in_position: 0,
+            high_water: None,
+            last_fill_price: None,
+            attributed: Vec::new(),
+            capital,
+        }
+    }
+
+    fn book_fill(&mut self, record: &FillRecord) {
+        if self.book.position().is_zero() {
+            self.opened_by.clone_from(&self.instance);
+        }
+        let before = self.book.closed_len();
+        self.book.on_fill(record);
+        for trade in self.book.closed_since(before) {
+            self.attributed.push(AttributedTrade {
+                instance: self.opened_by.clone(),
+                trade,
+            });
+        }
+        if self.book.closed_len() > before && !self.book.position().is_zero() {
+            // A flip: the new position is this instance's.
+            self.opened_by.clone_from(&self.instance);
+        }
+    }
+}
+
+/// The engine's venue port over the simulated venue and the risk gate.
+///
+/// One account. A single-instrument run binds one instrument and uses the
+/// [`VenuePort`] impl directly; a portfolio run (U-6.5) opens a sleeve per
+/// instrument and hands each instance a [`SleevePort`]. Both go through the same
+/// order bookkeeping below — there is one place orders become venue intents and
+/// venue reports become engine events.
+pub struct SimOrders {
+    venue: SimulatedVenue,
+    risk: SimulatedRisk,
+    asset_class: AssetClass,
+    strategy_id: String,
+    sleeves: BTreeMap<String, Sleeve>,
+    /// The instrument the single-instrument [`VenuePort`] impl acts for.
+    primary: String,
+    seq: u64,
     fills: Vec<FillRecord>,
     /// Gate refusals by the venue's idempotency key → planner tag.
     tags_by_key: BTreeMap<Uuid, String>,
-    book: TradeBook,
     equity: Vec<(DateTime<Utc>, f64)>,
     exposure: Vec<(DateTime<Utc>, f64)>,
 }
@@ -211,6 +288,17 @@ pub struct SimResults {
     pub gate_rejections: Vec<GateRejectionRecord>,
 }
 
+/// What a portfolio run accumulated: every round trip with the instance that
+/// opened it.
+pub struct PortfolioResults {
+    pub equity: Vec<(DateTime<Utc>, f64)>,
+    pub net_exposure: Vec<(DateTime<Utc>, f64)>,
+    pub trades: Vec<AttributedTrade>,
+    pub gate_rejections: Vec<GateRejectionRecord>,
+    /// Final account equity.
+    pub final_equity: Decimal,
+}
+
 impl SimOrders {
     #[must_use]
     pub fn new(
@@ -220,22 +308,43 @@ impl SimOrders {
         spec: InstrumentSpec,
         strategy_id: impl Into<String>,
     ) -> Self {
-        let spec_instrument = spec.instrument.clone();
+        let strategy_id = strategy_id.into();
+        let primary = spec.instrument.clone();
+        let sleeve = Sleeve::new(spec, strategy_id.clone(), strategy_id.clone(), None);
         Self {
             venue,
             risk,
             asset_class,
-            spec,
-            strategy_id: strategy_id.into(),
-            orders: BTreeMap::new(),
+            strategy_id,
+            sleeves: BTreeMap::from([(primary.clone(), sleeve)]),
+            primary,
             seq: 0,
-            mark: None,
-            bars_in_position: 0,
-            high_water: None,
-            last_fill_price: None,
             fills: Vec::new(),
             tags_by_key: BTreeMap::new(),
-            book: TradeBook::new(spec_instrument.clone()),
+            equity: Vec::new(),
+            exposure: Vec::new(),
+        }
+    }
+
+    /// An account with no instrument bound yet: a portfolio run opens sleeves
+    /// as instances start.
+    #[must_use]
+    pub fn portfolio(
+        venue: SimulatedVenue,
+        risk: SimulatedRisk,
+        asset_class: AssetClass,
+        strategy_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            venue,
+            risk,
+            asset_class,
+            strategy_id: strategy_id.into(),
+            sleeves: BTreeMap::new(),
+            primary: String::new(),
+            seq: 0,
+            fills: Vec::new(),
+            tags_by_key: BTreeMap::new(),
             equity: Vec::new(),
             exposure: Vec::new(),
         }
@@ -243,13 +352,40 @@ impl SimOrders {
 
     /// Everything the run accumulated.
     #[must_use]
-    pub fn into_results(self) -> SimResults {
+    pub fn into_results(mut self) -> SimResults {
         let gate_rejections = self.gate_rejections();
+        let trades = self
+            .sleeves
+            .remove(&self.primary)
+            .map(|s| s.book.trades())
+            .unwrap_or_default();
         SimResults {
             equity: self.equity,
             net_exposure: self.exposure,
-            trades: self.book.trades(),
+            trades,
             gate_rejections,
+        }
+    }
+
+    /// Everything a portfolio run accumulated.
+    #[must_use]
+    pub fn into_portfolio_results(self) -> PortfolioResults {
+        let gate_rejections = self.gate_rejections();
+        let final_equity = self.equity();
+        let mut trades: Vec<AttributedTrade> = self
+            .sleeves
+            .into_values()
+            .flat_map(|s| s.attributed)
+            .collect();
+        trades.sort_by(|a, b| {
+            (a.trade.exit_time, &a.trade.symbol).cmp(&(b.trade.exit_time, &b.trade.symbol))
+        });
+        PortfolioResults {
+            equity: self.equity,
+            net_exposure: self.exposure,
+            trades,
+            gate_rejections,
+            final_equity,
         }
     }
 
@@ -267,10 +403,16 @@ impl SimOrders {
     /// The position in the bound instrument.
     #[must_use]
     pub fn position(&self) -> Decimal {
+        self.position_of(&self.primary)
+    }
+
+    /// The position in `instrument`.
+    #[must_use]
+    pub fn position_of(&self, instrument: &str) -> Decimal {
         self.venue
             .positions(self.asset_class)
             .iter()
-            .find(|p| p.instrument_id == self.spec.instrument)
+            .find(|p| p.instrument_id == instrument)
             .map_or(Decimal::ZERO, |p| p.quantity)
     }
 
@@ -296,12 +438,132 @@ impl SimOrders {
             .collect()
     }
 
-    /// What the venue did to this strategy's orders since the last look, as
+    // ── portfolio sleeves ────────────────────────────────────────────────────
+
+    /// Start (or restart) `instance` trading `spec.instrument` with `capital`.
+    /// A position the instrument still holds — kept under `hold` — is the new
+    /// instance's to manage.
+    pub fn open_sleeve(
+        &mut self,
+        spec: InstrumentSpec,
+        instance: impl Into<String>,
+        capital: Decimal,
+    ) {
+        let instance = instance.into();
+        let prefix = format!("{}/{instance}", self.strategy_id);
+        if let Some(s) = self.sleeves.get_mut(&spec.instrument) {
+            s.instance = instance;
+            s.key_prefix = prefix;
+            s.capital = Some(capital);
+            s.spec = spec;
+        } else {
+            let key = spec.instrument.clone();
+            self.sleeves
+                .insert(key, Sleeve::new(spec, instance, prefix, Some(capital)));
+        }
+    }
+
+    /// Run one bar of any instrument through the venue; what happened to that
+    /// instrument's orders comes back as engine events.
+    pub fn on_bar_of(&mut self, bar: &SimBar) -> Vec<Event> {
+        self.bar_on(bar)
+    }
+
+    /// A sleeve's share of the deployment's capital changed.
+    pub fn set_capital(&mut self, instrument: &str, capital: Decimal) {
+        if let Some(s) = self.sleeves.get_mut(instrument) {
+            s.capital = Some(capital);
+        }
+    }
+
+    /// The port an instance on `instrument` decides through.
+    ///
+    /// # Panics
+    /// No sleeve is open for `instrument`.
+    pub fn port<'a>(&'a mut self, instrument: &'a str) -> SleevePort<'a> {
+        assert!(
+            self.sleeves.contains_key(instrument),
+            "no sleeve for {instrument}"
+        );
+        SleevePort {
+            orders: self,
+            instrument,
+        }
+    }
+
+    /// Flat, with no working order: an instance here has nothing left to do.
+    #[must_use]
+    pub fn is_idle(&self, instrument: &str) -> bool {
+        self.position_of(instrument).is_zero()
+            && self
+                .sleeves
+                .get(instrument)
+                .is_none_or(|s| s.orders.values().all(|t| t.closed))
+    }
+
+    /// `close` for a leaver: cancel its working orders and flatten it with a
+    /// reduce-only market order, through the risk gate like any other order.
+    pub fn flatten(&mut self, instrument: &str, at_ns: i64) -> Vec<Event> {
+        let Some(s) = self.sleeves.get(instrument) else {
+            return Vec::new();
+        };
+        let mut actions: Vec<OrderAction> = s
+            .orders
+            .iter()
+            .filter(|(_, t)| !t.closed)
+            .map(|(tag, _)| OrderAction::Cancel { tag: tag.clone() })
+            .collect();
+        let pos = self.position_of(instrument);
+        if !pos.is_zero() {
+            actions.push(OrderAction::Submit(PlannedOrder {
+                tag: format!("allocator:close:{at_ns}"),
+                side: if pos.is_sign_positive() {
+                    Side::Sell
+                } else {
+                    Side::Buy
+                },
+                qty: pos.abs(),
+                style: PlannedStyle::Market,
+                tif: domain::order::TimeInForce::Gtc,
+                reduce_only: true,
+                post_only: false,
+                oco_group: None,
+                role: OrderRole::Exit,
+            }));
+        }
+        self.act_on(instrument, &actions, at_ns)
+    }
+
+    /// Equity and net exposure across every sleeve, sampled once per instant
+    /// after every decision on it.
+    pub fn sample(&mut self, at_ns: i64) {
+        use rust_decimal::prelude::ToPrimitive;
+        let eq = self.equity();
+        let gross: Decimal = self
+            .sleeves
+            .iter()
+            .map(|(m, s)| self.position_of(m) * s.mark.unwrap_or_default())
+            .sum();
+        self.equity.push((at(at_ns), eq.to_f64().unwrap_or(0.0)));
+        let expo = if eq.is_zero() {
+            0.0
+        } else {
+            (gross / eq).to_f64().unwrap_or(0.0)
+        };
+        self.exposure.push((at(at_ns), expo));
+    }
+
+    // ── one instrument's bookkeeping, shared by both shapes ──────────────────
+
+    /// What the venue did to `instrument`'s orders since the last look, as
     /// engine events: fills first, in submission order, then orders the venue
     /// cancelled or refused. Fills are booked into the trade book as they are
     /// found.
-    fn collect(&mut self, at_ns: i64) -> Vec<Event> {
-        let mut live: Vec<(String, Tracked)> = self
+    fn collect(&mut self, instrument: &str, at_ns: i64) -> Vec<Event> {
+        let Some(sleeve) = self.sleeves.get(instrument) else {
+            return Vec::new();
+        };
+        let mut live: Vec<(String, Tracked)> = sleeve
             .orders
             .iter()
             .filter(|(_, t)| !t.closed)
@@ -313,6 +575,7 @@ impl SimOrders {
             let Some(status) = self.venue.order(t.key) else {
                 continue; // still on its way to the venue
             };
+            let sleeve = self.sleeves.get_mut(instrument).expect("checked above");
             let delta = status.filled_qty - t.filled;
             if delta > Decimal::ZERO {
                 let total = status
@@ -324,7 +587,7 @@ impl SimOrders {
                 t.filled = status.filled_qty;
                 t.notional = total;
                 t.commission = commission;
-                self.last_fill_price = Some(price);
+                sleeve.last_fill_price = Some(price);
                 let record = FillRecord {
                     tag: tag.clone(),
                     side: t.side,
@@ -333,7 +596,7 @@ impl SimOrders {
                     fee,
                     at_ns,
                 };
-                self.book.on_fill(&record);
+                sleeve.book_fill(&record);
                 self.fills.push(record);
                 events.push(Event::Fill(Fill {
                     tag: tag.clone(),
@@ -359,12 +622,12 @@ impl SimOrders {
                 }
                 _ => {}
             }
-            self.orders.insert(tag, t);
+            sleeve.orders.insert(tag, t);
         }
         events
     }
 
-    fn intent(&self, o: &PlannedOrder) -> OrderIntent {
+    fn intent(&self, sleeve: &Sleeve, o: &PlannedOrder) -> OrderIntent {
         let (order_type, limit, stop, trail) = match &o.style {
             PlannedStyle::Market => (OrderType::Market, None, None, None),
             PlannedStyle::Limit { price } => (OrderType::Limit, Some(*price), None, None),
@@ -377,7 +640,7 @@ impl SimOrders {
             }
         };
         let mut i = OrderIntent::new(
-            self.spec.instrument.clone(),
+            sleeve.spec.instrument.clone(),
             o.side,
             order_type,
             Size::from_decimal(o.qty),
@@ -387,7 +650,7 @@ impl SimOrders {
         // Deterministic: the same run places the same keys.
         i.idempotency_key = Uuid::new_v5(
             &Uuid::NAMESPACE_OID,
-            format!("{}/{}", self.strategy_id, o.tag).as_bytes(),
+            format!("{}/{}", sleeve.key_prefix, o.tag).as_bytes(),
         );
         i.time_in_force = o.tif;
         i.stop_price = stop.map(Price::from_decimal);
@@ -397,30 +660,35 @@ impl SimOrders {
         i.oco_group.clone_from(&o.oco_group);
         i
     }
-}
 
-impl BarVenue for SimOrders {
-    /// Run one primary bar through the venue. Fills are stamped at the bar's
-    /// open: they happen inside the bar, before its close is decided.
-    fn on_bar(&mut self, bar: &SimBar) -> Vec<Event> {
+    /// Run one bar of `bar.instrument_id` through the venue. Fills are stamped
+    /// at the bar's open: they happen inside the bar, before its close is
+    /// decided.
+    fn bar_on(&mut self, bar: &SimBar) -> Vec<Event> {
         let _report = self.venue.on_bar(bar);
-        let events = self.collect(bar.open_time.timestamp_nanos_opt().unwrap_or(0));
-        self.book.on_bar(bar.high, bar.low);
-
+        let instrument = bar.instrument_id.clone();
+        let events = self.collect(
+            &instrument,
+            bar.open_time.timestamp_nanos_opt().unwrap_or(0),
+        );
+        let pos = self.position_of(&instrument);
+        let Some(s) = self.sleeves.get_mut(&instrument) else {
+            return events;
+        };
+        s.book.on_bar(bar.high, bar.low);
         // The position's own clock and anchor, measured from the bars.
-        self.mark = Some(bar.close);
-        let pos = self.position();
+        s.mark = Some(bar.close);
         if pos.is_zero() {
-            self.bars_in_position = 0;
-            self.high_water = None;
+            s.bars_in_position = 0;
+            s.high_water = None;
         } else {
-            self.bars_in_position += 1;
+            s.bars_in_position += 1;
             let favourable = if pos.is_sign_positive() {
                 bar.high
             } else {
                 bar.low
             };
-            self.high_water = Some(self.high_water.map_or(favourable, |h| {
+            s.high_water = Some(s.high_water.map_or(favourable, |h| {
                 if pos.is_sign_positive() {
                     h.max(favourable)
                 } else {
@@ -431,67 +699,61 @@ impl BarVenue for SimOrders {
         events
     }
 
-    /// Equity and exposure, sampled after the close is decided — after any
-    /// order the decision filled at once under `current_close`.
-    fn on_close_decided(&mut self, bar: &SimBar) {
-        use rust_decimal::prelude::ToPrimitive;
-        let eq = self.equity();
-        self.equity
-            .push((bar.close_time, eq.to_f64().unwrap_or(0.0)));
-        let expo = if eq.is_zero() {
-            0.0
-        } else {
-            (self.position() * bar.close / eq).to_f64().unwrap_or(0.0)
-        };
-        self.exposure.push((bar.close_time, expo));
-    }
-}
-
-impl strategy_engine::VenuePort for SimOrders {
-    fn view(&self) -> PortfolioView {
+    fn view_of(&self, instrument: &str) -> PortfolioView {
         let snap = self.venue.snapshot(self.asset_class);
         let pos = snap
             .positions
             .iter()
-            .find(|p| p.instrument_id == self.spec.instrument);
+            .find(|p| p.instrument_id == instrument);
         let unrealized: Decimal = snap.positions.iter().map(|p| p.unrealized_pnl).sum();
         let daily_loss = self.venue.engine().daily_loss_usd(self.asset_class);
-        let open_orders = self
-            .orders
-            .iter()
-            .filter(|(_, t)| !t.closed)
-            .map(|(tag, t)| WorkingOrder {
-                tag: tag.clone(),
-                side: t.side,
-                remaining: t.qty - t.filled,
-                reduce_only: t.reduce_only,
-                protective: t.protective,
+        let sleeve = self.sleeves.get(instrument);
+        let open_orders = sleeve
+            .map(|s| {
+                s.orders
+                    .iter()
+                    .filter(|(_, t)| !t.closed)
+                    .map(|(tag, t)| WorkingOrder {
+                        tag: tag.clone(),
+                        side: t.side,
+                        remaining: t.qty - t.filled,
+                        reduce_only: t.reduce_only,
+                        protective: t.protective,
+                    })
+                    .collect()
             })
-            .collect();
+            .unwrap_or_default();
+        let position = pos.map_or(Decimal::ZERO, |p| p.quantity);
+        let mark = sleeve.and_then(|s| s.mark);
+        // A sleeve sizes against its share of the deployment's capital; the
+        // single-instrument run against the whole account.
+        let (equity, cash) = match sleeve.and_then(|s| s.capital) {
+            Some(c) => (c, c - position * mark.unwrap_or_default()),
+            None => (snap.equity, snap.cash),
+        };
         PortfolioView {
-            position: pos.map_or(Decimal::ZERO, |p| p.quantity),
+            position,
             avg_entry_price: pos.map(|p| p.average_entry_price),
-            bars_in_position: self.bars_in_position,
-            high_water: self.high_water,
-            equity: snap.equity,
-            cash: snap.cash,
+            bars_in_position: sleeve.map_or(0, |s| s.bars_in_position),
+            high_water: sleeve.and_then(|s| s.high_water),
+            equity,
+            cash,
             realized_pnl_today: -daily_loss - unrealized,
-            mark: self.mark,
+            mark,
             open_orders,
-            last_fill_price: self.last_fill_price,
+            last_fill_price: sleeve.and_then(|s| s.last_fill_price),
         }
     }
 
-    fn spec(&self) -> InstrumentSpec {
-        self.spec.clone()
-    }
-
-    fn act(&mut self, actions: &[OrderAction], at_ns: i64) -> Vec<Event> {
+    fn act_on(&mut self, instrument: &str, actions: &[OrderAction], at_ns: i64) -> Vec<Event> {
         let mut events = Vec::new();
         for action in actions {
             match action {
                 OrderAction::Submit(o) => {
-                    let intent = self.intent(o);
+                    let Some(sleeve) = self.sleeves.get(instrument) else {
+                        continue;
+                    };
+                    let intent = self.intent(sleeve, o);
                     self.seq += 1;
                     self.tags_by_key
                         .insert(intent.idempotency_key, o.tag.clone());
@@ -518,10 +780,16 @@ impl strategy_engine::VenuePort for SimOrders {
                             at_ns,
                         }));
                     }
-                    self.orders.insert(o.tag.clone(), t);
+                    if let Some(s) = self.sleeves.get_mut(instrument) {
+                        s.orders.insert(o.tag.clone(), t);
+                    }
                 }
                 OrderAction::Cancel { tag } => {
-                    let Some(t) = self.orders.get_mut(tag) else {
+                    let Some(t) = self
+                        .sleeves
+                        .get_mut(instrument)
+                        .and_then(|s| s.orders.get_mut(tag))
+                    else {
                         continue;
                     };
                     if t.closed {
@@ -540,9 +808,69 @@ impl strategy_engine::VenuePort for SimOrders {
         // Under `current_close` an order executes the moment it is submitted;
         // the engine hears of the fill now, stamped at the decision instant.
         if self.venue.policy() == FillPolicy::CurrentClose {
-            events.extend(self.collect(at_ns));
+            events.extend(self.collect(instrument, at_ns));
         }
         events
+    }
+}
+
+impl BarVenue for SimOrders {
+    /// Run one bar through the venue, for whichever instrument it is.
+    fn on_bar(&mut self, bar: &SimBar) -> Vec<Event> {
+        self.bar_on(bar)
+    }
+
+    /// Equity and exposure, sampled after the close is decided — after any
+    /// order the decision filled at once under `current_close`.
+    fn on_close_decided(&mut self, bar: &SimBar) {
+        use rust_decimal::prelude::ToPrimitive;
+        let eq = self.equity();
+        self.equity
+            .push((bar.close_time, eq.to_f64().unwrap_or(0.0)));
+        let expo = if eq.is_zero() {
+            0.0
+        } else {
+            (self.position() * bar.close / eq).to_f64().unwrap_or(0.0)
+        };
+        self.exposure.push((bar.close_time, expo));
+    }
+}
+
+impl strategy_engine::VenuePort for SimOrders {
+    fn view(&self) -> PortfolioView {
+        self.view_of(&self.primary)
+    }
+
+    fn spec(&self) -> InstrumentSpec {
+        self.sleeves
+            .get(&self.primary)
+            .map(|s| s.spec.clone())
+            .expect("a single-instrument run binds its instrument")
+    }
+
+    fn act(&mut self, actions: &[OrderAction], at_ns: i64) -> Vec<Event> {
+        let primary = self.primary.clone();
+        self.act_on(&primary, actions, at_ns)
+    }
+}
+
+/// One portfolio instance's face of the shared account (U-6.5).
+pub struct SleevePort<'a> {
+    orders: &'a mut SimOrders,
+    instrument: &'a str,
+}
+
+impl strategy_engine::VenuePort for SleevePort<'_> {
+    fn view(&self) -> PortfolioView {
+        self.orders.view_of(self.instrument)
+    }
+
+    fn spec(&self) -> InstrumentSpec {
+        self.orders.sleeves[self.instrument].spec.clone()
+    }
+
+    fn act(&mut self, actions: &[OrderAction], at_ns: i64) -> Vec<Event> {
+        self.orders.act_on(self.instrument, actions, at_ns)
     }
 }
 
@@ -593,6 +921,27 @@ impl TradeBook {
     #[must_use]
     pub fn trades(self) -> Vec<Trade> {
         self.closed
+    }
+
+    /// The position the fills so far add up to.
+    #[must_use]
+    pub const fn position(&self) -> Decimal {
+        self.position
+    }
+
+    /// How many round trips have closed.
+    #[must_use]
+    pub fn closed_len(&self) -> usize {
+        self.closed.len()
+    }
+
+    /// The round trips closed after the first `n`.
+    #[must_use]
+    pub fn closed_since(&self, n: usize) -> Vec<Trade> {
+        self.closed
+            .get(n..)
+            .map(<[Trade]>::to_vec)
+            .unwrap_or_default()
     }
 
     /// Extend the open trade's excursion with a bar's range.

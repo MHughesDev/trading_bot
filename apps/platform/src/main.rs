@@ -2,6 +2,7 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+mod allocator;
 mod bar_persist;
 mod book_feed;
 mod feature_jobs;
@@ -454,6 +455,15 @@ async fn main() -> anyhow::Result<()> {
         Some(stream_tx),
         agent_manager.clone(),
         Some(live_bus.clone()),
+    );
+    // Selection-bound deployments (Set U U-6.4): one allocator per deployment
+    // re-runs its selection on schedule and starts, retires and resizes the
+    // members the live-runner supervisor above runs. It answers models with the
+    // factory the screener and the suite use.
+    allocator::spawn(
+        app_state.pg.clone(),
+        cfg.clickhouse.url.clone(),
+        app_state.run_models.clone(),
     );
     // ── Portfolio sampler + alert evaluator (migration 0042) ─────────────────
     //

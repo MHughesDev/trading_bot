@@ -123,6 +123,93 @@ pub struct V3Deployment {
     /// What the deployment was started with — the base its realised series is
     /// measured from.
     pub starting_capital: rust_decimal::Decimal,
+    /// Set when this deployment is one member of a selection-bound deployment
+    /// (U-6.4): the handle its allocator moves its capital and retires it
+    /// through. `None` for a deployment bound to one instrument by hand.
+    pub sleeve: Option<Arc<SleeveHandle>>,
+}
+
+/// What a selection-bound deployment's allocator shares with one member's
+/// runner (Set U U-6.4).
+///
+/// The allocator decides; the runner acts. A leaver is not stopped from the
+/// outside: the allocator writes how it leaves, and the runner — the only thing
+/// that owns this member's orders — carries it out through its own gate and
+/// journal on its next bar.
+#[derive(Debug)]
+pub struct SleeveHandle {
+    /// The selection-bound deployment this member belongs to.
+    pub parent: uuid::Uuid,
+    capital: Mutex<rust_decimal::Decimal>,
+    retire: Mutex<Option<domain::strategy_graph::deployment::OnRemoval>>,
+}
+
+impl SleeveHandle {
+    #[must_use]
+    pub fn new(parent: uuid::Uuid, capital: rust_decimal::Decimal) -> Self {
+        Self {
+            parent,
+            capital: Mutex::new(capital),
+            retire: Mutex::new(None),
+        }
+    }
+
+    /// This member's share of the deployment's capital — what its strategy
+    /// sizes against.
+    #[must_use]
+    pub fn capital(&self) -> rust_decimal::Decimal {
+        self.capital
+            .lock()
+            .map_or(rust_decimal::Decimal::ZERO, |c| *c)
+    }
+
+    pub fn set_capital(&self, capital: rust_decimal::Decimal) {
+        if let Ok(mut c) = self.capital.lock() {
+            *c = capital;
+        }
+    }
+
+    /// The member left the selection: how it leaves.
+    pub fn retire(&self, how: domain::strategy_graph::deployment::OnRemoval) {
+        if let Ok(mut r) = self.retire.lock() {
+            *r = Some(how);
+        }
+    }
+
+    /// Picked again before its exit finished: it stays a member.
+    pub fn reinstate(&self) {
+        if let Ok(mut r) = self.retire.lock() {
+            *r = None;
+        }
+    }
+
+    /// `Some` once the member has left the selection.
+    #[must_use]
+    pub fn retiring(&self) -> Option<domain::strategy_graph::deployment::OnRemoval> {
+        self.retire.lock().ok().and_then(|r| *r)
+    }
+}
+
+/// A trading strategy deployed on whatever a selection picks (Set U U-6.4).
+///
+/// Its members run as ordinary [`V3Deployment`]s carrying a [`SleeveHandle`];
+/// this is what the platform's allocator for it reads.
+#[derive(Clone, Debug)]
+pub struct SelectionBinding {
+    /// The parent deployment record.
+    pub deployment_id: uuid::Uuid,
+    pub user_id: String,
+    /// The trading strategy each member runs.
+    pub trading: domain::strategy_graph::StrategyGraph,
+    pub trading_revision: String,
+    /// The selection's revision.
+    pub selection: String,
+    pub top_n: u32,
+    pub rebalance: domain::strategy_graph::deployment::Rebalance,
+    pub on_removal: domain::strategy_graph::deployment::OnRemoval,
+    pub weighting: domain::strategy_graph::deployment::Weighting,
+    /// Weights are fractions of this.
+    pub capital: rust_decimal::Decimal,
 }
 
 #[derive(Debug, Default)]
@@ -131,6 +218,8 @@ pub struct LiveStrategyRegistry {
     by_instrument: Mutex<HashMap<String, Vec<Arc<LiveStrategySpec>>>>,
     v3_generation: AtomicU64,
     v3: Mutex<std::collections::BTreeMap<uuid::Uuid, Arc<V3Deployment>>>,
+    selection_generation: AtomicU64,
+    selections: Mutex<std::collections::BTreeMap<uuid::Uuid, Arc<SelectionBinding>>>,
 }
 
 impl LiveStrategyRegistry {
@@ -309,6 +398,68 @@ impl LiveStrategyRegistry {
             .is_ok_and(|map| map.contains_key(&deployment_id))
     }
 
+    // ── selection-bound deployments (Set U U-6.4) ────────────────────────────
+
+    /// Moves whenever a selection-bound deployment is added or removed.
+    #[must_use]
+    pub fn selection_generation(&self) -> u64 {
+        self.selection_generation.load(Ordering::Acquire)
+    }
+
+    /// Declare a selection-bound deployment. One per (user, trading strategy,
+    /// selection).
+    ///
+    /// # Errors
+    /// The same trading strategy already deployed on the same selection.
+    pub fn register_selection(&self, b: SelectionBinding) -> Result<(), LiveRegistryError> {
+        let mut map = self
+            .selections
+            .lock()
+            .map_err(|_| LiveRegistryError::Poisoned)?;
+        if let Some(existing) = map.values().find(|e| {
+            e.user_id == b.user_id && e.selection == b.selection && e.trading.name == b.trading.name
+        }) {
+            return Err(LiveRegistryError::AlreadyDeployed {
+                user_id: b.user_id,
+                instrument_id: format!("selection:{}", b.selection),
+                name: b.trading.name.clone(),
+                deployment_id: existing.deployment_id,
+            });
+        }
+        map.insert(b.deployment_id, Arc::new(b));
+        self.selection_generation.fetch_add(1, Ordering::AcqRel);
+        Ok(())
+    }
+
+    /// Withdraw a selection-bound deployment: its allocator stops its members
+    /// and stops.
+    pub fn deregister_selection(&self, deployment_id: uuid::Uuid) -> bool {
+        let Ok(mut map) = self.selections.lock() else {
+            return false;
+        };
+        let removed = map.remove(&deployment_id).is_some();
+        if removed {
+            self.selection_generation.fetch_add(1, Ordering::AcqRel);
+        }
+        removed
+    }
+
+    #[must_use]
+    pub fn is_selection_declared(&self, deployment_id: uuid::Uuid) -> bool {
+        self.selections
+            .lock()
+            .is_ok_and(|map| map.contains_key(&deployment_id))
+    }
+
+    /// Every declared selection-bound deployment, in id order.
+    #[must_use]
+    pub fn selection_snapshot(&self) -> Vec<Arc<SelectionBinding>> {
+        self.selections
+            .lock()
+            .map(|m| m.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
     /// Every declared v3 deployment, in id order. Empty on a poisoned lock —
     /// fail closed: nothing runs rather than an unknown set.
     #[must_use]
@@ -461,6 +612,7 @@ mod tests {
             revision: graph.revision().unwrap().as_str().to_string(),
             graph,
             starting_capital: rust_decimal::Decimal::from(10_000),
+            sleeve: None,
         }
     }
 

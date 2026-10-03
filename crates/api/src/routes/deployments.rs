@@ -8,6 +8,10 @@
 //!
 //! Paper only, on the platform's own paper venue (ADR-0048). There is no live
 //! environment to ask for; the table refuses one.
+//!
+//! A deployment's target is one instrument, or a selection (Set U U-6.4): the
+//! trading strategy then trades whatever the selection picks, through the
+//! platform's allocator, which starts and retires one member per instrument.
 
 use axum::{
     extract::{Path, State},
@@ -32,7 +36,12 @@ pub struct DeployBody {
     /// …or the slug of a stored v3 graph.
     #[serde(default)]
     pub strategy_ref: Option<String>,
-    pub instrument_id: String,
+    /// The instrument it trades…
+    #[serde(default)]
+    pub instrument_id: Option<String>,
+    /// …or a target: `{"kind":"instrument",…}` or `{"kind":"selection",…}`.
+    #[serde(default)]
+    pub target: Option<domain::strategy_graph::deployment::DeploymentTarget>,
     /// Decimal string — what the deployment's realised series is measured from.
     pub starting_capital: String,
 }
@@ -92,6 +101,20 @@ pub async fn create_deployment(
             )
         }
     };
+    use domain::strategy_graph::deployment::DeploymentTarget;
+    let instrument_id = match (&body.target, &body.instrument_id) {
+        (Some(DeploymentTarget::Instrument { instrument }), None) | (None, Some(instrument)) => {
+            instrument.clone()
+        }
+        (Some(DeploymentTarget::Selection { .. }), None) => String::new(),
+        _ => {
+            return refuse(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "missing_target",
+                "give exactly one of `instrument_id` or `target`",
+            )
+        }
+    };
     let capital: Decimal = match body.starting_capital.parse() {
         Ok(c) if c > Decimal::ZERO => c,
         _ => {
@@ -128,17 +151,123 @@ pub async fn create_deployment(
         .collect();
     let deployment_id = Uuid::new_v4();
     let user = token.user_id().to_string();
+    if let Some(DeploymentTarget::Selection {
+        selection,
+        top_n,
+        rebalance,
+        on_removal,
+        weighting,
+    }) = body.target
+    {
+        if graph.kind != domain::strategy_graph::StrategyKind::Trading {
+            return refuse(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "not_trading",
+                "a deployment runs a trading strategy; the selection goes in `target`",
+            );
+        }
+        if top_n == 0 {
+            return refuse(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_target",
+                "top_n must be at least 1",
+            );
+        }
+        if let domain::strategy_graph::deployment::Rebalance::Schedule { cron } = &rebalance {
+            if let Err(e) = strategy_engine::schedule::Cron::parse(cron) {
+                return refuse(StatusCode::UNPROCESSABLE_ENTITY, "invalid_schedule", e);
+            }
+        }
+        // Pin the selection: a strategy id resolves to its head revision now,
+        // so the deployment cannot drift when the head moves.
+        let pinned = match backtest::selection_run::load_selection(&state.pg, &selection).await {
+            Ok((_, plan, _)) => plan.revision.clone(),
+            Err(e) => {
+                return refuse(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_selection",
+                    e.to_string(),
+                )
+            }
+        };
+        let target = DeploymentTarget::Selection {
+            selection: pinned.clone(),
+            top_n,
+            rebalance: rebalance.clone(),
+            on_removal,
+            weighting: weighting.clone(),
+        };
+        let record = storage::postgres::deployments::NewDeployment {
+            deployment_id,
+            user_id: user.clone(),
+            strategy_name: graph.name.clone(),
+            revision_hash: plan.revision.clone(),
+            definition_json: serde_json::to_value(&graph).unwrap_or_default(),
+            instrument_id: format!("selection:{pinned}"),
+            starting_capital: capital,
+            model_pins: json!(model_pins),
+            started_by: user.clone(),
+            forward_deployment_id: None,
+            target: serde_json::to_value(&target).ok(),
+            parent_deployment_id: None,
+        };
+        if let Err(e) = storage::postgres::deployments::start(&state.pg, &record).await {
+            return refuse(
+                StatusCode::CONFLICT,
+                "not_recorded",
+                format!("the deployment could not be recorded: {e}"),
+            );
+        }
+        let declared = strategy_runtime::live::global().register_selection(
+            strategy_runtime::live::SelectionBinding {
+                deployment_id,
+                user_id: user,
+                trading: graph,
+                trading_revision: plan.revision.clone(),
+                selection: pinned.clone(),
+                top_n,
+                rebalance,
+                on_removal,
+                weighting,
+                capital,
+            },
+        );
+        if let Err(e) = declared {
+            let _ = storage::postgres::deployments::stop(
+                &state.pg,
+                deployment_id,
+                &format!("not started: {e}"),
+            )
+            .await;
+            return refuse(StatusCode::CONFLICT, "already_deployed", e.to_string());
+        }
+        return (
+            StatusCode::CREATED,
+            Json(json!({
+                "deployment_id": deployment_id,
+                "revision": plan.revision,
+                "target": target,
+                "environment": "paper",
+                "venue": "platform_paper",
+                "starting_capital": capital.to_string(),
+                "model_pins": model_pins,
+            })),
+        )
+            .into_response();
+    }
     let record = storage::postgres::deployments::NewDeployment {
         deployment_id,
         user_id: user.clone(),
         strategy_name: graph.name.clone(),
         revision_hash: plan.revision.clone(),
         definition_json: serde_json::to_value(&graph).unwrap_or_default(),
-        instrument_id: body.instrument_id.clone(),
+        instrument_id: instrument_id.clone(),
         starting_capital: capital,
         model_pins: json!(model_pins),
         started_by: user.clone(),
         forward_deployment_id: None,
+        target: None,
+        parent_deployment_id: None,
     };
     // The record first: a deployment that runs without one is the defect this
     // route exists to end (FEAT-007 §1 defect 10).
@@ -152,10 +281,11 @@ pub async fn create_deployment(
     let declared = strategy_runtime::live::global().register_v3(V3Deployment {
         deployment_id,
         user_id: user,
-        instrument_id: body.instrument_id.clone(),
+        instrument_id,
         revision: plan.revision.clone(),
         graph,
         starting_capital: capital,
+        sleeve: None,
     });
     if let Err(e) = declared {
         // Recorded but not running: close the record rather than leave a row
@@ -195,7 +325,9 @@ pub async fn stop_deployment(
     }
     // Withdraw first: the runner checks the registry before every decision, so
     // it stops at its next tick whatever the database does next.
-    let withdrawn = strategy_runtime::live::global().deregister_v3(id);
+    // A selection-bound deployment's allocator stops its members (U-6.4).
+    let registry = strategy_runtime::live::global();
+    let withdrawn = registry.deregister_v3(id) | registry.deregister_selection(id);
     match storage::postgres::deployments::stop(&state.pg, id, "stopped by user").await {
         Ok(closed) => {
             Json(json!({ "deployment_id": id, "withdrawn": withdrawn, "closed": closed }))
@@ -226,7 +358,10 @@ pub async fn list_deployments(
                 "started_at": r.started_at,
                 "stopped_at": r.stopped_at,
                 "stop_reason": r.stop_reason,
-                "running": registry.is_v3_declared(r.deployment_id),
+                "target": r.target,
+                "parent_deployment_id": r.parent_deployment_id,
+                "running": registry.is_v3_declared(r.deployment_id)
+                    || registry.is_selection_declared(r.deployment_id),
             }))
             .collect::<Vec<_>>()))
         .into_response(),

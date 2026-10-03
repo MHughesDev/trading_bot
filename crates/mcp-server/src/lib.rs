@@ -950,6 +950,10 @@ async fn dispatch_untraced(
             tools::backtests::wait_for_backtest(&ctx.api, params, progress).await
         }
 
+        // ── Selections (Set U U-6.3) ───────────────────────────────────────────
+        "run_selection" => tools::selections::run_selection(&ctx.api, params).await,
+        "list_selection_runs" => tools::selections::list_selection_runs(&ctx.api, params).await,
+
         // ── Automations ────────────────────────────────────────────────────────
         "list_automations" => tools::automations::list_automations_tool(&ctx.api).await,
         "create_automation" => tools::automations::create_automation(&ctx.api, params).await,

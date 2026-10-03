@@ -34,6 +34,7 @@ pub mod portfolio;
 pub mod proposals;
 pub mod research;
 pub mod research_sessions;
+pub mod selections;
 pub mod strategies;
 pub mod streams;
 pub mod synthetic;
@@ -684,6 +685,10 @@ pub fn router(state: AppState) -> Router {
         )
         // A `transform` (Set U U-5.7): custom code with a declared contract.
         .route("/api/models/transforms", post(models::register_transform))
+        // Selection strategies, run now or as of the past, and journaled (Set U
+        // U-6.3). The screener and the agent's tool share this route.
+        .route("/api/selections/run", post(selections::run))
+        .route("/api/selections/runs", get(selections::list))
         .route(
             "/api/models/{id}",
             get(models::get_model)

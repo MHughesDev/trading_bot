@@ -170,6 +170,12 @@ pub struct RunConfig {
     /// result always says which world produced it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub null_world: Option<NullWorld>,
+    /// Present iff this Run backtests a trading strategy **deployed on a
+    /// selection** (Set U U-6.5): a portfolio run, one account across every
+    /// member over time. Part of the content hash — and absent from it when
+    /// `None`, so every Run that existed before it keeps its `run_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<domain::strategy_graph::deployment::DeploymentTarget>,
 }
 
 /// The null this Run's data was generated under.
@@ -201,6 +207,8 @@ impl RunConfig {
             unsafe_: bool,
             unsafe_flags: &'a UnsafeFlags,
             null_world: &'a Option<NullWorld>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            target: &'a Option<domain::strategy_graph::deployment::DeploymentTarget>,
         }
         let view = Hashable {
             strategy_ref: &self.strategy_ref,
@@ -215,6 +223,7 @@ impl RunConfig {
             unsafe_: self.unsafe_,
             unsafe_flags: &self.unsafe_flags,
             null_world: &self.null_world,
+            target: &self.target,
         };
         let bytes = canonical_json(&view).expect("RunConfig is always JSON-serializable");
         RunId::from_canonical_bytes(&bytes)
@@ -265,6 +274,7 @@ pub struct RunConfigBuilder {
     seed: u64,
     data_snapshot: String,
     unsafe_flags: UnsafeFlags,
+    target: Option<domain::strategy_graph::deployment::DeploymentTarget>,
 }
 
 impl RunConfigBuilder {
@@ -290,7 +300,19 @@ impl RunConfigBuilder {
             seed: 0,
             data_snapshot: data_snapshot.into(),
             unsafe_flags: UnsafeFlags::default(),
+            target: None,
         }
+    }
+
+    /// Backtest the strategy deployed on a target (Set U U-6.5). A selection
+    /// target makes this a portfolio run.
+    #[must_use]
+    pub fn target(
+        mut self,
+        target: Option<domain::strategy_graph::deployment::DeploymentTarget>,
+    ) -> Self {
+        self.target = target;
+        self
     }
 
     /// Set the parameter map.
@@ -346,6 +368,7 @@ impl RunConfigBuilder {
             // `in_null_world`, which is how a null member is derived from the
             // config it is the null for.
             null_world: None,
+            target: self.target,
         };
         cfg.run_id = cfg.compute_id();
         cfg
@@ -355,6 +378,40 @@ impl RunConfigBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Set U U-6.5: a selection target is part of a Run's identity — and its
+    /// absence is not, so every Run that existed before targets keeps its id.
+    #[test]
+    fn a_target_changes_the_run_id_and_no_target_changes_nothing() {
+        use domain::strategy_graph::deployment::DeploymentTarget;
+        let slice = || {
+            DataSlice::new(
+                "selection:abc",
+                chrono::Utc::now() - chrono::Duration::days(30),
+                chrono::Utc::now(),
+                EvalResolution::Day1,
+            )
+        };
+        let plain = RunConfigBuilder::new("s", "v", slice(), "c", "z", "snap").build();
+        let json = serde_json::to_string(&plain).unwrap();
+        assert!(!json.contains("target"), "{json}");
+        let target: DeploymentTarget = serde_json::from_value(
+            serde_json::json!({"kind": "selection", "selection": "abc", "top_n": 5}),
+        )
+        .unwrap();
+        let mut aimed = plain.clone();
+        aimed.target = Some(target);
+        let aimed = aimed.rehashed();
+        assert_ne!(aimed.run_id, plain.run_id);
+        assert!(aimed.id_is_valid());
+        let mut back = aimed.clone();
+        back.target = None;
+        assert_eq!(
+            back.rehashed().run_id,
+            plain.run_id,
+            "absence hashes as before"
+        );
+    }
     use chrono::TimeZone;
     use serde_json::json;
 

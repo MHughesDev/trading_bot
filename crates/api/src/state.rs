@@ -74,6 +74,11 @@ pub struct AppState {
     pub email: cfg::model::EmailConfig,
     /// ClickHouse URL — used by asset init jobs and the chart bars endpoint.
     pub clickhouse_url: String,
+    /// Point-in-time model answers for anything that evaluates a strategy here
+    /// outside the suite — a selection run (U-6.3). The same factory the suite's
+    /// executor uses, so a screener asks models exactly as a backtest does.
+    /// `None` outside a runtime: every model request is unavailable.
+    pub run_models: Option<backtest::runner::ModelsFactory>,
     /// Channel to request a live 1-minute aggregation pipeline for a newly
     /// initialized instrument.  `None` in contexts with no platform pipeline
     /// host (e.g. tests).
@@ -271,6 +276,7 @@ impl AppState {
         };
         // The suite runs real backtests when a runtime is present (the platform);
         // outside one (unit tests) it falls back to the synthetic executor.
+        let mut run_models: Option<backtest::runner::ModelsFactory> = None;
         let suite = match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
                 // v3 graphs run on the one strategy engine, v1 definitions on
@@ -299,6 +305,7 @@ impl AppState {
                             optimistic,
                         ))
                     });
+                run_models = Some(Arc::clone(&factory));
                 let executor = backtest::runner::FormatRoutedExecutor::new(
                     handle,
                     pg.clone(),
@@ -459,6 +466,7 @@ impl AppState {
             inference,
             email,
             clickhouse_url,
+            run_models,
             stream_tx,
             cred_crypto,
             agent,

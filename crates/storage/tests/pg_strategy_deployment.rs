@@ -29,6 +29,8 @@ fn deployment(user: &str) -> deployments::NewDeployment {
         model_pins: serde_json::json!([]),
         started_by: user.into(),
         forward_deployment_id: None,
+        target: None,
+        parent_deployment_id: None,
     }
 }
 
@@ -179,6 +181,101 @@ async fn the_journal_is_append_only_and_pruned_by_age() {
         .unwrap();
     assert_eq!(left.iter().map(|r| r.seq).collect::<Vec<_>>(), vec![2]);
     deployments::stop(&pool, d.deployment_id, "test")
+        .await
+        .unwrap();
+}
+
+/// Set U U-6.4: a selection-bound deployment is a parent row with its target,
+/// its members are child rows, and every allocation change is journaled —
+/// append-only.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL with migrations through 0148"]
+async fn a_selection_bound_deployment_records_its_members_and_every_change() {
+    let pg = pool().await;
+    let user = format!("u-{}", Uuid::new_v4());
+    let selection = "b".repeat(64);
+    let mut parent = deployment(&user);
+    parent.instrument_id = format!("selection:{selection}");
+    parent.target =
+        Some(serde_json::json!({"kind": "selection", "selection": selection, "top_n": 2}));
+    deployments::start(&pg, &parent)
+        .await
+        .expect("parent recorded");
+
+    // A target whose instrument_id does not name its selection is refused.
+    let mut wrong = deployment(&user);
+    wrong.strategy_name = "other".into();
+    wrong.target =
+        Some(serde_json::json!({"kind": "selection", "selection": selection, "top_n": 2}));
+    assert!(deployments::start(&pg, &wrong).await.is_err());
+
+    let mut child = deployment(&user);
+    child.instrument_id = "ETH-USD".into();
+    child.starting_capital = Decimal::new(12_500, 0);
+    child.parent_deployment_id = Some(parent.deployment_id);
+    deployments::start(&pg, &child)
+        .await
+        .expect("member recorded");
+    let kids = deployments::running_children(&pg, parent.deployment_id)
+        .await
+        .unwrap();
+    assert_eq!(kids.len(), 1);
+    assert_eq!(kids[0].parent_deployment_id, Some(parent.deployment_id));
+
+    let event =
+        |change: &str, weight: Decimal, action: Option<&str>| deployments::AllocationEvent {
+            deployment_id: parent.deployment_id,
+            at: Utc::now(),
+            selection_run_id: None,
+            change: change.into(),
+            instrument_id: "ETH-USD".into(),
+            member_deployment_id: Some(child.deployment_id),
+            weight,
+            capital: weight * parent.starting_capital,
+            action: action.map(str::to_string),
+        };
+    let half = Decimal::new(5, 1);
+    assert_eq!(
+        deployments::record_allocation(&pg, &event("entered", half, None))
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        deployments::record_allocation(&pg, &event("left", Decimal::ZERO, Some("close")))
+            .await
+            .unwrap(),
+        2
+    );
+    // A leaver must say how it leaves.
+    assert!(
+        deployments::record_allocation(&pg, &event("left", Decimal::ZERO, None))
+            .await
+            .is_err()
+    );
+    let latest = deployments::latest_allocation(&pg, parent.deployment_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        latest,
+        [(
+            "ETH-USD".to_string(),
+            Decimal::ZERO,
+            Decimal::ZERO,
+            "left".to_string()
+        )]
+    );
+    let rewrite =
+        sqlx::query("UPDATE deployment_allocation_event SET weight = 1 WHERE deployment_id = $1")
+            .bind(parent.deployment_id)
+            .execute(&pg)
+            .await;
+    assert!(rewrite.is_err(), "append-only");
+
+    deployments::stop(&pg, child.deployment_id, "left the selection")
+        .await
+        .unwrap();
+    deployments::stop(&pg, parent.deployment_id, "test")
         .await
         .unwrap();
 }

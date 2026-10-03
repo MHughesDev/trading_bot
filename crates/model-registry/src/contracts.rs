@@ -96,6 +96,8 @@ pub async fn declare(
 /// Why a transform was refused.
 #[derive(Debug, thiserror::Error)]
 pub enum TransformError {
+    #[error("'{0}' is not a transform name: lowercase letters, digits, '_' and '-', starting with a letter, at most 64")]
+    Name(String),
     #[error("contract does not validate: {0}")]
     Contract(String),
     #[error("the dry run did not answer in the contract's shape: {0}")]
@@ -180,12 +182,30 @@ pub async fn dry_run_transform(
     }
 }
 
+/// The model id a transform named `name` is registered under.
+///
+/// Prefixed, like every model id (`mdl_…`), so an id is never a bare word: a
+/// transform named `leaderboard` must not become `/api/models/leaderboard`, a
+/// path a static route already answers.
+#[must_use]
+pub fn transform_id(name: &str) -> String {
+    format!("tfm_{name}")
+}
+
+fn valid_name(name: &str) -> bool {
+    let mut cs = name.chars();
+    name.len() <= 64
+        && cs.next().is_some_and(|c| c.is_ascii_lowercase())
+        && cs.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
 /// Register a transform: dry-run it against its declared contract, then record
 /// the model and version 1 with that contract. No training, no artifact, no
 /// `trained_through` — it answers any decision, in a backtest as on paper.
+/// Returns its model id; strategies call it as `<id>@1`.
 ///
 /// # Errors
-/// As [`dry_run_transform`], or a database error.
+/// An invalid name, as [`dry_run_transform`], or a database error.
 pub async fn register_transform(
     pg: &sqlx::PgPool,
     client: &dyn crate::provider::V2Client,
@@ -194,7 +214,11 @@ pub async fn register_transform(
     asset_class: &str,
     contract: &serde_json::Value,
     spec: &domain::model_def::transform::TransformSpec,
-) -> Result<(), TransformError> {
+) -> Result<String, TransformError> {
+    if !valid_name(name) {
+        return Err(TransformError::Name(name.to_string()));
+    }
+    let model_id = transform_id(name);
     let parsed = dry_run_transform(client, name, contract, spec).await?;
     let definition = serde_json::json!({
         "schema_version": "1.1",
@@ -206,31 +230,41 @@ pub async fn register_transform(
     let mut tx = pg.begin().await?;
     sqlx::query(
         "INSERT INTO ai_models (model_id, slug, display_name, model_kind, asset_class, definition_json, created_by) \
-         VALUES ($1, $1, $1, 'transform', $2, $3, $4)",
+         VALUES ($1, $5, $5, 'transform', $2, $3, $4)",
     )
-    .bind(name)
+    .bind(&model_id)
     .bind(asset_class)
     .bind(&definition)
     .bind(owner)
+    .bind(name)
     .execute(&mut *tx)
     .await?;
     sqlx::query(
         "INSERT INTO model_versions (model_id, version, status, config_json, created_by, io_contract, contract_source) \
          VALUES ($1, 1, 'ready', $2, $3, $4, 'declared')",
     )
-    .bind(name)
+    .bind(&model_id)
     .bind(serde_json::json!({"transform": true}))
     .bind(owner)
     .bind(serde_json::to_value(&parsed).unwrap_or_default())
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(())
+    Ok(model_id)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_transform_id_is_never_a_bare_word() {
+        assert_eq!(transform_id("leaderboard"), "tfm_leaderboard");
+        assert!(valid_name("spread_z") && valid_name("a-b-1"));
+        for bad in ["", "Spread", "1abc", "a b", "a/b", &"x".repeat(65)] {
+            assert!(!valid_name(bad), "{bad}");
+        }
+    }
 
     fn forecaster() -> serde_json::Value {
         serde_json::json!({
@@ -347,7 +381,7 @@ mod pg_tests {
 "
             .into(),
         };
-        super::register_transform(
+        let id = super::register_transform(
             &pg,
             &client,
             uuid::Uuid::new_v4(),
@@ -358,6 +392,7 @@ mod pg_tests {
         )
         .await
         .expect("registered");
+        assert_eq!(id, super::transform_id(&name));
         // Code whose answer does not match its contract is refused at the door.
         let wrong = domain::model_def::transform::TransformSpec {
             source: "def f(x):
@@ -380,7 +415,7 @@ mod pg_tests {
         assert!(err.to_string().contains("`z`"), "{err}");
 
         let snapshot = backtest::models::RegistrySnapshot::load(&pg).await.unwrap();
-        let entry = snapshot.pinned(&name, 1).expect("in the registry");
+        let entry = snapshot.pinned(&id, 1).expect("in the registry");
         assert_eq!(entry.kind, "transform");
         assert!(entry.transform.is_some() && entry.contract.is_some());
         let graph: domain::strategy_graph::StrategyGraph =
@@ -388,7 +423,7 @@ mod pg_tests {
               "format": "tbot.strategy/3", "kind": "trading", "name": "uses_transform",
               "asset_class": "crypto_spot_cex", "timeframe": "1h",
               "nodes": [
-                {"id":"m","op":"model","args":{"ref":{"str": format!("{name}@1")},"a":"close"}},
+                {"id":"m","op":"model","args":{"ref":{"str": format!("{id}@1")},"a":"close"}},
                 {"id":"go","op":"gt","args":{"a":"m.z","b":0}}
               ],
               "decide": {"rules": [{"when":"go","then":{"kind":"hold"}}]}

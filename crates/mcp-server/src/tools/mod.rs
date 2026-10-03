@@ -25,6 +25,7 @@ pub mod path_risk;
 pub mod portfolio;
 pub mod research;
 pub mod research_tools;
+pub mod selections;
 pub mod strategy;
 pub mod templated;
 pub mod venues;

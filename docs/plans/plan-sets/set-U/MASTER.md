@@ -1,6 +1,6 @@
 # Unified Strategy Engine — Set U
 
-**Completion: 39% left (34 / 56 tasks). 34 done, 4 partial, 18 not started.**
+**Completion: 29% left (38 / 57 tasks). 38 done, 5 partial, 14 not started.**
 
 **Status:** ACCEPTED (2026-10-01) — Phase 0 starts immediately.
 **Created:** 2026-10-01
@@ -87,7 +87,7 @@ decide identically.
 | 3 | [The backtest environment](phase-3-backtest-environment.md) | 5 | — | 4 / 5 — U-3.4 PARTIAL (HTTP run unverified) |
 | 4 | [Paper and live](phase-4-paper-and-live.md) | 7 | 0142–0144 | 5 / 7 — U-4.2 PARTIAL, U-4.7 open |
 | 5 | [Models](phase-5-models.md) | 8 | 0146 | 5 / 8 — U-5.2, U-5.5 PARTIAL; U-5.8 open |
-| 6 | [Selection strategies](phase-6-selection.md) | 5 | 0148–0149 | NOT STARTED |
+| 6 | [Selection strategies](phase-6-selection.md) | 6 | 0147–0148 | 4 / 6 — U-6.3 PARTIAL; U-6.6 open |
 | 7 | [Authoring — identical for people and models](phase-7-authoring.md) | 6 | — | NOT STARTED |
 | 8 | [Parity, proven; old paths retired](phase-8-parity-and-retirement.md) | 5 | — | NOT STARTED |
 
