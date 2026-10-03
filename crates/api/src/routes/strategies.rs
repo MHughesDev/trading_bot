@@ -35,14 +35,14 @@ use crate::{auth::BearerToken, state::AppState};
 /// There is no `Default`, and no `Unknown` variant that gets written. A caller
 /// the platform cannot classify is refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ActorKind {
+pub(crate) enum ActorKind {
     Human,
     Agent,
 }
 
 impl ActorKind {
     /// The string migration 0058's CHECK accepts.
-    const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Human => "human",
             Self::Agent => "agent",
@@ -169,201 +169,25 @@ pub async fn create_strategy(
                 };
             let canonical = domain::strategy_def::revision::canonical_json(&def_json);
 
-            let mut tx = match state.pg.begin().await {
-                Ok(t) => t,
-                Err(e) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({ "error": e.to_string() })),
-                    )
-                        .into_response()
-                }
-            };
-
-            // Who is writing this (ADR-D-22). Read before anything is inserted,
-            // so an unclassifiable caller costs a rolled-back transaction rather
-            // than a row attributed to a guess.
-            let actor = match actor_kind_for(&mut tx, &token).await {
-                Ok(a) => a,
-                Err(why) => {
-                    return (
-                        StatusCode::FORBIDDEN,
-                        Json(json!({
-                            "error": "unclassifiable_actor",
-                            "message": format!(
-                                "the author of a revision is recorded, not defaulted: {why}. \
-                                 Sign in with a web session or use a service token."
-                            ),
-                        })),
-                    )
-                        .into_response()
-                }
-            };
-
-            // The parent is whatever this strategy currently points at. A first
-            // save has none; a later one records what it was edited from, which
-            // is what makes the revision history a chain rather than a pile.
-            //
-            // **Reusing the slug is the lineage mechanism** (ADR-D-21). The
-            // advice to mint `my_strat_v2` when iterating was written as though
-            // the pointer move discarded the previous definition; it does not,
-            // because `strategy_revision` is append-only and holds every version
-            // — which is the only reason `parent_hash` is derivable at all. A
-            // new slug has no head, so that advice produced exactly the NULL
-            // parent it was meant to avoid.
-            //
-            // The error is propagated rather than `.ok().flatten()`-ed away, as
-            // it used to be. A failed lookup and a slug with no history return
-            // the same `None` under that idiom, and the second is written to the
-            // row as "this is a first version" — an absent measurement recorded
-            // as a reading, in the one column whose whole job is to say what
-            // came before.
-            let own_head: Option<String> =
-                match sqlx::query_scalar(
-                    "SELECT head_revision FROM strategy_definitions WHERE strategy_id = $1",
-                )
-                .bind(&inner.strategy_id)
-                .fetch_optional(&mut *tx)
-                .await
-                {
-                    Ok(v) => v.flatten(),
-                    Err(e) => return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({ "error": "parent_lookup_failed", "message": e.to_string() })),
-                    )
-                        .into_response(),
-                };
-
-            // The case the slug rule cannot express: a definition derived from a
-            // *different* lineage. Resolved to that strategy's head, and refused
-            // rather than silently dropped when it names nothing — a lineage
-            // that was asked for and not recorded is worse than one never
-            // claimed, because the record then reads as a first version.
-            let parent: Option<String> = match params.parent_strategy_id.as_deref() {
-                None => own_head,
-                Some(slug) => {
-                    let named: Option<String> = match sqlx::query_scalar(
-                        "SELECT head_revision FROM strategy_definitions WHERE strategy_id = $1",
-                    )
-                    .bind(slug)
-                    .fetch_optional(&mut *tx)
-                    .await
-                    {
-                        Ok(v) => v.flatten(),
-                        Err(e) => {
-                            return (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(json!({ "error": e.to_string() })),
-                            )
-                                .into_response()
-                        }
-                    };
-                    let Some(named) = named else {
-                        return (
-                            StatusCode::UNPROCESSABLE_ENTITY,
-                            Json(json!({
-                                "error": "unknown_parent_strategy",
-                                "message": format!(
-                                    "parent_strategy_id {slug:?} has no stored revision to \
-                                     descend from. Omit it if this is a first version."
-                                ),
-                            })),
-                        )
-                            .into_response();
-                    };
-                    // Both a slug chain and a declared fork, disagreeing. Two
-                    // answers is not a lineage, so neither is recorded.
-                    if let Some(head) = &own_head {
-                        if head != &named {
-                            return (
-                                StatusCode::UNPROCESSABLE_ENTITY,
-                                Json(json!({
-                                    "error": "ambiguous_parent",
-                                    "message": format!(
-                                        "{:?} already has a head revision, which is its parent. \
-                                         Pass parent_strategy_id only on the first revision of \
-                                         a slug derived from another lineage.",
-                                        inner.strategy_id
-                                    ),
-                                })),
-                            )
-                                .into_response();
-                        }
-                    }
-                    Some(named)
-                }
-            };
-
-            // A revision cannot be its own parent: re-saving an unchanged
-            // document is a no-op, not a self-referential link.
-            let parent_recorded = parent.filter(|p| p != revision.as_str());
-
-            // Re-saving the identical document is not a new revision. The
-            // content hash is the identity, so ON CONFLICT DO NOTHING is the
-            // correct no-op here and the only place a `DO NOTHING` belongs in
-            // this path.
-            if let Err(e) = sqlx::query(
-                "INSERT INTO strategy_revision (
-                     revision_hash, strategy_id, parent_hash, definition_version, asset_class,
-                     definition_json, definition_bytes, actor_kind, actor_id,
-                     seq, prev_hash, row_hash
-                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,'\\x'::bytea,'\\x'::bytea)
-                 ON CONFLICT (revision_hash) DO NOTHING",
+            let written = match write_revision(
+                &state,
+                &token,
+                RevisionWrite {
+                    strategy_id: &inner.strategy_id,
+                    definition_version: &inner.definition_version,
+                    asset_class: &inner.asset_class,
+                    def_json: &def_json,
+                    revision: revision.as_str(),
+                    canonical: &canonical,
+                    parent_strategy_id: params.parent_strategy_id.as_deref(),
+                },
             )
-            .bind(revision.as_str())
-            .bind(&inner.strategy_id)
-            .bind(parent_recorded.clone())
-            .bind(&inner.definition_version)
-            .bind(&inner.asset_class)
-            .bind(&def_json)
-            .bind(canonical.as_bytes())
-            .bind(actor.as_str())
-            .bind(token.user_id().to_string())
-            .execute(&mut *tx)
             .await
             {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": "revision_insert_failed", "message": e.to_string() })),
-                )
-                    .into_response();
-            }
-
-            // The pointer. `definition_json` here is a cache of the head
-            // revision, and 0058's trigger refuses a head belonging to another
-            // strategy, so the two cannot drift into naming different documents.
-            if let Err(e) = sqlx::query(
-                "INSERT INTO strategy_definitions \
-                   (strategy_id, definition_version, asset_class, definition_json, head_revision) \
-                 VALUES ($1, $2, $3, $4, $5) \
-                 ON CONFLICT (strategy_id) DO UPDATE SET \
-                   definition_version = EXCLUDED.definition_version, \
-                   definition_json = EXCLUDED.definition_json, \
-                   head_revision   = EXCLUDED.head_revision, \
-                   updated_at      = now()",
-            )
-            .bind(&inner.strategy_id)
-            .bind(&inner.definition_version)
-            .bind(&inner.asset_class)
-            .bind(&def_json)
-            .bind(revision.as_str())
-            .execute(&mut *tx)
-            .await
-            {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": e.to_string() })),
-                )
-                    .into_response();
-            }
-
-            if let Err(e) = tx.commit().await {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": e.to_string() })),
-                )
-                    .into_response();
-            }
+                Ok(w) => w,
+                Err(r) => return r,
+            };
+            let (actor, parent_recorded) = (written.actor, written.parent);
 
             // Also keep in the in-memory store so the runtime can use it
             // without an extra DB round-trip (apply-list, start).
@@ -392,6 +216,237 @@ pub async fn create_strategy(
                 .into_response()
         }
     }
+}
+
+/// One revision to write: the document, its identity, and where it descends from.
+pub(crate) struct RevisionWrite<'a> {
+    pub strategy_id: &'a str,
+    pub definition_version: &'a str,
+    pub asset_class: &'a str,
+    pub def_json: &'a serde_json::Value,
+    pub revision: &'a str,
+    pub canonical: &'a str,
+    pub parent_strategy_id: Option<&'a str>,
+}
+
+/// What the write recorded.
+pub(crate) struct Written {
+    pub actor: ActorKind,
+    pub parent: Option<String>,
+}
+
+/// Append a revision and move the strategy's head to it, in one transaction —
+/// the one write path every saved strategy takes, v1 definitions and
+/// `tbot.strategy/3` graphs alike (ADR-P6-04; Set U U-7.4).
+///
+/// # Errors
+/// The response to send: who is writing cannot be classified, a named parent
+/// does not exist or disagrees with the slug's head, or the database.
+pub(crate) async fn write_revision(
+    state: &AppState,
+    token: &BearerToken,
+    w: RevisionWrite<'_>,
+) -> Result<Written, axum::response::Response> {
+    let mut tx = match state.pg.begin().await {
+        Ok(t) => t,
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            )
+                .into_response())
+        }
+    };
+
+    // Who is writing this (ADR-D-22). Read before anything is inserted,
+    // so an unclassifiable caller costs a rolled-back transaction rather
+    // than a row attributed to a guess.
+    let actor = match actor_kind_for(&mut tx, token).await {
+        Ok(a) => a,
+        Err(why) => {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": "unclassifiable_actor",
+                    "message": format!(
+                        "the author of a revision is recorded, not defaulted: {why}. \
+                         Sign in with a web session or use a service token."
+                    ),
+                })),
+            )
+                .into_response())
+        }
+    };
+
+    // The parent is whatever this strategy currently points at. A first
+    // save has none; a later one records what it was edited from, which
+    // is what makes the revision history a chain rather than a pile.
+    //
+    // **Reusing the slug is the lineage mechanism** (ADR-D-21). The
+    // advice to mint `my_strat_v2` when iterating was written as though
+    // the pointer move discarded the previous definition; it does not,
+    // because `strategy_revision` is append-only and holds every version
+    // — which is the only reason `parent_hash` is derivable at all. A
+    // new slug has no head, so that advice produced exactly the NULL
+    // parent it was meant to avoid.
+    //
+    // The error is propagated rather than `.ok().flatten()`-ed away, as
+    // it used to be. A failed lookup and a slug with no history return
+    // the same `None` under that idiom, and the second is written to the
+    // row as "this is a first version" — an absent measurement recorded
+    // as a reading, in the one column whose whole job is to say what
+    // came before.
+    let own_head: Option<String> = match sqlx::query_scalar(
+        "SELECT head_revision FROM strategy_definitions WHERE strategy_id = $1",
+    )
+    .bind(w.strategy_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(v) => v.flatten(),
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "parent_lookup_failed", "message": e.to_string() })),
+            )
+                .into_response())
+        }
+    };
+
+    // The case the slug rule cannot express: a definition derived from a
+    // *different* lineage. Resolved to that strategy's head, and refused
+    // rather than silently dropped when it names nothing — a lineage
+    // that was asked for and not recorded is worse than one never
+    // claimed, because the record then reads as a first version.
+    let parent: Option<String> = match w.parent_strategy_id {
+        None => own_head,
+        Some(slug) => {
+            let named: Option<String> = match sqlx::query_scalar(
+                "SELECT head_revision FROM strategy_definitions WHERE strategy_id = $1",
+            )
+            .bind(slug)
+            .fetch_optional(&mut *tx)
+            .await
+            {
+                Ok(v) => v.flatten(),
+                Err(e) => {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": e.to_string() })),
+                    )
+                        .into_response())
+                }
+            };
+            let Some(named) = named else {
+                return Err((
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(json!({
+                        "error": "unknown_parent_strategy",
+                        "message": format!(
+                            "parent_strategy_id {slug:?} has no stored revision to \
+                             descend from. Omit it if this is a first version."
+                        ),
+                    })),
+                )
+                    .into_response());
+            };
+            // Both a slug chain and a declared fork, disagreeing. Two
+            // answers is not a lineage, so neither is recorded.
+            if let Some(head) = &own_head {
+                if head != &named {
+                    return Err((
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        Json(json!({
+                            "error": "ambiguous_parent",
+                            "message": format!(
+                                "{:?} already has a head revision, which is its parent. \
+                                 Pass parent_strategy_id only on the first revision of \
+                                 a slug derived from another lineage.",
+                                w.strategy_id
+                            ),
+                        })),
+                    )
+                        .into_response());
+                }
+            }
+            Some(named)
+        }
+    };
+
+    // A revision cannot be its own parent: re-saving an unchanged
+    // document is a no-op, not a self-referential link.
+    let parent_recorded = parent.filter(|p| p != w.revision);
+
+    // Re-saving the identical document is not a new revision. The
+    // content hash is the identity, so ON CONFLICT DO NOTHING is the
+    // correct no-op here and the only place a `DO NOTHING` belongs in
+    // this path.
+    if let Err(e) = sqlx::query(
+        "INSERT INTO strategy_revision (
+             revision_hash, strategy_id, parent_hash, definition_version, asset_class,
+             definition_json, definition_bytes, actor_kind, actor_id,
+             seq, prev_hash, row_hash
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,'\\x'::bytea,'\\x'::bytea)
+         ON CONFLICT (revision_hash) DO NOTHING",
+    )
+    .bind(w.revision)
+    .bind(w.strategy_id)
+    .bind(parent_recorded.clone())
+    .bind(w.definition_version)
+    .bind(w.asset_class)
+    .bind(w.def_json)
+    .bind(w.canonical.as_bytes())
+    .bind(actor.as_str())
+    .bind(token.user_id().to_string())
+    .execute(&mut *tx)
+    .await
+    {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "revision_insert_failed", "message": e.to_string() })),
+        )
+            .into_response());
+    }
+
+    // The pointer. `definition_json` here is a cache of the head
+    // revision, and 0058's trigger refuses a head belonging to another
+    // strategy, so the two cannot drift into naming different documents.
+    if let Err(e) = sqlx::query(
+        "INSERT INTO strategy_definitions \
+           (strategy_id, definition_version, asset_class, definition_json, head_revision) \
+         VALUES ($1, $2, $3, $4, $5) \
+         ON CONFLICT (strategy_id) DO UPDATE SET \
+           definition_version = EXCLUDED.definition_version, \
+           definition_json = EXCLUDED.definition_json, \
+           head_revision   = EXCLUDED.head_revision, \
+           updated_at      = now()",
+    )
+    .bind(w.strategy_id)
+    .bind(w.definition_version)
+    .bind(w.asset_class)
+    .bind(w.def_json)
+    .bind(w.revision)
+    .execute(&mut *tx)
+    .await
+    {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response());
+    }
+
+    if let Err(e) = tx.commit().await {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response());
+    }
+    Ok(Written {
+        actor,
+        parent: parent_recorded,
+    })
 }
 
 // ── List ──────────────────────────────────────────────────────────────────────

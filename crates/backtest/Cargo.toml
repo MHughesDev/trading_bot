@@ -57,6 +57,8 @@ nautilus-core = { workspace = true }
 storage = { workspace = true }
 clickhouse = { workspace = true }
 rust_decimal_macros = { workspace = true }
+# A translated v1 definition backtests (Set U U-7.3).
+strategy-lang = { workspace = true }
 
 [lints]
 workspace = true

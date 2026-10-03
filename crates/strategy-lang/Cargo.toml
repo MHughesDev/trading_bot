@@ -11,6 +11,14 @@ domain = { workspace = true }
 # finding, and a language that disagrees with the engine about what a
 # feature is called would refuse valid strategies and accept invalid ones.
 features = { workspace = true }
+# SLv3's validator is the compiler's diagnostics (Set U U-7.2, ADR-0045): one
+# typechecker, not a second one here.
+strategy-engine = { workspace = true }
+rust_decimal = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+# Only to check every code it emits has an equivalent here (U-7.2).
+strategy-validator = { workspace = true }

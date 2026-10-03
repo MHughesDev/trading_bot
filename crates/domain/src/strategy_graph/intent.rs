@@ -277,13 +277,93 @@ pub fn check_literals(intent: &TradeIntent) -> Result<(), IntentError> {
             }
         }
     }
+    for (field, d) in distances(intent) {
+        if let Some(x) = d.amount.literal_num() {
+            if x <= 0.0 {
+                return Err(IntentError::DistanceNotPositive { field, amount: x });
+            }
+        }
+    }
     Ok(())
+}
+
+/// Every distance an intent carries, with the field it sits in.
+fn distances(intent: &TradeIntent) -> Vec<(&'static str, &Distance)> {
+    fn style<'a>(s: Option<&'a OrderStyle>, out: &mut Vec<(&'static str, &'a Distance)>) {
+        if let Some(OrderStyle::TrailingStop { trail }) = s {
+            out.push(("trail", trail));
+        }
+    }
+    fn size<'a>(s: &'a SizeSpec, out: &mut Vec<(&'static str, &'a Distance)>) {
+        if let SizeSpec::Risk { stop, .. } = s {
+            out.push(("size.stop", stop));
+        }
+    }
+    let mut out = Vec::new();
+    match intent {
+        TradeIntent::Target { size: s, via }
+        | TradeIntent::Add { size: s, via }
+        | TradeIntent::Reduce { size: s, via } => {
+            size(s, &mut out);
+            style(via.as_ref(), &mut out);
+        }
+        TradeIntent::Close { via, .. } => style(via.as_ref(), &mut out),
+        TradeIntent::Order(o) => {
+            size(&o.size, &mut out);
+            style(Some(&o.style), &mut out);
+        }
+        TradeIntent::Bracket(b) => {
+            match &b.entry {
+                Entry::Target { size: s, via } => {
+                    size(s, &mut out);
+                    style(via.as_ref(), &mut out);
+                }
+                Entry::Order(o) => {
+                    size(&o.size, &mut out);
+                    style(Some(&o.style), &mut out);
+                }
+            }
+            out.push(("stop", &b.stop));
+            if let Some(d) = &b.take_profit {
+                out.push(("take_profit", d));
+            }
+            if let Some(d) = &b.trailing {
+                out.push(("trailing", d));
+            }
+        }
+        TradeIntent::Protect(p) => {
+            for (f, d) in [
+                ("stop", &p.stop),
+                ("take_profit", &p.take_profit),
+                ("trailing", &p.trailing),
+            ] {
+                if let Some(d) = d {
+                    out.push((f, d));
+                }
+            }
+        }
+        TradeIntent::Hold | TradeIntent::Cancel { .. } => {}
+    }
+    out
 }
 
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum IntentError {
     #[error("`close` fraction {0} is outside (0, 1]; close all with 1, half with 0.5")]
     CloseFraction(f64),
+    #[error("`{field}` is {amount} away; a distance must be positive — the side it is on follows from the position")]
+    DistanceNotPositive { field: &'static str, amount: f64 },
+}
+
+impl IntentError {
+    /// A stable code for each, for validators.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::CloseFraction(_) => "close_fraction_out_of_range",
+            Self::DistanceNotPositive { .. } => "distance_not_positive",
+        }
+    }
 }
 
 #[cfg(test)]

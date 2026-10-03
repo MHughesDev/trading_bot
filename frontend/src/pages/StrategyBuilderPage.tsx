@@ -348,6 +348,10 @@ function Canvas() {
         <Button size="sm" icon={<Wand2 size={13} aria-hidden />} onClick={tidy} disabled={nodes.length === 0}>
           Tidy
         </Button>
+        {/* Set U U-7.5: strategies on the one engine are edited as graphs. */}
+        <a className="btn sm ghost" href="/strategy/graph">
+          Graph editor (v3)
+        </a>
         <Button size="sm" icon={<Play size={13} aria-hidden />} disabled={!validation.ok}>
           Run backtest
         </Button>

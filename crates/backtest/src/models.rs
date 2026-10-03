@@ -127,6 +127,11 @@ impl RegistrySnapshot {
         self.versions.get(&format!("{model}@{version}"))
     }
 
+    /// Every version the snapshot holds, by reference.
+    pub fn entries(&self) -> impl Iterator<Item = &VersionEntry> {
+        self.versions.values()
+    }
+
     /// A pinned version's entry.
     #[must_use]
     pub fn pinned(&self, model: &str, version: u32) -> Option<&VersionEntry> {

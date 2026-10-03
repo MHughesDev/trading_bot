@@ -157,6 +157,7 @@ dependencies = [
  "sqlx",
  "storage",
  "strategy-engine",
+ "strategy-lang",
  "strategy-runtime",
  "strategy-validator",
  "thiserror 2.0.18",
@@ -607,6 +608,7 @@ dependencies = [
  "sqlx",
  "storage",
  "strategy-engine",
+ "strategy-lang",
  "strategy-runtime",
  "thiserror 2.0.18",
  "tokio",
@@ -5381,8 +5383,11 @@ dependencies = [
 [[package]]
 name = "strategy-runtime"
 version = "0.1.0"
+ "rust_decimal",
 dependencies = [
  "builders",
+ "strategy-engine",
+ "strategy-validator",
  "chrono",
  "demand-manager",
  "domain",

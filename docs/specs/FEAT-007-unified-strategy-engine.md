@@ -442,19 +442,29 @@ record** (defect 10) — forward evidence accumulates from the first decision.
 - Testing is identical: validate → preview → backtest → Set J experiments and gates → a deployment
   proposal a human decides.
 
-SLv3 text, illustrative:
+SLv3 text (as built in Set U U-7.1, `strategy_lang::v3`; the sugar of the first draft —
+`bracket target 50% equity, stop 2 atr(14)` — became the tagged form below, which covers every
+intent with one rule):
 
-```
-strategy trend_with_vol_gate kind trading timeframe 1h
-params fast: int[5..50]=12, slow: int[20..200]=48
-let f   = ema(close, fast)
-let s   = ema(close, slow)
-let vol = model("vol_forecaster@12", window: features(core_v3, 64))
+```slv3
+strategy trend_with_vol_gate kind trading asset_class crypto_spot_cex timeframe 1h
+param fast: int(default: 12, min: 5, max: 50)
+param slow: int(default: 48, min: 20, max: 200)
+constraint "param('fast') < param('slow')"
+let f   = ema(close, $fast)
+let s   = ema(close, $slow)
+let vol = model("vol_forecaster@12", window: features("core_v3", 64))
 let go  = crossed_above(f, s) and vol.sigma < 0.03
-when go and flat            -> bracket target 50% equity, stop 2 atr(14), take 4 atr(14)
-when crossed_below(f, s) and long -> close
+when go and state.flat -> bracket(entry: target(size: equity_fraction(x: 0.5)),
+                                  stop: {amount: 2, unit: atr(n: 14)},
+                                  take_profit: {amount: 4, unit: atr(n: 14)})
+when crossed_below(f, s) and state.long -> close
 otherwise hold
 ```
+
+A bare name is a reference (`close`, `f`, `vol.sigma`, `$fast`, `state.flat`); a quoted string is
+a literal; `op(…)` binds positional arguments to the operator's ports in registry order. Layout
+and comments (`# …`) are not part of the graph, so reformatting never changes the revision.
 
 ---
 

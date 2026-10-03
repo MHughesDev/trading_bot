@@ -424,6 +424,37 @@ members entering and leaving as the selection does. A universe that is a list or
 an asset class is today's membership applied to the past; the result carries a
 `universe.not_point_in_time` flag when it is.
 
+### validate_strategy_v3
+
+A `tbot.strategy/3` strategy can be sent three ways and they are the same
+strategy: SLv3 `text`, `graph` JSON, or builder `ops`. The answer is the graph,
+its canonical text and its revision — or every finding, each with a `code`, where
+it is (`line 3, column 9`, or a node id), a `fix` and the guide section. The same
+mistake gives the same finding whichever way it was sent. SLv3 in brief:
+
+```
+strategy ema_cross kind trading asset_class crypto_spot_cex timeframe 1h
+param fast: int(default: 12, min: 5, max: 50)
+let f = ema(close, $fast)
+let s = ema(close, 48)
+when crossed_above(f, s) and state.flat -> target(size: equity_fraction(x: 0.5))
+when crossed_below(f, s) -> close
+```
+
+A bare name is a reference (`close`, `f`, `vol.sigma`, `$fast`, `state.flat`); a
+quoted string is a literal; `op(…)` binds positional arguments to the operator's
+ports in order. `get_strategy_catalogue` lists every operator, feature and model.
+
+### build_strategy_v3
+
+For when a grammar is too much: build the strategy one step at a time. `new`
+starts it; `add_node` (`id`, `operator`, `args`); `connect` (`from` a node,
+`node.field`, `close`, `$param` or `state.x`, `to` a node, `port`) wires a
+reference; `set_arg` sets a literal (a string here is always a literal, never a
+reference); `add_rule` (`when`, `then`); `set_param`; `set_universe` and
+`set_select` for a selection. Each call returns the graph so far, its text and
+what is still wrong — a half-built strategy is expected to have findings.
+
 ### run_sweep
 
 THE inner loop. A sampler (TPE by default) proposes batches; each batch is a

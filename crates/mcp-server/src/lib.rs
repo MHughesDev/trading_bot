@@ -950,6 +950,15 @@ async fn dispatch_untraced(
             tools::backtests::wait_for_backtest(&ctx.api, params, progress).await
         }
 
+        // ── v3 authoring (Set U U-7.4) ─────────────────────────────────────────
+        "validate_strategy_v3" => tools::strategy_v3::validate(&ctx.api, params).await,
+        "compile_strategy_v3" => tools::strategy_v3::compile(&ctx.api, params).await,
+        "explain_strategy_v3" => tools::strategy_v3::explain(&ctx.api, params).await,
+        "build_strategy_v3" => tools::strategy_v3::build(&ctx.api, params).await,
+        "save_strategy_v3" => tools::strategy_v3::save(&ctx.api, params).await,
+        "get_strategy_v3" => tools::strategy_v3::get(&ctx.api, params).await,
+        "get_strategy_catalogue" => tools::strategy_v3::catalogue(&ctx.api, params).await,
+
         // ── Selections (Set U U-6.3) ───────────────────────────────────────────
         "run_selection" => tools::selections::run_selection(&ctx.api, params).await,
         "list_selection_runs" => tools::selections::list_selection_runs(&ctx.api, params).await,

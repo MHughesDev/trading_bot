@@ -11,6 +11,8 @@ execution = { workspace = true }
 strategy-engine = { workspace = true }
 strategy-runtime = { workspace = true }
 strategy-validator = { workspace = true }
+# The one authoring front end (Set U Phase 7): SLv3, its validator and builder.
+strategy-lang = { workspace = true }
 storage = { workspace = true }
 ui-gateway = { workspace = true }
 demand-manager = { workspace = true }

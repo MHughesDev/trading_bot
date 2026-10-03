@@ -19,7 +19,8 @@ pub use deployment::{
     DeploymentEnvironment, DeploymentSpec, DeploymentTarget, OnRemoval, Weighting,
 };
 pub use graph::{
-    Arg, DataInput, Decide, GraphError, InstrumentRef, NodeDef, RefPath, RiskLimits, Rule, Select,
+    Arg, DataInput, Decide, GraphError, GraphParseError, InstrumentRef, NodeDef, RefPath,
+    RiskLimits, Rule, Select,
     Sink, StrategyGraph, StrategyKind, TimeframeKey, Triggers, UniverseRef, FORMAT,
 };
 pub use intent::{

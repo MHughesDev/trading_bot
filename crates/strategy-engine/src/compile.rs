@@ -1631,12 +1631,13 @@ impl<'a> Compiler<'a> {
             return;
         }
         if let Err(e) = intent::check_literals(&rule.then) {
-            self.diag(Diagnostic::new(
-                "bad_intent",
-                &at,
-                e.to_string(),
-                "fix the literal",
-            ));
+            let fix = match e {
+                intent::IntentError::CloseFraction(_) => "close all with 1, half with 0.5",
+                intent::IntentError::DistanceNotPositive { .. } => {
+                    "give the distance as a positive amount, e.g. `{amount: 2, unit: atr(n: 14)}`"
+                }
+            };
+            self.diag(Diagnostic::new(e.code(), &at, e.to_string(), fix));
             return;
         }
         let mut template = rule.then.clone();

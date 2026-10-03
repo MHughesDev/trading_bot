@@ -460,6 +460,47 @@ impl StrategyGraph {
     pub fn node(&self, id: &str) -> Option<&NodeDef> {
         self.nodes.iter().find(|n| n.id == id)
     }
+
+    /// A graph from its wire JSON, telling a document that is not shaped like a
+    /// graph at all apart from one that is shaped right and breaks a
+    /// structural rule — so a validator can name the rule (Set U U-7.2).
+    ///
+    /// # Errors
+    /// [`GraphParseError::Malformed`] with serde's account of the shape, or
+    /// [`GraphParseError::Structural`] with the rule broken.
+    pub fn from_json(v: &serde_json::Value) -> Result<Self, GraphParseError> {
+        let raw: RawGraph = serde_json::from_value(v.clone())
+            .map_err(|e| GraphParseError::Malformed(e.to_string()))?;
+        Self::try_from(raw).map_err(GraphParseError::Structural)
+    }
+}
+
+/// Why a JSON document is not a strategy graph.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum GraphParseError {
+    /// Not shaped like a graph: a missing field, a wrong type, an unknown key.
+    #[error("{0}")]
+    Malformed(String),
+    /// Shaped like a graph, but breaks a structural rule.
+    #[error("{0}")]
+    Structural(GraphError),
+}
+
+impl GraphError {
+    /// A stable code for each rule — what a validator reports.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Format(_) => "wrong_format",
+            Self::SinkMismatch { .. } => "sink_mismatch",
+            Self::SelectionWithoutUniverse => "selection_without_universe",
+            Self::DuplicateNode(_) => "duplicate_node_id",
+            Self::BadNodeId(_) => "bad_node_id",
+            Self::BadParam(_) => "bad_param_name",
+            Self::BadRef(_) => "bad_ref",
+            Self::UnknownTimeframe(_) => "unknown_timeframe",
+        }
+    }
 }
 
 /// The wire form. Kept separate so that the invariants below are checked on the

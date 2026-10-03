@@ -27,6 +27,7 @@ pub mod research;
 pub mod research_tools;
 pub mod selections;
 pub mod strategy;
+pub mod strategy_v3;
 pub mod templated;
 pub mod venues;
 pub mod workflows;

@@ -25,6 +25,10 @@ const BackTestingPage = lazy(() =>
 const StrategyCreationPage = lazy(() =>
   import('@/pages/StrategyCreationPage').then((m) => ({ default: m.StrategyCreationPage })),
 )
+// Set U U-7.5: the tbot.strategy/3 graph editor.
+const StrategyGraphPage = lazy(() =>
+  import('@/pages/StrategyGraphPage').then((m) => ({ default: m.StrategyGraphPage })),
+)
 const MlOpsPage = lazy(() =>
   import('@/pages/MlOpsPage').then((m) => ({ default: m.MlOpsPage })),
 )
@@ -162,6 +166,7 @@ export default function App() {
               <Route path="/terminal/:symbol" element={<TerminalPage />} />
               <Route path="/automations" element={<AutomationsPage />} />
               <Route path="/strategy" element={<StrategyCreationPage />} />
+              <Route path="/strategy/graph" element={<StrategyGraphPage />} />
               <Route path="/backtesting" element={<BackTestingPage />} />
               <Route path="/workbench" element={<Navigate to="/backtesting" replace />} />
               <Route path="/proving-ground" element={<Navigate to="/backtesting" replace />} />

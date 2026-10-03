@@ -83,6 +83,7 @@ pub mod lex;
 pub mod parse;
 pub mod skeleton;
 pub mod suggest;
+pub mod v3;
 
 pub use apply::{apply_move, apply_move_with, Applied, ClausePath, Edit, EntryPath};
 pub use block::{blocking_profile, entry_clauses, BlockingProfile, EntryCounts, Verdict};
