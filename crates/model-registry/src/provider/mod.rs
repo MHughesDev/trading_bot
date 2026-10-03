@@ -11,6 +11,7 @@
 
 pub mod backtest;
 pub mod gateway;
+pub mod llm;
 
 use std::collections::BTreeMap;
 
@@ -65,6 +66,16 @@ pub fn v2_features(
         match (&ci.shape, req.inputs.get(&ci.name)) {
             (InputShape::Row { .. }, Some(ModelInput::Row { values })) => {
                 row.extend(values.iter().map(|(k, v)| (k.clone(), *v)));
+            }
+            // A number wired in from another node — how a transform chains on
+            // another model's output — travels under its input's name.
+            (
+                InputShape::Scalar { .. },
+                Some(ModelInput::Value {
+                    value: domain::strategy_graph::Value::Num(n),
+                }),
+            ) => {
+                row.insert(ci.name.clone(), n.get());
             }
             (_, None) if ci.optional => {}
             (_, None) => return Err(format!("input `{}` was not assembled", ci.name)),
@@ -225,10 +236,13 @@ mod tests {
     }
 
     fn answered(outputs: serde_json::Value) -> V2Answer {
+        let serde_json::Value::Object(outputs) = outputs else {
+            panic!("outputs are an object")
+        };
         V2Answer {
             key: Some("k".into()),
             status: "answered".into(),
-            outputs: outputs.as_object().unwrap().clone(),
+            outputs,
             detail: None,
         }
     }

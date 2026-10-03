@@ -200,9 +200,11 @@ async fn build(
     // compiled against: pinned versions, batched per tick (U-5.3).
     let mut deps = deps;
     if let Some(client) = deps.sidecar.clone() {
-        deps.models = Arc::new(model_registry::provider::gateway::GatewayModels::new(
-            client, registry,
-        ));
+        let mut gateway = model_registry::provider::gateway::GatewayModels::new(client, registry);
+        if let Some((llm, caps)) = deps.llm.clone() {
+            gateway = gateway.with_llm(llm, caps);
+        }
+        deps.models = Arc::new(gateway);
     }
     let asset_class: domain::instrument::AssetClass =
         serde_json::from_value(serde_json::Value::String(d.graph.asset_class.clone()))

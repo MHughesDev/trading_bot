@@ -8,6 +8,7 @@ pub mod contract;
 pub mod cv;
 pub mod kinds;
 pub mod target;
+pub mod transform;
 pub mod validate;
 
 use adapter::AdapterSpec;
@@ -132,6 +133,9 @@ pub struct ModelDefinition {
     /// Calibration plan — populated by Phase 4. Present here for definition round-trips.
     #[serde(default)]
     pub calibration: Option<CalibrationSpec>,
+    /// A `transform`'s code (U-5.7). Absent for every other kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform: Option<transform::TransformSpec>,
 }
 
 // ── Migration ─────────────────────────────────────────────────────────────────

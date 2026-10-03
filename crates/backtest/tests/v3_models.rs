@@ -81,6 +81,8 @@ fn registry(trained_through: Option<DateTime<Utc>>) -> Arc<RegistrySnapshot> {
         trained_through,
         artifact_uri: None,
         artifact_sha256: None,
+        adapter: None,
+        transform: None,
     }))
 }
 
@@ -307,5 +309,149 @@ fn repeating_a_run_reads_the_cache_and_calls_the_sidecar_zero_times() {
     assert_eq!(
         a.manifest.journal_digest, b.manifest.journal_digest,
         "and the same decisions"
+    );
+}
+
+// ── U-5.5: the prediction series ─────────────────────────────────────────────
+
+fn row_contract() -> IoContract {
+    use domain::model_def::contract::{ContractInput, FeatureSource, InputShape};
+    IoContract {
+        inputs: vec![ContractInput {
+            name: "features".into(),
+            shape: InputShape::Row {
+                features: FeatureSource::Named {
+                    features: vec!["rsi_14".into()],
+                },
+            },
+            optional: false,
+        }],
+        ..contract()
+    }
+}
+
+#[test]
+fn a_series_covers_exactly_the_out_of_sample_window_and_a_backtest_then_asks_nothing() {
+    // Past the input's warm-up: `rsi_14` needs its history before the engine
+    // can assemble a request at all, so the training end sits after it and the
+    // test sees both refused in-sample decisions and answered ones.
+    let warm = features::runtime::lookback_bars("rsi_14").unwrap();
+    let through = t0() + chrono::Duration::hours(i64::from(warm) + 15);
+    let reg = Arc::new(RegistrySnapshot::new().with_version(VersionEntry {
+        model: "sizer".into(),
+        version: 1,
+        kind: "regressor".into(),
+        contract: Some(row_contract()),
+        trained_through: Some(through),
+        artifact_uri: None,
+        artifact_sha256: None,
+        adapter: None,
+        transform: None,
+    }));
+    let cache = Arc::new(MemoryCache::default());
+
+    // The job: fill the series over the whole window.
+    let filled = Counting::default();
+    let mut series_models = PitModels::new(Arc::clone(&reg), filled.clone(), cache.clone(), false);
+    let report = runner::predict_series(
+        "sizer@1",
+        &reg,
+        "ETH-USD",
+        "1h",
+        AssetClass::CryptoSpotCex,
+        bars(120),
+        ns(t0()),
+        &mut series_models,
+    )
+    .unwrap();
+    let cutoff = ns(through) + HOUR;
+    let keys = cache.keys();
+    assert_eq!(
+        keys.len() as u64,
+        report.answered,
+        "one row per answered decision"
+    );
+    assert!(
+        keys.iter().all(|k| k.at_ns > cutoff),
+        "nothing inside the training window"
+    );
+    let mut instants: Vec<i64> = keys.iter().map(|k| k.at_ns).collect();
+    instants.dedup();
+    assert_eq!(instants.len(), keys.len(), "no decision twice: no overlap");
+    let after_cutoff = bars(120).iter().filter(|b| b.ts_ns > cutoff).count() as u64;
+    assert_eq!(
+        report.answered, after_cutoff,
+        "every out-of-sample bar is covered"
+    );
+    assert!(
+        report.before_training_end > 0,
+        "and the in-sample ones were refused, not written"
+    );
+
+    // A strategy backtest over the same window reads the series.
+    let strategy: StrategyGraph = serde_json::from_value(serde_json::json!({
+      "format": "tbot.strategy/3", "kind": "trading", "name": "uses_series",
+      "asset_class": "crypto_spot_cex", "timeframe": "1h",
+      "nodes": [
+        {"id":"m","op":"model","args":{"ref":{"str":"sizer@1"}}},
+        {"id":"go","op":"gt","args":{"a":"m.f","b":0}}
+      ],
+      "decide": {"rules": [{"when":"go","then":{"kind":"target","size":{"mode":"units","x":1}}}]}
+    }))
+    .unwrap();
+    let plan = runner::compile_for_run(&strategy, &ParamMap::new(), reg.as_ref()).unwrap();
+    let mut r = v3_run(&reg, ns(t0()));
+    r.plan = Arc::new(plan);
+    let asked = Counting::default();
+    let mut models = PitModels::new(Arc::clone(&reg), asked.clone(), cache, false);
+    let out = runner::run(r, &mut models).unwrap();
+    assert_eq!(
+        asked.0.load(Ordering::SeqCst),
+        0,
+        "the backtest made no sidecar calls"
+    );
+    assert!(
+        !out.trades.is_empty() || out.manifest.journal.iter().any(|j| j.actions > 0),
+        "and it traded on the series"
+    );
+}
+
+// ── U-5.7: a transform answers backtests ────────────────────────────────────
+
+#[test]
+fn a_transform_has_no_training_end_to_be_held_to_and_answers_every_decision() {
+    let reg = Arc::new(RegistrySnapshot::new().with_version(VersionEntry {
+        model: "sizer".into(),
+        version: 1,
+        kind: "transform".into(),
+        contract: Some(contract()),
+        trained_through: None,
+        artifact_uri: None,
+        artifact_sha256: None,
+        adapter: None,
+        transform: Some(serde_json::json!({"language": "python", "entrypoint": "f", "source": "def f(i):\n    return {'f': 1.0}\n"})),
+    }));
+    let calls = Counting::default();
+    let mut models = PitModels::new(
+        Arc::clone(&reg),
+        calls.clone(),
+        Arc::new(MemoryCache::default()),
+        false,
+    );
+    let out = runner::run(v3_run(&reg, ns(t0())), &mut models).unwrap();
+    assert_eq!(
+        calls.0.load(Ordering::SeqCst),
+        out.manifest.decisions,
+        "asked at every decision"
+    );
+    assert!(models
+        .consumption()
+        .iter()
+        .all(backtest::models::ModelConsumption::point_in_time));
+    let result = runner::finish(&cfg(false), out, ComputeCost::default(), &models);
+    assert_eq!(
+        result.status,
+        RunStatus::Ok,
+        "Gate 0 has nothing to object to"
     );
 }

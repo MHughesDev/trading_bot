@@ -1025,8 +1025,9 @@ mod tests {
     /// is the whole thing the power check exists to prevent.
     #[test]
     fn a_design_request_carries_neither_the_delta_nor_the_window() {
+        // A fixed id: a random one can spell "2010" in hex and fail the check.
         let body = json!({
-            "hypothesis_id": Uuid::new_v4(),
+            "hypothesis_id": Uuid::nil(),
             "strategy_version": "v3",
             "null_family": "block_bootstrap",
             "delta_practical": 0.0001,

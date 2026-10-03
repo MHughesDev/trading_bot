@@ -87,6 +87,13 @@ async def predict_v2(req: V2PredictRequest) -> V2PredictResponse:
     makes every row unavailable with the reason."""
     start = time.time()
     rows = [r.model_dump() for r in req.rows]
+    if req.model_kind == "transform":
+        return V2PredictResponse(
+            model_id=req.model_id,
+            version=req.version,
+            answers=[V2Answer(**a) for a in v2_mod.run_transform(req.transform or {}, rows)],
+            latency_ms=int((time.time() - start) * 1000),
+        )
     try:
         artifact_bytes = CACHE.load(req.model_id, req.version, req.artifact_hash, req.artifact_uri)
         answers = v2_mod.predict_v2(artifact_bytes, rows, req.model_kind)

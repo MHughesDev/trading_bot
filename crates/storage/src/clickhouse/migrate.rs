@@ -57,6 +57,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "08_forward_series.sql",
         include_str!("../../../../clickhouse/08_forward_series.sql"),
     ),
+    (
+        "09_model_prediction_series.sql",
+        include_str!("../../../../clickhouse/09_model_prediction_series.sql"),
+    ),
 ];
 
 /// Applies every DDL file in [`MIGRATIONS`], in order.

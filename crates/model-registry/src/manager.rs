@@ -1669,7 +1669,7 @@ impl ModelManager {
                         .await;
                     }
                     Err(why) => {
-                        tracing::warn!(model_id, version, why, "new version has no contract")
+                        tracing::warn!(model_id, version, why, "new version has no contract");
                     }
                 }
 

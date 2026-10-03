@@ -14,6 +14,7 @@ mod live_deployments;
 mod live_runner;
 mod pipeline_manager;
 mod regime_jobs;
+mod series_runner;
 mod tee;
 #[cfg(test)]
 mod test_support;
@@ -314,6 +315,7 @@ async fn main() -> anyhow::Result<()> {
         live_bus.clone(),
     ));
 
+    let live_sidecar = Arc::new(model_registry::sidecar::SidecarClient::from_env());
     // v3 deployments (Set U Phase 4): one LiveRunner per declared deployment,
     // on the one strategy engine, fed completed minute bars, ordering through
     // the same risk gate and execution engine as everything else. Deployments
@@ -325,7 +327,11 @@ async fn main() -> anyhow::Result<()> {
             gate: Arc::clone(&risk_gate),
             models: Arc::new(live_runner::NoLiveModels),
             store: Arc::new(live_runner::PgDeploymentStore(pg.clone())),
-            sidecar: Some(Arc::new(model_registry::sidecar::SidecarClient::from_env())),
+            sidecar: Some(live_sidecar.clone()),
+            llm: Some((
+                live_sidecar,
+                model_registry::provider::llm::LlmCaps::default(),
+            )),
         },
         pg.clone(),
         cfg.clickhouse.url.clone(),
@@ -500,6 +506,9 @@ async fn main() -> anyhow::Result<()> {
             (jobs::WorkerClass::Research, cfg.jobs.research_parallel),
             (jobs::WorkerClass::Data, cfg.jobs.data_parallel),
             (jobs::WorkerClass::Eval, cfg.jobs.eval_parallel),
+            // Model work. `predict_series` (Set U U-5.5) is its first worker;
+            // before this pool existed no trainer-class job was ever claimed.
+            (jobs::WorkerClass::Trainer, 1),
         ];
 
         for (class, parallel) in pools.iter().copied() {
@@ -515,6 +524,19 @@ async fn main() -> anyhow::Result<()> {
                 // for it like everything else (INV-1).
                 pool = pool.register(std::sync::Arc::new(
                     api::gate_worker::GateAdvanceWorker::new(app_state.pg.clone()),
+                ));
+            }
+            if class == jobs::WorkerClass::Trainer {
+                pool = pool.register(std::sync::Arc::new(
+                    jobs::kinds::predict_series::PredictSeriesWorker::new(std::sync::Arc::new(
+                        series_runner::PlatformSeriesRunner {
+                            pg: app_state.pg.clone(),
+                            ch_url: cfg.clickhouse.url.clone(),
+                            sidecar: std::sync::Arc::new(
+                                model_registry::sidecar::SidecarClient::from_env(),
+                            ),
+                        },
+                    )),
                 ));
             }
             if class == jobs::WorkerClass::Data {

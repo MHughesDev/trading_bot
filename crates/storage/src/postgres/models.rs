@@ -27,6 +27,11 @@ pub struct VersionContractRow {
     pub model_kind: String,
     pub artifact_uri: Option<String>,
     pub artifact_sha256: Option<String>,
+    /// An LLM adapter's settings (`definition_json.adapter`), when the model
+    /// is one.
+    pub adapter: Option<serde_json::Value>,
+    /// A transform's code (`definition_json.transform`), when the model is one.
+    pub transform: Option<serde_json::Value>,
 }
 
 /// Every model version, with its contract (if any) and artifact.
@@ -38,7 +43,9 @@ pub async fn version_contracts(
 ) -> Result<Vec<VersionContractRow>, super::PgError> {
     Ok(sqlx::query_as(
         "SELECT v.model_id, v.version, v.io_contract, v.contract_source, v.trained_through, \
-                m.model_kind, a.storage_uri AS artifact_uri, a.sha256 AS artifact_sha256 \
+                m.model_kind, a.storage_uri AS artifact_uri, a.sha256 AS artifact_sha256, \
+                m.definition_json -> 'adapter' AS adapter, \
+                m.definition_json -> 'transform' AS transform \
          FROM model_versions v \
          JOIN ai_models m ON m.model_id = v.model_id \
          LEFT JOIN model_artifacts a ON a.artifact_id = v.artifact_id \

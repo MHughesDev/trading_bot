@@ -88,3 +88,36 @@ def test_an_artifact_without_a_feature_order_is_unavailable_not_guessed():
 def test_v1_no_longer_fills_a_missing_feature_with_zero():
     with pytest.raises(ValueError, match="atr_14"):
         base.features_matrix([{"features": {"rsi_14": 1.0}}], feature_order=["rsi_14", "atr_14"])
+
+
+# ── transforms (Set U U-5.7) ────────────────────────────────────────────────
+
+SPREAD = {
+    "language": "python",
+    "entrypoint": "spread",
+    "source": "def spread(x):\n    return {'z': (x['a'] - x['b']) / math.sqrt(2)}\n",
+}
+
+
+def test_a_transform_runs_per_row_and_answers_its_outputs():
+    [a, b] = v2.run_transform(SPREAD, [row("k1", a=3.0, b=1.0), row("k2", a=1.0, b=1.0)])
+    assert a["status"] == "answered" and abs(a["outputs"]["z"] - 2 / 2 ** 0.5) < 1e-12
+    assert b["outputs"]["z"] == 0.0
+
+
+def test_a_transform_that_raises_abstains_naming_the_error():
+    [a] = v2.run_transform(SPREAD, [row("k", a=1.0)])
+    assert a["status"] == "abstained" and "KeyError" in a["detail"]
+
+
+def test_a_transform_cannot_import():
+    spec = {"language": "python", "entrypoint": "f",
+            "source": "def f(x):\n    import os\n    return {'z': 1.0}\n"}
+    [a] = v2.run_transform(spec, [row("k", a=1.0)])
+    assert a["status"] == "abstained" and "import" in a["detail"].lower()
+
+
+def test_a_transform_returning_a_non_dict_abstains():
+    spec = {"language": "python", "entrypoint": "f", "source": "def f(x):\n    return 3\n"}
+    [a] = v2.run_transform(spec, [row("k")])
+    assert a["status"] == "abstained" and "not a dict" in a["detail"]

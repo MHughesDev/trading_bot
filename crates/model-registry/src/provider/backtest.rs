@@ -34,10 +34,15 @@ impl PredictionSource for SidecarSource {
                 detail: format!("{reference} has no contract"),
             };
         };
-        let (Some(uri), Some(sha)) = (&entry.artifact_uri, &entry.artifact_sha256) else {
-            return ModelOutcome::Unavailable {
-                detail: format!("{reference} has no artifact to serve"),
-            };
+        let is_transform = entry.kind == "transform";
+        let (uri, sha) = match (&entry.artifact_uri, &entry.artifact_sha256) {
+            (Some(u), Some(s)) => (u.clone(), s.clone()),
+            _ if is_transform && entry.transform.is_some() => (String::new(), String::new()),
+            _ => {
+                return ModelOutcome::Unavailable {
+                    detail: format!("{reference} has no artifact to serve"),
+                }
+            }
         };
         let features = match v2_features(req, contract) {
             Ok(f) => f,
@@ -47,12 +52,13 @@ impl PredictionSource for SidecarSource {
             model_id: entry.model.clone(),
             version: i32::try_from(entry.version).unwrap_or(i32::MAX),
             model_kind: entry.kind.clone(),
-            artifact_uri: uri.clone(),
-            artifact_hash: sha.clone(),
+            artifact_uri: uri,
+            artifact_hash: sha,
             rows: vec![V2Row {
                 key: "0".into(),
                 features,
             }],
+            transform: entry.transform.clone(),
         };
         let client = Arc::clone(&self.client);
         let reply = tokio::task::block_in_place(|| self.handle.block_on(client.predict_v2(body)));

@@ -159,6 +159,11 @@ pub struct LiveDeps {
     /// through a `GatewayModels` over the registry it compiled against, in place
     /// of `models` (Set U U-5.3).
     pub sidecar: Option<Arc<dyn model_registry::provider::V2Client>>,
+    /// The LLM client for external LLM adapters, with its cost caps (U-5.6).
+    pub llm: Option<(
+        Arc<dyn model_registry::provider::llm::LlmClient>,
+        model_registry::provider::llm::LlmCaps,
+    )>,
 }
 
 // ── bars of a timeframe from bars of a minute ────────────────────────────────
@@ -1061,6 +1066,7 @@ mod tests {
             models,
             store,
             sidecar: None,
+            llm: None,
         }
     }
 

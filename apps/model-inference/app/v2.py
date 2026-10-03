@@ -175,3 +175,52 @@ def predict_v2(artifact_bytes: bytes, rows: list[dict], model_kind: str) -> list
 
 class MissingFeatures(ValueError):
     """v1: a request that lacks features the model was trained on."""
+
+
+# --------------------------------------------------------------------------- #
+# Transforms (Set U U-5.7): custom code with a declared contract, no training.
+# --------------------------------------------------------------------------- #
+
+_SAFE_BUILTINS = {
+    name: __builtins__[name] if isinstance(__builtins__, dict) else getattr(__builtins__, name)
+    for name in (
+        "abs", "all", "any", "bool", "dict", "enumerate", "float", "int", "len", "list",
+        "max", "min", "pow", "range", "round", "sorted", "str", "sum", "tuple", "zip",
+        "isinstance", "ValueError", "ZeroDivisionError",
+    )
+}
+
+
+def run_transform(spec: dict, rows: list[dict]) -> list[dict]:
+    """Run a transform's ``entrypoint(inputs) -> dict`` once per row.
+
+    Restricted builtins, no ``import``, ``math`` provided: this stops accidents,
+    not an adversary — a transform is owner-registered code, the same trust as
+    the pickled artifacts this service already loads. A row whose call raises or
+    returns something that is not a dict abstains with the reason; nothing is
+    filled in.
+    """
+    if (spec or {}).get("language", "python") != "python":
+        return [{"key": r.get("key"), "status": "unavailable", "outputs": {},
+                 "detail": f"transform language {spec.get('language')!r} is not served"} for r in rows]
+    namespace = {"__builtins__": _SAFE_BUILTINS, "math": math}
+    try:
+        exec(compile(spec.get("source", ""), "<transform>", "exec"), namespace)  # noqa: S102
+        fn = namespace[spec.get("entrypoint", "transform")]
+    except Exception as e:  # noqa: BLE001
+        return [{"key": r.get("key"), "status": "unavailable", "outputs": {},
+                 "detail": f"transform does not load: {e}"} for r in rows]
+    answers = []
+    for r in rows:
+        try:
+            out = fn(dict(r.get("features") or {}))
+        except Exception as e:  # noqa: BLE001
+            answers.append({"key": r.get("key"), "status": "abstained", "outputs": {},
+                            "detail": f"transform raised {type(e).__name__}: {e}"})
+            continue
+        if not isinstance(out, dict):
+            answers.append({"key": r.get("key"), "status": "abstained", "outputs": {},
+                            "detail": f"transform returned {type(out).__name__}, not a dict of outputs"})
+            continue
+        answers.append({"key": r.get("key"), "status": "answered", "outputs": out, "detail": None})
+    return answers

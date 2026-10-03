@@ -9,6 +9,7 @@ storage = { workspace = true }
 # Set U Phase 5: model providers answer the one strategy engine's requests.
 strategy-engine = { workspace = true }
 async-trait = "0.1"
+thiserror = { workspace = true }
 features = { workspace = true }
 backtest = { workspace = true }
 ledger = { workspace = true }

@@ -50,6 +50,8 @@ class V2PredictRequest(BaseModel):
     artifact_uri: str
     artifact_hash: str
     rows: list[V2Row]
+    # A transform's code ({language, entrypoint, source}); no artifact (U-5.7).
+    transform: Optional[dict] = None
 
 
 class V2Answer(BaseModel):

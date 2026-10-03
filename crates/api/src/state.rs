@@ -281,8 +281,11 @@ impl AppState {
                 // repeated run asks the sidecar nothing (Set U U-5.4).
                 let sidecar: Arc<dyn model_registry::provider::V2Client> =
                     Arc::new(model_registry::sidecar::SidecarClient::from_env());
-                let cache: Arc<dyn backtest::models::PredictionCache> =
-                    Arc::new(backtest::models::MemoryCache::default());
+                // The cache is the ClickHouse prediction series (U-5.5): what a
+                // `predict_series` job filled, and what any earlier run asked.
+                let cache: Arc<dyn backtest::models::PredictionCache> = Arc::new(
+                    backtest::models::ClickHouseCache::new(&clickhouse_url, handle.clone()),
+                );
                 let models_handle = handle.clone();
                 let factory: backtest::runner::ModelsFactory =
                     Arc::new(move |snapshot, optimistic| {

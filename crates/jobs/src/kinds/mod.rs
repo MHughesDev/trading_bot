@@ -6,3 +6,4 @@
 //! idempotency, with the domain work delegated through a trait.
 
 pub mod backfill;
+pub mod predict_series;

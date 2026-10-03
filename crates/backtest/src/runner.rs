@@ -770,3 +770,78 @@ impl RunExecutor for FormatRoutedExecutor {
         }
     }
 }
+
+/// Fill a model version's prediction series over `bars` (U-5.5): the backtest
+/// loop over a graph that only calls the model, through `models` — whose cache
+/// is the series. Returns what was written.
+///
+/// # Errors
+/// As [`run`].
+pub fn predict_series(
+    reference: &str,
+    registry: &crate::models::RegistrySnapshot,
+    instrument: &str,
+    timeframe: &str,
+    asset_class: AssetClass,
+    bars: Vec<LoadedBar>,
+    start_ns: i64,
+    models: &mut dyn ModelProvider,
+) -> Result<crate::models::SeriesReport, String> {
+    let entry = registry
+        .entry(reference)
+        .ok_or_else(|| format!("{reference} is not in the registry"))?;
+    let contract = entry
+        .contract
+        .as_ref()
+        .ok_or_else(|| format!("{reference} has no contract"))?;
+    let ac = serde_json::to_value(asset_class)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default();
+    let graph = crate::models::series_graph(reference, contract, &ac, timeframe)?;
+    let plan = compile_for_run(&graph, &crate::run::ParamMap::new(), registry)?;
+    let r = V3Run {
+        plan: Arc::new(plan),
+        instrument: instrument.to_string(),
+        asset_class,
+        bars: vec![bars],
+        start_ns,
+        spec: InstrumentSpec {
+            instrument: instrument.to_string(),
+            lot_size: Decimal::new(1, 8),
+            tick_size: Decimal::new(1, 8),
+            min_qty: Decimal::new(1, 8),
+            caps: strategy_engine::VenueCaps::all(),
+        },
+        instrument_limits: InstrumentLimits {
+            tick_size: Decimal::new(1, 8),
+            lot_size: Decimal::ZERO,
+        },
+        limits: GlobalRiskLimits::default(),
+        initial_balance: Decimal::from(1),
+        fill_policy: FillPolicy::NextBarOpen,
+        strategy_id: format!("series:{reference}"),
+        sims: SimulatorSet::realistic(),
+    };
+    let out = run(r, models).map_err(|e| e.to_string())?;
+    let mut report = crate::models::SeriesReport::default();
+    for t in &out.traces {
+        for resp in &t.model_responses {
+            match &resp.outcome {
+                strategy_engine::ModelOutcome::Answered { .. } => {
+                    report.answered += 1;
+                    report.first_ns =
+                        Some(report.first_ns.map_or(t.at_ns, |f: i64| f.min(t.at_ns)));
+                    report.last_ns = Some(report.last_ns.map_or(t.at_ns, |l: i64| l.max(t.at_ns)));
+                }
+                strategy_engine::ModelOutcome::Unavailable { detail }
+                    if detail.contains("trained through") =>
+                {
+                    report.before_training_end += 1;
+                }
+                _ => report.other += 1,
+            }
+        }
+    }
+    Ok(report)
+}

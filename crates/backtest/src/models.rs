@@ -29,6 +29,13 @@ pub struct VersionEntry {
     pub trained_through: Option<DateTime<Utc>>,
     pub artifact_uri: Option<String>,
     pub artifact_sha256: Option<String>,
+    /// An LLM adapter's settings (provider, model, endpoint, cost), when the
+    /// version is an external LLM adapter.
+    pub adapter: Option<serde_json::Value>,
+    /// A transform's code (`{language, entrypoint, source}`), when the version
+    /// is a transform: no training, so the point-in-time rule has nothing to
+    /// hold it to and it answers any decision.
+    pub transform: Option<serde_json::Value>,
 }
 
 /// Every version and alias, read once.
@@ -84,6 +91,8 @@ impl RegistrySnapshot {
                 trained_through: row.trained_through,
                 artifact_uri: row.artifact_uri,
                 artifact_sha256: row.artifact_sha256,
+                adapter: row.adapter.filter(|a| !a.is_null()),
+                transform: row.transform.filter(|t| !t.is_null()),
             });
         }
         for (model, alias, version) in storage::postgres::models::model_aliases(pg).await? {
@@ -184,6 +193,17 @@ pub trait PredictionCache: Send + Sync {
 #[derive(Debug, Default)]
 pub struct MemoryCache(std::sync::Mutex<BTreeMap<CacheKey, ModelOutcome>>);
 
+impl MemoryCache {
+    /// Every key held, in order.
+    #[must_use]
+    pub fn keys(&self) -> Vec<CacheKey> {
+        self.0
+            .lock()
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+}
+
 impl PredictionCache for MemoryCache {
     fn get(&self, key: &CacheKey) -> Option<ModelOutcome> {
         self.0.lock().ok()?.get(key).cloned()
@@ -193,6 +213,138 @@ impl PredictionCache for MemoryCache {
             m.insert(key, outcome);
         }
     }
+}
+
+/// The prediction series in ClickHouse (`model_prediction_series`, U-5.5) as
+/// a cache: read before the sidecar is called, written after.
+pub struct ClickHouseCache {
+    client: clickhouse::Client,
+    handle: tokio::runtime::Handle,
+}
+
+#[derive(clickhouse::Row, serde::Serialize, serde::Deserialize)]
+struct SeriesRow {
+    model_id: String,
+    version: u32,
+    at_ns: i64,
+    inputs_digest: String,
+    status: String,
+    outcome: String,
+    trained_through_ns: Option<i64>,
+}
+
+impl ClickHouseCache {
+    #[must_use]
+    pub fn new(url: &str, handle: tokio::runtime::Handle) -> Self {
+        Self {
+            client: storage::clickhouse::connect(url),
+            handle,
+        }
+    }
+
+    fn block<F: std::future::Future>(&self, f: F) -> F::Output {
+        tokio::task::block_in_place(|| self.handle.block_on(f))
+    }
+}
+
+impl PredictionCache for ClickHouseCache {
+    fn get(&self, key: &CacheKey) -> Option<ModelOutcome> {
+        #[derive(clickhouse::Row, serde::Deserialize)]
+        struct Hit {
+            outcome: String,
+        }
+        let hit: Option<Hit> = self
+            .block(
+                self.client
+                    .query(
+                        "SELECT outcome FROM model_prediction_series FINAL \
+                         WHERE model_id = ? AND version = ? AND at_ns = ? AND inputs_digest = ? LIMIT 1",
+                    )
+                    .bind(&key.model)
+                    .bind(key.version)
+                    .bind(key.at_ns)
+                    .bind(&key.inputs_digest)
+                    .fetch_optional(),
+            )
+            .ok()
+            .flatten();
+        hit.and_then(|h| serde_json::from_str(&h.outcome).ok())
+    }
+
+    fn put(&self, key: CacheKey, outcome: ModelOutcome) {
+        let row = SeriesRow {
+            status: match &outcome {
+                ModelOutcome::Answered { .. } => "answered",
+                ModelOutcome::Abstained { .. } => "abstained",
+                ModelOutcome::TimedOut { .. } => "timed_out",
+                ModelOutcome::Unavailable { .. } => "unavailable",
+            }
+            .into(),
+            outcome: serde_json::to_string(&outcome).unwrap_or_default(),
+            model_id: key.model,
+            version: key.version,
+            at_ns: key.at_ns,
+            inputs_digest: key.inputs_digest,
+            trained_through_ns: None,
+        };
+        let written: Result<(), clickhouse::error::Error> = self.block(async {
+            let mut insert = self.client.insert("model_prediction_series")?;
+            insert.write(&row).await?;
+            insert.end().await
+        });
+        if let Err(e) = written {
+            // A cache that cannot be written is a slower run, not a wrong one.
+            tracing::warn!(error = %e, "prediction series write failed");
+        }
+    }
+}
+
+/// The graph a `predict_series` job runs: the model node and nothing that
+/// trades, so every bar asks the model exactly what a strategy calling it would
+/// ask (the same assembled inputs, so the same cache key).
+///
+/// # Errors
+/// A reference whose contract has an input a graph cannot wire without a
+/// strategy (a scalar, text), named.
+pub fn series_graph(
+    reference: &str,
+    contract: &domain::model_def::contract::IoContract,
+    asset_class: &str,
+    timeframe: &str,
+) -> Result<domain::strategy_graph::StrategyGraph, String> {
+    use domain::model_def::contract::InputShape;
+    for ci in &contract.inputs {
+        if !matches!(ci.shape, InputShape::Row { .. } | InputShape::Window { .. }) && !ci.optional {
+            return Err(format!(
+                "input `{}` needs a value a strategy wires in; a series cannot be computed for it alone",
+                ci.name
+            ));
+        }
+    }
+    serde_json::from_value(serde_json::json!({
+      "format": domain::strategy_graph::FORMAT, "kind": "trading", "name": format!("series:{reference}"),
+      "asset_class": asset_class, "timeframe": timeframe,
+      "nodes": [
+        {"id": "m", "op": "model", "args": {"ref": {"str": reference}}},
+        {"id": "always", "op": "ge", "args": {"a": "close", "b": 0}}
+      ],
+      "decide": {"rules": [{"when": "always", "then": {"kind": "hold"}}]}
+    }))
+    .map_err(|e| e.to_string())
+}
+
+/// What a prediction-series run wrote.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SeriesReport {
+    /// Decisions the version answered (each now in the series).
+    pub answered: u64,
+    /// Decisions it could not answer point-in-time — before its training end
+    /// plus embargo — and that are therefore not in the series.
+    pub before_training_end: u64,
+    /// Decisions it abstained on or could not reach.
+    pub other: u64,
+    pub first_ns: Option<i64>,
+    pub last_ns: Option<i64>,
 }
 
 /// One answer a run consumed, as Gate 0 judges it.
@@ -312,7 +464,13 @@ impl<S: PredictionSource> ModelProvider for PitModels<S> {
             at_ns: req.at_ns,
             model: req.model.clone(),
             version: req.version,
-            trained_through_ns: entry.trained_through.and_then(|t| t.timestamp_nanos_opt()),
+            // A transform trained on nothing: there is no training end it
+            // could have looked past, so it is in the past of every decision.
+            trained_through_ns: if entry.kind == "transform" {
+                Some(i64::MIN)
+            } else {
+                entry.trained_through.and_then(|t| t.timestamp_nanos_opt())
+            },
             embargo_ns,
         };
         if !self.optimistic && !consumption.point_in_time() {
@@ -440,6 +598,8 @@ mod tests {
             trained_through: None,
             artifact_uri: None,
             artifact_sha256: None,
+            adapter: None,
+            transform: None,
         }
     }
 

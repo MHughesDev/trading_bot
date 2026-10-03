@@ -682,6 +682,8 @@ pub fn router(state: AppState) -> Router {
             "/api/models",
             get(models::list_models).post(models::create_model),
         )
+        // A `transform` (Set U U-5.7): custom code with a declared contract.
+        .route("/api/models/transforms", post(models::register_transform))
         .route(
             "/api/models/{id}",
             get(models::get_model)

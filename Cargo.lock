@@ -3006,6 +3006,7 @@ dependencies = [
  "sqlx",
  "storage",
  "strategy-engine",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uuid",

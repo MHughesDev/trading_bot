@@ -195,6 +195,10 @@ pub struct PredictV2Request {
     pub artifact_uri: String,
     pub artifact_hash: String,
     pub rows: Vec<V2Row>,
+    /// A transform's code (`{language, entrypoint, source}`) — sent in place of
+    /// an artifact (U-5.7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform: Option<serde_json::Value>,
 }
 
 /// One row's answer: `answered` with named outputs in plain JSON, or

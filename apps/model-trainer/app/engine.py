@@ -44,7 +44,9 @@ def resolve_objective(definition: dict) -> str:
     if explicit in ("classification", "regression"):
         return explicit
     kind = definition.get("model_kind") or definition.get("kind")
-    if kind == "forecaster":
+    # A regressor predicts a value; until Set U U-5.7 it fell through to
+    # classification and was trained on a thresholded label.
+    if kind in ("forecaster", "regressor"):
         return "regression"
     return "classification"
 

@@ -1262,3 +1262,65 @@ pub async fn get_model_quality(
     }))
     .into_response()
 }
+
+/// Body of `POST /api/models/transforms`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegisterTransform {
+    pub name: String,
+    pub asset_class: String,
+    /// The declared `IoContract`.
+    pub contract: serde_json::Value,
+    pub transform: domain::model_def::transform::TransformSpec,
+}
+
+/// POST /api/models/transforms — register custom code as a model (Set U
+/// U-5.7). The code is dry-run in the inference sidecar against its declared
+/// contract before anything is recorded; code whose answer does not match is
+/// refused with what was wrong.
+pub async fn register_transform(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(body): Json<RegisterTransform>,
+) -> impl IntoResponse {
+    if body.transform.language != "python" {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"error": "unsupported_language", "message": "transforms are python"})),
+        )
+            .into_response();
+    }
+    let client = model_registry::sidecar::SidecarClient::from_env();
+    match model_registry::contracts::register_transform(
+        &state.pg,
+        &client,
+        token.user_id(),
+        &body.name,
+        &body.asset_class,
+        &body.contract,
+        &body.transform,
+    )
+    .await
+    {
+        Ok(()) => (
+            StatusCode::CREATED,
+            Json(
+                json!({"model": body.name, "version": 1, "reference": format!("{}@1", body.name)}),
+            ),
+        )
+            .into_response(),
+        Err(
+            e @ (model_registry::contracts::TransformError::Contract(_)
+            | model_registry::contracts::TransformError::DryRun(_)),
+        ) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"error": "transform_refused", "message": e.to_string()})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::CONFLICT,
+            Json(json!({"error": "not_recorded", "message": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
