@@ -1,6 +1,6 @@
 # Phase 6 — Selection strategies
 
-**Completion: 83% (5 / 6 tasks).** U-6.1, U-6.2, U-6.4, U-6.5 DONE 2026-10-02; U-6.6 DONE 2026-10-04; U-6.3 PARTIAL (no standalone scheduled screener; its HTTP route not run against ClickHouse).
+**Completion: 100% (6 / 6 tasks).** U-6.1, U-6.2, U-6.4, U-6.5 DONE 2026-10-02; U-6.3 and U-6.6 DONE 2026-10-04.
 
 **Requirement IDs:** SU-SEL-01…05.
 **Spec:** [FEAT-007](../../../specs/FEAT-007-unified-strategy-engine.md) §4, §5.2, §5.3; ADR-0040.
@@ -55,7 +55,7 @@ The engine evaluates a selection plan by mapping the per-instrument sub-graph ov
 **Traces:** FEAT-007 §5.3; ADR-0040.
 
 ### U-6.3 Running a selection — M
-`PARTIAL` 2026-10-02 — `backtest::selection_run`: `run_selection` resolves the revision, the
+`DONE` 2026-10-04 (built 2026-10-02) — `backtest::selection_run`: `run_selection` resolves the revision, the
 universe at the instant, and every member's bars **as the world stood then** (`BarStore::as_of`),
 warms each member over earlier closes, and evaluates at the last close at or before the instant
 asked; `evaluate_over` is the pure half. `POST /api/selections/run` and `GET /api/selections/runs`
@@ -67,9 +67,16 @@ UTC; malformed schedules are refused at compile time) and drive selections in po
 and in live deployments. Evidence: `backtest/tests/selection_run.rs` (as of day 5 the run sees day
 5's membership; later bars change nothing — same digest; a bar recorded after the instant is
 invisible; a member with no bars is excluded); `pg_universe.rs` (journal round trip, append-only).
-**Not met:** a selection that is not bound to a deployment does not run on its own triggers —
-there is no "watch this screener" record; and the route has not run end to end against
-ClickHouse (none here). "A person and the agent get the same list" rests on there being one route
+**2026-10-04, the two gaps closed:** a screener someone *watches* runs on its own schedule —
+`selection_watch` (0187: a pinned revision and schedule; one running watch per person and revision;
+stopped once, never edited or deleted), `POST /api/selections/watch` (refused without a
+`triggers.schedule`), `GET /api/selections/watches`, `DELETE /api/selections/watch/{id}`, and
+`apps/platform/src/screener_jobs.rs`, which runs every watch due in a minute through `run_selection`
+and journals it as `requested_by = 'schedule'`, once per fire (spawned at boot; source scan). And the
+ClickHouse half ran against the server: `tests/selection_clickhouse.rs` loads BTC-USD and ETH-USD as
+the store stood at 2026-10-02 20:00 UTC, excludes an unknown symbol for having no data, and selects
+by close. The HTTP hop itself was not exercised — the platform is not started here — but each of its
+three halves (Postgres, ClickHouse, the pure evaluation) is. "A person and the agent get the same list" rests on there being one route
 and one function, with tests that the tool and the route add nothing that could differ.
 
 An API and agent tool run a selection strategy now or as of a past instant and return the ranked list with scores and attributes; results are journaled; scheduled runs follow the strategy's triggers.

@@ -690,6 +690,9 @@ pub fn router(state: AppState) -> Router {
         // U-6.3). The screener and the agent's tool share this route.
         .route("/api/selections/run", post(selections::run))
         .route("/api/selections/runs", get(selections::list))
+        .route("/api/selections/watch", post(selections::watch))
+        .route("/api/selections/watches", get(selections::watches))
+        .route("/api/selections/watch/{id}", delete(selections::unwatch))
         .route(
             "/api/models/{id}",
             get(models::get_model)

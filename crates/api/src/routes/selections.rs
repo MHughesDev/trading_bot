@@ -6,9 +6,14 @@
 //! which calls `backtest::selection_run::run_selection` — so a person and the
 //! agent asking about the same strategy at the same instant get the same list.
 //! Who asked changes only the journal's `requested_by`.
+//!
+//! `POST /api/selections/watch`, `GET /api/selections/watches` and
+//! `DELETE /api/selections/watch/{id}` (migration 0187): a screener someone
+//! watches runs on its own `triggers.schedule`, through the same function, as
+//! a scheduled run (`apps/platform/src/screener_jobs.rs`).
 
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -141,6 +146,88 @@ pub async fn list(
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "list_failed", "message": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WatchSelection {
+    /// A selection strategy's id (its head is pinned) or revision.
+    pub strategy: String,
+}
+
+/// POST /api/selections/watch — run this selection on its own schedule.
+pub async fn watch(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(body): Json<WatchSelection>,
+) -> impl IntoResponse {
+    if !token.permits(scopes::DATA_READ) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "forbidden", "message": "watching a selection reads market data"})),
+        )
+            .into_response();
+    }
+    let user = token.user_id().to_string();
+    match selection_run::create_watch(&state.pg, &user, &body.strategy).await {
+        Ok(w) => (StatusCode::CREATED, Json(json!(w))).into_response(),
+        Err(selection_run::WatchError::Selection(e)) => {
+            let status = match e {
+                SelectionRunError::NotFound(_) => StatusCode::NOT_FOUND,
+                _ => StatusCode::UNPROCESSABLE_ENTITY,
+            };
+            (status, Json(json!({"error": "invalid_selection", "message": e.to_string()})))
+                .into_response()
+        }
+        Err(e @ selection_run::WatchError::NoSchedule(_)) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"error": "no_schedule", "message": e.to_string()})),
+        )
+            .into_response(),
+        Err(e @ selection_run::WatchError::AlreadyWatching(_)) => (
+            StatusCode::CONFLICT,
+            Json(json!({"error": "already_watching", "message": e.to_string()})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "watch_failed", "message": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /api/selections/watches — the caller's watches.
+pub async fn watches(State(state): State<AppState>, token: BearerToken) -> impl IntoResponse {
+    match selection_run::watches_for(&state.pg, &token.user_id().to_string()).await {
+        Ok(rows) => (StatusCode::OK, Json(json!({ "watches": rows }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "list_failed", "message": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+/// DELETE /api/selections/watch/{id} — stop watching.
+pub async fn unwatch(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<uuid::Uuid>,
+) -> impl IntoResponse {
+    match selection_run::stop_watch(&state.pg, &token.user_id().to_string(), id).await {
+        Ok(true) => (StatusCode::OK, Json(json!({"watch_id": id, "stopped": true}))).into_response(),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "not_found", "message": "no running watch of yours with that id"})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "stop_failed", "message": e.to_string()})),
         )
             .into_response(),
     }

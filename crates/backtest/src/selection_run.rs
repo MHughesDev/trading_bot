@@ -358,3 +358,129 @@ pub async fn list(
     .fetch_all(pg)
     .await
 }
+
+// ── watches: a selection that runs on its own schedule (U-6.3; 0187) ─────────
+
+/// A screener someone watches: its pinned revision and schedule.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, sqlx::FromRow)]
+pub struct Watch {
+    pub watch_id: Uuid,
+    pub user_id: String,
+    pub strategy_ref: String,
+    pub revision: String,
+    pub schedule: String,
+    pub created_at: DateTime<Utc>,
+    pub stopped_at: Option<DateTime<Utc>>,
+}
+
+/// Why a watch was not created.
+#[derive(Debug, thiserror::Error)]
+pub enum WatchError {
+    #[error(transparent)]
+    Selection(#[from] SelectionRunError),
+    #[error("'{0}' declares no `triggers.schedule`: a watch runs a selection on its own schedule, so it needs one")]
+    NoSchedule(String),
+    #[error("already watching revision {0}")]
+    AlreadyWatching(String),
+    #[error("database: {0}")]
+    Database(String),
+}
+
+/// Watch `strategy_ref` (an id or a revision): pin its revision and schedule.
+///
+/// # Errors
+/// Not a selection, no schedule, already watched, or the database.
+pub async fn create_watch(
+    pg: &sqlx::PgPool,
+    user_id: &str,
+    strategy_ref: &str,
+) -> Result<Watch, WatchError> {
+    let (_, plan, _) = load_selection(pg, strategy_ref).await?;
+    let schedule = plan
+        .triggers
+        .schedule
+        .clone()
+        .ok_or_else(|| WatchError::NoSchedule(strategy_ref.to_string()))?;
+    sqlx::query_as(
+        "INSERT INTO selection_watch (watch_id, user_id, strategy_ref, revision, schedule) \
+         VALUES ($1, $2, $3, $4, $5) \
+         RETURNING watch_id, user_id, strategy_ref, revision, schedule, created_at, stopped_at",
+    )
+    .bind(Uuid::new_v4())
+    .bind(user_id)
+    .bind(strategy_ref)
+    .bind(&plan.revision)
+    .bind(&schedule)
+    .fetch_one(pg)
+    .await
+    .map_err(|e| match &e {
+        sqlx::Error::Database(d) if d.is_unique_violation() => {
+            WatchError::AlreadyWatching(plan.revision.clone())
+        }
+        _ => WatchError::Database(e.to_string()),
+    })
+}
+
+/// Every running watch.
+///
+/// # Errors
+/// The database.
+pub async fn running_watches(pg: &sqlx::PgPool) -> Result<Vec<Watch>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT watch_id, user_id, strategy_ref, revision, schedule, created_at, stopped_at \
+         FROM selection_watch WHERE stopped_at IS NULL ORDER BY created_at",
+    )
+    .fetch_all(pg)
+    .await
+}
+
+/// A person's watches, newest first.
+///
+/// # Errors
+/// The database.
+pub async fn watches_for(pg: &sqlx::PgPool, user_id: &str) -> Result<Vec<Watch>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT watch_id, user_id, strategy_ref, revision, schedule, created_at, stopped_at \
+         FROM selection_watch WHERE user_id = $1 ORDER BY created_at DESC",
+    )
+    .bind(user_id)
+    .fetch_all(pg)
+    .await
+}
+
+/// Stop a person's running watch. `false` when there is none to stop.
+///
+/// # Errors
+/// The database.
+pub async fn stop_watch(pg: &sqlx::PgPool, user_id: &str, watch_id: Uuid) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE selection_watch SET stopped_at = now() \
+         WHERE watch_id = $1 AND user_id = $2 AND stopped_at IS NULL",
+    )
+    .bind(watch_id)
+    .bind(user_id)
+    .execute(pg)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+/// Whether a scheduled run of `revision` was already journaled at or after
+/// `fired` — so a restart inside the minute a schedule fired does not run it
+/// twice. (The run's `as_of` is its evaluation instant, the last bar close, so
+/// the minute it was asked for is found by when it was written.)
+///
+/// # Errors
+/// The database.
+pub async fn scheduled_run_since(
+    pg: &sqlx::PgPool,
+    revision: &str,
+    fired: DateTime<Utc>,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM selection_run           WHERE revision = $1 AND requested_by = 'schedule' AND created_at >= $2)",
+    )
+    .bind(revision)
+    .bind(fired)
+    .fetch_one(pg)
+    .await
+}

@@ -16,6 +16,7 @@ mod live_runner;
 mod parity_jobs;
 mod pipeline_manager;
 mod regime_jobs;
+mod screener_jobs;
 mod series_runner;
 mod tee;
 #[cfg(test)]
@@ -464,6 +465,13 @@ async fn main() -> anyhow::Result<()> {
     // members the live-runner supervisor above runs. It answers models with the
     // factory the screener and the suite use.
     allocator::spawn(
+        app_state.pg.clone(),
+        cfg.clickhouse.url.clone(),
+        app_state.run_models.clone(),
+    );
+    // Watched screeners (Set U U-6.3): a selection someone watches runs on its
+    // own schedule, journaled as a scheduled run.
+    screener_jobs::spawn(
         app_state.pg.clone(),
         cfg.clickhouse.url.clone(),
         app_state.run_models.clone(),
