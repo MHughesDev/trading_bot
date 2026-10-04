@@ -230,24 +230,52 @@ pub(crate) fn drive(
     );
     let mut traces = Vec::new();
     while let Some(ev) = data.next_bar() {
-        let in_window = ev.input == PRIMARY && !ev.warmup;
-        if in_window {
-            // The bar's fills happen before its close, so the engine hears of
-            // them before it decides on the close.
-            for e in venue.on_bar(&primary[&ev.bar.close_ns]) {
-                traces.extend(cycle(&mut engine, e, models, &mut *venue, journal)?);
-            }
+        let window = (ev.input == PRIMARY && !ev.warmup).then(|| &primary[&ev.bar.close_ns]);
+        traces.extend(step_bar(
+            &mut engine,
+            ev.input,
+            ev.bar,
+            ev.warmup,
+            window,
+            venue,
+            models,
+            journal,
+        )?);
+    }
+    Ok(traces)
+}
+
+/// One closed bar of one input through the engine and the venue — the body of
+/// the backtest loop, and of the shadow run beside a paper deployment
+/// ([`crate::shadow`]), so the two cannot step a bar differently. `window` is
+/// the primary bar as the venue trades it, when this bar is inside the run's
+/// window; returns the decisions inside the window.
+///
+/// # Errors
+/// An engine defect.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn step_bar(
+    engine: &mut Engine,
+    input: strategy_engine::plan::InputIdx,
+    bar: Bar,
+    warmup: bool,
+    window: Option<&SimBar>,
+    venue: &mut dyn BarVenue,
+    models: &mut dyn ModelProvider,
+    journal: &mut dyn Journal,
+) -> Result<Vec<DecisionTrace>, RunnerError> {
+    let mut traces = Vec::new();
+    if let Some(sim) = window {
+        // The bar's fills happen before its close, so the engine hears of them
+        // before it decides on the close.
+        for e in venue.on_bar(sim) {
+            traces.extend(cycle(engine, e, models, &mut *venue, journal)?);
         }
-        let bar_event = Event::Bar {
-            input: ev.input,
-            bar: ev.bar,
-            warmup: ev.warmup,
-        };
-        let decided = cycle(&mut engine, bar_event, models, &mut *venue, journal)?;
-        if in_window {
-            traces.extend(decided);
-            venue.on_close_decided(&primary[&ev.bar.close_ns]);
-        }
+    }
+    let decided = cycle(engine, Event::Bar { input, bar, warmup }, models, &mut *venue, journal)?;
+    if let Some(sim) = window {
+        traces.extend(decided);
+        venue.on_close_decided(sim);
     }
     Ok(traces)
 }

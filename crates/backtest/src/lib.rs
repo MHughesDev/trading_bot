@@ -49,6 +49,7 @@ pub mod rng;
 pub mod run;
 pub mod runner;
 pub mod selection_run;
+pub mod shadow;
 pub mod sim;
 pub mod sim_executor;
 pub mod stats;
