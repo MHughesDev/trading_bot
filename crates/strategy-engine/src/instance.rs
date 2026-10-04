@@ -167,6 +167,9 @@ impl Instance {
                     let d = (days + 3).rem_euclid(7) as f64;
                     values[slot] = Some(Value::num(d, "weekday"));
                 }
+                NodeKind::SelectionAttr { selection, attr } => {
+                    values[slot] = Some(selection_attr(ctx.view, selection, attr));
+                }
                 NodeKind::Op { op, .. } if op.cross_sectional => {}
                 NodeKind::Op { op, args } => {
                     let mut vals: BTreeMap<String, ArgVal> = BTreeMap::new();
@@ -441,5 +444,30 @@ impl Instance {
                 Some(v) => Ok(Some(ModelInput::Value { value: v })),
             },
         }
+    }
+}
+
+/// `selection_attr` (U-6.6): the attribute this member's selection gave its
+/// instrument — missing, with the reason, when the instance is not bound to a
+/// selection, is bound to another one, or was given no such attribute.
+fn selection_attr(view: &PortfolioView, selection: &str, attr: &str) -> Value {
+    let missing = |what: String| Value::Missing(MissingReason::NoData { what });
+    match &view.selection {
+        None => missing(format!(
+            "selection attribute `{attr}`: this instance is not bound to a selection"
+        )),
+        Some(s) if s.name != selection && s.revision != selection => missing(format!(
+            "selection attribute `{attr}`: this instance trades for selection `{}`, not `{selection}`",
+            s.name
+        )),
+        // Back through the decimal's own digits: `to_f64` is not exact, and the
+        // attribute must read as the number the selection computed.
+        Some(s) => match s.attributes.get(attr).and_then(|d| d.to_string().parse::<f64>().ok()) {
+            Some(x) => Value::num(x, attr),
+            None => missing(format!(
+                "selection attribute `{attr}`: selection `{}` gave this member no `{attr}`",
+                s.name
+            )),
+        },
     }
 }

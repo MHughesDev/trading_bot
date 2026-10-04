@@ -142,6 +142,16 @@ pub struct SleeveHandle {
     pub parent: uuid::Uuid,
     capital: Mutex<rust_decimal::Decimal>,
     retire: Mutex<Option<domain::strategy_graph::deployment::OnRemoval>>,
+    selection: Mutex<Option<MemberSelection>>,
+}
+
+/// What the selection said about a member at its latest rebalance (U-6.6).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MemberSelection {
+    /// The selection strategy's name.
+    pub name: String,
+    pub revision: String,
+    pub attributes: std::collections::BTreeMap<String, rust_decimal::Decimal>,
 }
 
 impl SleeveHandle {
@@ -151,6 +161,7 @@ impl SleeveHandle {
             parent,
             capital: Mutex::new(capital),
             retire: Mutex::new(None),
+            selection: Mutex::new(None),
         }
     }
 
@@ -166,6 +177,18 @@ impl SleeveHandle {
     pub fn set_capital(&self, capital: rust_decimal::Decimal) {
         if let Ok(mut c) = self.capital.lock() {
             *c = capital;
+        }
+    }
+
+    /// What the latest selection said about this member.
+    #[must_use]
+    pub fn selection(&self) -> Option<MemberSelection> {
+        self.selection.lock().ok().and_then(|s| s.clone())
+    }
+
+    pub fn set_selection(&self, selection: MemberSelection) {
+        if let Ok(mut s) = self.selection.lock() {
+            *s = Some(selection);
         }
     }
 

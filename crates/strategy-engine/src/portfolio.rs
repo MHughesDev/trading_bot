@@ -48,6 +48,23 @@ pub struct PortfolioView {
     pub mark: Option<Decimal>,
     pub open_orders: Vec<WorkingOrder>,
     pub last_fill_price: Option<Decimal>,
+    /// What the selection this instance trades for said about its instrument,
+    /// when it is a member of one (U-6.6). Absent from the serialised view when
+    /// `None`, so every journaled view from before it reads the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection: Option<SelectionContext>,
+}
+
+/// A selection-bound member's view of the selection that picked it (U-6.6):
+/// which selection, and the numeric attributes its latest run gave this
+/// member. `selection_attr` reads it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectionContext {
+    /// The selection strategy's name, as its graph declares it.
+    pub name: String,
+    /// The selection strategy's revision.
+    pub revision: String,
+    pub attributes: std::collections::BTreeMap<String, Decimal>,
 }
 
 impl PortfolioView {

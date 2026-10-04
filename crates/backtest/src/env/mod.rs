@@ -213,6 +213,9 @@ struct Sleeve {
     /// This instance's share of the deployment's capital. `None`: the whole
     /// account, as a single-instrument run sees it.
     capital: Option<Decimal>,
+    /// What the selection said about this member at its latest rebalance
+    /// (U-6.6). `None` outside a portfolio run.
+    selection: Option<strategy_engine::SelectionContext>,
 }
 
 impl Sleeve {
@@ -235,6 +238,7 @@ impl Sleeve {
             last_fill_price: None,
             attributed: Vec::new(),
             capital,
+            selection: None,
         }
     }
 
@@ -473,6 +477,13 @@ impl SimOrders {
     pub fn set_capital(&mut self, instrument: &str, capital: Decimal) {
         if let Some(s) = self.sleeves.get_mut(instrument) {
             s.capital = Some(capital);
+        }
+    }
+
+    /// What the selection said about `instrument`'s member (U-6.6).
+    pub fn set_selection(&mut self, instrument: &str, selection: strategy_engine::SelectionContext) {
+        if let Some(s) = self.sleeves.get_mut(instrument) {
+            s.selection = Some(selection);
         }
     }
 
@@ -742,6 +753,7 @@ impl SimOrders {
             mark,
             open_orders,
             last_fill_price: sleeve.and_then(|s| s.last_fill_price),
+            selection: sleeve.and_then(|s| s.selection.clone()),
         }
     }
 

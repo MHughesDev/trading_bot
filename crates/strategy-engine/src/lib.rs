@@ -46,6 +46,7 @@ pub use history::Bar;
 pub use models::{ModelInput, ModelOutcome, ModelRequest, ModelResponse};
 pub use plan::Plan;
 pub use portfolio::{
+    SelectionContext,
     Fill, InstrumentSpec, OrderClosed, OrderClosedReason, PortfolioView, VenueCaps, WorkingOrder,
 };
 pub use registry::{Registries, ResolvedModel, StdRegistries};

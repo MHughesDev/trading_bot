@@ -85,6 +85,29 @@ pub struct Rebalance {
     pub changes: Vec<AllocationChange>,
 }
 
+/// The numeric attributes `selection` gave `instrument`, as a member's
+/// portfolio view carries them (U-6.6). One conversion, used by the portfolio
+/// backtest and the live allocator alike, so both read the same number.
+#[must_use]
+pub fn member_attributes(selection: &Selection, instrument: &str) -> BTreeMap<String, Decimal> {
+    selection
+        .selected
+        .iter()
+        .find(|s| s.instrument == instrument)
+        .map(|s| {
+            s.attributes
+                .iter()
+                .filter_map(|(k, v)| match v {
+                    // Through the shortest string that reads back as the same
+                    // f64, so the attribute round-trips exactly.
+                    Value::Num(x) => x.get().to_string().parse::<Decimal>().ok().map(|d| (k.clone(), d)),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Rebalance `current` to the top `top_n` of `selection`.
 #[must_use]
 pub fn rebalance(

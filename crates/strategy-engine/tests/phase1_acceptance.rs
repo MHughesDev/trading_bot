@@ -495,6 +495,7 @@ fn u_1_5_every_state_field_is_read_from_the_view() {
         mark: Some(dec!(100)),
         open_orders: vec![],
         last_fill_price: Some(dec!(90)),
+        selection: None,
     };
     let s = e
         .on_event(

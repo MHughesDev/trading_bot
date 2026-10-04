@@ -881,6 +881,13 @@ impl LiveRunner {
                 })
                 .collect(),
             last_fill_price: self.last_fill_price,
+            selection: self.d.sleeve.as_ref().and_then(|s| s.selection()).map(|s| {
+                strategy_engine::SelectionContext {
+                    name: s.name,
+                    revision: s.revision,
+                    attributes: s.attributes,
+                }
+            }),
         }
     }
 
@@ -2269,6 +2276,104 @@ mod tests {
             !store.observations.lock().unwrap().is_empty(),
             "recording opened once both were flat"
         );
+    }
+
+    // ── U-6.6 ────────────────────────────────────────────────────────────────
+
+    fn reads_w() -> StrategyGraph {
+        graph(serde_json::json!({
+          "format": "tbot.strategy/3", "kind": "trading", "name": "reads_w",
+          "asset_class": "crypto_spot_cex", "timeframe": "1m",
+          "nodes": [
+            {"id":"w", "op":"selection_attr", "args":{"selection":{"str":"highest_w"},"attr":{"str":"w"}}},
+            {"id":"go","op":"ge","args":{"a":"close","b":0}}
+          ],
+          "decide": {"rules": [{"when":"go","then":{"kind":"hold"}}]}
+        }))
+    }
+
+    async fn one_decision(inst: &str, d: Arc<V3Deployment>) -> DecisionTrace {
+        ready_instrument(inst, "100");
+        let g = d.graph.clone();
+        let mut r = LiveRunner::start(
+            d,
+            plan_of(&g, &StdRegistries::new()),
+            AssetClass::CryptoSpotCex,
+            spec(inst),
+            deps(Arc::new(MemoryStore::default()), Arc::new(NoLiveModels)),
+            vec![Vec::new()],
+        )
+        .await
+        .unwrap();
+        r.on_minute_bar(
+            inst,
+            Bar {
+                close_ns: T0 * 1_000_000_000 + 60_000_000_000,
+                open: 100.0,
+                high: 101.0,
+                low: 99.0,
+                close: 100.0,
+                volume: 1.0,
+            },
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|t| t.cause == Cause::BarClose)
+        .unwrap()
+    }
+
+    /// A member on paper reads its selection's attribute exactly as the
+    /// portfolio backtest's member does — through the one conversion both use.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_member_on_paper_reads_what_its_selection_gave_it() {
+        use domain::strategy_graph::selection::{SelectedAsset, Selection};
+        let picked = Selection {
+            revision: "rev-w".into(),
+            as_of: chrono::Utc::now(),
+            universe_size: 3,
+            selected: vec![SelectedAsset {
+                instrument: "LIVE-ATTR-USD".into(),
+                rank: 1,
+                score: 103.17,
+                attributes: [(
+                    "w".to_string(),
+                    domain::strategy_graph::Value::num(103.17, "w"),
+                )]
+                .into_iter()
+                .collect(),
+            }],
+            excluded: vec![],
+        };
+        let sleeve = Arc::new(strategy_runtime::live::SleeveHandle::new(
+            Uuid::new_v4(),
+            Decimal::from(5_000),
+        ));
+        sleeve.set_selection(strategy_runtime::live::MemberSelection {
+            name: "highest_w".into(),
+            revision: picked.revision.clone(),
+            attributes: strategy_engine::allocation::member_attributes(&picked, "LIVE-ATTR-USD"),
+        });
+        let g = reads_w();
+        let mut d = (*deployment("LIVE-ATTR-USD", &g)).clone();
+        d.sleeve = Some(sleeve);
+        let trace = one_decision("LIVE-ATTR-USD", Arc::new(d)).await;
+        assert_eq!(
+            trace.values["w"],
+            domain::strategy_graph::Value::num(103.17, "w"),
+            "the attribute the selection gave, exactly"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_deployment_not_bound_to_a_selection_reads_missing_with_the_reason() {
+        let g = reads_w();
+        let trace = one_decision("LIVE-ATTR-SOLO-USD", deployment("LIVE-ATTR-SOLO-USD", &g)).await;
+        let domain::strategy_graph::Value::Missing(MissingReason::NoData { what }) = &trace.values["w"]
+        else {
+            panic!("{:?}", trace.values["w"]);
+        };
+        assert!(what.contains("not bound to a selection"), "{what}");
     }
 
     // ── U-4.5 ────────────────────────────────────────────────────────────────

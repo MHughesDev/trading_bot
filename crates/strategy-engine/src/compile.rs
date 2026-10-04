@@ -353,10 +353,7 @@ impl<'a> Compiler<'a> {
                 "`parse` does not run inside a strategy: text is parsed before it reaches the graph",
                 "declare the fields in the LLM model's contract outputs; its reply arrives already typed (U-5.6), so read `m.<field>` directly",
             )),
-            "selection_attr" => self.not_yet(
-                raw,
-                "U-6.6 (a trading strategy reading its selection's attributes)",
-            ),
+            "selection_attr" => self.compile_selection_attr(raw, spec),
             "feature" => self.compile_feature(raw, spec),
             "bar" => self.compile_bar(raw, spec),
             "hour" | "weekday" => self.compile_clock(raw, spec),
@@ -678,6 +675,37 @@ impl<'a> Compiler<'a> {
             NodeKind::Weekday
         };
         self.push_node(&raw.id, kind, ValueType::Num, 0);
+    }
+
+    /// `selection_attr(selection, attr)` (U-6.6): read by a trading strategy
+    /// deployed on a selection, from what its member's view carries.
+    fn compile_selection_attr(&mut self, raw: &RawNode, spec: &OpSpec) {
+        self.check_ports(raw, spec);
+        if self.graph.kind == domain::strategy_graph::StrategyKind::Selection {
+            self.diag(Diagnostic::new(
+                "selection_attr_in_selection",
+                &raw.id,
+                "`selection_attr` reads what a selection said about a trading strategy's instrument; \
+                 a selection strategy computes attributes, it does not read them",
+                "compute the value in this selection's own nodes, or declare it as an attribute",
+            ));
+            return;
+        }
+        let (Some(s), Some(a)) = (raw.args.get("selection"), raw.args.get("attr")) else {
+            return;
+        };
+        let Some(selection) = self.literal_text(&raw.id, "selection", s) else {
+            return;
+        };
+        let Some(attr) = self.literal_text(&raw.id, "attr", a) else {
+            return;
+        };
+        self.push_node(
+            &raw.id,
+            NodeKind::SelectionAttr { selection, attr },
+            ValueType::Num,
+            0,
+        );
     }
 
     fn compile_window(&mut self, raw: &RawNode, spec: &OpSpec) {

@@ -16,7 +16,7 @@ use dataplane::universe::MembershipEvent;
 use dataplane::InstrumentKey;
 use domain::instrument::AssetClass;
 use domain::strategy_graph::deployment::{OnRemoval, Rebalance, Weighting};
-use domain::strategy_graph::StrategyGraph;
+use domain::strategy_graph::{MissingReason, StrategyGraph, Value};
 use execution::paper::SimulatorSet;
 use execution::sim_venue::FillPolicy;
 use risk::{GlobalRiskLimits, InstrumentLimits};
@@ -154,9 +154,18 @@ fn run_with(
     rebalance: Rebalance,
     selection: &StrategyGraph,
 ) -> PortfolioOutcome {
+    run_graphs(on_removal, rebalance, selection, &always_long())
+}
+
+fn run_graphs(
+    on_removal: OnRemoval,
+    rebalance: Rebalance,
+    selection: &StrategyGraph,
+    trading: &StrategyGraph,
+) -> PortfolioOutcome {
     let reg = StdRegistries::new();
     let none = backtest::run::ParamMap::new();
-    let trading = runner::compile_for_run(&always_long(), &none, &reg).unwrap();
+    let trading = runner::compile_for_run(trading, &none, &reg).unwrap();
     let selection = runner::compile_for_run(selection, &none, &reg).unwrap();
     let members = ["A", "B", "C"];
     let r = PortfolioRun {
@@ -388,4 +397,93 @@ fn a_rebalance_schedule_applies_membership_only_when_it_fires() {
         .traces
         .iter()
         .all(|(i, t)| i == "B#1" && day_of(t.at_ns) >= 5));
+}
+
+// ── U-6.6 ────────────────────────────────────────────────────────────────────
+
+/// The selection that picks the highest close, and says what that close was.
+fn highest_with_its_close() -> StrategyGraph {
+    graph(serde_json::json!({
+      "format": "tbot.strategy/3", "kind": "selection", "name": "highest_w",
+      "asset_class": "crypto_spot_cex", "timeframe": "1d",
+      "universe": {"kind": "named", "name": "test"},
+      "nodes": [{"id":"p", "op":"bar", "args":{"field":{"str":"close"}}}],
+      "select": {"score": "p", "top_n": 1, "attributes": {"w": "p"}}
+    }))
+}
+
+/// Holds long, and reads what its selection said about its instrument.
+fn long_reading(selection: &str) -> StrategyGraph {
+    graph(serde_json::json!({
+      "format": "tbot.strategy/3", "kind": "trading", "name": "reads_w",
+      "asset_class": "crypto_spot_cex", "timeframe": "1h",
+      "nodes": [
+        {"id":"w",     "op":"selection_attr", "args":{"selection":{"str":selection},"attr":{"str":"w"}}},
+        {"id":"up",    "op":"gt",  "args":{"a":"close","b":0}},
+        {"id":"entry", "op":"and", "args":{"a":"up","b":"state.flat"}}
+      ],
+      "decide": {"rules": [
+        {"when":"entry","then":{"kind":"target","size":{"mode":"equity_fraction","x":0.5}}}
+      ]}
+    }))
+}
+
+#[test]
+fn a_member_reads_the_attribute_its_latest_selection_gave_it() {
+    let o = run_graphs(
+        OnRemoval::Close,
+        Rebalance::OnSelectionRun,
+        &highest_with_its_close(),
+        &long_reading("highest_w"),
+    );
+    assert!(!o.traces.is_empty());
+    let mut read = 0;
+    for (instance, trace) in &o.traces {
+        if trace.cause != strategy_engine::trace::Cause::BarClose {
+            continue;
+        }
+        let member = instance.split('#').next().unwrap();
+        // The latest selection at or before this decision.
+        let latest = o
+            .selections
+            .iter()
+            .filter(|s| s.as_of.timestamp_nanos_opt().unwrap() <= trace.at_ns)
+            .next_back()
+            .expect("a member decides only after a selection");
+        let given = latest
+            .selected
+            .iter()
+            .find(|s| s.instrument == member)
+            .and_then(|s| s.attributes.get("w"))
+            .cloned();
+        match given {
+            Some(Value::Num(x)) => {
+                assert_eq!(trace.values["w"], Value::num(x.get(), "w"), "{instance} at {}", trace.at_ns);
+                read += 1;
+            }
+            // An exiting member its latest selection no longer names reads
+            // what the selection last said about it; nothing to compare here.
+            _ => {}
+        }
+    }
+    assert!(read > 10, "members read their attribute ({read} decisions)");
+}
+
+#[test]
+fn a_member_naming_another_selection_reads_missing_with_the_reason() {
+    let o = run_graphs(
+        OnRemoval::Close,
+        Rebalance::OnSelectionRun,
+        &highest_with_its_close(),
+        &long_reading("some_other_screener"),
+    );
+    let (_, trace) = o
+        .traces
+        .iter()
+        .find(|(_, t)| t.cause == strategy_engine::trace::Cause::BarClose)
+        .unwrap();
+    let Value::Missing(MissingReason::NoData { what }) = &trace.values["w"] else {
+        panic!("{:?}", trace.values["w"]);
+    };
+    assert!(what.contains("highest_w") && what.contains("some_other_screener"), "{what}");
 }

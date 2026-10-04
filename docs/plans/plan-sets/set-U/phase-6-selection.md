@@ -1,6 +1,6 @@
 # Phase 6 — Selection strategies
 
-**Completion: 67% (4 / 6 tasks).** U-6.1, U-6.2, U-6.4, U-6.5 DONE 2026-10-02; U-6.3 PARTIAL (no standalone scheduled screener; its HTTP route not run against ClickHouse); U-6.6 added (a trading strategy reading its selection's attributes).
+**Completion: 83% (5 / 6 tasks).** U-6.1, U-6.2, U-6.4, U-6.5 DONE 2026-10-02; U-6.6 DONE 2026-10-04; U-6.3 PARTIAL (no standalone scheduled screener; its HTTP route not run against ClickHouse).
 
 **Requirement IDs:** SU-SEL-01…05.
 **Spec:** [FEAT-007](../../../specs/FEAT-007-unified-strategy-engine.md) §4, §5.2, §5.3; ADR-0040.
@@ -124,7 +124,22 @@ every instrument ever listed fails all four core tests. *Not run:* the executor'
 against ClickHouse (none here).
 
 ### U-6.6 A trading strategy reads its selection's attributes — M
-`NOT STARTED`
+`DONE` 2026-10-04 — `PortfolioView.selection` (`SelectionContext`: the selection's name, revision and
+the member's numeric attributes; absent from the serialised view when `None`, so journaled views and
+trace digests from before it are unchanged) and `NodeKind::SelectionAttr`, compiled from
+`selection_attr(selection, attr)` (a selection strategy is refused it, `selection_attr_in_selection`).
+`allocation::member_attributes` is the one conversion: the portfolio backtest sets each running member's
+sleeve after every rebalance and `SimOrders::view_of` shows it; the live allocator sets each member's
+`SleeveHandle` (its selection port now returns the selection's name) and the runner's view shows it. The
+attribute is matched by the selection's name or revision, and is missing with the reason when the
+instance is unbound, bound to another selection, or was given no such attribute. **Found by the
+acceptance test:** an attribute read back through `Decimal::to_f64` lost its last digit (200.48000000000002
+→ 200.48); it now reads back through the decimal's own digits. Evidence: backtest `portfolio.rs` —
+`a_member_reads_the_attribute_its_latest_selection_gave_it` (every bar-close decision of every member
+equals the attribute its latest selection gave it, exactly) and `…naming_another_selection_reads_missing…`;
+platform — `a_member_on_paper_reads_what_its_selection_gave_it` (the same conversion, exact) and
+`a_deployment_not_bound_to_a_selection_reads_missing_with_the_reason`; engine
+`a_selection_strategy_is_refused_selection_attr`.
 
 Found closing U-6.4. FEAT-007 §4 lets a trading strategy read "a selection's attributes" through
 `selection_attr`, and the compiler refuses it as not built. The allocator already holds each

@@ -189,6 +189,12 @@ pub enum NodeKind {
     },
     Hour,
     Weekday,
+    /// `selection_attr` (U-6.6): an attribute the instance's selection gave
+    /// its instrument, read from the portfolio view.
+    SelectionAttr {
+        selection: String,
+        attr: String,
+    },
     /// An operator from the registry, with its resolved arguments by port name.
     /// `switch`'s case labels are further entries.
     Op {

@@ -444,6 +444,17 @@ pub fn run_portfolio(
                     changes.push((t, change));
                 }
                 alloc = next;
+                // Every member reads what this selection said about it (U-6.6).
+                for m in running.keys() {
+                    orders.set_selection(
+                        m,
+                        strategy_engine::SelectionContext {
+                            name: r.selection.name.clone(),
+                            revision: selection.revision.clone(),
+                            attributes: allocation::member_attributes(selection, m),
+                        },
+                    );
+                }
             }
         }
 

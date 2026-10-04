@@ -34,19 +34,22 @@ use domain::strategy_graph::selection::Selection;
 use rust_decimal::Decimal;
 use strategy_engine::allocation::{self, Allocation, AllocationChange, Sleeve};
 use strategy_engine::schedule::Cron;
-use strategy_runtime::live::{LiveStrategyRegistry, SelectionBinding, SleeveHandle, V3Deployment};
+use strategy_runtime::live::{
+    LiveStrategyRegistry, MemberSelection, SelectionBinding, SleeveHandle, V3Deployment,
+};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
 /// Runs the deployment's selection.
 #[async_trait]
 pub trait SelectionPort: Send + Sync {
-    /// The selection as of `at`, and the journal id of the run.
+    /// The selection as of `at`, the journal id of the run, and the selection
+    /// strategy's name (what `selection_attr` names it by, U-6.6).
     async fn select(
         &self,
         revision: &str,
         at: DateTime<Utc>,
-    ) -> Result<(Selection, Option<Uuid>), String>;
+    ) -> Result<(Selection, Option<Uuid>, String), String>;
 }
 
 /// Starts members and reports whether they still run.
@@ -180,7 +183,7 @@ impl Allocator {
         members: &dyn MemberPort,
         journal: &dyn AllocationJournal,
     ) -> Result<Vec<AllocationChange>, String> {
-        let (picked, run) = selection.select(&self.b.selection, at).await?;
+        let (picked, run, name) = selection.select(&self.b.selection, at).await?;
         let rb = allocation::rebalance(
             &self.alloc,
             &picked,
@@ -241,6 +244,14 @@ impl Allocator {
             applied.push(change);
         }
         self.alloc = next;
+        // Every member reads what this selection said about it (U-6.6).
+        for (instrument, m) in &self.members {
+            m.sleeve.set_selection(MemberSelection {
+                name: name.clone(),
+                revision: picked.revision.clone(),
+                attributes: allocation::member_attributes(&picked, instrument),
+            });
+        }
         Ok(applied)
     }
 
@@ -335,7 +346,11 @@ impl SelectionPort for PgSelections {
         &self,
         revision: &str,
         at: DateTime<Utc>,
-    ) -> Result<(Selection, Option<Uuid>), String> {
+    ) -> Result<(Selection, Option<Uuid>, String), String> {
+        let name = backtest::selection_run::load_selection(&self.pg, revision)
+            .await
+            .map(|(_, plan, _)| plan.name.clone())
+            .map_err(|e| e.to_string())?;
         let report = backtest::selection_run::run_selection(
             &self.pg,
             &self.ch_url,
@@ -352,7 +367,7 @@ impl SelectionPort for PgSelections {
         )
         .await
         .map_err(|e| e.to_string())?;
-        Ok((report.run.selection, Some(run)))
+        Ok((report.run.selection, Some(run), name))
     }
 }
 
@@ -690,7 +705,7 @@ mod tests {
             &self,
             revision: &str,
             at: DateTime<Utc>,
-        ) -> Result<(Selection, Option<Uuid>), String> {
+        ) -> Result<(Selection, Option<Uuid>, String), String> {
             let next = self.0.lock().unwrap().remove(0);
             Ok((
                 Selection {
@@ -710,6 +725,7 @@ mod tests {
                     excluded: vec![],
                 },
                 Some(Uuid::new_v4()),
+                "scripted".to_string(),
             ))
         }
     }

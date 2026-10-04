@@ -366,3 +366,21 @@ fn a_selection_engine_refuses_a_trading_plan() {
         Err(strategy_engine::EngineError::TradingPlan)
     ));
 }
+
+/// U-6.6: `selection_attr` is what a trading strategy reads; a selection
+/// strategy computes attributes and is refused one, by name.
+#[test]
+fn a_selection_strategy_is_refused_selection_attr() {
+    let g = selection(
+        serde_json::json!([
+            {"id":"w", "op":"selection_attr", "args":{"selection":{"str":"other"},"attr":{"str":"w"}}},
+            {"id":"p", "op":"bar", "args":{"field":{"str":"close"}}}
+        ]),
+        serde_json::json!({"score": "p", "top_n": 1}),
+    );
+    let diags = compile(&g, &StdRegistries::new(), &ParamValues::new()).unwrap_err();
+    assert!(
+        diags.iter().any(|d| d.code == "selection_attr_in_selection"),
+        "{diags:#?}"
+    );
+}
