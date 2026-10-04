@@ -714,6 +714,7 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/models/{id}/versions/{v}/evaluate",
             post(models::start_eval),
+        )
         // One authoring API for the editor and the agent (Set U U-7.4).
         .route("/api/v3/authoring/validate", post(strategies_v3::validate))
         .route("/api/v3/authoring/compile", post(strategies_v3::compile))
@@ -722,7 +723,6 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v3/strategies", post(strategies_v3::save))
         .route("/api/v3/strategies/{id}", get(strategies_v3::get))
         .route("/api/v3/catalogue", get(strategies_v3::catalogue))
-        )
         .route(
             "/api/models/{id}/versions/{v}/promote",
             post(models::promote),

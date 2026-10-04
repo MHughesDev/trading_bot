@@ -67,8 +67,13 @@ v1) and `ScannerPanel` (evaluates v1 in the browser). Each needs a v3 arm before
 v3 head as its graph and SLv3 text (it was a 500); `apply_list` lists v3 rows with their kind (they were
 dropped); `POST /api/strategies/{id}/start` refuses a v3 head by name, pointing at `POST
 /api/deployments` (it was a 500); the v1 builder opens a v3 strategy in the graph editor, which now loads
-a stored strategy from `?strategy=`. Still v1-only, and in another track's in-flight files: automations
-arm/resume and `deploy_paper`, research sweeps, `toDefinition.ts`.
+a stored strategy from `?strategy=`. **And:** an automation whose execution strategy is a v3 head arms as
+a recorded deployment through `deployments::record_and_declare` — the one record-then-declare the route
+now also calls — `started_by = automation:<id>`, so disarming or deleting it stops exactly that
+deployment, and a restart resumes it from its record, not twice; a `deploy_paper` approval takes the
+same path; a research sweep over a v3 head sweeps its own typed parameters and constraints
+(`research::space::parameter_carrier`). Still v1-only: the SLv2 MCP tools (v3 tools exist beside
+them), `ScannerPanel` (lists only v1 discovery strategies), lifecycle simplification.
 
 Delete `sim.rs`'s evaluation loop, `preview.rs`'s loop, `interpreter.rs` and hot-path stage 3's `StrategyInstance` once every stored strategy runs on v3. A source-scan guard fails the build if any reappears.
 

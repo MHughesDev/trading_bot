@@ -5375,19 +5375,19 @@ version = "0.1.0"
 dependencies = [
  "domain",
  "features",
+ "rust_decimal",
  "serde",
  "serde_json",
+ "strategy-engine",
+ "strategy-validator",
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "strategy-runtime"
 version = "0.1.0"
- "rust_decimal",
 dependencies = [
  "builders",
- "strategy-engine",
- "strategy-validator",
  "chrono",
  "demand-manager",
  "domain",

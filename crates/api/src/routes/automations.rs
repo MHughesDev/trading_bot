@@ -165,9 +165,16 @@ async fn set_armed(
 ) -> axum::response::Response {
     if !armed {
         let removed = strategy_runtime::live::global().deregister_automation(&id.to_string());
+        let stopped = super::deployments::stop_started_by(
+            &state.pg,
+            &format!("automation:{id}"),
+            "automation disarmed",
+        )
+        .await;
         return match automation::set_automation_armed(&state.pg, id, false).await {
             Ok(true) => {
-                Json(json!({ "id": id, "armed": false, "deregistered": removed })).into_response()
+                Json(json!({ "id": id, "armed": false, "deregistered": removed + stopped }))
+                    .into_response()
             }
             Ok(false) => not_found(id),
             Err(e) => db_error(e),
@@ -299,6 +306,13 @@ pub async fn arm_by_id(state: &AppState, id: Uuid) -> Result<serde_json::Value, 
         )));
     };
 
+    // A strategy on the one engine arms as a recorded deployment (Set U
+    // U-8.3), never on hot-path stage 3.
+    if backtest::runner::is_v3(&def_json) {
+        return arm_v3(state, &row, id, instrument_id, asset_class, execution_strategy_id, def_json)
+            .await;
+    }
+
     let definition: domain::strategy_def::StrategyDefinition = serde_json::from_value(def_json)
         .map_err(|e| ArmError::Unusable(format!("invalid strategy definition: {e}")))?;
     let definition = domain::strategy_def::params::materialize(
@@ -340,6 +354,99 @@ pub async fn arm_by_id(state: &AppState, id: Uuid) -> Result<serde_json::Value, 
         }
         Err(e) => {
             live.deregister_automation(&id.to_string());
+            Err(ArmError::Storage(e.to_string()))
+        }
+    }
+}
+
+/// Arm an automation whose execution strategy is a `tbot.strategy/3` graph:
+/// record and declare it the way `POST /api/deployments` does
+/// ([`super::deployments::record_and_declare`]), `started_by` naming the
+/// automation so disarming or deleting it stops exactly this deployment. Its
+/// realised series needs a base, so the spec names a `starting_capital`.
+async fn arm_v3(
+    state: &AppState,
+    row: &automation::AutomationRow,
+    id: Uuid,
+    instrument_id: &str,
+    asset_class: &str,
+    execution_strategy_id: &str,
+    def_json: serde_json::Value,
+) -> Result<serde_json::Value, ArmError> {
+    let capital: rust_decimal::Decimal = match row.spec.get("starting_capital") {
+        Some(serde_json::Value::String(s)) => s.parse().ok(),
+        Some(serde_json::Value::Number(n)) => n.to_string().parse().ok(),
+        _ => None,
+    }
+    .filter(|c: &rust_decimal::Decimal| c.is_sign_positive() && !c.is_zero())
+    .ok_or_else(|| {
+        ArmError::Unusable(
+            "a strategy on the one engine runs as a recorded deployment, which is measured from \
+             a starting capital: set a positive `starting_capital` in the automation's spec"
+                .into(),
+        )
+    })?;
+    let graph: domain::strategy_graph::StrategyGraph = serde_json::from_value(def_json)
+        .map_err(|e| ArmError::Unusable(format!("invalid strategy graph: {e}")))?;
+    if graph.kind != domain::strategy_graph::StrategyKind::Trading {
+        return Err(ArmError::Unusable(
+            "an automation trades one instrument; a selection strategy deploys on a selection target"
+                .into(),
+        ));
+    }
+    let plan = backtest::runner::compile_for_run(
+        &graph,
+        &backtest::run::ParamMap::new(),
+        &backtest::models::RegistrySnapshot::load_or_empty(&state.pg).await,
+    )
+    .map_err(|e| ArmError::Unusable(format!("the strategy does not compile: {e}")))?;
+    let started_by = format!("automation:{id}");
+    let running = storage::postgres::deployments::running(&state.pg)
+        .await
+        .map_err(|e| ArmError::Storage(e.to_string()))?;
+    if running.iter().any(|r| r.started_by == started_by) {
+        return Err(ArmError::AlreadyRunning(format!(
+            "automation {id} already runs as a deployment"
+        )));
+    }
+    let deployment_id = Uuid::new_v4();
+    let record = storage::postgres::deployments::NewDeployment {
+        deployment_id,
+        user_id: row.user_id.to_string(),
+        strategy_name: graph.name.clone(),
+        revision_hash: plan.revision.clone(),
+        definition_json: serde_json::to_value(&graph).unwrap_or_default(),
+        instrument_id: instrument_id.to_owned(),
+        starting_capital: capital,
+        model_pins: json!(super::deployments::model_pins(&plan)),
+        started_by: started_by.clone(),
+        forward_deployment_id: None,
+        target: None,
+        parent_deployment_id: None,
+    };
+    state.ensure_pipeline(instrument_id, asset_class);
+    super::deployments::record_and_declare(&state.pg, &record, graph)
+        .await
+        .map_err(|e| match e {
+            super::deployments::DeclareError::NotRecorded(m) => ArmError::Storage(m),
+            super::deployments::DeclareError::AlreadyDeployed(m) => ArmError::AlreadyRunning(m),
+        })?;
+    match automation::set_automation_armed(&state.pg, id, true).await {
+        Ok(true) => Ok(json!({
+            "id": id,
+            "armed": true,
+            "instrument_id": instrument_id,
+            "execution_strategy_id": execution_strategy_id,
+            "deployment_id": deployment_id,
+            "revision": plan.revision,
+        })),
+        // Running but not believed armed: stopped, so the two cannot disagree.
+        Ok(false) => {
+            super::deployments::stop_started_by(&state.pg, &started_by, "automation vanished while arming").await;
+            Err(ArmError::NotFound)
+        }
+        Err(e) => {
+            super::deployments::stop_started_by(&state.pg, &started_by, "automation not marked armed").await;
             Err(ArmError::Storage(e.to_string()))
         }
     }
@@ -409,6 +516,13 @@ pub async fn resume_armed(
             );
             continue;
         };
+        // A v3 automation runs as a recorded deployment, which the live-runner
+        // supervisor resumes from its record; declaring it here too would run
+        // it twice.
+        if backtest::runner::is_v3(&def_json) {
+            tracing::info!(automation_id = %row.id, "v3 automation resumes as its recorded deployment");
+            continue;
+        }
         let definition: domain::strategy_def::StrategyDefinition =
             match serde_json::from_value(def_json)
                 .map_err(|e| e.to_string())
@@ -464,7 +578,15 @@ pub async fn delete_automation(
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
     match automation::delete_automation(&state.pg, id).await {
-        Ok(true) => Json(json!({ "id": id, "deleted": true })).into_response(),
+        Ok(true) => {
+            super::deployments::stop_started_by(
+                &state.pg,
+                &format!("automation:{id}"),
+                "automation deleted",
+            )
+            .await;
+            Json(json!({ "id": id, "deleted": true })).into_response()
+        }
         Ok(false) => not_found(id),
         Err(e) => db_error(e),
     }

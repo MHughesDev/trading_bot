@@ -243,16 +243,7 @@ pub async fn create_deployment(
             )
         }
     };
-    let model_pins: Vec<serde_json::Value> = plan
-        .nodes
-        .iter()
-        .filter_map(|n| match &n.kind {
-            strategy_engine::plan::NodeKind::Model(c) => {
-                Some(json!({ "node": n.id, "model": c.model, "version": c.version }))
-            }
-            _ => None,
-        })
-        .collect();
+    let model_pins = model_pins(&plan);
     let deployment_id = Uuid::new_v4();
     let user = token.user_id().to_string();
     let forward = body.forward;
@@ -396,35 +387,21 @@ pub async fn create_deployment(
     };
     // The record first: a deployment that runs without one is the defect this
     // route exists to end (FEAT-007 §1 defect 10).
-    if let Err(e) = storage::postgres::deployments::start(&state.pg, &record).await {
-        if let Some(id) = forward_deployment_id {
-            retire_forward(&state.pg, &user, id, "its deployment was not recorded").await;
+    match record_and_declare(&state.pg, &record, graph).await {
+        Ok(()) => {}
+        Err(DeclareError::NotRecorded(e)) => {
+            if let Some(id) = forward_deployment_id {
+                retire_forward(&state.pg, &user, id, "its deployment was not recorded").await;
+            }
+            return refuse(
+                StatusCode::CONFLICT,
+                "not_recorded",
+                format!("the deployment could not be recorded: {e}"),
+            );
         }
-        return refuse(
-            StatusCode::CONFLICT,
-            "not_recorded",
-            format!("the deployment could not be recorded: {e}"),
-        );
-    }
-    let declared = strategy_runtime::live::global().register_v3(V3Deployment {
-        deployment_id,
-        user_id: user,
-        instrument_id,
-        revision: plan.revision.clone(),
-        graph,
-        starting_capital: capital,
-        sleeve: None,
-    });
-    if let Err(e) = declared {
-        // Recorded but not running: close the record rather than leave a row
-        // that claims a deployment nothing runs.
-        let _ = storage::postgres::deployments::stop(
-            &state.pg,
-            deployment_id,
-            &format!("not started: {e}"),
-        )
-        .await;
-        return refuse(StatusCode::CONFLICT, "already_deployed", e.to_string());
+        Err(DeclareError::AlreadyDeployed(e)) => {
+            return refuse(StatusCode::CONFLICT, "already_deployed", e)
+        }
     }
     (
         StatusCode::CREATED,
@@ -438,6 +415,86 @@ pub async fn create_deployment(
         })),
     )
         .into_response()
+}
+
+/// The model versions a compiled plan pins, as a deployment records them.
+#[must_use]
+pub fn model_pins(plan: &strategy_engine::Plan) -> Vec<serde_json::Value> {
+    plan.nodes
+        .iter()
+        .filter_map(|n| match &n.kind {
+            strategy_engine::plan::NodeKind::Model(c) => {
+                Some(json!({ "node": n.id, "model": c.model, "version": c.version }))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Why a deployment did not start.
+#[derive(Debug)]
+pub enum DeclareError {
+    /// The record was refused; nothing runs.
+    NotRecorded(String),
+    /// Recorded, but the registry already runs it; the record was closed.
+    AlreadyDeployed(String),
+}
+
+/// Record an instrument deployment, then declare it in the one live registry,
+/// where the live-runner supervisor picks it up — the one way a v3 strategy
+/// starts on paper, from this route and from an armed automation alike. The
+/// record comes first: a deployment that runs without one is the defect this
+/// path exists to end (FEAT-007 §1 defect 10). Recorded but refused by the
+/// registry, the record is closed rather than left claiming a deployment
+/// nothing runs.
+pub async fn record_and_declare(
+    pg: &sqlx::PgPool,
+    record: &storage::postgres::deployments::NewDeployment,
+    graph: domain::strategy_graph::StrategyGraph,
+) -> Result<(), DeclareError> {
+    storage::postgres::deployments::start(pg, record)
+        .await
+        .map_err(|e| DeclareError::NotRecorded(e.to_string()))?;
+    let declared = strategy_runtime::live::global().register_v3(V3Deployment {
+        deployment_id: record.deployment_id,
+        user_id: record.user_id.clone(),
+        instrument_id: record.instrument_id.clone(),
+        revision: record.revision_hash.clone(),
+        graph,
+        starting_capital: record.starting_capital,
+        sleeve: None,
+    });
+    if let Err(e) = declared {
+        let _ = storage::postgres::deployments::stop(
+            pg,
+            record.deployment_id,
+            &format!("not started: {e}"),
+        )
+        .await;
+        return Err(DeclareError::AlreadyDeployed(e.to_string()));
+    }
+    Ok(())
+}
+
+/// Stop every running deployment `started_by` names — withdrawn from the
+/// registry first, so its runner stops at its next tick, then closed. Returns
+/// how many stopped.
+pub async fn stop_started_by(pg: &sqlx::PgPool, started_by: &str, reason: &str) -> usize {
+    let Ok(rows) = storage::postgres::deployments::running(pg).await else {
+        return 0;
+    };
+    let registry = strategy_runtime::live::global();
+    let mut stopped = 0;
+    for row in rows.into_iter().filter(|r| r.started_by == started_by) {
+        registry.deregister_v3(row.deployment_id);
+        if storage::postgres::deployments::stop(pg, row.deployment_id, reason)
+            .await
+            .unwrap_or(false)
+        {
+            stopped += 1;
+        }
+    }
+    stopped
 }
 
 /// DELETE /api/deployments/{id}

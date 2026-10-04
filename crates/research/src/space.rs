@@ -127,6 +127,30 @@ impl Dim {
     }
 }
 
+/// What a sweep reads of a `tbot.strategy/3` graph: its typed parameters and
+/// the constraints across them — the same `ParamSpec`s and constraint strings
+/// a v1 definition declares — carried in the shape [`SearchSpace`] builds from.
+/// Nothing else of the graph is used: the batches run the stored graph itself,
+/// through the format-routed executor (Set U U-8.3).
+///
+/// # Errors
+/// The graph's parameters do not form a definition (never, for a graph that
+/// parsed).
+pub fn parameter_carrier(
+    g: &domain::strategy_graph::StrategyGraph,
+) -> Result<StrategyDefinition, serde_json::Error> {
+    serde_json::from_value(serde_json::json!({
+        "strategy_id": g.name,
+        "definition_version": "1.2",
+        "asset_class": g.asset_class,
+        "parameters": g.params,
+        "constraints": g.constraints,
+        "inputs": [],
+        "nodes": [],
+        "actions": [],
+    }))
+}
+
 /// The sweepable space of one definition.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SearchSpace {
@@ -284,6 +308,38 @@ impl SearchSpace {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// U-8.3: a v3 graph sweeps over its own parameters, constraints included.
+    #[test]
+    fn a_v3_graph_sweeps_over_its_own_typed_parameters() {
+        let g: domain::strategy_graph::StrategyGraph = serde_json::from_value(json!({
+          "format": "tbot.strategy/3", "kind": "trading", "name": "ema_x",
+          "asset_class": "crypto_spot_cex", "timeframe": "1h",
+          "params": {
+            "fast": {"type": "int", "default": 7, "min": 3, "max": 20},
+            "slow": {"type": "int", "default": 21, "min": 10, "max": 60}
+          },
+          "constraints": ["param('fast') < param('slow')"],
+          "nodes": [
+            {"id":"f","op":"ema","args":{"x":"close","n":"$fast"}},
+            {"id":"s","op":"ema","args":{"x":"close","n":"$slow"}},
+            {"id":"up","op":"gt","args":{"a":"f","b":"s"}}
+          ],
+          "decide": {"rules": [{"when":"up","then":{"kind":"close"}}]}
+        }))
+        .unwrap();
+        let space =
+            SearchSpace::from_definition(&parameter_carrier(&g).unwrap(), &BTreeMap::new()).unwrap();
+        assert_eq!(space.n_dims(), 2);
+        let mut ok = ParamMap::new();
+        ok.insert("fast".into(), Value::from(5));
+        ok.insert("slow".into(), Value::from(30));
+        assert!(space.feasible(&ok));
+        let mut bad = ok.clone();
+        bad.insert("fast".into(), Value::from(15));
+        bad.insert("slow".into(), Value::from(12));
+        assert!(!space.feasible(&bad), "the graph's constraint holds");
+    }
 
     pub(crate) fn fixture() -> StrategyDefinition {
         serde_json::from_value(json!({
