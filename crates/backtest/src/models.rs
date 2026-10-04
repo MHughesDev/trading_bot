@@ -191,7 +191,9 @@ impl CacheKey {
 /// reads instead of calling the sidecar again.
 pub trait PredictionCache: Send + Sync {
     fn get(&self, key: &CacheKey) -> Option<ModelOutcome>;
-    fn put(&self, key: CacheKey, outcome: ModelOutcome);
+    /// Keep an answer, with the training end of the version that gave it — so
+    /// a stored series says which model answered, not only what it answered.
+    fn put(&self, key: CacheKey, outcome: ModelOutcome, trained_through_ns: Option<i64>);
 }
 
 /// An in-process cache.
@@ -213,7 +215,7 @@ impl PredictionCache for MemoryCache {
     fn get(&self, key: &CacheKey) -> Option<ModelOutcome> {
         self.0.lock().ok()?.get(key).cloned()
     }
-    fn put(&self, key: CacheKey, outcome: ModelOutcome) {
+    fn put(&self, key: CacheKey, outcome: ModelOutcome, _trained_through_ns: Option<i64>) {
         if let Ok(mut m) = self.0.lock() {
             m.insert(key, outcome);
         }
@@ -276,7 +278,7 @@ impl PredictionCache for ClickHouseCache {
         hit.and_then(|h| serde_json::from_str(&h.outcome).ok())
     }
 
-    fn put(&self, key: CacheKey, outcome: ModelOutcome) {
+    fn put(&self, key: CacheKey, outcome: ModelOutcome, trained_through_ns: Option<i64>) {
         let row = SeriesRow {
             status: match &outcome {
                 ModelOutcome::Answered { .. } => "answered",
@@ -290,7 +292,7 @@ impl PredictionCache for ClickHouseCache {
             version: key.version,
             at_ns: key.at_ns,
             inputs_digest: key.inputs_digest,
-            trained_through_ns: None,
+            trained_through_ns,
         };
         let written: Result<(), clickhouse::error::Error> = self.block(async {
             let mut insert = self.client.insert("model_prediction_series")?;
@@ -505,7 +507,8 @@ impl<S: PredictionSource> ModelProvider for PitModels<S> {
                 fresh,
                 ModelOutcome::Answered { .. } | ModelOutcome::Abstained { .. }
             ) {
-                self.cache.put(key, fresh.clone());
+                self.cache
+                    .put(key, fresh.clone(), consumption.trained_through_ns);
             }
             fresh
         };

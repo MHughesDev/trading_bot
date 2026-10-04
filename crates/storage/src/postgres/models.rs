@@ -36,6 +36,13 @@ pub struct VersionContractRow {
 
 /// Every model version, with its contract (if any) and artifact.
 ///
+/// The artifact is the version's `model` artifact — the one `artifact_id`
+/// names when it is set, else the most recent. Training writes
+/// `model_artifacts` by `(model_id, version)` and has never set
+/// `model_versions.artifact_id`, so joining on that column (as this did until
+/// 2026-10-04) left every trained version with no artifact: no backtest and no
+/// paper deployment could ever be answered by a trained model.
+///
 /// # Errors
 /// A database error.
 pub async fn version_contracts(
@@ -48,7 +55,14 @@ pub async fn version_contracts(
                 m.definition_json -> 'transform' AS transform \
          FROM model_versions v \
          JOIN ai_models m ON m.model_id = v.model_id \
-         LEFT JOIN model_artifacts a ON a.artifact_id = v.artifact_id \
+         LEFT JOIN LATERAL ( \
+             SELECT storage_uri, sha256 FROM model_artifacts a \
+              WHERE a.model_id = v.model_id AND a.version = v.version \
+                AND a.artifact_type = 'model' \
+              ORDER BY (a.artifact_id = v.artifact_id) DESC NULLS LAST, \
+                       a.created_at DESC, a.artifact_id \
+              LIMIT 1 \
+         ) a ON true \
          ORDER BY v.model_id, v.version",
     )
     .fetch_all(pool)
