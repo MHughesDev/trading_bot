@@ -565,10 +565,9 @@ impl LiveRunner {
         Ok(())
     }
 
-    /// Keep a fill of this deployment for the recorder to resume from. Every
-    /// fill while recording is attached, with the price its decision was made
-    /// at; one without a decision price (an order from before attach) is kept
-    /// at its own price, so its slippage reads as zero rather than invented.
+    /// Keep a fill of this deployment for the recorder to resume from: every
+    /// fill once it has opened (it opens flat with nothing working, so no order
+    /// straddles the opening), with the price its decision was made at.
     async fn keep_forward_fill(
         &mut self,
         side: Side,
@@ -581,7 +580,8 @@ impl LiveRunner {
         let Some(f) = self.forward.as_mut() else {
             return;
         };
-        if filled <= Decimal::ZERO {
+        // The fills the recorder saw: those of orders decided after it opened.
+        if !f.opened || filled <= Decimal::ZERO {
             return;
         }
         f.fill_seq += 1;
@@ -1069,8 +1069,13 @@ impl LiveRunner {
             match action {
                 OrderAction::Submit(o) => {
                     let intent = self.intent(o);
+                    // Only orders decided after the recorder opened — from flat,
+                    // with nothing working. One decided before would hand it the
+                    // closing fill of a position it never saw.
                     if let (Some(f), Some(mark)) = (&self.forward, self.decision_mark) {
-                        f.recorder.on_submit(&intent, Price::from_decimal(mark));
+                        if f.opened {
+                            f.recorder.on_submit(&intent, Price::from_decimal(mark));
+                        }
                     }
                     let mut order = LiveOrder {
                         key: intent.idempotency_key,
@@ -2254,6 +2259,9 @@ mod tests {
                     before,
                     "nothing is recorded while the runner holds a position the shadow does not"
                 );
+                // The fills that close the position it held at attach are not
+                // the recorder's.
+                assert!(store.fills.lock().unwrap().is_empty());
             }
         }
         assert!(first_flat.is_some(), "the runner went flat");
