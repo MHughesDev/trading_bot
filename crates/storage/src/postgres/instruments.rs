@@ -67,11 +67,15 @@ fn row_to_instrument(row: InstrumentRow) -> Instrument {
     }
 }
 
-const SELECT_COLUMNS: &str = "id, venue_id, asset_class, \
+// Aliased to the row type's names: the table (0002) calls them `instrument_id`
+// and `active`. Until 2026-10-03 this selected `id` and `is_active`, which do not
+// exist, so every lookup failed against a real database; `watermark_secs` is INT4
+// there and read as i64 here, hence the cast. `tests/pg_instruments.rs` holds it.
+const SELECT_COLUMNS: &str = "instrument_id AS id, venue_id, asset_class, \
     tick_size::TEXT, lot_size::TEXT, \
     COALESCE(base_precision, 8)  AS base_precision, \
     COALESCE(quote_precision, 2) AS quote_precision, \
-    is_active, trust_tier, halt_policy, watermark_secs";
+    active AS is_active, trust_tier, halt_policy, watermark_secs::BIGINT AS watermark_secs";
 
 fn map_row(r: sqlx::postgres::PgRow) -> InstrumentRow {
     InstrumentRow {
@@ -94,7 +98,7 @@ pub async fn fetch_by_id(
     pool: &PgPool,
     instrument_id: &str,
 ) -> Result<Option<Instrument>, PgError> {
-    let sql = format!("SELECT {SELECT_COLUMNS} FROM instruments WHERE id = $1");
+    let sql = format!("SELECT {SELECT_COLUMNS} FROM instruments WHERE instrument_id = $1");
     let row = sqlx::query(&sql)
         .bind(instrument_id)
         .fetch_optional(pool)
@@ -104,7 +108,7 @@ pub async fn fetch_by_id(
 
 /// List all active instruments.
 pub async fn list_active(pool: &PgPool) -> Result<Vec<Instrument>, PgError> {
-    let sql = format!("SELECT {SELECT_COLUMNS} FROM instruments WHERE is_active = true");
+    let sql = format!("SELECT {SELECT_COLUMNS} FROM instruments WHERE active = true");
     let rows = sqlx::query(&sql).fetch_all(pool).await?;
     Ok(rows
         .into_iter()

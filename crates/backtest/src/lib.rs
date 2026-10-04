@@ -43,6 +43,7 @@ pub mod preview;
 pub mod procedure_null;
 pub mod receipt;
 pub mod reconcile;
+pub mod replay;
 pub mod requirements;
 pub mod rng;
 pub mod run;

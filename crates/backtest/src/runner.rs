@@ -469,10 +469,48 @@ impl V3RunExecutor {
         let plan = compile_for_run(&graph, &cfg.params, registry.as_ref()).map_err(integrity)?;
         check_resolution(&plan, cfg).map_err(integrity)?;
 
+        let fill = fill_policy(cfg.fill_model).map_err(integrity)?;
+        let mut run = self
+            .load_plan(
+                plan,
+                &graph.asset_class,
+                &cfg.data_slice.universe_ref,
+                cfg.data_slice.start,
+                cfg.data_slice.end,
+                fill,
+                &cfg.strategy_ref,
+            )
+            .await?;
+        // A null-world run sees generated bars for the instrument it trades.
+        if let Some(nw) = &cfg.null_world {
+            run.bars[PRIMARY] = crate::sim_executor::apply_null_world(&run.bars[PRIMARY], nw);
+        }
+        Ok((run, registry))
+    }
+
+    /// Everything a compiled plan needs to run on `instrument` over
+    /// `[start, end]`: its instrument metadata and every input's bars, warm-up
+    /// included. What a stored run loads, for a plan that need not be stored —
+    /// the v3 migration backtests a translation before saving it (U-8.5).
+    ///
+    /// # Errors
+    /// An unknown asset class or instrument, or bars that are not stored.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn load_plan(
+        &self,
+        plan: Plan,
+        asset_class: &str,
+        instrument: &str,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        fill: FillPolicy,
+        strategy_id: &str,
+    ) -> Result<V3Run, (TerminalReason, String)> {
+        let integrity = |e: String| (TerminalReason::IntegrityRejected, e);
         let asset_class: AssetClass =
-            serde_json::from_value(serde_json::Value::String(graph.asset_class.clone()))
-                .map_err(|_| integrity(format!("unknown asset class '{}'", graph.asset_class)))?;
-        let instrument = cfg.data_slice.universe_ref.clone();
+            serde_json::from_value(serde_json::Value::String(asset_class.to_owned()))
+                .map_err(|_| integrity(format!("unknown asset class '{asset_class}'")))?;
+        let instrument = instrument.to_owned();
         let meta = storage::postgres::instruments::fetch_by_id(&self.pg, &instrument)
             .await
             .map_err(|e| (TerminalReason::DependencyFailure, e.to_string()))?
@@ -480,15 +518,13 @@ impl V3RunExecutor {
                 (
                     TerminalReason::DataError,
                     format!(
-                        "no instrument metadata for '{instrument}': the risk gate refuses an \
-                         instrument it cannot size, here as live (ADR-0046)"
+                        "no instrument metadata for '{instrument}': the risk gate refuses an                          instrument it cannot size, here as live (ADR-0046)"
                     ),
                 )
             })?;
-        let fill = fill_policy(cfg.fill_model).map_err(integrity)?;
 
         let store = crate::store::BarStore::connect(&self.ch_url);
-        let start_ns = cfg.data_slice.start.timestamp_nanos_opt().unwrap_or(0);
+        let start_ns = start.timestamp_nanos_opt().unwrap_or(0);
         let mut bars = Vec::with_capacity(plan.inputs.len());
         for (i, need) in plan.required_history() {
             let input = &plan.inputs[i];
@@ -500,12 +536,7 @@ impl V3RunExecutor {
                 i64::from(need.saturating_add(1)) * i64::from(input.timeframe.seconds()),
             );
             let loaded = store
-                .load_bars(
-                    &id,
-                    input.timeframe.timeframe(),
-                    cfg.data_slice.start - lead,
-                    cfg.data_slice.end,
-                )
+                .load_bars(&id, input.timeframe.timeframe(), start - lead, end)
                 .await
                 .map_err(|e| {
                     (
@@ -524,37 +555,30 @@ impl V3RunExecutor {
             }
             bars.push(loaded);
         }
-        // A null-world run sees generated bars for the instrument it trades.
-        if let Some(nw) = &cfg.null_world {
-            bars[PRIMARY] = crate::sim_executor::apply_null_world(&bars[PRIMARY], nw);
-        }
         let lot = meta.lot_size;
-        Ok((
-            V3Run {
-                plan: Arc::new(plan),
-                instrument: instrument.clone(),
-                asset_class,
-                bars,
-                start_ns,
-                spec: InstrumentSpec {
-                    instrument,
-                    lot_size: lot,
-                    tick_size: meta.tick_size,
-                    min_qty: lot,
-                    caps: strategy_engine::VenueCaps::all(),
-                },
-                instrument_limits: InstrumentLimits {
-                    tick_size: meta.tick_size,
-                    lot_size: lot,
-                },
-                limits: GlobalRiskLimits::default(),
-                initial_balance: self.initial_balance,
-                fill_policy: fill,
-                strategy_id: cfg.strategy_ref.clone(),
-                sims: SimulatorSet::realistic(),
+        Ok(V3Run {
+            plan: Arc::new(plan),
+            instrument: instrument.clone(),
+            asset_class,
+            bars,
+            start_ns,
+            spec: InstrumentSpec {
+                instrument,
+                lot_size: lot,
+                tick_size: meta.tick_size,
+                min_qty: lot,
+                caps: strategy_engine::VenueCaps::all(),
             },
-            registry,
-        ))
+            instrument_limits: InstrumentLimits {
+                tick_size: meta.tick_size,
+                lot_size: lot,
+            },
+            limits: GlobalRiskLimits::default(),
+            initial_balance: self.initial_balance,
+            fill_policy: fill,
+            strategy_id: strategy_id.to_owned(),
+            sims: SimulatorSet::realistic(),
+        })
     }
 }
 

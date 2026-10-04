@@ -76,7 +76,7 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
     vec![
         ToolSpec::new(
             "run_selection",
-            "strategy",
+            "analysis",
             Risk::Read,
             "Run a selection strategy (a screener) now, or as of a past instant, and get the \
              ranked list it picks — every universe member selected with its score, or excluded \
@@ -94,7 +94,7 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
         .evidence(&["run_id", "digest"]),
         ToolSpec::new(
             "list_selection_runs",
-            "strategy",
+            "analysis",
             Risk::Read,
             "List journaled selection runs, newest first, optionally of one strategy.",
             json!({

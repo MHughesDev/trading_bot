@@ -67,7 +67,10 @@ tower-http = { version = "0.6", features = ["cors", "trace", "compression-full",
 
 # serialization / core types
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["raw_value"] }
+# `float_roundtrip`: a number written as JSON reads back as the same f64. Without it the
+# parser can be one ULP off, and a paper journal replayed through the backtest engine
+# drifts in the last digit (Set U U-8.1; ADR-0047 requires byte-identical decisions).
+serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 uuid = { version = "1", features = ["v4", "v5", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"

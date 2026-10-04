@@ -144,7 +144,7 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
         .notes("validate_strategy_v3"),
         ToolSpec::new(
             "compile_strategy_v3",
-            "strategy",
+            "builder",
             Risk::Read,
             "What a valid v3 strategy compiles to: its inputs and indicators, warm-up and the \
              model versions it pins.",
@@ -198,7 +198,7 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
         .evidence(&["revision"]),
         ToolSpec::new(
             "get_strategy_catalogue",
-            "strategy",
+            "discovery",
             Risk::Read,
             "Every operator, feature family and callable model a v3 strategy can use, read from \
              the registries the compiler checks against.",

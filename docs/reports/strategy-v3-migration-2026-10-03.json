@@ -1,0 +1,347 @@
+{
+  "generated_at": "2026-10-04T08:12:49.850454500Z",
+  "applied": false,
+  "strategies": [
+    {
+      "strategy_id": "ai_model_smoke",
+      "v1_revision": "10e54102be7d2f2cf2c519531f6018e09170978db44da24985e0eb60694765f4",
+      "timeframe": "1h",
+      "timeframe_source": "default: no backtest on record",
+      "outcome": "does_not_compile",
+      "text": "strategy ai_model_smoke kind trading asset_class crypto_spot_cex timeframe 1h\ndescription \"translated from v1.1\"\n\nlet m1__model = model(\"btc_forecaster@production\")\nlet m1 = is(m1__model.direction, \"bullish\") and m1__model.confidence >= 0.6\n\nwhen m1 and not prev(m1, 1.0) -> order(side: buy, size: units(x: 0.01), style: market, tif: gtc)\notherwise hold\n",
+      "errors": "[unknown_model] at m1__model: no model answers to 'btc_forecaster@production' — fix: use `name@version` or `name@alias` for a model in the registry; list them with the models catalogue"
+    },
+    {
+      "strategy_id": "btc_model_signal_v1",
+      "v1_revision": "f9c8616839ae527f3761e11896a5aa60336b7b0241476d1749c98e35f579fe61",
+      "timeframe": "1h",
+      "timeframe_source": "default: no backtest on record",
+      "outcome": "refused",
+      "construct": "inputs",
+      "at": "inputs[lane=market.bars.1h]",
+      "why": "it reads `BTC-USD`, another instrument; declare it as a v3 `input` by hand"
+    },
+    {
+      "strategy_id": "ema_crossover",
+      "v1_revision": "99011bd86e372817ab7be00ee1536b520e37dcfe8e998fbb42c48dd318c044fb",
+      "timeframe": "1m",
+      "timeframe_source": "its latest backtest",
+      "outcome": "translated",
+      "v3_revision": "8615811218343b2703eea684eabcd7bcf9b77f83b77f8ef7444c340fa0defcf6",
+      "text": "strategy ema_crossover kind trading asset_class crypto_spot_cex timeframe 1m\ndescription \"translated from v1.0\"\n\nlet c_bull = feature(\"ema_7\") > feature(\"ema_21\")\nlet c_bear = feature(\"ema_7\") < feature(\"ema_21\")\n\nwhen c_bull and not prev(c_bull, 1.0) -> order(side: buy, size: units(x: 0.1), style: market, tif: gtc)\nwhen c_bear and not prev(c_bear, 1.0) -> order(side: sell, size: units(x: 0.1), style: market, tif: gtc)\notherwise hold\n",
+      "changes": [
+        {
+          "code": "fills_next_bar_open",
+          "detail": "orders fill at the next bar's open, not at the close of the bar that decided"
+        },
+        {
+          "code": "risk_gate_applied",
+          "detail": "every order passes the production risk gate, in backtests too"
+        },
+        {
+          "code": "missing_holds",
+          "detail": "a value that cannot be computed (an indicator warming up, a model that does not answer) holds the rule, with the reason journaled, rather than comparing false"
+        }
+      ],
+      "rerun": {
+        "instrument": "BTC-USD",
+        "window": [
+          "2026-06-15T00:00:00Z",
+          "2026-06-22T00:00:00Z"
+        ],
+        "initial_balance": 10000.0,
+        "old": {
+          "bars": 6022,
+          "orders": 333,
+          "positions": 167,
+          "pnl": 0.0
+        },
+        "new": {
+          "Ok": {
+            "orders": 567,
+            "round_trips": 101,
+            "pnl": -3770.110724414403,
+            "decisions": 10079,
+            "gate_rejections": 0,
+            "holds": 0
+          }
+        },
+        "differences": [
+          {
+            "metric": "orders",
+            "old": 333.0,
+            "new": 567.0,
+            "attributed_to": [
+              "bars_differ"
+            ]
+          },
+          {
+            "metric": "pnl",
+            "old": 0.0,
+            "new": -3770.110724414403,
+            "attributed_to": [
+              "v1_venue_reported_no_fills",
+              "bars_differ",
+              "fills_next_bar_open"
+            ]
+          }
+        ]
+      },
+      "applied": false
+    },
+    {
+      "strategy_id": "ema_crossover_scanner",
+      "v1_revision": "aa8c1354274a4b24bb3dfa6784f6df65a47c8f6148ec73d19b9ad3d759b72ccb",
+      "timeframe": "1h",
+      "timeframe_source": "default: no backtest on record",
+      "outcome": "translated",
+      "v3_revision": "3a62fffd9379180cb9201f346001a32fd9f79770ba61fac6c7c7732d6478cb8a",
+      "text": "strategy ema_crossover_scanner kind trading asset_class crypto_spot_cex timeframe 1h\ndescription \"translated from v1.0\"\n\nlet c1 = feature(\"ema_7\") > feature(\"ema_21\")\n\notherwise hold\n",
+      "changes": [
+        {
+          "code": "fills_next_bar_open",
+          "detail": "orders fill at the next bar's open, not at the close of the bar that decided"
+        },
+        {
+          "code": "risk_gate_applied",
+          "detail": "every order passes the production risk gate, in backtests too"
+        },
+        {
+          "code": "missing_holds",
+          "detail": "a value that cannot be computed (an indicator warming up, a model that does not answer) holds the rule, with the reason journaled, rather than comparing false"
+        },
+        {
+          "code": "no_orders",
+          "detail": "the v1 definition places no orders; the translation has no entry rule"
+        }
+      ],
+      "rerun": null,
+      "applied": false
+    },
+    {
+      "strategy_id": "ema_cross_p_smoke_1788927738",
+      "v1_revision": "86aa09df5bf5adc0610aa0feb6ee3b3f6f743973f5ab92e42ccd05993d6a68ea",
+      "timeframe": "1h",
+      "timeframe_source": "default: no backtest on record",
+      "outcome": "refused",
+      "construct": "parameterised feature name",
+      "at": "nodes[n1]",
+      "why": "`feature('ema_{{fast}}')` names a different feature for each parameter value; a v3 feature name is fixed — use the operator with a parameter port instead, e.g. `ema(close, $fast)`"
+    },
+    {
+      "strategy_id": "ema_cross_p_smoke_1788928410",
+      "v1_revision": "7f5e43d91b59f6e92002a456d56ad36f4e4dc4bda178ccedb9cf67813b62b06c",
+      "timeframe": "1h",
+      "timeframe_source": "default: no backtest on record",
+      "outcome": "refused",
+      "construct": "parameterised feature name",
+      "at": "nodes[n1]",
+      "why": "`feature('ema_{{fast}}')` names a different feature for each parameter value; a v3 feature name is fixed — use the operator with a parameter port instead, e.g. `ema(close, $fast)`"
+    },
+    {
+      "strategy_id": "ema_cross_v1",
+      "v1_revision": "b329d970884dddce4b092e6d4d44bb1944fb0c429cd9d92419688500996e7766",
+      "timeframe": "1m",
+      "timeframe_source": "its latest backtest",
+      "outcome": "translated",
+      "v3_revision": "fa957ede23d05e9bb99c5cb53dcb67a8cee4e07c0406bcec6d78c38770b26cd9",
+      "text": "strategy ema_cross_v1 kind trading asset_class crypto_spot_cex timeframe 1m\ndescription \"translated from v1.0\"\n\nlet c1 = feature(\"ema_7\") > feature(\"ema_21\")\n\nwhen c1 and not prev(c1, 1.0) -> order(side: buy, size: units(x: 0.01), style: market, tif: gtc)\notherwise hold\n",
+      "changes": [
+        {
+          "code": "fills_next_bar_open",
+          "detail": "orders fill at the next bar's open, not at the close of the bar that decided"
+        },
+        {
+          "code": "risk_gate_applied",
+          "detail": "every order passes the production risk gate, in backtests too"
+        },
+        {
+          "code": "missing_holds",
+          "detail": "a value that cannot be computed (an indicator warming up, a model that does not answer) holds the rule, with the reason journaled, rather than comparing false"
+        }
+      ],
+      "rerun": {
+        "instrument": "BTC-USDT",
+        "window": [
+          "2026-06-15T01:27:10.550Z",
+          "2026-09-13T01:27:10.550Z"
+        ],
+        "initial_balance": 100000.0,
+        "old": {
+          "bars": 2264,
+          "orders": 58,
+          "positions": 1,
+          "pnl": 0.0
+        },
+        "new": {
+          "Err": "no instrument metadata for 'BTC-USDT': the risk gate refuses an                          instrument it cannot size, here as live (ADR-0046)"
+        },
+        "differences": []
+      },
+      "applied": false
+    },
+    {
+      "strategy_id": "ema_rsi_trend",
+      "v1_revision": "bc683cd69be02415aea3683b70db96019063e317ad15e3fb398c0b135cffd24a",
+      "timeframe": "1h",
+      "timeframe_source": "default: no backtest on record",
+      "outcome": "translated",
+      "v3_revision": "52ca01f0153ffc419f22a7127340cae16a5bdf984e05e46c0bfb4102a4e86ee4",
+      "text": "strategy ema_rsi_trend kind trading asset_class crypto_spot_cex timeframe 1h\ndescription \"translated from v1.0\"\n\nlet c_bull = if(feature(\"ema_7\") > feature(\"ema_21\"), 1.0, 0.0) * if(feature(\"rsi_14\") < 70.0, 1.0, 0.0) > 0.0\nlet c_bear = feature(\"ema_7\") < feature(\"ema_21\")\n\nwhen c_bull and not prev(c_bull, 1.0) -> order(side: buy, size: units(x: 0.1), style: market, tif: gtc)\nwhen c_bear and not prev(c_bear, 1.0) -> order(side: sell, size: units(x: 0.1), style: market, tif: gtc)\notherwise hold\n",
+      "changes": [
+        {
+          "code": "fills_next_bar_open",
+          "detail": "orders fill at the next bar's open, not at the close of the bar that decided"
+        },
+        {
+          "code": "risk_gate_applied",
+          "detail": "every order passes the production risk gate, in backtests too"
+        },
+        {
+          "code": "missing_holds",
+          "detail": "a value that cannot be computed (an indicator warming up, a model that does not answer) holds the rule, with the reason journaled, rather than comparing false"
+        }
+      ],
+      "rerun": null,
+      "applied": false
+    },
+    {
+      "strategy_id": "ema_trend_sell",
+      "v1_revision": "51379c54922d657609828d546b0d2738be423d988aa9e1e5f3bfc45cf321bb33",
+      "timeframe": "1h",
+      "timeframe_source": "default: no backtest on record",
+      "outcome": "translated",
+      "v3_revision": "a516ea433211fa954b8a1c2c86cdaa5befbc17a0c0da17785b5992f7a7743a72",
+      "text": "strategy ema_trend_sell kind trading asset_class crypto_spot_cex timeframe 1h\ndescription \"translated from v1.0\"\n\nlet c1 = feature(\"ema_7\") < feature(\"ema_21\")\n\nwhen c1 and not prev(c1, 1.0) -> order(side: sell, size: equity_fraction(x: 0.02), style: market, tif: gtc)\notherwise hold\n",
+      "changes": [
+        {
+          "code": "fills_next_bar_open",
+          "detail": "orders fill at the next bar's open, not at the close of the bar that decided"
+        },
+        {
+          "code": "risk_gate_applied",
+          "detail": "every order passes the production risk gate, in backtests too"
+        },
+        {
+          "code": "missing_holds",
+          "detail": "a value that cannot be computed (an indicator warming up, a model that does not answer) holds the rule, with the reason journaled, rather than comparing false"
+        }
+      ],
+      "rerun": null,
+      "applied": false
+    },
+    {
+      "strategy_id": "model_signal_v1",
+      "v1_revision": "8670c871e567010b362ad9365ed2b8db92dbbbed9e208a8fb1a514c3bd575c5e",
+      "timeframe": "1h",
+      "timeframe_source": "default: no backtest on record",
+      "outcome": "does_not_compile",
+      "text": "strategy model_signal_v1 kind trading asset_class crypto_spot_cex timeframe 1h\ndescription \"translated from v1.2\"\nparam exit: enum(choices: [trail, fixed], default: trail)\n\nlet n1 = feature(\"model_signal\") > 0.5\n\nwhen n1 and not prev(n1, 1.0) -> order(side: buy, size: units(x: 0.01), style: market, tif: gtc)\notherwise hold\n",
+      "errors": "[unknown_feature] at n1~a: there is no indicator 'model_signal' — fix: indicator names are family_params, e.g. rsi_14, ema_20, atr_14 (e.g. {\"op\":\"feature\",\"args\":{\"name\":{\"str\":\"rsi_14\"}}})"
+    },
+    {
+      "strategy_id": "rsi_mean_reversion",
+      "v1_revision": "9911208568cfa47cdd416acc57097410220fc5650c1c7e0bd99050376a5d9f5d",
+      "timeframe": "1h",
+      "timeframe_source": "default: no backtest on record",
+      "outcome": "translated",
+      "v3_revision": "6709358d8971ad85d38ad455803052018eb98725035cdb0f2e8a5985af128c63",
+      "text": "strategy rsi_mean_reversion kind trading asset_class crypto_spot_cex timeframe 1h\ndescription \"translated from v1.0\"\n\nlet c_oversold = feature(\"rsi_14\") < 30.0\nlet c_overbought = feature(\"rsi_14\") > 70.0\n\nwhen c_oversold and not prev(c_oversold, 1.0) -> order(side: buy, size: units(x: 0.1), style: market, tif: gtc)\nwhen c_overbought and not prev(c_overbought, 1.0) -> order(side: sell, size: units(x: 0.1), style: market, tif: gtc)\notherwise hold\n",
+      "changes": [
+        {
+          "code": "fills_next_bar_open",
+          "detail": "orders fill at the next bar's open, not at the close of the bar that decided"
+        },
+        {
+          "code": "risk_gate_applied",
+          "detail": "every order passes the production risk gate, in backtests too"
+        },
+        {
+          "code": "missing_holds",
+          "detail": "a value that cannot be computed (an indicator warming up, a model that does not answer) holds the rule, with the reason journaled, rather than comparing false"
+        }
+      ],
+      "rerun": null,
+      "applied": false
+    },
+    {
+      "strategy_id": "rsi_overbought_scanner",
+      "v1_revision": "8e34188eb048865566954ddc4bde96888b4c9cdf25416177deabeaa7b625b852",
+      "timeframe": "1h",
+      "timeframe_source": "default: no backtest on record",
+      "outcome": "translated",
+      "v3_revision": "7d9b21c21e75c2eeedf8fa87ea1fea26957772803e0d4ad03adfa9dbed163f43",
+      "text": "strategy rsi_overbought_scanner kind trading asset_class crypto_spot_cex timeframe 1h\ndescription \"translated from v1.0\"\n\nlet c1 = feature(\"rsi_14\") > 70.0\n\notherwise hold\n",
+      "changes": [
+        {
+          "code": "fills_next_bar_open",
+          "detail": "orders fill at the next bar's open, not at the close of the bar that decided"
+        },
+        {
+          "code": "risk_gate_applied",
+          "detail": "every order passes the production risk gate, in backtests too"
+        },
+        {
+          "code": "missing_holds",
+          "detail": "a value that cannot be computed (an indicator warming up, a model that does not answer) holds the rule, with the reason journaled, rather than comparing false"
+        },
+        {
+          "code": "no_orders",
+          "detail": "the v1 definition places no orders; the translation has no entry rule"
+        }
+      ],
+      "rerun": null,
+      "applied": false
+    },
+    {
+      "strategy_id": "rsi_oversold_bounce",
+      "v1_revision": "dc82e8c20ff785e82c5d214b0d7567f7a4f09cec9852d018db3b18586566d9af",
+      "timeframe": "1h",
+      "timeframe_source": "default: no backtest on record",
+      "outcome": "translated",
+      "v3_revision": "67cf7ae3c90dc72e986b4ef30e9c7e54baa92435dcad77af531d94827f2e6965",
+      "text": "strategy rsi_oversold_bounce kind trading asset_class crypto_spot_cex timeframe 1h\ndescription \"translated from v1.0\"\n\nlet c1 = feature(\"rsi_14\") < 30.0\n\nwhen c1 and not prev(c1, 1.0) -> order(side: buy, size: equity_fraction(x: 0.01), style: market, tif: gtc)\notherwise hold\n",
+      "changes": [
+        {
+          "code": "fills_next_bar_open",
+          "detail": "orders fill at the next bar's open, not at the close of the bar that decided"
+        },
+        {
+          "code": "risk_gate_applied",
+          "detail": "every order passes the production risk gate, in backtests too"
+        },
+        {
+          "code": "missing_holds",
+          "detail": "a value that cannot be computed (an indicator warming up, a model that does not answer) holds the rule, with the reason journaled, rather than comparing false"
+        }
+      ],
+      "rerun": null,
+      "applied": false
+    },
+    {
+      "strategy_id": "triple_ema",
+      "v1_revision": "780213d44569a1f296c92a217369611e5759b10aab9711f92f580417a9dda5e5",
+      "timeframe": "1h",
+      "timeframe_source": "default: no backtest on record",
+      "outcome": "translated",
+      "v3_revision": "d662b90e43d6aafaf32d088e8e759e37449cd3c0dbfef51c33a6d1151f966d1d",
+      "text": "strategy triple_ema kind trading asset_class crypto_spot_cex timeframe 1h\ndescription \"translated from v1.0\"\n\nlet c_bull = if(feature(\"ema_7\") > feature(\"ema_21\"), 1.0, 0.0) * if(feature(\"ema_21\") > feature(\"ema_50\"), 1.0, 0.0) > 0.0\nlet c_bear = if(feature(\"ema_7\") < feature(\"ema_21\"), 1.0, 0.0) * if(feature(\"ema_21\") < feature(\"ema_50\"), 1.0, 0.0) > 0.0\n\nwhen c_bull and not prev(c_bull, 1.0) -> order(side: buy, size: units(x: 0.1), style: market, tif: gtc)\nwhen c_bear and not prev(c_bear, 1.0) -> order(side: sell, size: units(x: 0.1), style: market, tif: gtc)\notherwise hold\n",
+      "changes": [
+        {
+          "code": "fills_next_bar_open",
+          "detail": "orders fill at the next bar's open, not at the close of the bar that decided"
+        },
+        {
+          "code": "risk_gate_applied",
+          "detail": "every order passes the production risk gate, in backtests too"
+        },
+        {
+          "code": "missing_holds",
+          "detail": "a value that cannot be computed (an indicator warming up, a model that does not answer) holds the rule, with the reason journaled, rather than comparing false"
+        }
+      ],
+      "rerun": null,
+      "applied": false
+    }
+  ]
+}

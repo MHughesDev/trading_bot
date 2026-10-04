@@ -219,7 +219,7 @@ pub async fn create_strategy(
 }
 
 /// One revision to write: the document, its identity, and where it descends from.
-pub(crate) struct RevisionWrite<'a> {
+pub struct RevisionWrite<'a> {
     pub strategy_id: &'a str,
     pub definition_version: &'a str,
     pub asset_class: &'a str,
@@ -233,6 +233,49 @@ pub(crate) struct RevisionWrite<'a> {
 pub(crate) struct Written {
     pub actor: ActorKind,
     pub parent: Option<String>,
+}
+
+/// Why a revision was not written.
+#[derive(Debug)]
+pub enum RevisionError {
+    /// The named parent cannot be the parent (422).
+    Lineage { error: &'static str, message: String },
+    /// The database (500).
+    Database { error: &'static str, message: String },
+}
+
+impl RevisionError {
+    fn db(error: &'static str, e: impl std::fmt::Display) -> Self {
+        Self::Database {
+            error,
+            message: e.to_string(),
+        }
+    }
+
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            Self::Lineage { error, message } => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "error": error, "message": message })),
+            )
+                .into_response(),
+            Self::Database { error, message } => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": error, "message": message })),
+            )
+                .into_response(),
+        }
+    }
+}
+
+impl std::fmt::Display for RevisionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Lineage { error, message } | Self::Database { error, message } => {
+                write!(f, "{error}: {message}")
+            }
+        }
+    }
 }
 
 /// Append a revision and move the strategy's head to it, in one transaction —
@@ -277,7 +320,34 @@ pub(crate) async fn write_revision(
                 .into_response())
         }
     };
+    let parent = append_revision(&mut tx, actor.as_str(), &token.user_id().to_string(), &w)
+        .await
+        .map_err(RevisionError::into_response)?;
+    if let Err(e) = tx.commit().await {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response());
+    }
+    Ok(Written { actor, parent })
+}
 
+/// The write itself, inside the caller's transaction, by an author the caller
+/// has already classified (`human`, `agent`, `scheduler`, `import` — 0058's
+/// CHECK). [`write_revision`] is the HTTP door; the v3 migration
+/// (`bin/migrate_strategies_v3`, U-8.5) is the other caller, so a migrated
+/// strategy is saved exactly as an edited one is. Returns the parent recorded.
+///
+/// # Errors
+/// A named parent that does not exist or disagrees with the slug's head, or
+/// the database.
+pub async fn append_revision(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    actor_kind: &str,
+    actor_id: &str,
+    w: &RevisionWrite<'_>,
+) -> Result<Option<String>, RevisionError> {
     // The parent is whatever this strategy currently points at. A first
     // save has none; a later one records what it was edited from, which
     // is what makes the revision history a chain rather than a pile.
@@ -296,22 +366,14 @@ pub(crate) async fn write_revision(
     // row as "this is a first version" — an absent measurement recorded
     // as a reading, in the one column whose whole job is to say what
     // came before.
-    let own_head: Option<String> = match sqlx::query_scalar(
+    let own_head: Option<String> = sqlx::query_scalar(
         "SELECT head_revision FROM strategy_definitions WHERE strategy_id = $1",
     )
     .bind(w.strategy_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await
-    {
-        Ok(v) => v.flatten(),
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "parent_lookup_failed", "message": e.to_string() })),
-            )
-                .into_response())
-        }
-    };
+    .map_err(|e| RevisionError::db("parent_lookup_failed", e))?
+    .flatten();
 
     // The case the slug rule cannot express: a definition derived from a
     // *different* lineage. Resolved to that strategy's head, and refused
@@ -321,52 +383,36 @@ pub(crate) async fn write_revision(
     let parent: Option<String> = match w.parent_strategy_id {
         None => own_head,
         Some(slug) => {
-            let named: Option<String> = match sqlx::query_scalar(
+            let named: Option<String> = sqlx::query_scalar(
                 "SELECT head_revision FROM strategy_definitions WHERE strategy_id = $1",
             )
             .bind(slug)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
-            {
-                Ok(v) => v.flatten(),
-                Err(e) => {
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({ "error": e.to_string() })),
-                    )
-                        .into_response())
-                }
-            };
+            .map_err(|e| RevisionError::db("parent_lookup_failed", e))?
+            .flatten();
             let Some(named) = named else {
-                return Err((
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    Json(json!({
-                        "error": "unknown_parent_strategy",
-                        "message": format!(
-                            "parent_strategy_id {slug:?} has no stored revision to \
-                             descend from. Omit it if this is a first version."
-                        ),
-                    })),
-                )
-                    .into_response());
+                return Err(RevisionError::Lineage {
+                    error: "unknown_parent_strategy",
+                    message: format!(
+                        "parent_strategy_id {slug:?} has no stored revision to \
+                         descend from. Omit it if this is a first version."
+                    ),
+                });
             };
             // Both a slug chain and a declared fork, disagreeing. Two
             // answers is not a lineage, so neither is recorded.
             if let Some(head) = &own_head {
                 if head != &named {
-                    return Err((
-                        StatusCode::UNPROCESSABLE_ENTITY,
-                        Json(json!({
-                            "error": "ambiguous_parent",
-                            "message": format!(
-                                "{:?} already has a head revision, which is its parent. \
-                                 Pass parent_strategy_id only on the first revision of \
-                                 a slug derived from another lineage.",
-                                w.strategy_id
-                            ),
-                        })),
-                    )
-                        .into_response());
+                    return Err(RevisionError::Lineage {
+                        error: "ambiguous_parent",
+                        message: format!(
+                            "{:?} already has a head revision, which is its parent. \
+                             Pass parent_strategy_id only on the first revision of \
+                             a slug derived from another lineage.",
+                            w.strategy_id
+                        ),
+                    });
                 }
             }
             Some(named)
@@ -381,7 +427,7 @@ pub(crate) async fn write_revision(
     // content hash is the identity, so ON CONFLICT DO NOTHING is the
     // correct no-op here and the only place a `DO NOTHING` belongs in
     // this path.
-    if let Err(e) = sqlx::query(
+    sqlx::query(
         "INSERT INTO strategy_revision (
              revision_hash, strategy_id, parent_hash, definition_version, asset_class,
              definition_json, definition_bytes, actor_kind, actor_id,
@@ -396,22 +442,16 @@ pub(crate) async fn write_revision(
     .bind(w.asset_class)
     .bind(w.def_json)
     .bind(w.canonical.as_bytes())
-    .bind(actor.as_str())
-    .bind(token.user_id().to_string())
-    .execute(&mut *tx)
+    .bind(actor_kind)
+    .bind(actor_id)
+    .execute(&mut **tx)
     .await
-    {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": "revision_insert_failed", "message": e.to_string() })),
-        )
-            .into_response());
-    }
+    .map_err(|e| RevisionError::db("revision_insert_failed", e))?;
 
     // The pointer. `definition_json` here is a cache of the head
     // revision, and 0058's trigger refuses a head belonging to another
     // strategy, so the two cannot drift into naming different documents.
-    if let Err(e) = sqlx::query(
+    sqlx::query(
         "INSERT INTO strategy_definitions \
            (strategy_id, definition_version, asset_class, definition_json, head_revision) \
          VALUES ($1, $2, $3, $4, $5) \
@@ -426,27 +466,10 @@ pub(crate) async fn write_revision(
     .bind(w.asset_class)
     .bind(w.def_json)
     .bind(w.revision)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
-    {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )
-            .into_response());
-    }
-
-    if let Err(e) = tx.commit().await {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )
-            .into_response());
-    }
-    Ok(Written {
-        actor,
-        parent: parent_recorded,
-    })
+    .map_err(|e| RevisionError::db("head_update_failed", e))?;
+    Ok(parent_recorded)
 }
 
 // ── List ──────────────────────────────────────────────────────────────────────
@@ -902,10 +925,22 @@ mod tests {
                 "{literal} is bound as an author literal; the actor is read, not asserted"
             );
         }
+        // The insert binds the author its caller classified; the HTTP door's
+        // classification is the session's kind, read before anything is written.
         assert!(
-            body.contains(".bind(actor.as_str())"),
-            "the insert must bind the classified actor"
+            body.contains(".bind(actor_kind)"),
+            "the insert must bind the author it was given"
         );
+        assert!(
+            body.contains("append_revision(&mut tx, actor.as_str(),"),
+            "the HTTP door must pass the classified actor"
+        );
+        for literal in ["\"human\"", "\"agent\"", "\"scheduler\"", "\"import\""] {
+            assert!(
+                !body.contains(&format!("append_revision(&mut tx, {literal}")),
+                "{literal} is passed as an author literal; the actor is read, not asserted"
+            );
+        }
     }
 
     /// The refusal exists and is a refusal, not a fallback.

@@ -146,3 +146,19 @@ fn every_taught_code_names_a_section_once() {
         assert!(section.starts_with("slv3#"), "{section}");
     }
 }
+
+/// Found migrating the stored strategies (U-8.5): a mistake inside a nested
+/// expression was reported twice — once where it is, and again as "`x~a` is
+/// not a reference" from its parent, which teaches a fix that does not exist.
+#[test]
+fn a_mistake_inside_a_nested_expression_is_reported_once_where_it_is() {
+    let f = findings_of_text(
+        "strategy s kind trading asset_class crypto_spot_cex timeframe 1h\n\
+         let x = (close > 1) * 2 > 0\n\
+         when x -> close\n",
+        None,
+    );
+    let c = codes(&f);
+    assert!(c.contains(&"type_mismatch"), "{f:#?}");
+    assert!(!c.contains(&"bad_ref"), "{f:#?}");
+}

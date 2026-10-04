@@ -13,6 +13,7 @@ mod ledger_jobs;
 mod live_bars;
 mod live_deployments;
 mod live_runner;
+mod parity_jobs;
 mod pipeline_manager;
 mod regime_jobs;
 mod series_runner;
@@ -104,6 +105,8 @@ async fn main() -> anyhow::Result<()> {
     fixation.clone().spawn();
     info!("ledger anchor and verification jobs started");
     feature_jobs::spawn(pg.clone(), cfg.clickhouse.url.clone());
+    // Nightly: yesterday's paper decisions replayed through the backtest's engine (U-8.2).
+    parity_jobs::spawn(pg.clone());
     leakage_jobs::spawn(pg.clone());
     health_jobs::spawn(pg.clone(), cfg.clickhouse.url.clone());
     // The rule-tier regime labeller (SPEC §5.4, ADR-P3-02). Scoped to the

@@ -96,7 +96,9 @@ fn a_translated_ema_cross_compiles_with_entries_exits_and_its_change_list() {
         "{text}"
     );
     assert!(
-        text.contains("when up -> order(side: buy, size: units(x: 0.5), style: market, tif: gtc)"),
+        text.contains(
+            "when up and not prev(up, 1.0) -> order(side: buy, size: units(x: 0.5), style: market, tif: gtc)"
+        ),
         "{text}"
     );
     assert!(
@@ -150,6 +152,37 @@ fn a_plain_ema_cross_translates_to_a_strategy_that_compiles() {
     )
     .unwrap_or_else(|f| panic!("{f:#?}"));
     assert!(v.text.contains("equity_fraction(x: 0.1)"), "{}", v.text);
+}
+
+/// Found migrating the stored strategies (U-8.5): v1 multiplies conditions as
+/// 1/0 — `triple_ema` and `ema_rsi_trend` are written so — and v3 does not let
+/// a truth value stand for a number. The translation writes v1's meaning out.
+#[test]
+fn conditions_multiplied_as_numbers_translate_to_what_v1_meant() {
+    let d = def(serde_json::json!({
+      "strategy_id": "triple_ema", "definition_version": "1.0", "asset_class": "crypto_spot_cex",
+      "inputs": [],
+      "nodes": [
+        {"id": "c_bull", "type": "condition",
+         "expr": "(feature('ema_7') > feature('ema_21')) * (feature('ema_21') > feature('ema_50')) > 0"},
+        {"id": "s1", "type": "signal", "when": "c_bull", "emit": "long"}
+      ],
+      "actions": [{"on_signal": "long", "type": "place_order",
+                   "order": {"side": "buy", "size_mode": "fixed", "size": "0.1"}}]
+    }));
+    let t = translate(&d, "1h").unwrap();
+    let v = validate(
+        Source::Graph(t.graph),
+        &StdRegistries::new(),
+        &ParamValues::new(),
+        None,
+    )
+    .unwrap_or_else(|f| panic!("{f:#?}"));
+    assert!(
+        v.text.contains("if(feature(\"ema_7\") > feature(\"ema_21\"), 1"),
+        "{}",
+        v.text
+    );
 }
 
 #[test]

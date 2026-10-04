@@ -55,6 +55,7 @@ use strategy_engine::{
     ModelRequest, ModelResponse, OrderClosed, OrderClosedReason, Plan, PortfolioView, RestoreError,
     Step, WorkingOrder,
 };
+use backtest::replay::{Consumed, Genesis, JournalInputs};
 use strategy_runtime::live::V3Deployment;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -287,6 +288,12 @@ pub struct LiveRunner {
     /// before it is one the runner already has — from warm-up, or a duplicate
     /// delivery — and is not folded twice.
     last_minute: BTreeMap<String, i64>,
+    /// How this run's engine was built, until the first record carries it
+    /// (U-8.1: a replay starts from it).
+    genesis: Option<Genesis>,
+    /// Events consumed since the last record without a decision — each moved
+    /// the engine's state, so a replay must see them too.
+    preceding: Vec<Consumed>,
 }
 
 /// Unix ns → UTC.
@@ -346,7 +353,11 @@ impl LiveRunner {
                 }
                 let state: RunnerState = serde_json::from_value(state)
                     .map_err(|e| LiveError::Store(format!("checkpoint does not parse: {e}")))?;
-                let engine = Engine::restore(Arc::clone(&plan), &state.engine, flat, &spec)?;
+                let genesis = Genesis {
+                    checkpoint: Some(state.engine.clone()),
+                    history: flat,
+                };
+                let engine = genesis.build(Arc::clone(&plan), &spec)?;
                 info!(deployment = %d.deployment_id, tick = engine.tick(), "v3 deployment restored from its checkpoint");
                 Self {
                     d,
@@ -364,24 +375,16 @@ impl LiveRunner {
                     steps: 0,
                     halted: None,
                     last_minute: BTreeMap::new(),
+                    genesis: Some(genesis),
+                    preceding: Vec::new(),
                 }
             }
             None => {
-                let mut engine = Engine::new(Arc::clone(&plan))?;
-                let mut bars = flat;
-                bars.sort_by_key(|(i, b)| (b.close_ns, *i == PRIMARY, *i));
-                let view = PortfolioView::default();
-                for (input, bar) in bars {
-                    engine.on_event(
-                        Event::Bar {
-                            input,
-                            bar,
-                            warmup: true,
-                        },
-                        &view,
-                        &spec,
-                    )?;
-                }
+                let genesis = Genesis {
+                    checkpoint: None,
+                    history: flat,
+                };
+                let engine = genesis.build(Arc::clone(&plan), &spec)?;
                 Self {
                     d,
                     plan,
@@ -398,6 +401,8 @@ impl LiveRunner {
                     steps: 0,
                     halted: None,
                     last_minute: BTreeMap::new(),
+                    genesis: Some(genesis),
+                    preceding: Vec::new(),
                 }
             }
         };
@@ -666,14 +671,25 @@ impl LiveRunner {
                 break;
             }
             let view = self.view();
-            let inputs = serde_json::json!({ "event": ev, "view": view, "spec": self.spec });
             self.steps += 1;
-            let mut step = self.engine.on_event(ev, &view, &self.spec)?;
+            let mut step = self.engine.on_event(ev.clone(), &view, &self.spec)?;
             while let Step::NeedModels(requests) = step {
                 let responses = self.ask_models(requests).await;
                 step = self.engine.resume(responses)?;
             }
-            let Step::Decided(trace) = step else { continue };
+            let Step::Decided(trace) = step else {
+                self.preceding.push(Consumed { event: ev, view });
+                continue;
+            };
+            // Everything a replay needs to reproduce this decision (U-8.1).
+            let inputs = serde_json::to_value(JournalInputs {
+                event: ev,
+                view,
+                spec: self.spec.clone(),
+                preceding: std::mem::take(&mut self.preceding),
+                genesis: self.genesis.take(),
+            })
+            .map_err(|e| LiveError::Journal(e.to_string()))?;
             let (verdicts, follow_on) = self.act(&trace.actions, trace.at_ns).await;
             self.journal(&trace, &inputs, &verdicts).await?;
             self.checkpoint().await?;
@@ -1555,6 +1571,199 @@ mod tests {
             matches!(err, LiveError::Restore(RestoreError::PlanMismatch { .. })),
             "{err}"
         );
+    }
+
+    // ── U-8.1 ────────────────────────────────────────────────────────────────
+
+    /// Replay a runner's journal through an engine compiled the way a backtest
+    /// compiles it — after a round trip through text, as the database returns it.
+    fn replayed(
+        store: &MemoryStore,
+        g: &StrategyGraph,
+        reg: &StdRegistries,
+    ) -> Vec<backtest::replay::SegmentReport> {
+        let plan = Arc::new(
+            backtest::runner::compile_for_run(g, &backtest::run::ParamMap::new(), reg).unwrap(),
+        );
+        let steps: Vec<backtest::replay::RecordedStep> = store
+            .journal
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                let mut s = crate::parity_jobs::recorded(r);
+                s.inputs = serde_json::from_str(&s.inputs.to_string()).unwrap();
+                s.trace = serde_json::from_str(&s.trace.to_string()).unwrap();
+                s
+            })
+            .collect();
+        backtest::replay::replay(&plan, &steps)
+    }
+
+    fn identical(reports: &[backtest::replay::SegmentReport]) -> usize {
+        reports
+            .iter()
+            .map(|r| match &r.verdict {
+                backtest::replay::Verdict::Identical { decisions } => *decisions,
+                other => panic!("segment {}..{}: {other:?}", r.first_seq, r.last_seq),
+            })
+            .sum()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_paper_journal_replays_identically_through_the_backtest_engine() {
+        let inst = "LIVE-REPLAY-USD";
+        ready_instrument(inst, "100");
+        let g = ema_7_21();
+        let store = Arc::new(MemoryStore::default());
+        // Warm-up history the runner is given, so the genesis carries bars.
+        let (minutes, _) = trades_to_minutes(inst, 150);
+        let mut r = LiveRunner::start(
+            deployment(inst, &g),
+            plan_of(&g, &StdRegistries::new()),
+            AssetClass::CryptoSpotCex,
+            spec(inst),
+            deps(store.clone(), Arc::new(NoLiveModels)),
+            vec![minutes[..30].to_vec()],
+        )
+        .await
+        .unwrap();
+        for m in &minutes[30..] {
+            r.on_minute_bar(inst, *m).await.unwrap();
+        }
+        let n = store.journal.lock().unwrap().len();
+        assert!(n > 100, "{n} decisions");
+        // Fills that armed nothing were consumed without a decision: the
+        // journal carries them, or the replay would drift.
+        assert!(
+            store
+                .journal
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|rec| rec.inputs.get("preceding").is_some()),
+            "some record carries events consumed without a decision"
+        );
+        let reports = replayed(&store, &g, &StdRegistries::new());
+        assert_eq!(reports.len(), 1);
+        assert_eq!(identical(&reports), n);
+
+        // A deliberately perturbed engine fails, naming the record and field.
+        let mut perturbed = g.clone();
+        perturbed.nodes[1]
+            .args
+            .insert("n".into(), serde_json::from_value(serde_json::json!(22)).unwrap());
+        let reports = replayed(&store, &perturbed, &StdRegistries::new());
+        let backtest::replay::Verdict::Diverged(d) = &reports[0].verdict else {
+            panic!("{reports:?}");
+        };
+        assert_eq!(d.seq, 1);
+        assert!(d.field.starts_with("values.s"), "{d:?}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_journal_across_a_restart_replays_identically_segment_by_segment() {
+        let g = ema_7_21();
+        let plan = plan_of(&g, &StdRegistries::new());
+        let inst = "LIVE-REPLAY-RESTART-USD";
+        ready_instrument(inst, "100");
+        let (minutes, _) = trades_to_minutes(inst, 140);
+        let d = deployment(inst, &g);
+        let store = Arc::new(MemoryStore::default());
+        let mut first = LiveRunner::start(
+            Arc::clone(&d),
+            Arc::clone(&plan),
+            AssetClass::CryptoSpotCex,
+            spec(inst),
+            deps(store.clone(), Arc::new(NoLiveModels)),
+            vec![Vec::new()],
+        )
+        .await
+        .unwrap();
+        for m in &minutes[..70] {
+            first.on_minute_bar(inst, *m).await.unwrap();
+        }
+        drop(first);
+        let mut second = LiveRunner::start(
+            Arc::clone(&d),
+            Arc::clone(&plan),
+            AssetClass::CryptoSpotCex,
+            spec(inst),
+            deps(store.clone(), Arc::new(NoLiveModels)),
+            vec![minutes[..70].to_vec()],
+        )
+        .await
+        .unwrap();
+        for m in &minutes[70..] {
+            second.on_minute_bar(inst, *m).await.unwrap();
+        }
+        let reports = replayed(&store, &g, &StdRegistries::new());
+        assert_eq!(reports.len(), 2, "one segment per runner start");
+        assert_eq!(identical(&reports), store.journal.lock().unwrap().len());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn model_answers_replay_as_they_were_received() {
+        let inst = "LIVE-REPLAY-MODELS-USD";
+        ready_instrument(inst, "100");
+        let g = graph(serde_json::json!({
+          "format": "tbot.strategy/3", "kind": "trading", "name": "replay_models",
+          "asset_class": "crypto_spot_cex", "timeframe": "1m",
+          "nodes": [
+            {"id":"a","op":"model","args":{"ref":{"str":"a@1"}}},
+            {"id":"b","op":"model","args":{"ref":{"str":"slow@1"}}},
+            {"id":"go","op":"ge","args":{"a":"a.f","b":0}}
+          ],
+          "decide": {"rules": [{"when":"go","then":{"kind":"target","size":{"mode":"units","x":"b.f"}}}]}
+        }));
+        // `a` answers; `slow` misses its 20 ms timeout every time.
+        struct Mixed;
+        #[async_trait::async_trait]
+        impl LiveModels for Mixed {
+            async fn answer(&self, req: ModelRequest) -> ModelOutcome {
+                if req.model == "slow" {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+                ModelOutcome::Answered {
+                    outputs: [(
+                        "f".to_string(),
+                        domain::strategy_graph::Value::Num(0.25.try_into().unwrap()),
+                    )]
+                    .into_iter()
+                    .collect(),
+                }
+            }
+        }
+        let reg = model_registry(&[("a@1", 2_000), ("slow@1", 20)]);
+        let store = Arc::new(MemoryStore::default());
+        let mut r = LiveRunner::start(
+            deployment(inst, &g),
+            plan_of(&g, &reg),
+            AssetClass::CryptoSpotCex,
+            spec(inst),
+            deps(store.clone(), Arc::new(Mixed)),
+            vec![Vec::new()],
+        )
+        .await
+        .unwrap();
+        for i in 0..3 {
+            r.on_minute_bar(
+                inst,
+                Bar {
+                    close_ns: (T0 + 60 * (i + 1)) * 1_000_000_000,
+                    open: 100.0,
+                    high: 101.0,
+                    low: 99.0,
+                    close: 100.0,
+                    volume: 1.0,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let n = store.journal.lock().unwrap().len();
+        assert!(n >= 3);
+        assert_eq!(identical(&replayed(&store, &g, &reg)), n);
     }
 
     // ── U-4.5 ────────────────────────────────────────────────────────────────

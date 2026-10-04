@@ -900,6 +900,12 @@ impl<'a> Compiler<'a> {
         if let Some(w) = self.windows.get(s) {
             return Some((Operand::Const(Value::Bool(false)), w.clone()));
         }
+        // `parent~port` is a lifted inline node — no id a person writes has a
+        // `~`. Absent from the slots, it failed to compile and said why at its
+        // own site; a second "is not a reference" would teach the wrong fix.
+        if s.contains('~') {
+            return None;
+        }
         let path = match RefPath::parse(s) {
             Ok(p) => p,
             Err(e) => {

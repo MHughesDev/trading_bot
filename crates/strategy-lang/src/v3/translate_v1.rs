@@ -10,7 +10,7 @@
 //! | v1 | v3 |
 //! |---|---|
 //! | `condition` (an expression) | a node: the same expression |
-//! | `signal` + `place_order` action | a rule: `when <condition> -> order(…)` |
+//! | `signal` + `place_order` action | a rule on the signal's rising edge: `when c and not prev(c, 1) -> order(…)` |
 //! | `exits` stop / take-profit / trailing | a `protect` rule while in a position |
 //! | `exits` max holding bars | `when state.bars_in_position >= n -> close` |
 //! | `exits` on signal | `when <condition> and not state.flat -> close` |
@@ -25,6 +25,7 @@ use domain::strategy_def::actions::{ActionKind, SizeMode};
 use domain::strategy_def::exits::{DistanceUnit, ExitDistance, ExitPolicy, ExitRule};
 use domain::strategy_def::nodes::{CombineOp, NodeKind};
 use domain::strategy_def::StrategyDefinition;
+use domain::strategy_graph::ops::{self, Ty};
 use domain::strategy_graph::StrategyGraph;
 use rust_decimal::prelude::ToPrimitive;
 use serde::Serialize;
@@ -116,13 +117,47 @@ fn expression(expr: &str, outputs: &BTreeMap<String, String>, at: &str) -> Resul
         out.push(c);
         rest = &rest[c.len_utf8()..];
     }
-    super::parse::parse_expr(&out).map_err(|e| {
-        refuse(
-            "expression",
-            at,
-            format!("`{expr}` does not read as an expression: {}", e.message),
-        )
-    })
+    super::parse::parse_expr(&out)
+        .map(|v| numeric_truth(v, None))
+        .map_err(|e| {
+            refuse(
+                "expression",
+                at,
+                format!("`{expr}` does not read as an expression: {}", e.message),
+            )
+        })
+}
+
+/// v1 evaluates a comparison to 1.0 or 0.0, so stored strategies multiply
+/// conditions — `(a > b) * (c > d) > 0` means "both". v3 does not let a truth
+/// value stand for a number. Wherever a truth-valued expression sits in a port
+/// that wants a number, it becomes `if(x, 1, 0)`: exactly v1's meaning, written
+/// out. `want` is the type the enclosing port asks for.
+fn numeric_truth(v: Value, want: Option<Ty>) -> Value {
+    let Value::Object(mut node) = v else {
+        return v;
+    };
+    let Some(name) = node.get("op").and_then(Value::as_str).map(str::to_owned) else {
+        return Value::Object(node);
+    };
+    let spec = ops::op(&name);
+    if let Some(Value::Object(args)) = node.remove("args") {
+        let args = args
+            .into_iter()
+            .map(|(port, a)| {
+                let ty = spec
+                    .and_then(|s| s.inputs.iter().find(|p| p.name == port))
+                    .map(|p| p.ty);
+                (port, numeric_truth(a, ty))
+            })
+            .collect();
+        node.insert("args".into(), Value::Object(args));
+    }
+    let node = Value::Object(node);
+    if want == Some(Ty::Num) && spec.is_some_and(|s| s.output == Ty::Bool) {
+        return json!({"op": "if", "args": {"cond": node, "then": 1.0, "else": 0.0}});
+    }
+    node
 }
 
 fn decimal(d: rust_decimal::Decimal) -> f64 {
@@ -329,8 +364,17 @@ pub fn translate(def: &StrategyDefinition, timeframe: &str) -> Result<Translatio
             SizeMode::Model { node_ref } => json!({"mode": "equity_fraction", "x": node_ref}),
             SizeMode::RiskUnit => return Err(refuse("size_mode risk_unit", &at, "an R-multiple needs the stop it is measured against; write `risk(fraction: …, stop: …)`")),
         };
+        // v1 places an order on a signal's rising edge, not on every bar it
+        // holds (`backtest::sim`, pinned by `ema_cross_over_rising_bars_places_one_order`).
+        // Found by the stored-strategy re-run (U-8.5): a level-triggered
+        // translation placed 10 079 orders where v1 placed 333.
+        let signal = condition_of(&a.on_signal, &at)?;
+        let rising = json!({"op": "and", "args": {
+            "a": signal.clone(),
+            "b": {"op": "not", "args": {"x": {"op": "prev", "args": {"x": signal, "n": 1}}}}
+        }});
         rules.push(json!({
-            "when": condition_of(&a.on_signal, &at)?,
+            "when": rising,
             "then": {"kind": "order", "side": order.side, "size": size}
         }));
     }

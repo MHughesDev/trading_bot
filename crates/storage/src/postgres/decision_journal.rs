@@ -104,3 +104,73 @@ pub async fn prune_older_than(pool: &PgPool, cutoff: DateTime<Utc>) -> Result<u6
         .await?;
     Ok(done.rows_affected())
 }
+
+/// Deployments with a decision journaled in `[from, to)` — the ones a nightly
+/// parity check replays (U-8.2).
+///
+/// # Errors
+/// A database error.
+pub async fn decided_between(
+    pool: &PgPool,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> Result<Vec<Uuid>, PgError> {
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
+        "SELECT DISTINCT deployment_id FROM strategy_decision_journal \
+         WHERE decided_at >= $1 AND decided_at < $2 ORDER BY deployment_id",
+    )
+    .bind(from)
+    .bind(to)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|(d,)| d).collect())
+}
+
+/// One replayed segment's verdict (migration 0149).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParityCheck {
+    pub deployment_id: Uuid,
+    pub revision: String,
+    pub window_start: DateTime<Utc>,
+    pub window_end: DateTime<Utc>,
+    pub first_seq: i64,
+    pub last_seq: i64,
+    /// `identical`, `diverged` or `unreplayable`.
+    pub verdict: String,
+    pub decisions: Option<i64>,
+    pub diverged_seq: Option<i64>,
+    pub field: Option<String>,
+    pub recorded: Option<serde_json::Value>,
+    pub replayed: Option<serde_json::Value>,
+    pub reason: Option<String>,
+}
+
+/// Record a verdict. Returns its id.
+///
+/// # Errors
+/// A database error, or a row the table's checks refuse.
+pub async fn record_parity(pool: &PgPool, c: &ParityCheck) -> Result<i64, PgError> {
+    let (id,): (i64,) = sqlx::query_as(
+        "INSERT INTO strategy_parity_check (
+             deployment_id, revision, window_start, window_end, first_seq, last_seq,
+             verdict, decisions, diverged_seq, field, recorded, replayed, reason
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         RETURNING check_id",
+    )
+    .bind(c.deployment_id)
+    .bind(&c.revision)
+    .bind(c.window_start)
+    .bind(c.window_end)
+    .bind(c.first_seq)
+    .bind(c.last_seq)
+    .bind(&c.verdict)
+    .bind(c.decisions)
+    .bind(c.diverged_seq)
+    .bind(&c.field)
+    .bind(&c.recorded)
+    .bind(&c.replayed)
+    .bind(&c.reason)
+    .fetch_one(pool)
+    .await?;
+    Ok(id)
+}

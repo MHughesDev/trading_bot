@@ -279,3 +279,101 @@ async fn a_selection_bound_deployment_records_its_members_and_every_change() {
         .await
         .unwrap();
 }
+
+fn verdict(deployment_id: Uuid, verdict: &str) -> journal::ParityCheck {
+    let now = Utc::now();
+    journal::ParityCheck {
+        deployment_id,
+        revision: "a".repeat(64),
+        window_start: now - Duration::days(1),
+        window_end: now,
+        first_seq: 1,
+        last_seq: 3,
+        verdict: verdict.into(),
+        decisions: None,
+        diverged_seq: None,
+        field: None,
+        recorded: None,
+        replayed: None,
+        reason: None,
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL with migrations through 0149"]
+async fn parity_verdicts_are_recorded_append_only_and_by_the_platform_role() {
+    let pool = pool().await;
+    let user = format!("u-{}", Uuid::new_v4());
+    let d = deployment(&user);
+    deployments::start(&pool, &d).await.unwrap();
+    let now = Utc::now();
+    journal::append(&pool, &record(d.deployment_id, 1, now - Duration::hours(3)))
+        .await
+        .unwrap();
+    let listed = journal::decided_between(&pool, now - Duration::days(1), now)
+        .await
+        .unwrap();
+    assert!(listed.contains(&d.deployment_id));
+    let later = journal::decided_between(&pool, now, now + Duration::days(1))
+        .await
+        .unwrap();
+    assert!(!later.contains(&d.deployment_id));
+
+    // Each verdict carries what makes it readable, or the database refuses it.
+    let mut ok = verdict(d.deployment_id, "identical");
+    ok.decisions = Some(3);
+    let id = journal::record_parity(&pool, &ok).await.unwrap();
+    assert!(journal::record_parity(&pool, &verdict(d.deployment_id, "identical"))
+        .await
+        .is_err(), "an identical verdict says how many decisions");
+    assert!(journal::record_parity(&pool, &verdict(d.deployment_id, "diverged"))
+        .await
+        .is_err(), "a divergence names its record and field");
+    let mut div = verdict(d.deployment_id, "diverged");
+    div.diverged_seq = Some(2);
+    div.field = Some("values.f".into());
+    div.recorded = Some(serde_json::json!(1.0));
+    div.replayed = Some(serde_json::json!(1.5));
+    journal::record_parity(&pool, &div).await.unwrap();
+    assert!(journal::record_parity(&pool, &verdict(d.deployment_id, "unreplayable"))
+        .await
+        .is_err(), "an unreplayable verdict says why");
+
+    // Append-only.
+    assert!(
+        sqlx::query("UPDATE strategy_parity_check SET verdict = 'identical' WHERE check_id = $1")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("DELETE FROM strategy_parity_check WHERE check_id = $1")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+
+    // The platform runs as app_role, not as the owner these tests connect as.
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let (n,): (i64,) = sqlx::query_as(
+        "INSERT INTO strategy_parity_check (deployment_id, revision, window_start, window_end, \
+         first_seq, last_seq, verdict, decisions) \
+         VALUES ($1, 'r', now() - interval '1 day', now(), 1, 1, 'identical', 1) RETURNING check_id",
+    )
+    .bind(d.deployment_id)
+    .fetch_one(&mut *tx)
+    .await
+    .expect("app_role records a verdict");
+    assert!(n > 0);
+    sqlx::query("SELECT count(*) FROM strategy_decision_journal")
+        .execute(&mut *tx)
+        .await
+        .expect("app_role reads the journal it replays");
+    tx.rollback().await.unwrap();
+}
