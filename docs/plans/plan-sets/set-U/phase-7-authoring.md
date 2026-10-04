@@ -75,9 +75,11 @@ on-signal exit backtests on the one engine and round-trips. **2026-10-04:** run 
 definition in the platform database by U-8.5's tool — 11 of 14 translate, 2 do not compile (a model and
 a feature that do not exist), 1 is refused (another instrument's input); the run found and fixed v1's
 rising-edge entries, its 1/0 condition arithmetic, and the parameterised EMAs. **Not met as written:**
-the four refused AI and
-pipeline node kinds still need a translation (a decision model's class map, an LLM node's prompt
-as a contract, ranking and pipelines as selection strategies).
+a decision model's class map now translates (2026-10-04: one condition per class,
+`is(m.action, class) and m.confidence >= min`; `hold_last` abstention refused by name). Still refused,
+each because it changes what the strategy *is* rather than how it is written: an LLM node (its prompt
+belongs to a registered model's contract in v3, not to the strategy), and ranking and universe
+pipelines (they become selection strategies).
 
 Translate every stored v1.0–1.5 definition: conditions and signals to nodes and rules; `place_order` to `order` intents; exits to `bracket`/`protect`; AI nodes to model nodes with derived contracts and adapters; universe nodes to a selection strategy. Emit, per strategy, the list of behaviours that change (fills at next open, models now called, risk gate applied).
 

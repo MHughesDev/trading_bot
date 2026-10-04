@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 
 use domain::strategy_def::actions::{ActionKind, SizeMode};
 use domain::strategy_def::exits::{DistanceUnit, ExitDistance, ExitPolicy, ExitRule};
-use domain::strategy_def::nodes::{CombineOp, NodeKind};
+use domain::strategy_def::nodes::{AbstainPolicy, CombineOp, NodeKind};
 use domain::strategy_def::StrategyDefinition;
 use domain::strategy_graph::ops::{self, Ty};
 use domain::strategy_graph::StrategyGraph;
@@ -351,7 +351,31 @@ pub fn translate(def: &StrategyDefinition, timeframe: &str) -> Result<Translatio
                 nodes.push(Value::Object(o));
                 outputs.insert(as_.clone(), n.id.clone());
             }
-            NodeKind::Decision { .. } => return Err(refuse("decision", &at, "a decision model maps classes to signals; translate it to `is(model.action, …)` conditions by hand")),
+            // A decision model's class map: each class it may predict emits its
+            // signal when the model names that class with enough confidence.
+            // An abstaining model is a missing value, which holds — v1's `flat`.
+            NodeKind::Decision { model_ref: m, alias, class_map, min_confidence, abstain, .. } => {
+                if *abstain != AbstainPolicy::Flat {
+                    return Err(refuse(
+                        "decision.abstain hold_last",
+                        &at,
+                        "holding the last decision while the model abstains is state v3 writes explicitly; translate it with `prev` by hand",
+                    ));
+                }
+                models = true;
+                let model = format!("{}__model", n.id);
+                nodes.push(json!({"id": model, "op": "model", "args": {"ref": model_ref(m, alias)}}));
+                let mut classes: Vec<(&String, &String)> = class_map.iter().collect();
+                classes.sort();
+                for (class, emit) in classes {
+                    let id = format!("{}__{class}", n.id);
+                    nodes.push(json!({"id": id, "op": "and", "args": {
+                        "a": {"op": "is", "args": {"x": format!("{model}.action"), "label": {"str": class}}},
+                        "b": {"op": "ge", "args": {"a": format!("{model}.confidence"), "b": min_confidence}}
+                    }}));
+                    signals.entry(emit.clone()).or_default().push(id);
+                }
+            }
             NodeKind::LlmInference { .. } => return Err(refuse("llm_inference", &at, "its prompt and parse mode must become an LLM model version's contract first")),
             NodeKind::ModelRank { .. } => return Err(refuse("model_rank", &at, "ranking belongs in a selection strategy")),
             NodeKind::DataSource { .. } | NodeKind::Rank { .. } | NodeKind::Filter { .. } | NodeKind::TakeTopN { .. } | NodeKind::SurfaceAction { .. } => {

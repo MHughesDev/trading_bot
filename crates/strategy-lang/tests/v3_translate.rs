@@ -225,6 +225,60 @@ fn a_feature_named_by_parameter_translates_to_the_operator_with_its_port() {
     assert_eq!(translate(&rsi, "1h").unwrap_err().construct, "parameterised feature name");
 }
 
+/// U-7.3: a decision model's class map translates — each class it may
+/// predict emits its signal when the model names it with enough confidence.
+#[test]
+fn a_decision_models_class_map_becomes_one_condition_per_class() {
+    use domain::model_def::contract::{ContractOutput, CostClass, IoContract, PitSpec};
+    use domain::strategy_graph::ValueType;
+    use strategy_engine::ResolvedModel;
+    let d = def(serde_json::json!({
+      "strategy_id": "dec", "definition_version": "1.1", "asset_class": "crypto_spot_cex",
+      "inputs": [],
+      "nodes": [
+        {"id": "d", "type": "decision", "model_ref": "trader", "min_confidence": 0.6,
+         "class_map": {"long": "go_long", "flat": "go_flat"}}
+      ],
+      "actions": [
+        {"on_signal": "go_long", "type": "place_order",
+         "order": {"side": "buy", "size_mode": "fixed", "size": "1"}},
+        {"on_signal": "go_flat", "type": "place_order",
+         "order": {"side": "sell", "size_mode": "fixed", "size": "1"}}
+      ]
+    }));
+    let t = translate(&d, "1h").unwrap_or_else(|r| panic!("{r}"));
+    assert!(t.text.contains("is(d__model.action, \"long\")"), "{}", t.text);
+    assert!(t.text.contains("d__model.confidence >= 0.6"), "{}", t.text);
+    let reg = StdRegistries::new().with_model(
+        "trader@production",
+        ResolvedModel {
+            model: "trader".into(),
+            version: 3,
+            contract: IoContract {
+                inputs: vec![],
+                outputs: vec![
+                    ContractOutput {
+                        name: "action".into(),
+                        value_type: ValueType::Cat {
+                            labels: vec!["long".into(), "flat".into()],
+                        },
+                    },
+                    ContractOutput {
+                        name: "confidence".into(),
+                        value_type: ValueType::Num,
+                    },
+                ],
+                horizon: None,
+                pit: PitSpec::default(),
+                cost_class: CostClass::Cheap,
+                timeout_ms: 1_000,
+            },
+        },
+    );
+    validate(Source::Graph(t.graph), &reg, &ParamValues::new(), None)
+        .unwrap_or_else(|f| panic!("the translation compiles: {f:#?}"));
+}
+
 #[test]
 fn constructs_without_a_translation_are_refused_by_name() {
     let base = |extra: serde_json::Value| {
@@ -244,8 +298,8 @@ fn constructs_without_a_translation_are_refused_by_name() {
     .unwrap_err();
     assert_eq!(r.construct, "risk_overrides.max_position");
     assert!(r.why.contains("loosen"));
-    let r = translate(&base(serde_json::json!({"nodes": [{"id": "d", "type": "decision", "model_ref": "m", "class_map": {}}]})), "1h").unwrap_err();
-    assert_eq!(r.construct, "decision");
+    let r = translate(&base(serde_json::json!({"nodes": [{"id": "d", "type": "decision", "model_ref": "m", "class_map": {}, "abstain": "hold_last"}]})), "1h").unwrap_err();
+    assert_eq!(r.construct, "decision.abstain hold_last");
     let r = translate(
         &base(serde_json::json!({"inputs": [{"lane": "market.bars.1m", "instrument": "ETH-USD"}]})),
         "1h",
