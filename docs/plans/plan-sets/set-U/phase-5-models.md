@@ -1,6 +1,6 @@
 # Phase 5 — Models
 
-**Completion: 63% (5 / 8 tasks).** U-5.1, U-5.3, U-5.4, U-5.6, U-5.7 DONE 2026-10-02; U-5.2 and U-5.5 PARTIAL (embeddings unserved; the ClickHouse series unrun against a server); U-5.8 added (one model per walk-forward fold).
+**Completion: 75% (6 / 8 tasks).** U-5.1, U-5.3, U-5.4, U-5.6, U-5.7 DONE 2026-10-02; U-5.5 DONE 2026-10-04 (run against ClickHouse); U-5.2 PARTIAL (embeddings unserved); U-5.8 PARTIAL (backtest side committed; the trainer half lands with another session's commit).
 
 **Requirement IDs:** SU-MOD-01…07.
 **Spec:** [FEAT-007](../../../specs/FEAT-007-unified-strategy-engine.md) §8; ADR-0043; FEAT-006 §5, §6.
@@ -90,7 +90,17 @@ For a request at t, use the walk-forward fold whose `train_end + embargo < t`; w
 **Traces:** ADR-0043 decision 5; FEAT-005 §4.3; FEAT-006 §6; QA-2.
 
 ### U-5.5 Prediction series job — M
-`PARTIAL` 2026-10-02 — `clickhouse/09_model_prediction_series.sql` (ReplacingMergeTree on
+`DONE` 2026-10-04 — run against servers: `series_runner::tests::the_series_job_fills_clickhouse_fold_by_fold_and_a_refill_asks_nothing`
+drives the platform's `PlatformSeriesRunner::fill` (the job's work) over ten days of stored BTC-USD
+hourly bars copied into a scratch ClickHouse database with `09_model_prediction_series.sql`, a
+scratch PostgreSQL registry holding a version with two fold models (U-5.8), and a stand-in for the
+inference service: 166 answers, each stored once and tagged with the training end of the latest
+model trained before it (each of the three models answered its own window; the 3 decisions before
+the first fold's end plus embargo were refused); a second fill over the window made no sidecar
+calls. The cache's blocking calls inside the job's `spawn_blocking` ran clean on a real runtime.
+The live inference path itself is U-5.3's evidence.
+
+Built 2026-10-02 — `clickhouse/09_model_prediction_series.sql` (ReplacingMergeTree on
 version, instant, inputs digest); `backtest::models::ClickHouseCache` is the backtest provider's
 cache, read before the sidecar and written after; `runner::predict_series` runs the engine's own
 loop over a graph that only calls the model, so the series is keyed exactly as a later strategy
@@ -99,9 +109,8 @@ registered in a new Trainer worker pool (no trainer-class job was claimed before
 `a_series_covers_exactly_the_out_of_sample_window_and_a_backtest_then_asks_nothing` — rows only
 after training end + embargo, one per decision, every out-of-sample bar covered, the in-sample
 ones refused; then a different strategy over the window asked the source nothing.
-**Not met as written:** the ClickHouse table, cache and job have not run against a ClickHouse
-server (none here); the logic is verified through the in-memory store. And "each fold to its own
-test window" assumes one model per fold, which training does not produce — see U-5.8.
+Until 2026-10-04 the ClickHouse table, cache and job had not run against a server, and "each fold
+to its own test window" assumed one model per fold, which training did not produce (U-5.8).
 
 The `predict_series` job kind applies each fold to its own test window and writes `model_prediction_series` in ClickHouse; the backtest provider reads it before calling the sidecar.
 
