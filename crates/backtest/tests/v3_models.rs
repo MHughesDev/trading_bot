@@ -569,3 +569,82 @@ fn each_fold_answers_its_own_test_window_and_none_answers_before_it_was_trained(
     let result = runner::finish(&cfg(false), out, ComputeCost::default(), &models);
     assert_eq!(result.status, RunStatus::Ok);
 }
+
+/// A cache that keeps which training end answered each row, as the ClickHouse
+/// series does.
+#[derive(Default)]
+struct Tagged(std::sync::Mutex<Vec<(backtest::models::CacheKey, Option<i64>)>>);
+
+impl backtest::models::PredictionCache for Tagged {
+    fn get(&self, _key: &backtest::models::CacheKey) -> Option<ModelOutcome> {
+        None
+    }
+    fn put(&self, key: backtest::models::CacheKey, _o: ModelOutcome, through: Option<i64>) {
+        self.0.lock().unwrap().push((key, through));
+    }
+}
+
+#[test]
+fn a_fold_versions_series_covers_every_folds_window_once_each_by_its_own_fold() {
+    use backtest::models::FoldArtifact;
+    let warm = i64::from(features::runtime::lookback_bars("rsi_14").unwrap());
+    let at = |h: i64| t0() + chrono::Duration::hours(h);
+    let ends = [warm + 5, warm + 20, warm + 35];
+    let mut entry = registry(Some(at(ends[2])))
+        .pinned("sizer", 1)
+        .unwrap()
+        .clone();
+    entry.contract = Some(row_contract());
+    entry.artifact_uri = Some("file:///version".into());
+    entry.artifact_sha256 = Some("f".repeat(64));
+    entry.folds = ends[..2]
+        .iter()
+        .enumerate()
+        .map(|(i, h)| FoldArtifact {
+            index: u32::try_from(i).unwrap(),
+            trained_through: at(*h),
+            artifact_uri: format!("file:///fold/{i}"),
+            artifact_sha256: "0".repeat(64),
+        })
+        .collect();
+    let reg = Arc::new(RegistrySnapshot::new().with_version(entry));
+    let cache = Arc::new(Tagged::default());
+    let mut models = PitModels::new(Arc::clone(&reg), Counting::default(), cache.clone(), false);
+    let report = runner::predict_series(
+        "sizer@1",
+        &reg,
+        "ETH-USD",
+        "1h",
+        AssetClass::CryptoSpotCex,
+        bars(120),
+        ns(t0()),
+        &mut models,
+    )
+    .unwrap();
+    let rows = cache.0.lock().unwrap().clone();
+
+    // The union of the folds' windows: every decision after the first fold
+    // may answer, once.
+    let open = ns(at(ends[0])) + HOUR;
+    let expected = bars(120).iter().filter(|b| b.ts_ns > open).count();
+    assert_eq!(rows.len(), expected, "{report:?}");
+    let mut instants: Vec<i64> = rows.iter().map(|(k, _)| k.at_ns).collect();
+    instants.sort_unstable();
+    instants.dedup();
+    assert_eq!(instants.len(), rows.len(), "no decision twice");
+    // Each row names the model that answered it: the latest trained before it.
+    for (k, through) in &rows {
+        let want = ends
+            .iter()
+            .map(|h| ns(at(*h)))
+            .rfind(|t| t + HOUR < k.at_ns)
+            .unwrap();
+        assert_eq!(*through, Some(want), "at {}", k.at_ns);
+    }
+    for h in ends {
+        assert!(
+            rows.iter().any(|(_, t)| *t == Some(ns(at(h)))),
+            "the model trained through {h}h answered its window"
+        );
+    }
+}

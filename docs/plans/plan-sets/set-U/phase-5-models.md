@@ -146,7 +146,17 @@ PostgreSQL (registered, a wrong-shaped transform refused, a strategy compiles ag
 `test_kinds.py`, `test_v2.py`.
 
 ### U-5.8 One model per walk-forward fold — L
-`NOT STARTED`
+`PARTIAL` — the backtest side committed 2026-10-04 (5ae2c5c7): migration 0189 keeps each fold's
+model as a `model_fold` artifact with its own `trained_through`; `RegistrySnapshot` loads a
+version's folds; `PitModels` answers each decision with the latest model (a fold's or the
+version's own) trained before `t − embargo` and asks the source with that model's artifact; the
+manifest's fold usage names each fold. Proven by
+`each_fold_answers_its_own_test_window_and_none_answers_before_it_was_trained` (mutation-checked),
+`a_fold_versions_series_covers_every_folds_window_once_each_by_its_own_fold`, the chooser's unit
+test and `pg_fold_artifacts` (scratch PostgreSQL). Built, landing with the other session's commit
+because the files are theirs: the trainer fits every later fold (`app/fold_models.py`,
+`test_fold_models.py`; `worker.py`, `schemas.py`) and the platform records them
+(`sidecar.rs` `fold_artifacts`, `manager.rs` → `record_fold_artifact`). DONE when that lands.
 
 Found building U-5.4/U-5.5. Training fits **one** model per version, on the first fold's training
 window (`worker.py`: `req.folds[0]`), so a version answers point-in-time only after that window —
