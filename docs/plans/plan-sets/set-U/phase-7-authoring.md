@@ -1,6 +1,6 @@
 # Phase 7 — Authoring — identical for people and models
 
-**Completion: 71% (5 / 7 tasks).** U-7.1, U-7.2, U-7.4, U-7.5, U-7.6 DONE 2026-10-03; U-7.3 PARTIAL (not run over the platform's stored definitions; decision, LLM, ranking and universe-pipeline nodes refused by name); U-7.7 added (a deployment proposal a human decides).
+**Completion: 86% (6 / 7 tasks).** U-7.1, U-7.2, U-7.4, U-7.5, U-7.6 DONE 2026-10-03; U-7.3 DONE 2026-10-04 (run over every stored definition; LLM, ranking and universe-pipeline nodes refused by name, by decision); U-7.7 added (a deployment proposal a human decides).
 
 **Requirement IDs:** SU-AUTH-01…06.
 **Spec:** [FEAT-007](../../../specs/FEAT-007-unified-strategy-engine.md) §10, §12; ADR-0045; AGENT-011.
@@ -57,7 +57,18 @@ Validation is the compiler's diagnostics plus the `teach.rs` fix/example table, 
 **Traces:** ADR-0045 decision 2.
 
 ### U-7.3 v1 → v3 translator — L
-`PARTIAL` 2026-10-03 — `strategy_lang::v3::translate_v1`: conditions → nodes (the v1 expression
+`DONE` 2026-10-04 — the acceptance, checked line by line against the run over the platform
+database's 14 stored definitions: every one translates (11 compile; 2 translate but name a model and
+a feature that do not exist, which the compiler reports) or is refused naming the construct (1:
+another instrument's input); every translation carries its behaviour-change list; a translated EMA
+cross compiles and backtests (`translated_v1.rs`). **Decided, not built** (the owner delegated it):
+the description's "AI nodes to model nodes with adapters" and "universe nodes to a selection
+strategy" stay refusals for the LLM, ranking and pipeline nodes — an LLM prompt belongs to a
+registered model's contract in v3, and a ranking or universe is a selection strategy someone should
+author, so a mechanical translation would invent a strategy rather than carry one. None of the 14
+stored definitions uses them. History:
+
+Built 2026-10-03 — `strategy_lang::v3::translate_v1`: conditions → nodes (the v1 expression
 grammar rewritten into SLv3: `feature('x')`, `bar('close')`, `param('p')`, `{{p}}`), signal +
 `place_order` → `order` rules (fixed, percent-of-balance and model sizing), exits → a `protect` rule
 while in a position plus `close` rules for max-holding-bars and on-signal (a sigma distance becomes

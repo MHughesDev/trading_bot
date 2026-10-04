@@ -1,6 +1,6 @@
 # Unified Strategy Engine — Set U
 
-**Completion: 9% left (50 / 58 tasks). 50 done, 4 partial, 2 not started, 2 blocked.**
+**Completion: 8% left (51 / 58 tasks). 51 done, 3 partial, 2 not started, 2 blocked.**
 
 **Status:** ACCEPTED (2026-10-01) — Phase 0 starts immediately.
 **Created:** 2026-10-01
@@ -88,7 +88,7 @@ decide identically.
 | 4 | [Paper and live](phase-4-paper-and-live.md) | 7 | 0142–0144 | 5 / 7 — U-4.2 PARTIAL, U-4.7 open |
 | 5 | [Models](phase-5-models.md) | 8 | 0146, 0189 | 7 / 8 — U-5.8 PARTIAL |
 | 6 | [Selection strategies](phase-6-selection.md) | 6 | 0147–0148, 0187 | DONE |
-| 7 | [Authoring — identical for people and models](phase-7-authoring.md) | 7 | — | 5 / 7 — U-7.3 PARTIAL; U-7.7 open |
+| 7 | [Authoring — identical for people and models](phase-7-authoring.md) | 7 | — | 6 / 7 — U-7.7 open |
 | 8 | [Parity, proven; old paths retired](phase-8-parity-and-retirement.md) | 5 | — | 2 / 5 — U-8.5 PARTIAL; U-8.3, U-8.4 BLOCKED |
 
 ### Dependency graph
