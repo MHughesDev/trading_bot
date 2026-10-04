@@ -313,6 +313,7 @@ mod tests {
             artifact_sha256: Some(format!("{version:064}")),
             adapter: None,
             transform: None,
+            folds: Vec::new(),
         }
     }
 
@@ -457,6 +458,7 @@ mod tests {
                 "default_params": {"max_tokens": 500}}),
             ),
             transform: None,
+            folds: Vec::new(),
         })
     }
 
@@ -618,6 +620,7 @@ mod tests {
             artifact_sha256: transform.is_none().then(|| "0".repeat(64)),
             adapter: None,
             transform,
+            folds: Vec::new(),
         }
     }
 

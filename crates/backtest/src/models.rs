@@ -36,6 +36,70 @@ pub struct VersionEntry {
     /// is a transform: no training, so the point-in-time rule has nothing to
     /// hold it to and it answers any decision.
     pub transform: Option<serde_json::Value>,
+    /// The walk-forward folds' own models (Set U U-5.8), earliest training end
+    /// first. Empty for a version trained once. A backtest decision is answered
+    /// by the latest of these — or the version's own artifact — trained early
+    /// enough; live serving always uses the version's own artifact.
+    pub folds: Vec<FoldArtifact>,
+}
+
+/// One walk-forward fold's model: trained on the data before that fold's test
+/// window, so it may answer the decisions inside it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FoldArtifact {
+    pub index: u32,
+    pub trained_through: DateTime<Utc>,
+    pub artifact_uri: String,
+    pub artifact_sha256: String,
+}
+
+impl VersionEntry {
+    /// The model that may answer a decision at `at_ns`: the candidate (the
+    /// folds and the version's own artifact) with the latest training end
+    /// that is still before `at_ns − embargo`. `None` when none is; the
+    /// version's own artifact with an unknown training end is never chosen.
+    #[must_use]
+    pub fn answerer_at(&self, at_ns: i64, embargo_ns: i64) -> Option<Answerer> {
+        let fits = |through: i64| through.saturating_add(embargo_ns) < at_ns;
+        let own = self
+            .trained_through
+            .and_then(|t| t.timestamp_nanos_opt())
+            .filter(|t| fits(*t))
+            .map(|t| (t, None));
+        self.folds
+            .iter()
+            .filter_map(|f| {
+                let t = f.trained_through.timestamp_nanos_opt()?;
+                fits(t).then_some((t, Some(f)))
+            })
+            .chain(own)
+            // The latest training end; on a tie the version's own artifact.
+            .max_by_key(|(t, f)| (*t, f.is_none()))
+            .map(|(t, f)| Answerer {
+                trained_through_ns: t,
+                fold: f.cloned(),
+            })
+    }
+
+    /// This entry as the given fold's model: its artifact and training end.
+    #[must_use]
+    pub fn as_fold(&self, fold: &FoldArtifact) -> Self {
+        Self {
+            trained_through: Some(fold.trained_through),
+            artifact_uri: Some(fold.artifact_uri.clone()),
+            artifact_sha256: Some(fold.artifact_sha256.clone()),
+            folds: Vec::new(),
+            ..self.clone()
+        }
+    }
+}
+
+/// Which of a version's models answers one decision.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Answerer {
+    pub trained_through_ns: i64,
+    /// `None`: the version's own artifact.
+    pub fold: Option<FoldArtifact>,
 }
 
 /// Every version and alias, read once.
@@ -93,7 +157,29 @@ impl RegistrySnapshot {
                 artifact_sha256: row.artifact_sha256,
                 adapter: row.adapter.filter(|a| !a.is_null()),
                 transform: row.transform.filter(|t| !t.is_null()),
+                folds: Vec::new(),
             });
+        }
+        for row in storage::postgres::models::fold_artifacts(pg).await? {
+            let (Ok(version), Ok(index)) =
+                (u32::try_from(row.version), u32::try_from(row.fold_index))
+            else {
+                continue;
+            };
+            if let Some(e) = snap
+                .versions
+                .get_mut(&format!("{}@{version}", row.model_id))
+            {
+                e.folds.push(FoldArtifact {
+                    index,
+                    trained_through: row.trained_through,
+                    artifact_uri: row.storage_uri,
+                    artifact_sha256: row.sha256,
+                });
+            }
+        }
+        for e in snap.versions.values_mut() {
+            e.folds.sort_by_key(|f| (f.trained_through, f.index));
         }
         for (model, alias, version) in storage::postgres::models::model_aliases(pg).await? {
             if let Ok(v) = u32::try_from(version) {
@@ -423,7 +509,9 @@ pub struct PitModels<S: PredictionSource> {
     optimistic: bool,
     consumed: Vec<ModelConsumption>,
     calls: u64,
-    answered: BTreeMap<(String, u32), u64>,
+    /// Answers per (model, version, fold) — `None` is the version's own
+    /// artifact.
+    answered: BTreeMap<(String, u32, Option<u32>), u64>,
 }
 
 impl<S: PredictionSource> PitModels<S> {
@@ -467,27 +555,45 @@ impl<S: PredictionSource> ModelProvider for PitModels<S> {
                 }
             }
         };
+        // Which model answers: a transform trained on nothing, so it is in the
+        // past of every decision; otherwise the latest of the version's own
+        // artifact and its folds' (U-5.8) trained before `at − embargo`.
+        let (trained_through_ns, answerer, fold) = if entry.kind == "transform" {
+            (Some(i64::MIN), entry.clone(), None)
+        } else if let Some(a) = entry.answerer_at(req.at_ns, embargo_ns) {
+            match &a.fold {
+                Some(f) => (Some(a.trained_through_ns), entry.as_fold(f), Some(f.index)),
+                None => (Some(a.trained_through_ns), entry.clone(), None),
+            }
+        } else {
+            (
+                entry.trained_through.and_then(|t| t.timestamp_nanos_opt()),
+                entry.clone(),
+                None,
+            )
+        };
         let consumption = ModelConsumption {
             at_ns: req.at_ns,
             model: req.model.clone(),
             version: req.version,
-            // A transform trained on nothing: there is no training end it
-            // could have looked past, so it is in the past of every decision.
-            trained_through_ns: if entry.kind == "transform" {
-                Some(i64::MIN)
-            } else {
-                entry.trained_through.and_then(|t| t.timestamp_nanos_opt())
-            },
+            trained_through_ns,
             embargo_ns,
         };
         if !self.optimistic && !consumption.point_in_time() {
             let trained = entry
                 .trained_through
                 .map_or_else(|| "an unknown instant".to_string(), |t| t.to_rfc3339());
+            let folds = match entry.folds.first() {
+                Some(f) => format!(
+                    "; its earliest of {} folds through {}",
+                    entry.folds.len(),
+                    f.trained_through.to_rfc3339()
+                ),
+                None => String::new(),
+            };
             return ModelOutcome::Unavailable {
                 detail: format!(
-                    "{}@{} was trained through {trained} (embargo {}s): no fold trained early \
-                     enough to answer at {}",
+                    "{}@{} was trained through {trained}{folds} (embargo {}s): no fold trained                      early enough to answer at {}",
                     req.model,
                     req.version,
                     embargo_ns / 1_000_000_000,
@@ -500,7 +606,7 @@ impl<S: PredictionSource> ModelProvider for PitModels<S> {
             hit
         } else {
             self.calls += 1;
-            let fresh = self.source.predict(&entry, req);
+            let fresh = self.source.predict(&answerer, req);
             // Only deterministic answers are cached: a timeout or an outage
             // is a fact about that call, not about the model.
             if matches!(
@@ -515,7 +621,7 @@ impl<S: PredictionSource> ModelProvider for PitModels<S> {
         if matches!(outcome, ModelOutcome::Answered { .. }) {
             *self
                 .answered
-                .entry((req.model.clone(), req.version))
+                .entry((req.model.clone(), req.version, fold))
                 .or_insert(0) += 1;
             self.consumed.push(consumption);
         }
@@ -533,18 +639,32 @@ impl<S: PredictionSource> RunModels for PitModels<S> {
     fn fold_uses(&self) -> Vec<crate::run::FoldUse> {
         self.answered
             .iter()
-            .map(|((model, version), n)| crate::run::FoldUse {
-                model: model.clone(),
-                version: *version,
-                fold: self
-                    .snapshot
-                    .pinned(model, *version)
-                    .and_then(|e| e.trained_through)
-                    .map_or_else(
+            .map(|((model, version, fold), n)| {
+                let entry = self.snapshot.pinned(model, *version);
+                let through = |t: Option<DateTime<Utc>>| {
+                    t.map_or_else(
                         || "trained_through unknown".into(),
                         |t| format!("trained through {}", t.to_rfc3339()),
+                    )
+                };
+                let label = match fold {
+                    None => through(entry.and_then(|e| e.trained_through)),
+                    Some(i) => format!(
+                        "fold {i}, {}",
+                        through(entry.and_then(|e| {
+                            e.folds
+                                .iter()
+                                .find(|f| f.index == *i)
+                                .map(|f| f.trained_through)
+                        }))
                     ),
-                answered: *n,
+                };
+                crate::run::FoldUse {
+                    model: model.clone(),
+                    version: *version,
+                    fold: label,
+                    answered: *n,
+                }
             })
             .collect()
     }
@@ -608,6 +728,7 @@ mod tests {
             artifact_sha256: None,
             adapter: None,
             transform: None,
+            folds: Vec::new(),
         }
     }
 
@@ -641,6 +762,48 @@ mod tests {
             ),
             "the alias is resolved to a version at compile time"
         );
+    }
+
+    #[test]
+    fn the_answerer_is_the_latest_model_trained_before_the_embargo() {
+        use chrono::TimeZone;
+        let t = |h: u32| Utc.with_ymd_and_hms(2025, 1, 1, h, 0, 0).unwrap();
+        let n = |h: u32| t(h).timestamp_nanos_opt().unwrap();
+        let fold = |index: u32, h: u32| FoldArtifact {
+            index,
+            trained_through: t(h),
+            artifact_uri: format!("f{index}"),
+            artifact_sha256: String::new(),
+        };
+        let mut e = entry("m", 1, Some(contract()));
+        e.trained_through = Some(t(10));
+        e.folds = vec![fold(0, 2), fold(1, 6)];
+        let hour = n(1) - n(0);
+        let pick =
+            |e: &VersionEntry, at: i64| e.answerer_at(at, hour).map(|a| a.fold.map(|f| f.index));
+        assert_eq!(
+            pick(&e, n(3)),
+            None,
+            "trained through 2h + 1h embargo is not before 3h"
+        );
+        assert_eq!(pick(&e, n(3) + 1), Some(Some(0)));
+        assert_eq!(pick(&e, n(8)), Some(Some(1)));
+        assert_eq!(
+            pick(&e, n(12)),
+            Some(None),
+            "the version's own artifact once it may"
+        );
+        // An unknown training end never answers; the folds still do.
+        e.trained_through = None;
+        assert_eq!(pick(&e, n(20)), Some(Some(1)));
+        // Same training end as a fold: the version's own artifact.
+        e.trained_through = Some(t(6));
+        assert_eq!(pick(&e, n(20)), Some(None));
+        // A fold answers as that fold's model.
+        let f = e.as_fold(&e.folds[0]);
+        assert_eq!(f.artifact_uri.as_deref(), Some("f0"));
+        assert_eq!(f.trained_through, Some(t(2)));
+        assert!(f.folds.is_empty());
     }
 
     #[test]

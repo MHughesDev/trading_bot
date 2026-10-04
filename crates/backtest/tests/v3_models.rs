@@ -83,6 +83,7 @@ fn registry(trained_through: Option<DateTime<Utc>>) -> Arc<RegistrySnapshot> {
         artifact_sha256: None,
         adapter: None,
         transform: None,
+        folds: Vec::new(),
     }))
 }
 
@@ -347,6 +348,7 @@ fn a_series_covers_exactly_the_out_of_sample_window_and_a_backtest_then_asks_not
         artifact_sha256: None,
         adapter: None,
         transform: None,
+        folds: Vec::new(),
     }));
     let cache = Arc::new(MemoryCache::default());
 
@@ -430,6 +432,7 @@ fn a_transform_has_no_training_end_to_be_held_to_and_answers_every_decision() {
         artifact_sha256: None,
         adapter: None,
         transform: Some(serde_json::json!({"language": "python", "entrypoint": "f", "source": "def f(i):\n    return {'f': 1.0}\n"})),
+        folds: Vec::new(),
     }));
     let calls = Counting::default();
     let mut models = PitModels::new(
@@ -454,4 +457,115 @@ fn a_transform_has_no_training_end_to_be_held_to_and_answers_every_decision() {
         RunStatus::Ok,
         "Gate 0 has nothing to object to"
     );
+}
+
+// ── U-5.8: one model per walk-forward fold ──────────────────────────────────
+
+/// A sidecar stand-in that records which artifact answered at which instant.
+#[derive(Clone, Default)]
+#[allow(clippy::type_complexity)]
+struct WhoAnswered(Arc<std::sync::Mutex<Vec<(i64, String, DateTime<Utc>)>>>);
+
+impl PredictionSource for WhoAnswered {
+    fn predict(&mut self, e: &VersionEntry, req: &ModelRequest) -> ModelOutcome {
+        self.0.lock().unwrap().push((
+            req.at_ns,
+            e.artifact_uri.clone().unwrap_or_default(),
+            e.trained_through
+                .expect("an answering model has a training end"),
+        ));
+        Counting::default().predict(e, req)
+    }
+}
+
+#[test]
+fn each_fold_answers_its_own_test_window_and_none_answers_before_it_was_trained() {
+    use backtest::models::FoldArtifact;
+    let at = |h: i64| t0() + chrono::Duration::hours(h);
+    let fold = |index: u32, h: i64| FoldArtifact {
+        index,
+        trained_through: at(h),
+        artifact_uri: format!("file:///fold/{index}"),
+        artifact_sha256: format!("{index:064}"),
+    };
+    let mut entry = registry(Some(at(100))).pinned("sizer", 1).unwrap().clone();
+    entry.artifact_uri = Some("file:///version".into());
+    entry.artifact_sha256 = Some("f".repeat(64));
+    entry.folds = vec![fold(0, 20), fold(1, 50), fold(2, 80)];
+    let reg = Arc::new(RegistrySnapshot::new().with_version(entry));
+
+    let who = WhoAnswered::default();
+    let mut models = PitModels::new(
+        Arc::clone(&reg),
+        who.clone(),
+        Arc::new(MemoryCache::default()),
+        false,
+    );
+    let out = runner::run(v3_run(&reg, ns(t0())), &mut models).unwrap();
+    let answers = who.0.lock().unwrap().clone();
+
+    // Every training end, the version's own last.
+    let ends = [
+        (20, "file:///fold/0"),
+        (50, "file:///fold/1"),
+        (80, "file:///fold/2"),
+        (100, "file:///version"),
+    ];
+    for (at_ns, uri, through) in &answers {
+        let through_ns = ns(*through);
+        assert!(
+            through_ns + HOUR < *at_ns,
+            "{uri} (trained through {through}) answered at {at_ns}: inside its own training"
+        );
+        // And it was the latest one allowed: no later model was also eligible.
+        let latest = ends
+            .iter()
+            .rfind(|(h, _)| ns(at(*h)) + HOUR < *at_ns)
+            .unwrap();
+        assert_eq!(uri, latest.1, "at {at_ns}");
+    }
+    for (_, uri) in ends {
+        assert!(
+            answers.iter().any(|(_, u, _)| u == uri),
+            "{uri} answered its window"
+        );
+    }
+    // Every decision after fold 0 may answer is answered — a fold switches in
+    // as soon as the embargo allows, never a bar late (which would hold).
+    let open = ns(at(20)) + HOUR;
+    assert_eq!(
+        answers.len(),
+        bars(120).iter().filter(|b| b.ts_ns > open).count(),
+        "every decision after {open} answered"
+    );
+    // Before the first fold's training end nothing could answer: those held.
+    assert!(
+        out.manifest
+            .holds_by_reason
+            .get("model_unavailable")
+            .copied()
+            .unwrap_or(0)
+            > 0
+    );
+    assert!(
+        answers.iter().all(|(t, _, _)| *t > ns(at(20)) + HOUR),
+        "nothing answered before fold 0 was trained"
+    );
+
+    // The manifest names each fold that answered, and Gate 0 passes.
+    let uses = models.fold_uses();
+    assert_eq!(uses.len(), 4, "{uses:?}");
+    assert!(uses
+        .iter()
+        .any(|u| u.fold.starts_with("fold 1, trained through")));
+    assert_eq!(
+        uses.iter().map(|u| u.answered).sum::<u64>(),
+        answers.len() as u64
+    );
+    assert!(models
+        .consumption()
+        .iter()
+        .all(backtest::models::ModelConsumption::point_in_time));
+    let result = runner::finish(&cfg(false), out, ComputeCost::default(), &models);
+    assert_eq!(result.status, RunStatus::Ok);
 }

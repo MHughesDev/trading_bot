@@ -69,6 +69,66 @@ pub async fn version_contracts(
     .await?)
 }
 
+/// One walk-forward fold's model (Set U U-5.8, migration 0189).
+#[derive(Clone, Debug, sqlx::FromRow)]
+pub struct FoldArtifactRow {
+    pub model_id: String,
+    pub version: i32,
+    pub fold_index: i32,
+    pub trained_through: chrono::DateTime<chrono::Utc>,
+    pub storage_uri: String,
+    pub sha256: String,
+}
+
+/// Every version's fold models, earliest training end first.
+///
+/// # Errors
+/// A database error.
+pub async fn fold_artifacts(pool: &super::PgPool) -> Result<Vec<FoldArtifactRow>, super::PgError> {
+    Ok(sqlx::query_as(
+        "SELECT model_id, version, fold_index, trained_through, storage_uri, sha256 \
+         FROM model_artifacts WHERE artifact_type = 'model_fold' \
+         ORDER BY model_id, version, trained_through, fold_index",
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Record one fold's model: trained only on what came before its test window,
+/// so a backtest may ask it about the decisions inside that window. Written
+/// once per (model, version, fold); a repeat is a no-op.
+///
+/// # Errors
+/// A database error.
+#[allow(clippy::too_many_arguments)]
+pub async fn record_fold_artifact(
+    pool: &super::PgPool,
+    model_id: &str,
+    version: i32,
+    fold_index: i32,
+    trained_through: chrono::DateTime<chrono::Utc>,
+    storage_uri: &str,
+    size_bytes: i64,
+    sha256: &str,
+) -> Result<(), super::PgError> {
+    sqlx::query(
+        "INSERT INTO model_artifacts \
+           (model_id, version, storage_uri, artifact_type, size_bytes, sha256, fold_index, trained_through) \
+         VALUES ($1, $2, $3, 'model_fold', $4, $5, $6, $7) \
+         ON CONFLICT (model_id, version, fold_index) WHERE artifact_type = 'model_fold' DO NOTHING",
+    )
+    .bind(model_id)
+    .bind(version)
+    .bind(storage_uri)
+    .bind(size_bytes)
+    .bind(sha256)
+    .bind(fold_index)
+    .bind(trained_through)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Every alias and the version it points at now. The compiler resolves an
 /// alias to a version once; a running strategy keeps that version.
 ///
