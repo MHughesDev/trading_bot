@@ -174,3 +174,106 @@ pub async fn record_parity(pool: &PgPool, c: &ParityCheck) -> Result<i64, PgErro
     .await?;
     Ok(id)
 }
+
+// ── forward evidence: what a recorder resumes from (Set T T-0.4; 0186) ─────────
+
+/// A bar a forward recorder opened, closed or re-anchored at, and its mark.
+#[derive(Clone, Debug, PartialEq, sqlx::FromRow)]
+pub struct ForwardMark {
+    pub forward_deployment_id: Uuid,
+    pub tenant_id: String,
+    pub bar: DateTime<Utc>,
+    pub mark: rust_decimal::Decimal,
+    /// `open`, `close` or `reanchor`.
+    pub kind: String,
+}
+
+/// One fill of a forward deployment, with what resuming its series needs.
+#[derive(Clone, Debug, PartialEq, sqlx::FromRow)]
+pub struct ForwardFill {
+    pub forward_deployment_id: Uuid,
+    pub tenant_id: String,
+    /// 1, 2, 3… per forward deployment.
+    pub seq: i64,
+    /// `buy` or `sell`.
+    pub side: String,
+    /// This fill's quantity, never the cumulative figure.
+    pub filled: rust_decimal::Decimal,
+    pub fill_price: rust_decimal::Decimal,
+    /// `None` when the venue did not report a fee — never recorded as zero.
+    pub charge: Option<rust_decimal::Decimal>,
+    pub decision_price: rust_decimal::Decimal,
+    pub filled_at: DateTime<Utc>,
+}
+
+/// Keep a mark.
+///
+/// # Errors
+/// A database error, or a second mark for the same bar.
+pub async fn record_forward_mark(pool: &PgPool, m: &ForwardMark) -> Result<(), PgError> {
+    sqlx::query(
+        "INSERT INTO strategy_forward_mark (forward_deployment_id, tenant_id, bar, mark, kind) \
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(m.forward_deployment_id)
+    .bind(&m.tenant_id)
+    .bind(m.bar)
+    .bind(m.mark)
+    .bind(&m.kind)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Keep a fill.
+///
+/// # Errors
+/// A database error, or a sequence number already used.
+pub async fn record_forward_fill(pool: &PgPool, f: &ForwardFill) -> Result<(), PgError> {
+    sqlx::query(
+        "INSERT INTO strategy_forward_fill (forward_deployment_id, tenant_id, seq, side, filled, \
+           fill_price, charge, decision_price, filled_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+    )
+    .bind(f.forward_deployment_id)
+    .bind(&f.tenant_id)
+    .bind(f.seq)
+    .bind(&f.side)
+    .bind(f.filled)
+    .bind(f.fill_price)
+    .bind(f.charge)
+    .bind(f.decision_price)
+    .bind(f.filled_at)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// A forward deployment's marks, by bar.
+///
+/// # Errors
+/// A database error.
+pub async fn forward_marks(pool: &PgPool, forward_deployment_id: Uuid) -> Result<Vec<ForwardMark>, PgError> {
+    Ok(sqlx::query_as(
+        "SELECT forward_deployment_id, tenant_id, bar, mark, kind FROM strategy_forward_mark \
+         WHERE forward_deployment_id = $1 ORDER BY bar",
+    )
+    .bind(forward_deployment_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// A forward deployment's fills, in the order they were applied.
+///
+/// # Errors
+/// A database error.
+pub async fn forward_fills(pool: &PgPool, forward_deployment_id: Uuid) -> Result<Vec<ForwardFill>, PgError> {
+    Ok(sqlx::query_as(
+        "SELECT forward_deployment_id, tenant_id, seq, side, filled, fill_price, charge, \
+                decision_price, filled_at \
+           FROM strategy_forward_fill WHERE forward_deployment_id = $1 ORDER BY seq",
+    )
+    .bind(forward_deployment_id)
+    .fetch_all(pool)
+    .await?)
+}

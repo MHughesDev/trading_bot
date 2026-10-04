@@ -351,10 +351,16 @@ async fn build(
     if let Some(spec) = forward_spec(pg, d).await? {
         let recorders = reconciliation::ForwardRecorders::installed()
             .ok_or("forward evidence is recorded but no recorder registry is installed")?;
+        let forward_id = spec.deployment_id;
+        let fill_seq = storage::postgres::decision_journal::forward_fills(pg, forward_id)
+            .await
+            .map_err(|e| format!("forward fills: {e}"))?
+            .last()
+            .map_or(0, |f| f.seq);
         let recorder = recorders
             .deploy(spec, d.starting_capital, Arc::clone(gate.halt_registry()))
             .map_err(|e| format!("forward recorder: {e}"))?;
-        runner.attach_forward(recorder, d.user_id.clone(), limits)?;
+        runner.attach_forward(recorder, forward_id, fill_seq, d.user_id.clone(), limits)?;
         info!(deployment = %d.deployment_id, "forward evidence recording attached");
     }
     Ok(runner)

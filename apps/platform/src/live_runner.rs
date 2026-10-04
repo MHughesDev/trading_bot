@@ -107,6 +107,16 @@ pub trait DeploymentStore: Send + Sync {
         tenant: &str,
         observation: &domain::forward::ForwardObservation,
     ) -> Result<(), String>;
+    /// Keep a bar's mark and a fill — what the recorder resumes from after a
+    /// restart (migration 0186).
+    async fn record_forward_mark(
+        &self,
+        mark: &storage::postgres::decision_journal::ForwardMark,
+    ) -> Result<(), String>;
+    async fn record_forward_fill(
+        &self,
+        fill: &storage::postgres::decision_journal::ForwardFill,
+    ) -> Result<(), String>;
 }
 
 /// The Postgres store (migrations 0142–0144).
@@ -159,6 +169,22 @@ impl DeploymentStore for PgDeploymentStore {
         observation: &domain::forward::ForwardObservation,
     ) -> Result<(), String> {
         reconciliation::store::insert_observation(&self.0, tenant, observation)
+            .await
+            .map_err(|e| e.to_string())
+    }
+    async fn record_forward_mark(
+        &self,
+        mark: &storage::postgres::decision_journal::ForwardMark,
+    ) -> Result<(), String> {
+        storage::postgres::decision_journal::record_forward_mark(&self.0, mark)
+            .await
+            .map_err(|e| e.to_string())
+    }
+    async fn record_forward_fill(
+        &self,
+        fill: &storage::postgres::decision_journal::ForwardFill,
+    ) -> Result<(), String> {
+        storage::postgres::decision_journal::record_forward_fill(&self.0, fill)
             .await
             .map_err(|e| e.to_string())
     }
@@ -247,6 +273,10 @@ struct LiveOrder {
     reduce_only: bool,
     protective: bool,
     closed: bool,
+    /// The primary close its decision was made at — what a forward fill's
+    /// slippage is measured against. Absent in checkpoints written before it.
+    #[serde(default)]
+    decision_price: Option<Decimal>,
 }
 
 /// What the runner checkpoints beside the engine.
@@ -324,12 +354,31 @@ pub struct LiveRunner {
 /// stream) and the backtest running beside it for the expected series.
 struct Forward {
     recorder: Arc<reconciliation::ForwardRecorder>,
+    /// `mlops.paper_deployment.deployment_id`.
+    forward_id: Uuid,
+    /// The last fill sequence number kept.
+    fill_seq: i64,
     shadow: backtest::shadow::Shadow,
     tenant: String,
     /// The recorder has its opening mark. Until then — a runner that starts
     /// holding a position — nothing is recorded: the shadow starts flat, and
     /// the two are compared only from a bar where both are flat.
     opened: bool,
+}
+
+fn forward_mark(
+    f: &Forward,
+    bar: DateTime<Utc>,
+    mark: Decimal,
+    kind: &str,
+) -> storage::postgres::decision_journal::ForwardMark {
+    storage::postgres::decision_journal::ForwardMark {
+        forward_deployment_id: f.forward_id,
+        tenant_id: f.tenant.clone(),
+        bar,
+        mark,
+        kind: kind.into(),
+    }
 }
 
 /// Unix ns → UTC.
@@ -475,6 +524,8 @@ impl LiveRunner {
     pub fn attach_forward(
         &mut self,
         recorder: Arc<reconciliation::ForwardRecorder>,
+        forward_id: Uuid,
+        fill_seq: i64,
         tenant: String,
         instrument_limits: risk::InstrumentLimits,
     ) -> Result<(), String> {
@@ -505,11 +556,53 @@ impl LiveRunner {
         .map_err(|e| format!("the shadow backtest does not build: {e}"))?;
         self.forward = Some(Forward {
             recorder,
+            forward_id,
+            fill_seq,
             shadow,
             tenant,
             opened: false,
         });
         Ok(())
+    }
+
+    /// Keep a fill of this deployment for the recorder to resume from. Every
+    /// fill while recording is attached, with the price its decision was made
+    /// at; one without a decision price (an order from before attach) is kept
+    /// at its own price, so its slippage reads as zero rather than invented.
+    async fn keep_forward_fill(
+        &mut self,
+        side: Side,
+        filled: Decimal,
+        fill_price: Decimal,
+        charge: Option<Decimal>,
+        decision_price: Option<Decimal>,
+        filled_at: DateTime<Utc>,
+    ) {
+        let Some(f) = self.forward.as_mut() else {
+            return;
+        };
+        if filled <= Decimal::ZERO {
+            return;
+        }
+        f.fill_seq += 1;
+        let fill = storage::postgres::decision_journal::ForwardFill {
+            forward_deployment_id: f.forward_id,
+            tenant_id: f.tenant.clone(),
+            seq: f.fill_seq,
+            side: match side {
+                Side::Buy => "buy",
+                Side::Sell => "sell",
+            }
+            .into(),
+            filled,
+            fill_price,
+            charge,
+            decision_price: decision_price.unwrap_or(fill_price),
+            filled_at,
+        };
+        if let Err(e) = self.deps.store.record_forward_fill(&fill).await {
+            error!(deployment = %self.d.deployment_id, error = %e, "forward fill not stored — a restart cannot resume this series");
+        }
     }
 
     /// One closed bar through the shadow, and on a primary bar one forward
@@ -545,6 +638,10 @@ impl LiveRunner {
                 }
                 f.opened = true;
                 info!(deployment = %self.d.deployment_id, bar = %bar_at, "forward recording opened");
+                let m = forward_mark(f, bar_at, close, "open");
+                if let Err(e) = self.deps.store.record_forward_mark(&m).await {
+                    error!(deployment = %self.d.deployment_id, error = %e, "forward mark not stored");
+                }
             }
             return;
         }
@@ -579,8 +676,12 @@ impl LiveRunner {
             }
         };
         let tenant = f.tenant.clone();
+        let m = forward_mark(f, bar_at, close, "close");
         if let Err(e) = self.deps.store.insert_observation(&tenant, &observation).await {
             error!(deployment = %self.d.deployment_id, error = %e, "forward observation not stored");
+        }
+        if let Err(e) = self.deps.store.record_forward_mark(&m).await {
+            error!(deployment = %self.d.deployment_id, error = %e, "forward mark not stored");
         }
         info!(deployment = %self.d.deployment_id, bar = %bar_at, verdict = ?verdict, "forward observation");
     }
@@ -980,6 +1081,7 @@ impl LiveRunner {
                         reduce_only: o.reduce_only,
                         protective: o.role == OrderRole::Protective,
                         closed: false,
+                        decision_price: self.decision_mark,
                     };
                     let refuse = |verdict: &str, detail: String| {
                         (
@@ -1023,6 +1125,15 @@ impl LiveRunner {
                                 order.filled = f.cumulative_filled;
                                 order.closed = order.filled >= order.qty;
                                 self.last_fill_price = Some(f.fill_price.inner());
+                                self.keep_forward_fill(
+                                    o.side,
+                                    f.filled_size,
+                                    f.fill_price.inner(),
+                                    f.commission,
+                                    order.decision_price,
+                                    f.filled_at,
+                                )
+                                .await;
                                 events.push(Event::Fill(Fill {
                                     tag: o.tag.clone(),
                                     side: o.side,
@@ -1087,6 +1198,15 @@ impl LiveRunner {
             if let Some(f) = synced.fill {
                 o.filled += f.filled_qty;
                 self.last_fill_price = Some(f.fill_price.inner());
+                self.keep_forward_fill(
+                    o.side,
+                    f.filled_qty,
+                    f.fill_price.inner(),
+                    Some(f.commission),
+                    o.decision_price,
+                    f.filled_at,
+                )
+                .await;
                 events.push(Event::Fill(Fill {
                     tag: tag.clone(),
                     side: o.side,
@@ -1230,6 +1350,8 @@ mod tests {
         checkpoints: Mutex<BTreeMap<Uuid, (String, serde_json::Value)>>,
         fail_journal: bool,
         observations: Mutex<Vec<domain::forward::ForwardObservation>>,
+        marks: Mutex<Vec<storage::postgres::decision_journal::ForwardMark>>,
+        fills: Mutex<Vec<storage::postgres::decision_journal::ForwardFill>>,
     }
 
     #[async_trait::async_trait]
@@ -1277,6 +1399,20 @@ mod tests {
             observation: &domain::forward::ForwardObservation,
         ) -> Result<(), String> {
             self.observations.lock().unwrap().push(observation.clone());
+            Ok(())
+        }
+        async fn record_forward_mark(
+            &self,
+            mark: &storage::postgres::decision_journal::ForwardMark,
+        ) -> Result<(), String> {
+            self.marks.lock().unwrap().push(mark.clone());
+            Ok(())
+        }
+        async fn record_forward_fill(
+            &self,
+            fill: &storage::postgres::decision_journal::ForwardFill,
+        ) -> Result<(), String> {
+            self.fills.lock().unwrap().push(fill.clone());
             Ok(())
         }
     }
@@ -1993,7 +2129,7 @@ mod tests {
             tick_size: Decimal::new(1, 1),
             lot_size: Decimal::new(1, 8),
         };
-        r.attach_forward(recorder, "t-fwd".into(), limits.clone())
+        r.attach_forward(recorder, Uuid::new_v4(), 0, "t-fwd".into(), limits.clone())
             .unwrap();
         assert!(
             r.attach_forward(
@@ -2004,6 +2140,8 @@ mod tests {
                         Arc::clone(gate.halt_registry()),
                     )
                     .unwrap(),
+                Uuid::new_v4(),
+                0,
                 "t-fwd".into(),
                 limits,
             )
@@ -2036,6 +2174,18 @@ mod tests {
             "the shadow decides as paper does on most bars: {matched} of {}",
             obs.len()
         );
+        // What a restart resumes from: a mark for the opening bar and every
+        // closed bar, and every fill numbered, with a fee and a decision price.
+        let marks = store.marks.lock().unwrap();
+        assert_eq!(marks.len(), obs.len() + 1);
+        assert_eq!(marks[0].kind, "open");
+        assert!(marks[1..].iter().all(|m| m.kind == "close"));
+        let fills = store.fills.lock().unwrap();
+        assert!(!fills.is_empty(), "the paper deployment's fills are kept");
+        assert!(fills
+            .iter()
+            .enumerate()
+            .all(|(i, f)| f.seq == i as i64 + 1 && f.charge.is_some() && f.filled > Decimal::ZERO));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2082,6 +2232,8 @@ mod tests {
             .unwrap();
         r.attach_forward(
             recorder,
+            Uuid::new_v4(),
+            0,
             "t-fwd".into(),
             risk::InstrumentLimits {
                 tick_size: Decimal::new(1, 1),
