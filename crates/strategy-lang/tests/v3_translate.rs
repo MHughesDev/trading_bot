@@ -185,6 +185,46 @@ fn conditions_multiplied_as_numbers_translate_to_what_v1_meant() {
     );
 }
 
+/// Found migrating the stored strategies (U-8.5): two stored sweeps name their
+/// EMAs by parameter. That is the operator with a parameter port, and it
+/// compiles to the same indicator column.
+#[test]
+fn a_feature_named_by_parameter_translates_to_the_operator_with_its_port() {
+    let d = def(serde_json::json!({
+      "strategy_id": "ema_sweep", "definition_version": "1.2", "asset_class": "crypto_spot_cex",
+      "inputs": [],
+      "parameters": {
+        "fast": {"type": "int", "default": 7, "min": 3, "max": 20},
+        "slow": {"type": "int", "default": 21, "min": 10, "max": 60}
+      },
+      "nodes": [
+        {"id": "n1", "type": "condition", "expr": "feature('ema_{{fast}}') > feature('ema_{{slow}}')"},
+        {"id": "s1", "type": "signal", "when": "n1", "emit": "long"}
+      ],
+      "actions": [{"on_signal": "long", "type": "place_order",
+                   "order": {"side": "buy", "size_mode": "fixed", "size": "0.1"}}]
+    }));
+    let t = translate(&d, "1h").unwrap_or_else(|r| panic!("{r}"));
+    assert!(t.text.contains("ema(close, $fast) > ema(close, $slow)"), "{}", t.text);
+    validate(
+        Source::Graph(t.graph),
+        &StdRegistries::new(),
+        &ParamValues::new(),
+        None,
+    )
+    .unwrap_or_else(|f| panic!("{f:#?}"));
+    // A family with no operator taking a window port is still refused by name.
+    let rsi = def(serde_json::json!({
+      "strategy_id": "rsi_sweep", "definition_version": "1.2", "asset_class": "crypto_spot_cex",
+      "inputs": [], "parameters": {"n": {"type": "int", "default": 14, "min": 5, "max": 30}},
+      "nodes": [{"id": "c", "type": "condition", "expr": "feature('rsi_{{n}}') < 30"},
+                {"id": "s", "type": "signal", "when": "c", "emit": "long"}],
+      "actions": [{"on_signal": "long", "type": "place_order",
+                   "order": {"side": "buy", "size_mode": "fixed", "size": "0.1"}}]
+    }));
+    assert_eq!(translate(&rsi, "1h").unwrap_err().construct, "parameterised feature name");
+}
+
 #[test]
 fn constructs_without_a_translation_are_refused_by_name() {
     let base = |extra: serde_json::Value| {
@@ -212,11 +252,11 @@ fn constructs_without_a_translation_are_refused_by_name() {
     )
     .unwrap_err();
     assert_eq!(r.construct, "inputs");
-    // A parameter inside a feature name: v1 substituted it per value; a v3
-    // feature name is fixed, so this is refused rather than carried broken.
-    let r = translate(&base(serde_json::json!({"nodes": [{"id": "c", "type": "condition", "expr": "feature('ema_{{fast}}') > 1"}]})), "1h").unwrap_err();
+    // A parameter inside a feature name with no operator to carry it: v1
+    // substituted it per value; a v3 feature name is fixed, so this is refused
+    // rather than carried broken. (`ema_{{p}}` translates: see below.)
+    let r = translate(&base(serde_json::json!({"nodes": [{"id": "c", "type": "condition", "expr": "feature('rsi_{{n}}') > 1"}]})), "1h").unwrap_err();
     assert_eq!(r.construct, "parameterised feature name");
-    assert!(r.why.contains("ema(close, $fast)"));
 }
 
 #[test]

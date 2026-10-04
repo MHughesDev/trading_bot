@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-04T08:12:49.850454500Z",
+  "generated_at": "2026-10-04T09:31:09.522323200Z",
   "applied": false,
   "strategies": [
     {
@@ -123,20 +123,50 @@
       "v1_revision": "86aa09df5bf5adc0610aa0feb6ee3b3f6f743973f5ab92e42ccd05993d6a68ea",
       "timeframe": "1h",
       "timeframe_source": "default: no backtest on record",
-      "outcome": "refused",
-      "construct": "parameterised feature name",
-      "at": "nodes[n1]",
-      "why": "`feature('ema_{{fast}}')` names a different feature for each parameter value; a v3 feature name is fixed — use the operator with a parameter port instead, e.g. `ema(close, $fast)`"
+      "outcome": "translated",
+      "v3_revision": "8dec137a463625b2345e941c84642d8b93704c123e8dbcbec6ee6854561e0be1",
+      "text": "strategy ema_cross_p_smoke_1788927738 kind trading asset_class crypto_spot_cex timeframe 1h\ndescription \"translated from v1.2\"\nparam fast: int(default: 7, max: 30, min: 3, step: 1)\nparam slow: int(default: 21, max: 90, min: 10, step: 1)\nconstraint \"param('fast') < param('slow')\"\n\nlet n1 = ema(close, $fast) > ema(close, $slow)\nlet n3 = ema(close, $fast) < ema(close, $slow)\n\nwhen n1 and not prev(n1, 1.0) -> order(side: buy, size: units(x: 0.01), style: market, tif: gtc)\nwhen n3 and not prev(n3, 1.0) -> order(side: sell, size: units(x: 0.01), style: market, tif: gtc)\notherwise hold\n",
+      "changes": [
+        {
+          "code": "fills_next_bar_open",
+          "detail": "orders fill at the next bar's open, not at the close of the bar that decided"
+        },
+        {
+          "code": "risk_gate_applied",
+          "detail": "every order passes the production risk gate, in backtests too"
+        },
+        {
+          "code": "missing_holds",
+          "detail": "a value that cannot be computed (an indicator warming up, a model that does not answer) holds the rule, with the reason journaled, rather than comparing false"
+        }
+      ],
+      "rerun": null,
+      "applied": false
     },
     {
       "strategy_id": "ema_cross_p_smoke_1788928410",
       "v1_revision": "7f5e43d91b59f6e92002a456d56ad36f4e4dc4bda178ccedb9cf67813b62b06c",
       "timeframe": "1h",
       "timeframe_source": "default: no backtest on record",
-      "outcome": "refused",
-      "construct": "parameterised feature name",
-      "at": "nodes[n1]",
-      "why": "`feature('ema_{{fast}}')` names a different feature for each parameter value; a v3 feature name is fixed — use the operator with a parameter port instead, e.g. `ema(close, $fast)`"
+      "outcome": "translated",
+      "v3_revision": "6c803de402d02ba8c2be0df622be9d695e73f286f8a476735284831cf9e83e0c",
+      "text": "strategy ema_cross_p_smoke_1788928410 kind trading asset_class crypto_spot_cex timeframe 1h\ndescription \"translated from v1.2\"\nparam fast: int(default: 7, max: 30, min: 3, step: 1)\nparam slow: int(default: 21, max: 90, min: 10, step: 1)\nconstraint \"param('fast') < param('slow')\"\n\nlet n1 = ema(close, $fast) > ema(close, $slow)\nlet n3 = ema(close, $fast) < ema(close, $slow)\n\nwhen n1 and not prev(n1, 1.0) -> order(side: buy, size: units(x: 0.01), style: market, tif: gtc)\nwhen n3 and not prev(n3, 1.0) -> order(side: sell, size: units(x: 0.01), style: market, tif: gtc)\notherwise hold\n",
+      "changes": [
+        {
+          "code": "fills_next_bar_open",
+          "detail": "orders fill at the next bar's open, not at the close of the bar that decided"
+        },
+        {
+          "code": "risk_gate_applied",
+          "detail": "every order passes the production risk gate, in backtests too"
+        },
+        {
+          "code": "missing_holds",
+          "detail": "a value that cannot be computed (an indicator warming up, a model that does not answer) holds the rule, with the reason journaled, rather than comparing false"
+        }
+      ],
+      "rerun": null,
+      "applied": false
     },
     {
       "strategy_id": "ema_cross_v1",

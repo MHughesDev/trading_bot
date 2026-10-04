@@ -93,6 +93,14 @@ fn expression(expr: &str, outputs: &BTreeMap<String, String>, at: &str) -> Resul
         });
         if let Some((f, arg, after)) = call {
             if arg.contains("{{") {
+                // `ema_{{p}}` is the operator with a parameter port — the
+                // compiler lowers `ema(close, $p)` to the very `ema_N` column the
+                // v1 name resolved to, so nothing about the value changes.
+                if let Some(op) = parameterised_family(f, &arg) {
+                    out.push_str(&op);
+                    rest = after;
+                    continue;
+                }
                 return Err(refuse(
                     "parameterised feature name",
                     at,
@@ -158,6 +166,25 @@ fn numeric_truth(v: Value, want: Option<Ty>) -> Value {
         return json!({"op": "if", "args": {"cond": node, "then": 1.0, "else": 0.0}});
     }
     node
+}
+
+/// `feature('ema_{{p}}')` → `ema(close, $p)`, for the families whose v3
+/// operator takes the window as a parameter port. `None` for anything else.
+fn parameterised_family(f: &str, arg: &str) -> Option<String> {
+    if f != "feature" {
+        return None;
+    }
+    let (family, rest) = arg.split_once('_')?;
+    let param = rest.strip_prefix("{{")?.strip_suffix("}}")?.trim();
+    if param.is_empty() || !param.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return None;
+    }
+    let op = match family {
+        "ema" => "ema",
+        "sma" => "rolling_mean",
+        _ => return None,
+    };
+    Some(format!("{op}(close, ${param})"))
 }
 
 fn decimal(d: rust_decimal::Decimal) -> f64 {

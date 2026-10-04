@@ -35,10 +35,11 @@ const build = vi.fn(async (input: { text: string } | { graph: StrategyGraph }) =
     : { valid: false, graph: input.graph, text: `strategy ${input.graph.name} kind trading`, findings: [{ code: 'no_rules', at: 'decide', message: 'a trading strategy with no rules never acts', fix: 'add a rule' }] },
 )
 const save = vi.fn(async (id: string) => ({ strategy_id: id, revision_hash: 'a'.repeat(64), actor_kind: 'human', parent_revision: null, text: '' }))
+const get = vi.fn(async (_id: string) => ({ graph: { ...textGraph, name: 'stored_one' }, text: '' }))
 
 vi.mock('@/api/strategyV3', async (orig) => ({
   ...(await orig<typeof import('@/api/strategyV3')>()),
-  strategyV3Api: { catalogue: async () => catalogue, build: (i: never) => build(i), save: (id: string, g: never) => save(id, g), get: vi.fn() },
+  strategyV3Api: { catalogue: async () => catalogue, build: (i: never) => build(i), save: (id: string, g: never) => save(id, g), get: (id: string) => get(id) },
 }))
 
 beforeAll(() => {
@@ -89,5 +90,15 @@ describe('the graph editor', () => {
     fireEvent.click(screen.getByText('Save'))
     await waitFor(() => expect(save).toHaveBeenCalled())
     expect(save.mock.calls[0][0]).toBe('ema_cross_v3')
+  })
+})
+
+describe('opening a stored strategy', () => {
+  it('loads the graph named by ?strategy= and saves back to it', async () => {
+    window.history.pushState({}, '', '/strategy/graph?strategy=stored_one')
+    await renderPage()
+    await waitFor(() => expect(get).toHaveBeenCalledWith('stored_one'))
+    await waitFor(() => expect(screen.getByLabelText('Strategy name')).toHaveValue('stored_one'))
+    window.history.pushState({}, '', '/')
   })
 })

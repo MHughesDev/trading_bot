@@ -61,9 +61,14 @@ parity check passes on translated strategies, then are deleted". No translated s
 yet (the platform database records 0 deployments), so the check has nothing to pass on. And deleting
 now would strand what still produces or runs v1 (mapped 2026-10-03): hot-path stage 3 fed by
 `/api/strategies/{id}/start`, automations arm/resume and `deploy_paper` approval; research sweeps (v1
-parse and `SearchSpace`); `GET /api/strategies/{id}/config`, `apply_list`, lifecycle simplification;
-the SLv2 MCP tools; `StrategyBuilderPage` (posts v1) and `ScannerPanel` (evaluates v1 in the browser).
-Each needs a v3 arm before the evaluators can go.
+parse and `SearchSpace`); lifecycle simplification; the SLv2 MCP tools; `StrategyBuilderPage` (posts
+v1) and `ScannerPanel` (evaluates v1 in the browser). Each needs a v3 arm before the evaluators can go.
+**2026-10-04, v3 arms added where a v3 head used to break:** `GET /api/strategies/{id}/config` returns a
+v3 head as its graph and SLv3 text (it was a 500); `apply_list` lists v3 rows with their kind (they were
+dropped); `POST /api/strategies/{id}/start` refuses a v3 head by name, pointing at `POST
+/api/deployments` (it was a 500); the v1 builder opens a v3 strategy in the graph editor, which now loads
+a stored strategy from `?strategy=`. Still v1-only, and in another track's in-flight files: automations
+arm/resume and `deploy_paper`, research sweeps, `toDefinition.ts`.
 
 Delete `sim.rs`'s evaluation loop, `preview.rs`'s loop, `interpreter.rs` and hot-path stage 3's `StrategyInstance` once every stored strategy runs on v3. A source-scan guard fails the build if any reappears.
 
@@ -88,10 +93,10 @@ and balance) and publishes old against new with each difference attributed or ma
 `--apply` saves the translation as the head through the platform's one revision write
 (`append_revision`, split out of `write_revision`, authored `scheduler`). **Dry run against the
 platform database, 2026-10-04:** [report](../../../reports/strategy-v3-migration-2026-10-03.md) — of 14
-stored strategies, 9 translate (1 re-run; 1 cannot re-run, `BTC-USDT` has no instrument row; 7 have no
+stored strategies, 11 translate (1 re-run; 1 cannot re-run, `BTC-USDT` has no instrument row; 9 have no
 backtest on record), 2 translate but do not compile (`btc_forecaster@production` is not in the
-registry; `model_signal` is no indicator), 3 are refused by name (two parameterised-feature smoke
-tests, one reading another instrument). **Found by the re-run and fixed:** v1 places an order on a
+registry; `model_signal` is no indicator), 1 is refused by name (it reads another instrument). The two
+parameterised-EMA sweeps translate since `feature('ema_{{p}}')` became `ema(close, $p)`. **Found by the re-run and fixed:** v1 places an order on a
 signal's *rising edge* and the translation placed one on every bar the condition held (10 079 orders
 for v1's 333) — entries now translate as `c and not prev(c, 1)`; v1 multiplies conditions as 1/0 and the
 translation now writes `if(x, 1, 0)`; the compiler reported a mistake inside a nested expression twice;
@@ -101,9 +106,9 @@ failed on a real database (`tests/pg_instruments.rs` now holds it); and the attr
 order count to fill timing — counts are now attributed only to what changes a count, and a different
 number of bars seen (`bars_differ`: 6 022 then, 10 079 now for the same week, orders per bar 0.055 vs
 0.056) is measured, not assumed. **Not met:** `--apply` was not run. Making v3 the head would break
-those strategies in every consumer that still reads only v1 (automations arm/resume, research sweeps,
-`GET /api/strategies/{id}/config`, `StrategyBuilderPage`, `ScannerPanel` — U-8.3's list), and no
-stored strategy is deployed. Apply once those consumers have a v3 arm.
+those strategies in every consumer that still reads only v1 (automations arm/resume and `deploy_paper`,
+research sweeps, `ScannerPanel` — U-8.3's list), and no stored strategy is deployed. Apply once those
+consumers have a v3 arm.
 
 
 Translate every stored strategy, re-run its latest backtest on the engine, and publish old-versus-new with the translator's behaviour-change list, so no result changes silently.

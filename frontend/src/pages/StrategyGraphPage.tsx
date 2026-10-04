@@ -79,6 +79,20 @@ function Editor() {
 
   const catalogue: Catalogue = useMemo(() => cat.data ?? EMPTY_CATALOGUE, [cat.data])
 
+  // Opened on a stored strategy (`?strategy=<id>`): edit it, and save back to it.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('strategy')
+    if (!id) return
+    strategyV3Api
+      .get(id)
+      .then((r) => {
+        setGraph(r.graph)
+        setStrategyId(id)
+      })
+      .catch(() => toast({ title: `Could not open ${id}`, variant: 'error' }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Graph → text and findings, debounced. The server prints and validates.
   useEffect(() => {
     if (textDirty) return

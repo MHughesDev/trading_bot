@@ -65,13 +65,17 @@ an `abs` distance of `k × rolling_std`), `model_forecast` / `inference` / `sizi
 with outputs read as fields, `combine` → `weighted_mean`/`max`/`min`/sum, parameters and constraints
 unchanged, the per-minute order limit carried. Every translation lists what changes (next-bar-open
 fills, the risk gate, missing values hold, models now called, exits as venue orders). Refused by
-name, never approximated: a parameter inside a feature name, a units position limit or a
+name, never approximated: a parameter inside a feature name with no operator to carry it
+(`ema_{{p}}`/`sma_{{p}}` translate to `ema(close, $p)`/`rolling_mean(close, $p)`, 2026-10-04), a units position limit or a
 per-second limit (dropping either would loosen risk), `risk_unit` sizing, inputs on another
 instrument, and the `decision`, `llm_inference`, `model_rank` and universe-pipeline nodes.
 Evidence: `tests/v3_translate.rs` 5/5 over the repository's corpus (the runtime fixture and every
 SLv2 skeleton compiled to v1); `backtest/tests/translated_v1.rs` — a translated v1 EMA cross with an
-on-signal exit backtests on the one engine and round-trips. **Not met as written:** "every stored
-definition" was not run — the platform's database is not here; and the four refused AI and
+on-signal exit backtests on the one engine and round-trips. **2026-10-04:** run over every stored
+definition in the platform database by U-8.5's tool — 11 of 14 translate, 2 do not compile (a model and
+a feature that do not exist), 1 is refused (another instrument's input); the run found and fixed v1's
+rising-edge entries, its 1/0 condition arithmetic, and the parameterised EMAs. **Not met as written:**
+the four refused AI and
 pipeline node kinds still need a translation (a decision model's class map, an LLM node's prompt
 as a contract, ranking and pipelines as selection strategies).
 

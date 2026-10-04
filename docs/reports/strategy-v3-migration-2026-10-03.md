@@ -1,6 +1,6 @@
 # Stored strategies on the one engine — v1 → v3 migration
 
-Generated 2026-10-04 08:12 UTC by `cargo run -p api --bin migrate_strategies_v3` (Set U U-8.5; FEAT-007 §12). **Dry run: nothing was written to the database.**
+Generated 2026-10-04 09:31 UTC by `cargo run -p api --bin migrate_strategies_v3` (Set U U-8.5; FEAT-007 §12). **Dry run: nothing was written to the database.**
 
 Translated strategies are not expected to backtest as they did: FEAT-007 §12. Every difference below names the listed behaviour change it is attributed to. Attribution is by mechanism — the change is present in the run and moves that metric — not by re-running with each change removed. Models answer `unavailable` in these re-runs (no inference service), so a model-driven rule holds.
 
@@ -10,8 +10,8 @@ Translated strategies are not expected to backtest as they did: FEAT-007 §12. E
 | `btc_model_signal_v1` | 1h (default: no backtest on record) | refused — `inputs`: it reads `BTC-USD`, another instrument; declare it as a v3 `input` by hand | — | — |
 | `ema_crossover` | 1m (its latest backtest) | translated, re-run | 333 → 567 | 0.00 → -3770.11 |
 | `ema_crossover_scanner` | 1h (default: no backtest on record) | translated, no backtest to re-run | — | — |
-| `ema_cross_p_smoke_1788927738` | 1h (default: no backtest on record) | refused — `parameterised feature name`: `feature('ema_{{fast}}')` names a different feature for each parameter value; a v3 feature name is fixed — use the operator with a parameter port instead, e.g. `ema(close, $fast)` | — | — |
-| `ema_cross_p_smoke_1788928410` | 1h (default: no backtest on record) | refused — `parameterised feature name`: `feature('ema_{{fast}}')` names a different feature for each parameter value; a v3 feature name is fixed — use the operator with a parameter port instead, e.g. `ema(close, $fast)` | — | — |
+| `ema_cross_p_smoke_1788927738` | 1h (default: no backtest on record) | translated, no backtest to re-run | — | — |
+| `ema_cross_p_smoke_1788928410` | 1h (default: no backtest on record) | translated, no backtest to re-run | — | — |
 | `ema_cross_v1` | 1m (its latest backtest) | translated, re-run failed | — | — |
 | `ema_rsi_trend` | 1h (default: no backtest on record) | translated, no backtest to re-run | — | — |
 | `ema_trend_sell` | 1h (default: no backtest on record) | translated, no backtest to re-run | — | — |
@@ -111,13 +111,59 @@ No completed backtest on record to re-run.
 
 v1 revision `86aa09df5bf5adc0610aa0feb6ee3b3f6f743973f5ab92e42ccd05993d6a68ea`.
 
-**Refused**, not approximated: `parameterised feature name` at `nodes[n1]` — `feature('ema_{{fast}}')` names a different feature for each parameter value; a v3 feature name is fixed — use the operator with a parameter port instead, e.g. `ema(close, $fast)`. It keeps running on v1 until the translator covers it.
+v3 revision `8dec137a463625b2345e941c84642d8b93704c123e8dbcbec6ee6854561e0be1`.
+
+```slv3
+strategy ema_cross_p_smoke_1788927738 kind trading asset_class crypto_spot_cex timeframe 1h
+description "translated from v1.2"
+param fast: int(default: 7, max: 30, min: 3, step: 1)
+param slow: int(default: 21, max: 90, min: 10, step: 1)
+constraint "param('fast') < param('slow')"
+
+let n1 = ema(close, $fast) > ema(close, $slow)
+let n3 = ema(close, $fast) < ema(close, $slow)
+
+when n1 and not prev(n1, 1.0) -> order(side: buy, size: units(x: 0.01), style: market, tif: gtc)
+when n3 and not prev(n3, 1.0) -> order(side: sell, size: units(x: 0.01), style: market, tif: gtc)
+otherwise hold
+```
+
+What changes:
+
+- `fills_next_bar_open` — orders fill at the next bar's open, not at the close of the bar that decided
+- `risk_gate_applied` — every order passes the production risk gate, in backtests too
+- `missing_holds` — a value that cannot be computed (an indicator warming up, a model that does not answer) holds the rule, with the reason journaled, rather than comparing false
+
+No completed backtest on record to re-run.
 
 ## `ema_cross_p_smoke_1788928410`
 
 v1 revision `7f5e43d91b59f6e92002a456d56ad36f4e4dc4bda178ccedb9cf67813b62b06c`.
 
-**Refused**, not approximated: `parameterised feature name` at `nodes[n1]` — `feature('ema_{{fast}}')` names a different feature for each parameter value; a v3 feature name is fixed — use the operator with a parameter port instead, e.g. `ema(close, $fast)`. It keeps running on v1 until the translator covers it.
+v3 revision `6c803de402d02ba8c2be0df622be9d695e73f286f8a476735284831cf9e83e0c`.
+
+```slv3
+strategy ema_cross_p_smoke_1788928410 kind trading asset_class crypto_spot_cex timeframe 1h
+description "translated from v1.2"
+param fast: int(default: 7, max: 30, min: 3, step: 1)
+param slow: int(default: 21, max: 90, min: 10, step: 1)
+constraint "param('fast') < param('slow')"
+
+let n1 = ema(close, $fast) > ema(close, $slow)
+let n3 = ema(close, $fast) < ema(close, $slow)
+
+when n1 and not prev(n1, 1.0) -> order(side: buy, size: units(x: 0.01), style: market, tif: gtc)
+when n3 and not prev(n3, 1.0) -> order(side: sell, size: units(x: 0.01), style: market, tif: gtc)
+otherwise hold
+```
+
+What changes:
+
+- `fills_next_bar_open` — orders fill at the next bar's open, not at the close of the bar that decided
+- `risk_gate_applied` — every order passes the production risk gate, in backtests too
+- `missing_holds` — a value that cannot be computed (an indicator warming up, a model that does not answer) holds the rule, with the reason journaled, rather than comparing false
+
+No completed backtest on record to re-run.
 
 ## `ema_cross_v1`
 

@@ -515,6 +515,25 @@ pub async fn get_strategy(
             Json(json!({ "error": "not_found", "id": strategy_id })),
         )
             .into_response(),
+        // A `tbot.strategy/3` head is a graph, not a v1 definition: it comes
+        // back as one, with its SLv3 text, rather than failing a v1 parse
+        // (Set U U-8.5 — a migrated strategy stays readable here).
+        Some((def_json,)) if backtest::runner::is_v3(&def_json) => {
+            match serde_json::from_value::<domain::strategy_graph::StrategyGraph>(def_json) {
+                Ok(g) => Json(json!({
+                    "id": strategy_id,
+                    "format": domain::strategy_graph::FORMAT,
+                    "text": strategy_lang::v3::print(&g),
+                    "graph": g,
+                }))
+                .into_response(),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": e.to_string() })),
+                )
+                    .into_response(),
+            }
+        }
         Some((def_json,)) => match serde_json::from_value::<StrategyDefinition>(def_json) {
             Ok(def) => Json(json!({ "id": strategy_id, "definition": def })).into_response(),
             Err(e) => (
@@ -570,6 +589,21 @@ pub async fn start_strategy(
                     return (
                         StatusCode::NOT_FOUND,
                         Json(json!({ "error": "not_found", "id": strategy_id })),
+                    )
+                        .into_response()
+                }
+                // A v3 graph runs through the one strategy engine as a recorded
+                // deployment, never on hot-path stage 3 (FEAT-007 §9.5).
+                Some((def_json,)) if backtest::runner::is_v3(&def_json) => {
+                    return (
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        Json(json!({
+                            "error": "v3_strategy",
+                            "message": format!(
+                                "`{strategy_id}` is a tbot.strategy/3 graph; deploy it with \
+                                 POST /api/deployments {{strategy_ref, instrument_id, starting_capital}}"
+                            ),
+                        })),
                     )
                         .into_response()
                 }
@@ -766,6 +800,26 @@ pub async fn apply_list(
     let compatible: Vec<serde_json::Value> = rows
         .into_iter()
         .filter_map(|(sid, def_json)| {
+            // A v3 graph declares its asset class and kind; it is listed for
+            // the asset class it names, never dropped because it is not v1.
+            if backtest::runner::is_v3(&def_json) {
+                let g = serde_json::from_value::<domain::strategy_graph::StrategyGraph>(def_json)
+                    .ok()?;
+                if params.asset_class.as_deref().is_some_and(|a| a != g.asset_class) {
+                    return None;
+                }
+                return Some(json!({
+                    "id": sid,
+                    "strategy_id": sid,
+                    "format": domain::strategy_graph::FORMAT,
+                    "strategy_kind": match g.kind {
+                        domain::strategy_graph::StrategyKind::Trading => "trading",
+                        domain::strategy_graph::StrategyKind::Selection => "selection",
+                    },
+                    "evaluation_trigger": "bar_close",
+                    "required_lanes": Vec::<String>::new(),
+                }));
+            }
             let def = serde_json::from_value::<StrategyDefinition>(def_json).ok()?;
             let manifest = compile_manifest(&def);
             if is_compatible(&manifest, &caps) {

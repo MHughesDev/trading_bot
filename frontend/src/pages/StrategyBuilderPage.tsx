@@ -155,6 +155,11 @@ function Canvas() {
   async function load(id: string) {
     try {
       const r = await strategiesApi.get(id)
+      // A strategy on the one engine is a graph: it opens in the graph editor.
+      if ((r.data as { format?: string }).format === 'tbot.strategy/3') {
+        window.location.assign(`/strategy/graph?strategy=${encodeURIComponent(id)}`)
+        return
+      }
       const def = (r.data as { definition: Parameters<typeof fromDefinition>[0] }).definition
       const g = fromDefinition(def)
       setNodes(autoLayout(g.nodes, g.edges))
