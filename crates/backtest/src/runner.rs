@@ -39,6 +39,7 @@ use sha2::{Digest, Sha256};
 use strategy_engine::decide::RuleOutcome;
 use strategy_engine::env::{Journal, MarketData, MemoryJournal, ModelProvider};
 use strategy_engine::plan::{NodeKind, PRIMARY};
+use strategy_engine::planner::OrderAction;
 use strategy_engine::trace::Cause;
 use strategy_engine::{
     cycle, Bar, DecisionTrace, Engine, EngineError, Event, InstrumentSpec, Plan,
@@ -136,6 +137,19 @@ pub fn run(r: V3Run, models: &mut dyn ModelProvider) -> Result<V3Outcome, Runner
     run_with_journal(r, models, &mut MemoryJournal::default())
 }
 
+/// [`run`], with every decided order held `fill_delay_bars` bars before it
+/// reaches the venue (`RunConfig::fill_delay_bars`). Zero is [`run`].
+///
+/// # Errors
+/// As [`run`].
+pub fn run_delayed(
+    r: V3Run,
+    models: &mut dyn ModelProvider,
+    fill_delay_bars: u32,
+) -> Result<V3Outcome, RunnerError> {
+    run_inner(r, models, &mut MemoryJournal::default(), fill_delay_bars)
+}
+
 /// [`run`] writing every decision to `journal` as it is made.
 ///
 /// # Errors
@@ -144,6 +158,15 @@ pub fn run_with_journal(
     r: V3Run,
     models: &mut dyn ModelProvider,
     journal: &mut dyn Journal,
+) -> Result<V3Outcome, RunnerError> {
+    run_inner(r, models, journal, 0)
+}
+
+fn run_inner(
+    r: V3Run,
+    models: &mut dyn ModelProvider,
+    journal: &mut dyn Journal,
+    fill_delay_bars: u32,
 ) -> Result<V3Outcome, RunnerError> {
     let primary = primary_bars(&r)?;
     let first = primary.values().next().ok_or(RunnerError::NoPrimaryBars)?;
@@ -162,15 +185,28 @@ pub fn run_with_journal(
     let risk = SimulatedRisk::new(r.limits.clone(), instruments, Some(r.strategy_id.clone()));
     let mut orders = SimOrders::new(venue, risk, r.asset_class, r.spec, r.strategy_id.clone());
 
-    let traces = drive(
-        &r.plan,
-        &r.bars,
-        &primary,
-        r.start_ns,
-        &mut orders,
-        models,
-        journal,
-    )?;
+    let traces = if fill_delay_bars == 0 {
+        drive(
+            &r.plan,
+            &r.bars,
+            &primary,
+            r.start_ns,
+            &mut orders,
+            models,
+            journal,
+        )?
+    } else {
+        let mut delayed = Delayed::new(&mut orders, fill_delay_bars);
+        drive(
+            &r.plan,
+            &r.bars,
+            &primary,
+            r.start_ns,
+            &mut delayed,
+            models,
+            journal,
+        )?
+    };
     let results = orders.into_results();
     let manifest = manifest(
         &r.plan,
@@ -243,6 +279,85 @@ pub(crate) fn drive(
         )?);
     }
     Ok(traces)
+}
+
+/// A venue that holds every decided order `delay` primary bars before passing
+/// it on — the timing-jitter question: what if every order reached the venue
+/// later than the strategy meant? An order decided on bar `b`'s close reaches
+/// the venue as bar `b + 1 + delay` opens, so it fills `delay` bars later than
+/// it would. A cancel of an order still held removes it and closes it at once.
+struct Delayed<'a> {
+    inner: &'a mut dyn BarVenue,
+    delay: u64,
+    /// Primary bars opened so far.
+    opened: u64,
+    held: Vec<(u64, OrderAction)>,
+}
+
+impl<'a> Delayed<'a> {
+    fn new(inner: &'a mut dyn BarVenue, delay: u32) -> Self {
+        Self {
+            inner,
+            delay: u64::from(delay),
+            opened: 0,
+            held: Vec::new(),
+        }
+    }
+}
+
+impl strategy_engine::VenuePort for Delayed<'_> {
+    fn view(&self) -> strategy_engine::PortfolioView {
+        self.inner.view()
+    }
+
+    fn spec(&self) -> InstrumentSpec {
+        self.inner.spec()
+    }
+
+    fn act(&mut self, actions: &[OrderAction], at_ns: i64) -> Vec<Event> {
+        let mut events = Vec::new();
+        for a in actions {
+            if let OrderAction::Cancel { tag } = a {
+                let before = self.held.len();
+                self.held.retain(
+                    |(_, h)| !matches!(h, OrderAction::Submit(o) if o.tag == *tag),
+                );
+                if self.held.len() < before {
+                    events.push(Event::OrderClosed(strategy_engine::OrderClosed {
+                        tag: tag.clone(),
+                        reason: strategy_engine::OrderClosedReason::Cancelled,
+                        at_ns,
+                    }));
+                    continue;
+                }
+            }
+            self.held.push((self.opened + self.delay, a.clone()));
+        }
+        events
+    }
+}
+
+impl BarVenue for Delayed<'_> {
+    fn on_bar(&mut self, bar: &SimBar) -> Vec<Event> {
+        let index = self.opened;
+        self.opened += 1;
+        let (due, held): (Vec<_>, Vec<_>) = std::mem::take(&mut self.held)
+            .into_iter()
+            .partition(|(at, _)| *at <= index);
+        self.held = held;
+        let mut events = Vec::new();
+        if !due.is_empty() {
+            let actions: Vec<OrderAction> = due.into_iter().map(|(_, a)| a).collect();
+            let at_ns = bar.open_time.timestamp_nanos_opt().unwrap_or(0);
+            events.extend(self.inner.act(&actions, at_ns));
+        }
+        events.extend(self.inner.on_bar(bar));
+        events
+    }
+
+    fn on_close_decided(&mut self, bar: &SimBar) {
+        self.inner.on_close_decided(bar);
+    }
 }
 
 /// One closed bar of one input through the engine and the venue — the body of
@@ -1006,7 +1121,7 @@ impl RunExecutor for V3RunExecutor {
                 optimistic,
             )),
         };
-        let outcome = run(r, models.as_mut());
+        let outcome = run_delayed(r, models.as_mut(), cfg.fill_delay_bars);
         let cost = ComputeCost {
             wall_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
             cpu_ms: 0,

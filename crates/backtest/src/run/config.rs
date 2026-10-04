@@ -176,6 +176,17 @@ pub struct RunConfig {
     /// `None`, so every Run that existed before it keeps its `run_id`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<domain::strategy_graph::deployment::DeploymentTarget>,
+    /// Bars every decided order waits before it reaches the venue — what a
+    /// timing-jitter sensitivity study varies. 0, the default, is the
+    /// platform's own timing; part of the content hash only when set, so every
+    /// Run that existed before it keeps its `run_id`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub fill_delay_bars: u32,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 /// The null this Run's data was generated under.
@@ -209,6 +220,8 @@ impl RunConfig {
             null_world: &'a Option<NullWorld>,
             #[serde(skip_serializing_if = "Option::is_none")]
             target: &'a Option<domain::strategy_graph::deployment::DeploymentTarget>,
+            #[serde(skip_serializing_if = "is_zero")]
+            fill_delay_bars: &'a u32,
         }
         let view = Hashable {
             strategy_ref: &self.strategy_ref,
@@ -224,6 +237,7 @@ impl RunConfig {
             unsafe_flags: &self.unsafe_flags,
             null_world: &self.null_world,
             target: &self.target,
+            fill_delay_bars: &self.fill_delay_bars,
         };
         let bytes = canonical_json(&view).expect("RunConfig is always JSON-serializable");
         RunId::from_canonical_bytes(&bytes)
@@ -275,6 +289,7 @@ pub struct RunConfigBuilder {
     data_snapshot: String,
     unsafe_flags: UnsafeFlags,
     target: Option<domain::strategy_graph::deployment::DeploymentTarget>,
+    fill_delay_bars: u32,
 }
 
 impl RunConfigBuilder {
@@ -301,6 +316,7 @@ impl RunConfigBuilder {
             data_snapshot: data_snapshot.into(),
             unsafe_flags: UnsafeFlags::default(),
             target: None,
+            fill_delay_bars: 0,
         }
     }
 
@@ -312,6 +328,13 @@ impl RunConfigBuilder {
         target: Option<domain::strategy_graph::deployment::DeploymentTarget>,
     ) -> Self {
         self.target = target;
+        self
+    }
+
+    /// Hold every decided order `bars` bars before it reaches the venue.
+    #[must_use]
+    pub const fn fill_delay_bars(mut self, bars: u32) -> Self {
+        self.fill_delay_bars = bars;
         self
     }
 
@@ -369,6 +392,7 @@ impl RunConfigBuilder {
             // config it is the null for.
             null_world: None,
             target: self.target,
+            fill_delay_bars: self.fill_delay_bars,
         };
         cfg.run_id = cfg.compute_id();
         cfg
