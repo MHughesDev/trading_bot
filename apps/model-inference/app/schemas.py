@@ -70,6 +70,26 @@ class V2PredictResponse(BaseModel):
     latency_ms: int
 
 
+class EmbedRow(BaseModel):
+    key: str
+    text: str
+
+
+class EmbedRequest(BaseModel):
+    """`POST /v2/embed`: an embedding version's adapter and the texts to embed
+    (Set U U-5.2). Each answer carries `embedding` — the provider's vector."""
+    model_id: str
+    version: int
+    adapter: dict
+    rows: list[EmbedRow]
+
+
+class EmbedResponse(BaseModel):
+    model_id: str
+    version: int
+    answers: list[V2Answer]
+
+
 class LLMPredictRequest(BaseModel):
     model_id: str
     version: int

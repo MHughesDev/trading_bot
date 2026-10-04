@@ -26,6 +26,12 @@ use crate::sidecar::{LlmPredictRequest, LlmPredictResponse};
 #[async_trait::async_trait]
 pub trait LlmClient: Send + Sync {
     async fn predict_llm(&self, req: LlmPredictRequest) -> anyhow::Result<LlmPredictResponse>;
+
+    /// An embedding version's vectors (U-5.2). A client that cannot embed
+    /// says so; the version then answers `unavailable` naming why.
+    async fn embed(&self, _req: EmbedRequest) -> anyhow::Result<EmbedResponse> {
+        anyhow::bail!("this model client does not embed")
+    }
 }
 
 #[async_trait::async_trait]
@@ -33,6 +39,56 @@ impl LlmClient for crate::sidecar::SidecarClient {
     async fn predict_llm(&self, req: LlmPredictRequest) -> anyhow::Result<LlmPredictResponse> {
         Self::predict_llm(self, req).await
     }
+
+    async fn embed(&self, req: EmbedRequest) -> anyhow::Result<EmbedResponse> {
+        static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+        let http = HTTP.get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .connect_timeout(std::time::Duration::from_secs(5))
+                .build()
+                .expect("http client")
+        });
+        // The inference service's address, as `SidecarClient::from_env` reads it.
+        let base = std::env::var("MODEL_INFERENCE_URL")
+            .unwrap_or_else(|_| "http://localhost:8002".to_string());
+        let resp = http
+            .post(format!("{}/v2/embed", base.trim_end_matches('/')))
+            .json(&req)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("inference embed unreachable: {e}"))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("inference embed returned {status}: {body}");
+        }
+        Ok(resp.json::<EmbedResponse>().await?)
+    }
+}
+
+/// `POST /v2/embed` (`apps/model-inference/app/predictors/embed_predictor.py`):
+/// the version's adapter and the texts to embed.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EmbedRequest {
+    pub model_id: String,
+    pub version: i32,
+    pub adapter: serde_json::Value,
+    pub rows: Vec<EmbedRow>,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EmbedRow {
+    pub key: String,
+    pub text: String,
+}
+
+/// One answer per text: `embedding` in `outputs`, or why not.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EmbedResponse {
+    pub model_id: String,
+    pub version: i32,
+    pub answers: Vec<crate::sidecar::V2Answer>,
 }
 
 /// Spending limits for LLM calls, in USD.

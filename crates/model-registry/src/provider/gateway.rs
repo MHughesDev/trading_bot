@@ -15,7 +15,9 @@ use std::sync::Arc;
 use backtest::models::RegistrySnapshot;
 use strategy_engine::{ModelOutcome, ModelRequest};
 
-use super::llm::{cap_breached, estimate_usd, parse_reply, LlmCaps, LlmClient, Spend};
+use super::llm::{
+    cap_breached, estimate_usd, parse_reply, EmbedRequest, EmbedRow, LlmCaps, LlmClient, Spend,
+};
 use super::{outcome_of, v2_features, LiveModels, V2Client};
 use crate::sidecar::{LlmPredictRequest, PredictV2Request, V2Row};
 
@@ -73,20 +75,7 @@ impl GatewayModels {
                 "{reference} has no contract or no adapter settings"
             ));
         };
-        let prompt =
-            contract
-                .inputs
-                .iter()
-                .find_map(|ci| match (&ci.shape, req.inputs.get(&ci.name)) {
-                    (
-                        domain::model_def::contract::InputShape::Text { .. },
-                        Some(strategy_engine::ModelInput::Value {
-                            value: domain::strategy_graph::Value::Text(s),
-                        }),
-                    ) => Some(s.clone()),
-                    _ => None,
-                });
-        let Some(prompt) = prompt else {
+        let Some(prompt) = wired_text(contract, req) else {
             return unavailable(format!("{reference}: no text prompt was wired"));
         };
         let fields: Vec<String> = contract
@@ -123,11 +112,69 @@ impl GatewayModels {
         }
     }
 
+    /// One embedding request (U-5.2): the text it was wired, the version's
+    /// adapter, the vector typed against the contract's `vec`.
+    async fn answer_embedding(
+        &self,
+        entry: &backtest::models::VersionEntry,
+        req: &ModelRequest,
+    ) -> ModelOutcome {
+        let reference = format!("{}@{}", entry.model, entry.version);
+        let unavailable = |detail: String| ModelOutcome::Unavailable { detail };
+        let Some(client) = &self.llm else {
+            return unavailable(format!("{reference}: no model client in this process"));
+        };
+        let (Some(contract), Some(adapter)) = (&entry.contract, &entry.adapter) else {
+            return unavailable(format!(
+                "{reference} has no contract or no adapter settings"
+            ));
+        };
+        let Some(text) = wired_text(contract, req) else {
+            return unavailable(format!("{reference}: no text was wired"));
+        };
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        let body = EmbedRequest {
+            model_id: entry.model.clone(),
+            version: i32::try_from(entry.version).unwrap_or(i32::MAX),
+            adapter: adapter.clone(),
+            rows: vec![EmbedRow {
+                key: "0".into(),
+                text,
+            }],
+        };
+        match client.embed(body).await {
+            Ok(resp) => resp.answers.first().map_or_else(
+                || unavailable(format!("{reference}: the service returned no answer")),
+                |a| super::outcome_of(a, contract, &reference),
+            ),
+            Err(e) => unavailable(format!("{reference}: {e}")),
+        }
+    }
+
     /// Sidecar calls made.
     #[must_use]
     pub fn calls(&self) -> u64 {
         self.calls.load(Ordering::Relaxed)
     }
+}
+
+/// The text a request wired to the contract's text input, if any.
+fn wired_text(
+    contract: &domain::model_def::contract::IoContract,
+    req: &ModelRequest,
+) -> Option<String> {
+    contract
+        .inputs
+        .iter()
+        .find_map(|ci| match (&ci.shape, req.inputs.get(&ci.name)) {
+            (
+                domain::model_def::contract::InputShape::Text { .. },
+                Some(strategy_engine::ModelInput::Value {
+                    value: domain::strategy_graph::Value::Text(s),
+                }),
+            ) => Some(s.clone()),
+            _ => None,
+        })
 }
 
 #[async_trait::async_trait]
@@ -163,6 +210,12 @@ impl LiveModels for GatewayModels {
             if entry.kind == "external_llm_adapter" {
                 for i in idx {
                     out[i] = Some(self.answer_llm(entry, &reqs[i]).await);
+                }
+                continue;
+            }
+            if entry.kind == "embedding" {
+                for i in idx {
+                    out[i] = Some(self.answer_embedding(entry, &reqs[i]).await);
                 }
                 continue;
             }
@@ -855,5 +908,202 @@ mod tests {
         )
         .await
         .is_err());
+    }
+
+    // ── U-5.2: an embedding returns its vector ───────────────────────────────
+
+    /// Embeds by keyword: anything about rates points one way, anything else
+    /// the other.
+    struct FakeEmbed(Mutex<Vec<String>>);
+
+    #[async_trait::async_trait]
+    impl LlmClient for FakeEmbed {
+        async fn predict_llm(
+            &self,
+            _req: LlmPredictRequest,
+        ) -> anyhow::Result<crate::sidecar::LlmPredictResponse> {
+            anyhow::bail!("not an LLM")
+        }
+        async fn embed(
+            &self,
+            req: super::super::llm::EmbedRequest,
+        ) -> anyhow::Result<super::super::llm::EmbedResponse> {
+            let answers = req
+                .rows
+                .iter()
+                .map(|r| {
+                    self.0.lock().unwrap().push(r.text.clone());
+                    let v = if r.text.contains("rate") {
+                        [0.9, 0.1, 0.0]
+                    } else {
+                        [0.0, 0.2, 0.9]
+                    };
+                    crate::sidecar::V2Answer {
+                        key: Some(r.key.clone()),
+                        status: "answered".into(),
+                        outputs: [("embedding".to_string(), serde_json::json!(v))]
+                            .into_iter()
+                            .collect(),
+                        detail: None,
+                    }
+                })
+                .collect();
+            Ok(super::super::llm::EmbedResponse {
+                model_id: req.model_id,
+                version: req.version,
+                answers,
+            })
+        }
+    }
+
+    fn embedding_registry() -> RegistrySnapshot {
+        // The contract an embedding kind derives: `text` in, `embedding: vec` out.
+        let contract = Some(IoContract {
+            inputs: vec![ContractInput {
+                name: "text".into(),
+                shape: InputShape::Text { template: None },
+                optional: false,
+            }],
+            outputs: vec![ContractOutput {
+                name: "embedding".into(),
+                value_type: ValueType::Vec { dim: None },
+            }],
+            horizon: None,
+            pit: PitSpec::default(),
+            cost_class: CostClass::Moderate,
+            timeout_ms: 2_000,
+        });
+        RegistrySnapshot::new().with_version(VersionEntry {
+            model: "emb".into(),
+            version: 1,
+            kind: "embedding".into(),
+            contract: Some(contract.expect("an embedding's derived contract")),
+            trained_through: None,
+            artifact_uri: None,
+            artifact_sha256: None,
+            adapter: Some(serde_json::json!({"provider": "ollama", "model": "nomic-embed-text"})),
+            transform: None,
+            folds: Vec::new(),
+        })
+    }
+
+    #[tokio::test]
+    async fn an_embeddings_vector_is_consumed_by_a_strategy() {
+        let reg = embedding_registry();
+        let client = Arc::new(FakeEmbed(Mutex::new(Vec::new())));
+        let gw = GatewayModels::new(Arc::new(Fake::default()), Arc::new(reg.clone()))
+            .with_llm(client.clone(), LlmCaps::default());
+        // Two headlines embedded; enter when they say the same thing.
+        let graph = |second: &str| -> domain::strategy_graph::StrategyGraph {
+            serde_json::from_value(serde_json::json!({
+              "format": "tbot.strategy/3", "kind": "trading", "name": "same_story",
+              "asset_class": "crypto_spot_cex", "timeframe": "1h",
+              "nodes": [
+                {"id":"a","op":"model","args":{"ref":{"str":"emb@1"},"text":{"str":"the fed raised rates"}}},
+                {"id":"b","op":"model","args":{"ref":{"str":"emb@1"},"text":{"str":second}}},
+                {"id":"sim","op":"cosine","args":{"a":"a.embedding","b":"b.embedding"}},
+                {"id":"go","op":"gt","args":{"a":"sim","b":0.8}}
+              ],
+              "decide": {"rules": [{"when":"go","then":{"kind":"target","size":{"mode":"units","x":1}}}]}
+            }))
+            .unwrap()
+        };
+        let same = one_decision_on(&gw, &reg, graph("rates went up again")).await;
+        assert!(
+            !same.actions.is_empty(),
+            "similar texts entered: {:?}",
+            same.rules
+        );
+        let other = one_decision_on(&gw, &reg, graph("a sourdough recipe")).await;
+        assert!(other.actions.is_empty(), "dissimilar texts held");
+        assert!(client
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|t| t == "a sourdough recipe"));
+
+        // A client that cannot embed: the version is unavailable, named.
+        let llm = Arc::new(FakeLlm("{}".into(), Mutex::new(0)));
+        let gw = GatewayModels::new(Arc::new(Fake::default()), Arc::new(reg.clone()))
+            .with_llm(llm, LlmCaps::default());
+        let out = gw
+            .answer_batch(vec![ModelRequest {
+                node: "a".into(),
+                reference: "emb@1".into(),
+                model: "emb".into(),
+                version: 1,
+                at_ns: 0,
+                inputs: [(
+                    "text".to_string(),
+                    strategy_engine::ModelInput::Value {
+                        value: domain::strategy_graph::Value::Text("x".into()),
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            }])
+            .await;
+        assert!(
+            matches!(&out[0], ModelOutcome::Unavailable { detail } if detail.contains("does not embed")),
+            "{out:?}"
+        );
+    }
+
+    /// One decision of `graph` answered by `gw`.
+    async fn one_decision_on(
+        gw: &GatewayModels,
+        reg: &RegistrySnapshot,
+        graph: domain::strategy_graph::StrategyGraph,
+    ) -> strategy_engine::DecisionTrace {
+        let plan = strategy_engine::compile(&graph, reg, &ParamValues::new())
+            .unwrap_or_else(|d| panic!("{d:#?}"));
+        let mut engine = strategy_engine::Engine::new(Arc::new(plan)).unwrap();
+        let view = strategy_engine::PortfolioView {
+            equity: rust_decimal::Decimal::from(10_000),
+            cash: rust_decimal::Decimal::from(10_000),
+            mark: Some(rust_decimal::Decimal::from(100)),
+            ..Default::default()
+        };
+        let spec = strategy_engine::InstrumentSpec {
+            instrument: "BTC-USD".into(),
+            lot_size: rust_decimal::Decimal::new(1, 4),
+            tick_size: rust_decimal::Decimal::new(1, 2),
+            min_qty: rust_decimal::Decimal::new(1, 4),
+            caps: strategy_engine::VenueCaps::all(),
+        };
+        let bar = strategy_engine::Bar {
+            close_ns: 3_600_000_000_000,
+            open: 100.0,
+            high: 101.0,
+            low: 99.0,
+            close: 100.0,
+            volume: 1.0,
+        };
+        let mut step = engine
+            .on_event(
+                strategy_engine::Event::Bar {
+                    input: 0,
+                    bar,
+                    warmup: false,
+                },
+                &view,
+                &spec,
+            )
+            .unwrap();
+        while let strategy_engine::Step::NeedModels(reqs) = step {
+            let nodes: Vec<String> = reqs.iter().map(|r| r.node.clone()).collect();
+            let outcomes = gw.answer_batch(reqs).await;
+            let responses = nodes
+                .into_iter()
+                .zip(outcomes)
+                .map(|(node, outcome)| strategy_engine::ModelResponse { node, outcome })
+                .collect();
+            step = engine.resume(responses).unwrap();
+        }
+        let strategy_engine::Step::Decided(t) = step else {
+            panic!("no decision")
+        };
+        *t
     }
 }

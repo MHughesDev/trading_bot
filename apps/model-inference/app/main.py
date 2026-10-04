@@ -6,6 +6,8 @@ from .schemas import (
     PredictRequest,
     PredictResponse,
     Forecast,
+    EmbedRequest,
+    EmbedResponse,
     LLMPredictRequest,
     LLMPredictResponse,
     V2Answer,
@@ -16,6 +18,7 @@ from . import v2 as v2_mod
 from .predictors import bundle as bundle_mod
 from .loader import CACHE
 from .predictors import base, run_predict
+from .predictors.embed_predictor import embed
 from .predictors.llm_predictor import predict_llm
 
 app = FastAPI(title="model-inference", version="0.1.0")
@@ -115,3 +118,8 @@ async def predict_v2(req: V2PredictRequest) -> V2PredictResponse:
 @app.post("/predict/llm")
 async def predict_llm_endpoint(req: LLMPredictRequest) -> LLMPredictResponse:
     return await predict_llm(req)
+
+
+@app.post("/v2/embed")
+async def embed_endpoint(req: EmbedRequest) -> EmbedResponse:
+    return await embed(req)

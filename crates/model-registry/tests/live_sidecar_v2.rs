@@ -112,3 +112,85 @@ async fn a_transform_runs_in_the_sidecar_and_answers_typed() {
     };
     assert!(matches!(outputs["z"], Value::Num(n) if (n.get() - 2.0).abs() < 1e-12));
 }
+
+/// U-5.2's last line: an embedding version returns its `vec`. The Rust client
+/// reaches the service's `/v2/embed`, the service the local embedding model,
+/// and the vector comes back typed against the embedding contract.
+///
+/// ```text
+/// MODEL_INFERENCE_URL=http://127.0.0.1:18082 EMBED_MODEL=nomic-embed-text \
+///   cargo test -j 2 -p model-registry --test live_sidecar_v2 an_embedding -- --ignored
+/// ```
+#[tokio::test]
+#[ignore = "needs MODEL_INFERENCE_URL and a local Ollama serving EMBED_MODEL"]
+async fn an_embedding_version_returns_its_vector_typed() {
+    use domain::model_def::contract::{ContractInput, InputShape};
+    use model_registry::provider::llm::{EmbedRequest, EmbedRow, LlmClient};
+
+    let contract = IoContract {
+        inputs: vec![ContractInput {
+            name: "text".into(),
+            shape: InputShape::Text { template: None },
+            optional: false,
+        }],
+        outputs: vec![ContractOutput {
+            name: "embedding".into(),
+            value_type: ValueType::Vec { dim: None },
+        }],
+        horizon: None,
+        pit: PitSpec::default(),
+        cost_class: CostClass::Moderate,
+        timeout_ms: 30_000,
+    };
+    let texts = [
+        "the central bank raised interest rates",
+        "the fed hiked rates again",
+        "a recipe for sourdough bread",
+    ];
+    let resp = SidecarClient::from_env()
+        .embed(EmbedRequest {
+            model_id: "emb".into(),
+            version: 1,
+            adapter: serde_json::json!({
+                "provider": "ollama",
+                "model": std::env::var("EMBED_MODEL").expect("EMBED_MODEL"),
+            }),
+            rows: texts
+                .iter()
+                .enumerate()
+                .map(|(i, t)| EmbedRow {
+                    key: i.to_string(),
+                    text: (*t).to_string(),
+                })
+                .collect(),
+        })
+        .await
+        .expect("the service answers");
+    let vecs: Vec<Vec<f64>> = resp
+        .answers
+        .iter()
+        .map(|a| match outcome_of(a, &contract, "emb@1") {
+            ModelOutcome::Answered { outputs } => match &outputs["embedding"] {
+                Value::Vec(v) => v.iter().map(|x| x.get()).collect(),
+                other => panic!("not a vec: {other:?}"),
+            },
+            other => panic!("not answered: {other:?}"),
+        })
+        .collect();
+    assert_eq!(vecs.len(), 3);
+    assert!(vecs
+        .iter()
+        .all(|v| v.len() == vecs[0].len() && v.len() > 100));
+    let cos = |a: &[f64], b: &[f64]| {
+        let dot: f64 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+        dot / (a.iter().map(|x| x * x).sum::<f64>().sqrt()
+            * b.iter().map(|y| y * y).sum::<f64>().sqrt())
+    };
+    println!(
+        "dim {}: rates~rates {:.3}, rates~bread {:.3}",
+        vecs[0].len(),
+        cos(&vecs[0], &vecs[1]),
+        cos(&vecs[0], &vecs[2])
+    );
+    assert!(cos(&vecs[0], &vecs[1]) > cos(&vecs[0], &vecs[2]));
+}

@@ -1,6 +1,6 @@
 # Phase 5 — Models
 
-**Completion: 75% (6 / 8 tasks).** U-5.1, U-5.3, U-5.4, U-5.6, U-5.7 DONE 2026-10-02; U-5.5 DONE 2026-10-04 (run against ClickHouse); U-5.2 PARTIAL (embeddings unserved); U-5.8 PARTIAL (backtest side committed; the trainer half lands with another session's commit).
+**Completion: 88% (7 / 8 tasks).** U-5.1, U-5.3, U-5.4, U-5.6, U-5.7 DONE 2026-10-02; U-5.2 and U-5.5 DONE 2026-10-04 (an embedding serves its vector; the series run against ClickHouse); U-5.8 PARTIAL (backtest side committed; the trainer half lands with another session's commit).
 
 **Requirement IDs:** SU-MOD-01…07.
 **Spec:** [FEAT-007](../../../specs/FEAT-007-unified-strategy-engine.md) §8; ADR-0043; FEAT-006 §5, §6.
@@ -32,7 +32,20 @@ Every model version stores its `IoContract`; existing versions are backfilled wi
 **Traces:** ADR-0043 decision 1.
 
 ### U-5.2 Serving protocol v2 — L
-`PARTIAL` 2026-10-02 — `POST /v2/predict` (`apps/model-inference/app/v2.py`): named feature rows in,
+`DONE` 2026-10-04 — the last line, "an embedding returns its `vec`": an `embedding` version is an
+adapter like an LLM's (`{provider, model}`), served by the inference service's `POST /v2/embed`
+(`predictors/embed_predictor.py`; local `ollama` only — no key, no cost; a count mismatch, failure
+or unknown provider is `unavailable` by name, a non-finite vector abstains). Paper deployments
+reach it through `GatewayModels` (`kind == "embedding"` → `LlmClient::embed`, the vector typed
+by `outcome_of` against the contract's `vec`). Evidence: `test_embed.py` 5/5 including the local
+`nomic-embed-text` model (similar texts closer); gateway
+`an_embeddings_vector_is_consumed_by_a_strategy` (two embedded headlines, `cosine` > 0.8 enters;
+dissimilar holds; a client that cannot embed is unavailable, named);
+`live_sidecar_v2::an_embedding_version_returns_its_vector_typed` — the Rust client through the
+running service to the local model: 768-dimension vectors, typed, rates~rates 0.686 vs
+rates~bread 0.290.
+
+Built 2026-10-02 — `POST /v2/predict` (`apps/model-inference/app/v2.py`): named feature rows in,
 named outputs out as plain JSON, typed in Rust against the contract
 (`model_registry::provider::outcome_of`; an output a kind does not produce is that field
 `missing`, a malformed one abstains the answer). A row missing a feature — or carrying a NaN —
@@ -42,9 +55,7 @@ instead of a flat forecast. Classifiers return `probs` (+ `class`), regressors t
 rankers and sizers their score. Evidence: `apps/model-inference/tests/test_v2.py` (real LightGBM
 models); `crates/model-registry/tests/live_sidecar_v2.rs` run against the service on localhost —
 a real regressor answered a typed number and a short row abstained naming `atr_14`.
-**Not met:** "an embedding returns its `vec`" — there is no embedding predictor in the inference
-service, so an embedding version answers `unavailable` by name. Close with an embedding predictor
-that returns `{"embedding": [...]}`; the Rust side already types `vec`.
+Until 2026-10-04 there was no embedding predictor, so an embedding version answered `unavailable`.
 
 The sidecar accepts typed named inputs and returns typed named outputs per contract; a missing required input is an abstain with a reason; the zero-fill in `features_matrix` is removed. v1 `Forecast` responses remain for derived forecaster contracts.
 
