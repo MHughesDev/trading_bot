@@ -44,6 +44,110 @@ pub struct DeployBody {
     pub target: Option<domain::strategy_graph::deployment::DeploymentTarget>,
     /// Decimal string — what the deployment's realised series is measured from.
     pub starting_capital: String,
+    /// Record this deployment as forward evidence for a trial (Set T T-0.4):
+    /// its realised series is compared with the backtest's, bar by bar.
+    #[serde(default)]
+    pub forward: Option<ForwardEvidence>,
+}
+
+/// What a deployment that is forward evidence declares before its first fill
+/// (`mlops.paper_deployment`, migrations 0105 and 0141): the trial it is
+/// compared against, the unit both series are counted in, its divergence
+/// thresholds and its kill criteria. Never edited afterwards.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ForwardEvidence {
+    pub trial_id: Uuid,
+    /// `usd`, `usdt`, `usdc`, `eur`, `btc` or `eth`.
+    pub numeraire: String,
+    pub max_abs_return_divergence: f64,
+    pub max_cum_return_divergence: f64,
+    /// Decimal string.
+    pub max_position_divergence: String,
+    pub min_signal_match: f64,
+    pub kill_criteria: String,
+}
+
+/// Write the deployment's `paper_deployment` row, under the caller's tenant.
+/// Its `strategy_id` is the deployment id — what the runner puts on every
+/// order, and so the join between an order and its divergence halt.
+async fn record_forward(
+    pg: &sqlx::PgPool,
+    tenant: &str,
+    deployment_id: Uuid,
+    bar_seconds: u32,
+    f: &ForwardEvidence,
+) -> Result<Uuid, axum::response::Response> {
+    let bad = |m: String| refuse(StatusCode::UNPROCESSABLE_ENTITY, "invalid_forward", m);
+    let max_position: Decimal = f
+        .max_position_divergence
+        .parse()
+        .map_err(|_| bad("max_position_divergence must be a decimal".into()))?;
+    let thresholds = reconciliation::forward::DivergenceThresholds {
+        max_abs_return_divergence: f.max_abs_return_divergence,
+        max_cum_return_divergence: f.max_cum_return_divergence,
+        max_position_divergence: max_position,
+        min_signal_match: f.min_signal_match,
+    };
+    thresholds.validate().map_err(|e| bad(e.to_string()))?;
+    if !["usd", "usdt", "usdc", "eur", "btc", "eth"].contains(&f.numeraire.as_str()) {
+        return Err(bad(format!("unknown numeraire '{}'", f.numeraire)));
+    }
+    if f.kill_criteria.trim().is_empty() {
+        return Err(bad("kill criteria are declared before the first fill".into()));
+    }
+    let mut tx = ledger::pg::tenant_tx(pg, tenant)
+        .await
+        .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()))?;
+    let id: Uuid = sqlx::query_scalar(
+        "INSERT INTO mlops.paper_deployment (tenant_id, strategy_id, trial_id, venue, numeraire, \
+           bar_seconds, max_abs_return_divergence, max_cum_return_divergence, \
+           max_position_divergence, min_signal_match, kill_criteria, deployed_by) \
+         VALUES ($1, $2, $3, 'platform_paper', $4, $5, $6, $7, $8, $9, $10, $1) \
+         RETURNING deployment_id",
+    )
+    .bind(tenant)
+    .bind(deployment_id.to_string())
+    .bind(f.trial_id)
+    .bind(&f.numeraire)
+    .bind(i32::try_from(bar_seconds).unwrap_or(i32::MAX))
+    .bind(f.max_abs_return_divergence)
+    .bind(f.max_cum_return_divergence)
+    .bind(max_position)
+    .bind(f.min_signal_match)
+    .bind(&f.kill_criteria)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| {
+        refuse(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "forward_not_recorded",
+            format!("the forward-evidence record was refused (is `trial_id` a registered trial?): {e}"),
+        )
+    })?;
+    tx.commit()
+        .await
+        .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()))?;
+    Ok(id)
+}
+
+/// A forward record whose deployment was then not recorded is retired, not
+/// left claiming evidence nothing will produce. The table is append-only.
+async fn retire_forward(pg: &sqlx::PgPool, tenant: &str, id: Uuid, reason: &str) {
+    let Ok(mut tx) = ledger::pg::tenant_tx(pg, tenant).await else {
+        return;
+    };
+    let _ = sqlx::query(
+        "INSERT INTO mlops.paper_deployment_retirement \
+           (deployment_id, tenant_id, retired_by, reason) \
+         VALUES ($1, $2, $2, $3) ON CONFLICT DO NOTHING",
+    )
+    .bind(id)
+    .bind(tenant)
+    .bind(reason)
+    .execute(&mut *tx)
+    .await;
+    let _ = tx.commit().await;
 }
 
 fn refuse(status: StatusCode, error: &str, message: impl Into<String>) -> axum::response::Response {
@@ -151,6 +255,7 @@ pub async fn create_deployment(
         .collect();
     let deployment_id = Uuid::new_v4();
     let user = token.user_id().to_string();
+    let forward = body.forward;
     if let Some(DeploymentTarget::Selection {
         selection,
         top_n,
@@ -159,6 +264,14 @@ pub async fn create_deployment(
         weighting,
     }) = body.target
     {
+        if forward.is_some() {
+            return refuse(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_forward",
+                "forward evidence is recorded per instrument deployment; a selection's members \
+                 trade capital the allocator moves, which no single backtest series describes",
+            );
+        }
         if graph.kind != domain::strategy_graph::StrategyKind::Trading {
             return refuse(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -255,6 +368,18 @@ pub async fn create_deployment(
         )
             .into_response();
     }
+    // Forward evidence first (Set T T-0.4), so the deployment record names it.
+    let forward_deployment_id = match &forward {
+        None => None,
+        Some(f) => {
+            match record_forward(&state.pg, &user, deployment_id, plan.timeframe.seconds(), f)
+                .await
+            {
+                Ok(id) => Some(id),
+                Err(r) => return r,
+            }
+        }
+    };
     let record = storage::postgres::deployments::NewDeployment {
         deployment_id,
         user_id: user.clone(),
@@ -265,13 +390,16 @@ pub async fn create_deployment(
         starting_capital: capital,
         model_pins: json!(model_pins),
         started_by: user.clone(),
-        forward_deployment_id: None,
+        forward_deployment_id,
         target: None,
         parent_deployment_id: None,
     };
     // The record first: a deployment that runs without one is the defect this
     // route exists to end (FEAT-007 §1 defect 10).
     if let Err(e) = storage::postgres::deployments::start(&state.pg, &record).await {
+        if let Some(id) = forward_deployment_id {
+            retire_forward(&state.pg, &user, id, "its deployment was not recorded").await;
+        }
         return refuse(
             StatusCode::CONFLICT,
             "not_recorded",

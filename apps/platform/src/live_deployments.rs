@@ -302,6 +302,7 @@ async fn build(
                 .collect(),
         );
     }
+    let gate = Arc::clone(&deps.gate);
     let mut runner = LiveRunner::start(
         Arc::clone(d),
         Arc::new(plan),
@@ -345,5 +346,62 @@ async fn build(
             );
         }
     }
+    // Forward evidence (Set T T-0.4): a deployment the record names as such
+    // has every bar recorded against a shadow backtest of the same plan.
+    if let Some(spec) = forward_spec(pg, d).await? {
+        let recorders = reconciliation::ForwardRecorders::installed()
+            .ok_or("forward evidence is recorded but no recorder registry is installed")?;
+        let recorder = recorders
+            .deploy(spec, d.starting_capital, Arc::clone(gate.halt_registry()))
+            .map_err(|e| format!("forward recorder: {e}"))?;
+        runner.attach_forward(recorder, d.user_id.clone(), limits)?;
+        info!(deployment = %d.deployment_id, "forward evidence recording attached");
+    }
     Ok(runner)
+}
+
+/// The forward-evidence declaration a deployment's record names, if any
+/// (`strategy_deployment.forward_deployment_id` → `mlops.paper_deployment`),
+/// read under the deployment owner's tenant.
+async fn forward_spec(
+    pg: &sqlx::PgPool,
+    d: &V3Deployment,
+) -> Result<Option<reconciliation::DeploymentSpec>, String> {
+    use sqlx::Row;
+    let mut tx = ledger::pg::tenant_tx(pg, &d.user_id)
+        .await
+        .map_err(|e| format!("forward evidence: {e}"))?;
+    let row = sqlx::query(
+        "SELECT pd.deployment_id, pd.strategy_id, pd.trial_id, pd.numeraire, pd.bar_seconds, \
+                pd.max_abs_return_divergence, pd.max_cum_return_divergence, \
+                pd.max_position_divergence, pd.min_signal_match \
+           FROM strategy_deployment sd \
+           JOIN mlops.paper_deployment pd ON pd.deployment_id = sd.forward_deployment_id \
+          WHERE sd.deployment_id = $1",
+    )
+    .bind(d.deployment_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| format!("forward evidence: {e}"))?;
+    let _ = tx.commit().await;
+    let Some(r) = row else {
+        return Ok(None);
+    };
+    let get = |e: sqlx::Error| format!("forward evidence row: {e}");
+    let numeraire: String = r.try_get("numeraire").map_err(get)?;
+    let bar_seconds: i32 = r.try_get("bar_seconds").map_err(get)?;
+    Ok(Some(reconciliation::DeploymentSpec {
+        deployment_id: r.try_get("deployment_id").map_err(get)?,
+        strategy_id: r.try_get("strategy_id").map_err(get)?,
+        trial_id: r.try_get("trial_id").map_err(get)?,
+        venue: reconciliation::forward::PaperVenue::Platform,
+        numeraire: domain::numeraire::Numeraire::of(&numeraire.to_uppercase()),
+        bar_seconds: i64::from(bar_seconds),
+        thresholds: reconciliation::DivergenceThresholds {
+            max_abs_return_divergence: r.try_get("max_abs_return_divergence").map_err(get)?,
+            max_cum_return_divergence: r.try_get("max_cum_return_divergence").map_err(get)?,
+            max_position_divergence: r.try_get("max_position_divergence").map_err(get)?,
+            min_signal_match: r.try_get("min_signal_match").map_err(get)?,
+        },
+    }))
 }

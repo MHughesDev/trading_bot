@@ -100,6 +100,13 @@ pub trait DeploymentStore: Send + Sync {
         &self,
         deployment_id: Uuid,
     ) -> Result<Option<(String, serde_json::Value)>, String>;
+    /// Keep one forward observation (Set T T-0.4), under the deployment's
+    /// tenant.
+    async fn insert_observation(
+        &self,
+        tenant: &str,
+        observation: &domain::forward::ForwardObservation,
+    ) -> Result<(), String>;
 }
 
 /// The Postgres store (migrations 0142–0144).
@@ -144,6 +151,15 @@ impl DeploymentStore for PgDeploymentStore {
         storage::postgres::deployments::load_checkpoint(&self.0, deployment_id)
             .await
             .map(|r| r.map(|c| (c.revision_hash, c.state)))
+            .map_err(|e| e.to_string())
+    }
+    async fn insert_observation(
+        &self,
+        tenant: &str,
+        observation: &domain::forward::ForwardObservation,
+    ) -> Result<(), String> {
+        reconciliation::store::insert_observation(&self.0, tenant, observation)
+            .await
             .map_err(|e| e.to_string())
     }
 }
@@ -294,6 +310,26 @@ pub struct LiveRunner {
     /// Events consumed since the last record without a decision — each moved
     /// the engine's state, so a replay must see them too.
     preceding: Vec<Consumed>,
+    /// The genesis again, kept until a forward recorder attaches: its shadow
+    /// is built from the same bars the engine was.
+    origin: Option<Genesis>,
+    /// The close of the last primary bar — the price a decision on it was made
+    /// at, and so the price its orders are measured against.
+    decision_mark: Option<Decimal>,
+    /// Forward evidence, when this deployment is recorded as such (T-0.4).
+    forward: Option<Forward>,
+}
+
+/// A deployment recorded as forward evidence: its recorder (on the fill
+/// stream) and the backtest running beside it for the expected series.
+struct Forward {
+    recorder: Arc<reconciliation::ForwardRecorder>,
+    shadow: backtest::shadow::Shadow,
+    tenant: String,
+    /// The recorder has its opening mark. Until then — a runner that starts
+    /// holding a position — nothing is recorded: the shadow starts flat, and
+    /// the two are compared only from a bar where both are flat.
+    opened: bool,
 }
 
 /// Unix ns → UTC.
@@ -375,8 +411,11 @@ impl LiveRunner {
                     steps: 0,
                     halted: None,
                     last_minute: BTreeMap::new(),
+                    origin: Some(genesis.clone()),
                     genesis: Some(genesis),
                     preceding: Vec::new(),
+                    decision_mark: None,
+                    forward: None,
                 }
             }
             None => {
@@ -401,8 +440,11 @@ impl LiveRunner {
                     steps: 0,
                     halted: None,
                     last_minute: BTreeMap::new(),
+                    origin: Some(genesis.clone()),
                     genesis: Some(genesis),
                     preceding: Vec::new(),
+                    decision_mark: None,
+                    forward: None,
                 }
             }
         };
@@ -420,6 +462,127 @@ impl LiveRunner {
     #[must_use]
     pub fn deployment_id(&self) -> Uuid {
         self.d.deployment_id
+    }
+
+    /// Record this deployment as forward evidence (Set T T-0.4): every primary
+    /// bar from here on is a forward observation — the realised return the
+    /// recorder measures against the expected one a shadow backtest of the same
+    /// plan produces over the same bars. Call right after [`Self::start`],
+    /// before the first bar: the shadow is built from the same genesis.
+    ///
+    /// # Errors
+    /// Already attached or already stepped, or a shadow that does not build.
+    pub fn attach_forward(
+        &mut self,
+        recorder: Arc<reconciliation::ForwardRecorder>,
+        tenant: String,
+        instrument_limits: risk::InstrumentLimits,
+    ) -> Result<(), String> {
+        let genesis = self
+            .origin
+            .take()
+            .ok_or("a forward recorder attaches once, before the first bar")?;
+        let start = self
+            .last_minute
+            .values()
+            .max()
+            .map_or_else(Utc::now, |ns| at(*ns));
+        let shadow = backtest::shadow::Shadow::new(
+            backtest::shadow::ShadowSpec {
+                plan: Arc::clone(&self.plan),
+                spec: self.spec.clone(),
+                asset_class: self.asset_class,
+                instrument_limits,
+                limits: risk::GlobalRiskLimits::default(),
+                // Flat, holding what the deployment is worth now: its capital
+                // at a first start, its equity after a restart.
+                cash: self.view().equity,
+                start,
+                strategy_id: self.d.deployment_id.to_string(),
+            },
+            &genesis,
+        )
+        .map_err(|e| format!("the shadow backtest does not build: {e}"))?;
+        self.forward = Some(Forward {
+            recorder,
+            shadow,
+            tenant,
+            opened: false,
+        });
+        Ok(())
+    }
+
+    /// One closed bar through the shadow, and on a primary bar one forward
+    /// observation. A failure here stops forward recording for this run — it
+    /// never stops the deployment trading.
+    async fn forward_bar(&mut self, input: InputIdx, bar: Bar, decided: &[DecisionTrace]) {
+        use reconciliation::ExpectedBar;
+        let flat = self.is_idle();
+        let Some(f) = self.forward.as_mut() else {
+            return;
+        };
+        let live_close = decided.iter().find(|t| t.cause == Cause::BarClose);
+        let answers = live_close.map(|t| t.model_responses.clone()).unwrap_or_default();
+        let step = match f.shadow.on_bar(input, bar, &answers) {
+            Ok(Some(s)) => s,
+            Ok(None) => return,
+            Err(e) => {
+                error!(deployment = %self.d.deployment_id, error = %e, "shadow backtest failed — forward recording stops for this run");
+                self.forward = None;
+                return;
+            }
+        };
+        let bar_at = at(bar.close_ns);
+        let Ok(close) = bar.close.to_string().parse::<Decimal>() else {
+            return;
+        };
+        let mark = Price::from_decimal(close);
+        if !f.opened {
+            if flat && f.shadow.position().is_zero() {
+                if let Err(e) = f.recorder.open(bar_at, mark) {
+                    warn!(deployment = %self.d.deployment_id, error = %e, "forward recorder did not open");
+                    return;
+                }
+                f.opened = true;
+                info!(deployment = %self.d.deployment_id, bar = %bar_at, "forward recording opened");
+            }
+            return;
+        }
+        let intents = |t: Option<&DecisionTrace>| {
+            t.map(|t| serde_json::to_value(&t.intents).unwrap_or_default())
+        };
+        let shadow_close = step.decided.iter().find(|t| t.cause == Cause::BarClose);
+        // The expected value is for this bar or it is not comparable.
+        if step.bar != bar_at || !step.expected_return.is_finite() {
+            error!(deployment = %self.d.deployment_id, bar = %bar_at, shadow = %step.bar, "shadow step is not for this bar — forward recording stops for this run");
+            self.forward = None;
+            return;
+        }
+        let expected = ExpectedBar {
+            expected_return: step.expected_return,
+            expected_turnover: step.turnover,
+            modelled_slippage_bps: step.slippage_bps,
+            signal_matched: intents(live_close) == intents(shadow_close),
+        };
+        let recorded = f.recorder.close_bar(
+            bar_at,
+            mark,
+            expected,
+            domain::forward::ObservationSource::Observed,
+        );
+        let (observation, verdict) = match recorded {
+            Ok(r) => r,
+            Err(e) => {
+                error!(deployment = %self.d.deployment_id, error = %e, "forward observation refused — forward recording stops for this run");
+                self.forward = None;
+                return;
+            }
+        };
+        let tenant = f.tenant.clone();
+        if let Err(e) = self.deps.store.insert_observation(&tenant, &observation).await {
+            error!(deployment = %self.d.deployment_id, error = %e, "forward observation not stored");
+        }
+        info!(deployment = %self.d.deployment_id, bar = %bar_at, verdict = ?verdict, "forward observation");
     }
 
     /// Engine steps taken since start — one per event, never one per tick.
@@ -492,15 +655,17 @@ impl LiveRunner {
                     decided.extend(self.step(e).await?);
                 }
                 self.track_position(&bar);
+                self.decision_mark = bar.close.to_string().parse().ok();
             }
-            decided.extend(
-                self.step(Event::Bar {
+            let on_bar = self
+                .step(Event::Bar {
                     input,
                     bar,
                     warmup: false,
                 })
-                .await?,
-            );
+                .await?;
+            self.forward_bar(input, bar, &on_bar).await;
+            decided.extend(on_bar);
         }
         Ok(decided)
     }
@@ -803,6 +968,9 @@ impl LiveRunner {
             match action {
                 OrderAction::Submit(o) => {
                     let intent = self.intent(o);
+                    if let (Some(f), Some(mark)) = (&self.forward, self.decision_mark) {
+                        f.recorder.on_submit(&intent, Price::from_decimal(mark));
+                    }
                     let mut order = LiveOrder {
                         key: intent.idempotency_key,
                         broker_order_id: None,
@@ -1061,6 +1229,7 @@ mod tests {
         journal: Mutex<Vec<JournalRecord>>,
         checkpoints: Mutex<BTreeMap<Uuid, (String, serde_json::Value)>>,
         fail_journal: bool,
+        observations: Mutex<Vec<domain::forward::ForwardObservation>>,
     }
 
     #[async_trait::async_trait]
@@ -1101,6 +1270,14 @@ mod tests {
             id: Uuid,
         ) -> Result<Option<(String, serde_json::Value)>, String> {
             Ok(self.checkpoints.lock().unwrap().get(&id).cloned())
+        }
+        async fn insert_observation(
+            &self,
+            _tenant: &str,
+            observation: &domain::forward::ForwardObservation,
+        ) -> Result<(), String> {
+            self.observations.lock().unwrap().push(observation.clone());
+            Ok(())
         }
     }
 
@@ -1764,6 +1941,174 @@ mod tests {
         let n = store.journal.lock().unwrap().len();
         assert!(n >= 3);
         assert_eq!(identical(&replayed(&store, &g, &reg)), n);
+    }
+
+    // ── T-0.4 ────────────────────────────────────────────────────────────────
+
+    fn forward_spec(strategy_id: String) -> reconciliation::DeploymentSpec {
+        reconciliation::DeploymentSpec {
+            deployment_id: Uuid::new_v4(),
+            strategy_id,
+            trial_id: Uuid::new_v4(),
+            venue: reconciliation::forward::PaperVenue::Platform,
+            numeraire: domain::numeraire::Numeraire::Usd,
+            bar_seconds: 60,
+            // Loose enough that a divergence halt does not stop the fixture.
+            thresholds: reconciliation::DivergenceThresholds {
+                max_abs_return_divergence: 1.0,
+                max_cum_return_divergence: 10.0,
+                max_position_divergence: Decimal::from(1_000),
+                min_signal_match: 0.01,
+            },
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_forward_deployment_records_every_bar_against_its_shadow_backtest() {
+        let inst = "LIVE-FWD-USD";
+        ready_instrument(inst, "100");
+        let g = ema_7_21();
+        let store = Arc::new(MemoryStore::default());
+        let d = deployment(inst, &g);
+        let deps = deps(store.clone(), Arc::new(NoLiveModels));
+        let gate = Arc::clone(&deps.gate);
+        let mut r = LiveRunner::start(
+            Arc::clone(&d),
+            plan_of(&g, &StdRegistries::new()),
+            AssetClass::CryptoSpotCex,
+            spec(inst),
+            deps,
+            vec![Vec::new()],
+        )
+        .await
+        .unwrap();
+        let recorder = reconciliation::ForwardRecorders::install()
+            .deploy(
+                forward_spec(d.deployment_id.to_string()),
+                Decimal::from(10_000),
+                Arc::clone(gate.halt_registry()),
+            )
+            .unwrap();
+        let limits = risk::InstrumentLimits {
+            tick_size: Decimal::new(1, 1),
+            lot_size: Decimal::new(1, 8),
+        };
+        r.attach_forward(recorder, "t-fwd".into(), limits.clone())
+            .unwrap();
+        assert!(
+            r.attach_forward(
+                reconciliation::ForwardRecorders::install()
+                    .deploy(
+                        forward_spec(d.deployment_id.to_string()),
+                        Decimal::from(10_000),
+                        Arc::clone(gate.halt_registry()),
+                    )
+                    .unwrap(),
+                "t-fwd".into(),
+                limits,
+            )
+            .is_err(),
+            "a recorder attaches once"
+        );
+
+        let (minutes, _) = trades_to_minutes(inst, 120);
+        for m in &minutes {
+            r.on_minute_bar(inst, *m).await.unwrap();
+        }
+        let obs = store.observations.lock().unwrap();
+        // Opened on the first bar, flat; one observation per bar after it.
+        assert_eq!(obs.len(), minutes.len() - 1, "one per bar after the opening mark");
+        assert!(obs.windows(2).all(|w| w[0].bar < w[1].bar));
+        assert!(obs
+            .iter()
+            .all(|o| o.realised_return.is_finite() && o.expected_return.is_finite()));
+        assert!(
+            obs.iter().any(|o| o.expected_turnover > 0.0),
+            "the shadow backtest traded"
+        );
+        assert!(
+            obs.iter().any(|o| o.realised_return != 0.0),
+            "the paper deployment traded"
+        );
+        let matched = obs.iter().filter(|o| o.signal_matched).count();
+        assert!(
+            matched * 10 >= obs.len() * 9,
+            "the shadow decides as paper does on most bars: {matched} of {}",
+            obs.len()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_runner_holding_a_position_records_nothing_until_it_is_flat() {
+        let inst = "LIVE-FWD-POS-USD";
+        ready_instrument(inst, "100");
+        let g = ema_7_21();
+        let store = Arc::new(MemoryStore::default());
+        let d = deployment(inst, &g);
+        let deps = deps(store.clone(), Arc::new(NoLiveModels));
+        let gate = Arc::clone(&deps.gate);
+        let mut r = LiveRunner::start(
+            Arc::clone(&d),
+            plan_of(&g, &StdRegistries::new()),
+            AssetClass::CryptoSpotCex,
+            spec(inst),
+            deps,
+            vec![Vec::new()],
+        )
+        .await
+        .unwrap();
+        let (minutes, _) = trades_to_minutes(inst, 300);
+        // Trade until the runner holds a position…
+        let mut k = 0;
+        for (i, m) in minutes.iter().enumerate() {
+            r.on_minute_bar(inst, *m).await.unwrap();
+            if !r.position().is_zero() && i > 30 {
+                k = i + 1;
+                break;
+            }
+        }
+        assert!(k > 0, "the runner took a position");
+        // …then attach, as a restart mid-position would.
+        r.origin = Some(Genesis {
+            checkpoint: None,
+            history: Vec::new(),
+        });
+        let recorder = reconciliation::ForwardRecorders::install()
+            .deploy(
+                forward_spec(d.deployment_id.to_string()),
+                Decimal::from(10_000),
+                Arc::clone(gate.halt_registry()),
+            )
+            .unwrap();
+        r.attach_forward(
+            recorder,
+            "t-fwd".into(),
+            risk::InstrumentLimits {
+                tick_size: Decimal::new(1, 1),
+                lot_size: Decimal::new(1, 8),
+            },
+        )
+        .unwrap();
+        let mut first_flat = None;
+        for (i, m) in minutes[k..].iter().enumerate() {
+            let before = store.observations.lock().unwrap().len();
+            if first_flat.is_none() && r.is_idle() {
+                first_flat = Some(i);
+            }
+            r.on_minute_bar(inst, *m).await.unwrap();
+            if first_flat.is_none() {
+                assert_eq!(
+                    store.observations.lock().unwrap().len(),
+                    before,
+                    "nothing is recorded while the runner holds a position the shadow does not"
+                );
+            }
+        }
+        assert!(first_flat.is_some(), "the runner went flat");
+        assert!(
+            !store.observations.lock().unwrap().is_empty(),
+            "recording opened once both were flat"
+        );
     }
 
     // ── U-4.5 ────────────────────────────────────────────────────────────────
