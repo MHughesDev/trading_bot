@@ -28,3 +28,10 @@ hex = "0.4"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# Test-only, and deliberately not a real dependency. The forward collector writes
+# a `series` name that `observability::silence::FeedExpectation::owns` has to join
+# to a `dataplane.forward_series` row, and the two drifted apart unnoticed because
+# no crate could see both sides: `storage` and `observability` cannot depend on
+# `collectors`, so the assertion can only live here. A dev-dependency pins the
+# strings without putting the alarm in the collector's production graph.
+observability = { workspace = true }

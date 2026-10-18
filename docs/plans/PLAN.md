@@ -19,9 +19,9 @@ worse than no map, because people steer by it.
 
 ## 1. Where we are — **41% left**
 
-Derived 2026-09-21 from the `### <TASK-ID>` headings and their status markers
-across sets P, S and T. Size-weighted **S = 1, M = 2, L = 4**: 189 tasks of
-wildly different sizes averaged flat would flatter us.
+Derived 2026-09-21, re-derived 2026-09-22, from the `### <TASK-ID>` headings and
+their status markers across sets P, S and T. Size-weighted **S = 1, M = 2,
+L = 4**: 189 tasks of wildly different sizes averaged flat would flatter us.
 
 | counting rule | % of the work left |
 |---|---|
@@ -30,7 +30,7 @@ wildly different sizes averaged flat would flatter us.
 | generous — `PARTIAL` counts done | 18% |
 
 Take the middle number and treat it as **±10**, not as a measurement. `PARTIAL`
-is 250 of 531 units and in this repository it spans "complete, one database test
+is 252 of 531 units and in this repository it spans "complete, one database test
 unwritten" to "the types exist and nothing calls them". The spread between the
 strict and generous rows *is* the uncertainty, and it is honest to show it rather
 than pick one and present it as precision.
@@ -40,7 +40,7 @@ than pick one and present it as precision.
 | set | subject | tasks | units | done | partial | % left |
 |---|---|---:|---:|---:|---:|---:|
 | **S** | The Agent Platform | 189 | 446 | 178 | 237 | **34%** |
-| **P** | Data Reach | 30 | 51 | 6 | 9 | **79%** |
+| **P** | Data Reach | 30 | 51 | 6 | 11 | **77%** |
 | **T** | Forward Evidence | 17 | 34 | 2 | 4 | **88%** |
 
 P and T are 16% of the weight and almost entirely ahead of us — and they are the
@@ -50,11 +50,17 @@ being where the code is.
 **Both were audited for the first time on 2026-09-21 and both figures moved, in
 opposite directions.** Set P is better than published (84% → 79%): four tasks
 were further along than their markers said, including a 749-line census with its
-acceptance as named tests and a published nine-series result. **Set T is worse
-(82% → 88%), and it is 1 of 17 rather than 3.** Two of its three `DONE` markers
-do not survive contact with the tree — T-0.1's wire is not in place (the
-observer is constructed only in tests, and `ExecutionEngine::with_fill_observer`,
-the method this phase file instructs a track to call, **does not exist anywhere
+acceptance as named tests and a published nine-series result. **A fifth followed
+on 2026-09-22 (79% → 77%):** P-0.3 said `NOT STARTED` over a built and tested
+forward collector whose only gap is a caller — and whose heartbeat, had it ever
+run, would have paged a healthy feed under a name the silence alarm could not
+join.
+
+**Set T is worse (82% → 88%), and it is 1 of 17 rather than 3.** Two of its
+three `DONE` markers do not survive contact with the tree — T-0.1's wire is not
+in place (the observer is constructed only in tests, and
+`ExecutionEngine::with_fill_observer`, the method this phase file instructs a
+track to call, **does not exist anywhere
 in the workspace**), and T-0.3's own note says *"This criterion is not met"*
 above a `DONE`. The one task that survives does so because its author wrote its
 partial down honestly.
@@ -103,15 +109,21 @@ Phase 11 still has the highest percentage and the smallest body.
 
 | set | phase | tasks | units | % left |
 |---|---|---:|---:|---:|
-| P | 0 — Measure, start the irreversible clock | 6 | 10 | **100%** |
-| P | 1 — Deep backfill | 7 | 13 | **100%** |
-| P | 2 — Quality and eligibility | 6 | 10 | 20% |
-| P | 3 — Alternative data | 6 | 9 | 100% |
+| P | 0 — Measure, start the irreversible clock | 6 | 10 | **80%** |
+| P | 1 — Deep backfill | 7 | 13 | **85%** |
+| P | 2 — Quality and eligibility | 6 | 10 | 30% |
+| P | 3 — Alternative data | 6 | 9 | 94% |
 | P | 4 — Derived access and the source fence | 5 | 9 | 100% |
-| T | 0 — Reconciliation and the first observation | 4 | 8 | 25% |
+| T | 0 — Reconciliation and the first observation | 4 | 8 | 50% |
 | T | 1 — The deployment path | 5 | 10 | **100%** |
 | T | 2 — The paper fleet | 4 | 8 | 100% |
 | T | 3 — Ramp mechanics | 4 | 8 | 100% |
+
+§1's rule throughout — `PARTIAL` counts half. Re-derived 2026-09-22, when four
+of these six P and T rows were found to have drifted: they had been computed
+under three different rules (P 0, 1 and 3 strict; P 2 and T 0 generous). That
+is what a hand-maintained table does and the set table above it does not,
+because a test holds that one and nothing holds this one.
 
 ### The older sets, and what is genuinely left in them
 

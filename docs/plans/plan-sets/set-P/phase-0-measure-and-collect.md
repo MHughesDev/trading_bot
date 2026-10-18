@@ -82,7 +82,55 @@ a request without a valid token; the page is reachable from the desk navigation.
 ## Then collect what cannot be collected later
 
 ### P-0.3 Funding rates and open interest, forward — M
-`NOT STARTED`
+`PARTIAL` — **corrected 2026-09-22; the marker said `NOT STARTED` over
+`crates/collectors/src/derivs/`, which is three modules and 26 passing tests.**
+The collector is built: `funding.rs` parses the venue's real shapes and keeps a
+prediction apart from a settlement, `sink.rs` resolves provenance against
+`dataplane.source` rather than defaulting it, `service.rs` polls, backfills and
+beats. Migration 0098 is applied and seeds both series, enabled.
+
+**The gap is a caller.** `ForwardCollector` has zero callers workspace-wide —
+`grep -rn "derivs::" crates/ apps/ --include=*.rs` returns only matches inside
+the module itself — so the acceptance clause that requires an hour against the
+live venue is unmet, and `trading.funding_rates`, `trading.open_interest` and
+`trading.forward_series_heartbeat` are reported at 0 rows. Built, tested,
+unreached: the same shape as P-0.1.
+
+**Switching it on is deliberately not part of the 2026-09-22 heartbeat-naming
+fix, and needs a human.** Two reasons, the second of them a further gap:
+
+1. Starting it is an outward-facing, continuing decision — a live poll against a
+   third-party venue, writing the live store — and not a side effect of a rename.
+2. Turning it on alone would still produce no alarm, because the chain needs
+   two wires and this is one of them. The reading half landed on main in
+   `7261301`: `storage::clickhouse::census::forward_census` calls
+   `read_heartbeats` and maps each row's `series` straight into a `FeedKey`,
+   and `silence::evaluate` now has three real call sites. What nothing calls is
+   `census::silence_report` — no scheduler, no health job. So today a running
+   collector would write rows that are read by a function nobody invokes, and
+   the registry row would go on reporting `NeverSeen`, correctly. A caller for
+   the collector is half the work; a caller for the census pass is the other
+   half, and it is being chased separately.
+
+What *was* fixed on 2026-09-22 is the join itself. `service.rs` wrote
+`series = "funding"` and `series = "open_interest"`, while
+`observability::silence::FeedExpectation::owns` matches a heartbeat to its
+registry row on `series_id` **or** `store_table`: `"open_interest"` matched the
+store table of the same name by coincidence, and `"funding"` matched neither
+`kraken_futures.funding` nor `funding_rates`. The first hour the collector ran,
+its funding heartbeat would have been reported `CannotJudge` (Info) while the
+registry row for that same healthy feed reported `NeverSeen` (Alarm, a page) — a
+permanent false page on a working feed, which is the one shape that reliably
+gets an alarm muted. Half the join worked and half did not, and with both tables
+at zero rows nothing observable would have said so first. The constants are now
+the registry's own ids, and
+`the_series_the_sink_writes_are_the_ones_the_alarm_joins_on` parses migration
+0098 and pins both strings against the rows it actually seeds. The test lives in
+`collectors` because that is the only crate able to see both sides — `storage`
+and `observability` cannot depend on it.
+
+**Remaining for `DONE`:** a caller, an hour against the live venue, and the
+idempotency-on-restart clause verified against real rows.
 
 A collector for a free, US-accessible public derivatives API (DATA-005 S6 names Kraken
 Futures public as the candidate; **verify geo-restrictions and terms before building** — a

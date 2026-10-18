@@ -27,10 +27,34 @@ use tracing::{error, info, warn};
 use super::funding::{FundingError, FundingObservation, KrakenFuturesClient, TickerSnapshot, VENUE};
 use super::sink::{Beat, ForwardSink, SinkError};
 
-/// The series names the heartbeat table records, matching
-/// `dataplane.forward_series`.
-pub const FUNDING_SERIES: &str = "funding";
-pub const OPEN_INTEREST_SERIES: &str = "open_interest";
+/// The series names the heartbeat table records.
+///
+/// These are the registry's own identifiers — `dataplane.forward_series.series_id`
+/// — and not a shorthand, because the shorthand does not join.
+/// `observability::silence::FeedExpectation::owns` matches a heartbeat to its
+/// registry row on `series_id` *or* `store_table`, and the shorthand pair hit one
+/// of those by coincidence and the other not at all: `"open_interest"` happened to
+/// equal the store table `open_interest`, while `"funding"` matched neither
+/// `kraken_futures.funding` nor `funding_rates`.
+///
+/// A half-working join is worse here than a broken one. The first hour the funding
+/// collector ran, its heartbeat would have been reported as `CannotJudge { "no
+/// registered series covers funding/kraken_futures" }` while the registry row for
+/// `kraken_futures.funding` simultaneously reported `NeverSeen` — an Alarm, a page,
+/// against a feed that was healthy and writing. One false page on a healthy feed is
+/// how a silence alarm gets muted, after which the feeds that really are dead stay
+/// dead in silence.
+///
+/// The `series_id` is preferred over the store table because store tables are not
+/// unique — both option-chain series land in `option_chain_snapshots` — and because
+/// `silence::evaluate` builds every finding's key from `series_id`, so an observed
+/// heartbeat and a promised feed come out as the same `FeedKey` rather than two
+/// spellings of one feed.
+///
+/// `the_series_the_sink_writes_are_the_ones_the_alarm_joins_on` pins both strings
+/// against the rows migration 0098 actually seeds.
+pub const FUNDING_SERIES: &str = "kraken_futures.funding";
+pub const OPEN_INTEREST_SERIES: &str = "kraken_futures.open_interest";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceError {
@@ -239,6 +263,8 @@ mod tests {
     use super::*;
     use crate::derivs::funding::{parse_tickers, FundingKind, OpenInterestObservation};
     use chrono::TimeZone;
+    use dataplane::retention::{ForwardSeriesSpec, RetentionPolicy};
+    use observability::silence::{Arrival, FeedExpectation, FeedKey, Roster};
     use std::sync::Mutex;
 
     const TICKERS: &str = r#"{
@@ -423,6 +449,147 @@ mod tests {
         assert_eq!(report.funding_rows, 12);
         assert_eq!(report.failures, 0);
         assert_eq!(report.rate_limited, 0);
+    }
+
+    /// The rows migration 0098 seeds into `dataplane.forward_series`, as
+    /// `(series_id, store_table, venue)` — the three columns
+    /// `FeedExpectation::owns` joins on.
+    ///
+    /// Parsed out of the migration rather than copied from it. A hand-copied
+    /// registry row is free to drift from the real one in exactly the way the
+    /// series constants drifted, and a guard that drifts along with the bug it is
+    /// guarding is not a guard.
+    fn seeded_forward_series() -> Vec<(String, String, String)> {
+        const M0098: &str = include_str!("../../../../migrations/0098_forward_series.sql");
+
+        let from = M0098.find("INSERT INTO dataplane.forward_series").expect("0098 seeds the registry");
+        let block = &M0098[from..];
+        let block = &block[..block.find("ON CONFLICT").expect("the seed ends in an upsert")];
+        let values = &block[block.find("VALUES").expect("the seed has a VALUES clause") + "VALUES".len()..];
+
+        // Quoted text is scanned through rather than split on: the seeded notes
+        // carry both commas ("8,870 hourly rates") and parentheses ("(FM-11)"),
+        // and splitting on either would cut a row in half and quietly return the
+        // wrong registry.
+        let mut rows = Vec::new();
+        let mut cur: Vec<String> = Vec::new();
+        let mut buf = String::new();
+        let mut in_str = false;
+        let mut depth = 0_usize;
+        let mut chars = values.chars().peekable();
+        while let Some(c) = chars.next() {
+            if in_str {
+                if c != '\'' {
+                    buf.push(c);
+                } else if chars.peek() == Some(&'\'') {
+                    chars.next();
+                    buf.push('\'');
+                } else {
+                    in_str = false;
+                    let lit = std::mem::take(&mut buf);
+                    if depth == 1 && cur.len() < 3 {
+                        cur.push(lit);
+                    }
+                }
+                continue;
+            }
+            match c {
+                '\'' => in_str = true,
+                '(' => {
+                    depth += 1;
+                    if depth == 1 {
+                        cur.clear();
+                    }
+                }
+                ')' => {
+                    if depth == 1 {
+                        assert_eq!(cur.len(), 3, "a seeded row parsed as {cur:?}");
+                        rows.push((cur[0].clone(), cur[1].clone(), cur[2].clone()));
+                    }
+                    depth = depth.saturating_sub(1);
+                }
+                _ => {}
+            }
+        }
+        assert!(!rows.is_empty(), "the registry seed parsed as nothing, which no assertion below would notice");
+        rows
+    }
+
+    /// A registry row as the silence alarm holds it. Only `series_id`,
+    /// `store_table` and `venue` take part in `owns`; the cadence and budget below
+    /// are the seeded ones but carry no weight here.
+    fn expectation(series_id: &str, store_table: &str, venue: &str) -> FeedExpectation {
+        FeedExpectation {
+            spec: ForwardSeriesSpec {
+                series_id: series_id.to_string(),
+                store_table: store_table.to_string(),
+                venue: venue.to_string(),
+                cadence_secs: 3600,
+                alarm_after_cadences: 3,
+                disk_budget_bytes: 2_147_483_648,
+                retention: RetentionPolicy::None,
+                enabled: true,
+            },
+            arrival: Arrival::Polled { poll_period_secs: 3600 },
+            roster: Roster::WhateverAppears,
+        }
+    }
+
+    /// Every `series` this collector writes must be one the silence alarm can join
+    /// to a registry row. This crate is the only place that can assert it:
+    /// `storage` and `observability` cannot depend on `collectors`, so neither of
+    /// them can see the string that is actually written.
+    ///
+    /// What this pins is not a broken join but a half-working one. `"open_interest"`
+    /// used to match — by coincidence, the store table happens to share its name —
+    /// while `"funding"` matched neither the series id `kraken_futures.funding` nor
+    /// the store table `funding_rates`. The first hour the collector ran, its
+    /// funding heartbeat would have been reported `CannotJudge` (Info) while the
+    /// registry row for that same healthy feed reported `NeverSeen` (Alarm, a
+    /// page). A permanent false page on a working feed is the one shape that
+    /// reliably gets an alarm muted, and with both tables at zero rows nothing
+    /// observable would have said so first.
+    #[tokio::test]
+    async fn the_series_the_sink_writes_are_the_ones_the_alarm_joins_on() {
+        let seeded = seeded_forward_series();
+        let expectations: Vec<FeedExpectation> =
+            seeded.iter().map(|(s, t, v)| expectation(s, t, v)).collect();
+
+        // The names as they are written, not as the constants declare them: what
+        // the alarm joins on is whatever reaches `forward_series_heartbeat`.
+        let c = ForwardCollector::new(FixtureSource::new(), CountingSink::default());
+        c.poll_once().await.unwrap();
+        c.backfill_funding("PF_XBTUSD").await.unwrap();
+        let written: BTreeSet<(String, String)> =
+            c.sink.beats.lock().unwrap().iter().map(|b| (b.series.clone(), b.venue.clone())).collect();
+        assert_eq!(written.len(), 2, "a poll and a backfill write two series between them: {written:?}");
+
+        for (series, venue) in &written {
+            let key = FeedKey::new(series, venue, "PF_XBTUSD");
+            let owners: Vec<&str> =
+                expectations.iter().filter(|e| e.owns(&key)).map(|e| e.spec.series_id.as_str()).collect();
+            assert_eq!(
+                owners.len(),
+                1,
+                "the heartbeat {series}/{venue} must be owned by exactly one seeded series, not {owners:?}"
+            );
+        }
+
+        // And the two names are the registry's own, literally. `owns` would also
+        // accept the store tables, but store tables are not unique — both
+        // option-chain series land in `option_chain_snapshots` — so the series id
+        // is the identifier that stays unambiguous as the registry grows.
+        for series_id in [FUNDING_SERIES, OPEN_INTEREST_SERIES] {
+            assert!(
+                seeded.iter().any(|(s, _, v)| s == series_id && v == VENUE),
+                "the sink writes {series_id} and dataplane.forward_series does not seed it: {seeded:?}"
+            );
+        }
+
+        // The shorthand that used to be here joined to nothing at all. Kept as a
+        // witness, because it is the value a future rename would reach for first.
+        let stale = FeedKey::new("funding", VENUE, "PF_XBTUSD");
+        assert!(!expectations.iter().any(|e| e.owns(&stale)), "no registry row has ever covered {stale:?}");
     }
 
     #[tokio::test(start_paused = true)]
