@@ -11,6 +11,16 @@ use crate::types::*;
 /// How long a lease lasts before a job is considered abandoned (COMP-005 §5).
 pub const LEASE_SECONDS: i64 = 60;
 
+/// The artifact type a resumable training checkpoint is stored under.
+pub const CHECKPOINT_TYPE: &str = "checkpoint";
+
+/// The only `job_artifacts` role a checkpoint may occupy.
+///
+/// Its own role, and only its own: a checkpoint under `model` or `result` is a
+/// partial model in the slot a finished one belongs in, which is how a half
+/// trained network ends up serving or being scored.
+pub const CHECKPOINT_ROLE: &str = "checkpoint";
+
 /// Infrastructure re-queues allowed before a job fails with `lost_worker`.
 pub const MAX_ATTEMPTS: i16 = 2;
 
@@ -121,6 +131,14 @@ pub struct Job {
     pub created_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
+    /// Wall-clock seconds this job has consumed across **every** attempt
+    /// (migration 0252).
+    ///
+    /// Charged by the database when an attempt ends, from the lease rather than
+    /// from a worker's self-report — a killed worker reports nothing, and that is
+    /// precisely the attempt whose spend must still count against
+    /// `max_gpu_hours`.
+    pub gpu_seconds_spent: f64,
 }
 
 /// Hook called inside the submission transaction to count a trial (INV-1, JB-03).
@@ -691,7 +709,8 @@ impl JobStore {
 
         sqlx::query(
             "UPDATE jobs SET state='running', lease_owner=$2, lease_expires_at=$3, \
-                             heartbeat_at=now(), started_at=coalesce(started_at, now()) \
+                             heartbeat_at=now(), started_at=coalesce(started_at, now()), \
+                             attempt_started_at=now() \
              WHERE job_id=$1",
         )
         .bind(&job_id)
@@ -820,7 +839,30 @@ impl JobStore {
         .execute(&mut *tx)
         .await?;
 
+        charge_attempt(&mut tx, job_id, AttemptEnd::Now).await?;
+
         for (handle, role) in &output.artifacts {
+            // A checkpoint written mid-run is a **partial** model, and nothing
+            // downstream may read one as if it were a finished artifact. This is
+            // the one place a job's outputs become its evidence, so it is the
+            // place the distinction has to be a mechanism rather than a habit:
+            // a `checkpoint` artifact may be attached under the `checkpoint`
+            // role and no other. Resuming from a half-trained model is correct;
+            // serving from one, scoring one, or citing one in a verdict is not,
+            // and the two are the same bytes on disk.
+            let stored_type: Option<String> =
+                sqlx::query_scalar("SELECT type FROM artifacts WHERE handle = $1")
+                    .bind(handle)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            if stored_type.as_deref() == Some(CHECKPOINT_TYPE) && role != CHECKPOINT_ROLE {
+                return Err(JobStoreError::Invalid(format!(
+                    "artifact {handle} is a checkpoint and was attached to job {job_id} as \
+                     `{role}`; a checkpoint is a partial model and may only be attached as \
+                     `{CHECKPOINT_ROLE}`"
+                )));
+            }
+
             sqlx::query(
                 "INSERT INTO job_artifacts (job_id, handle, role) VALUES ($1,$2,$3) \
                  ON CONFLICT DO NOTHING",
@@ -867,6 +909,12 @@ impl JobStore {
             .fetch_one(&mut *tx)
             .await?
             .get("attempts");
+
+        // Charged before the branch. An attempt that failed spent the time it
+        // spent, and whether the job is about to be re-queued or ended has
+        // nothing to do with it — a job that re-queues is exactly the case where
+        // forgetting to charge hands the next attempt the whole ceiling again.
+        charge_attempt(&mut tx, job_id, AttemptEnd::Now).await?;
 
         let state = if retryable && attempts + 1 < MAX_ATTEMPTS {
             sqlx::query(
@@ -982,6 +1030,14 @@ impl JobStore {
             let job_id: String = row.get("job_id");
             let attempts: i16 = row.get("attempts");
             let mut tx = self.pool.begin().await?;
+            // The attempt nobody reported on. This is the whole reason the spend
+            // is charged by the database: the worker that was holding this lease
+            // is gone, it will never tell anyone what it used, and if that time
+            // went uncharged then "die and be re-queued" would be a way to spend
+            // more than `max_gpu_hours`. Charged to the lease expiry rather than
+            // to now, because that is the last instant the slot was held and the
+            // reaper's own latency is not the job's to pay for.
+            charge_attempt(&mut tx, &job_id, AttemptEnd::LeaseExpiry).await?;
             if attempts + 1 < MAX_ATTEMPTS {
                 sqlx::query(
                     "UPDATE jobs SET state='queued', attempts=attempts+1, lease_owner=NULL, \
@@ -1196,7 +1252,50 @@ fn row_to_job(row: &sqlx::postgres::PgRow) -> Result<Job, JobStoreError> {
         created_at: row.get("created_at"),
         started_at: row.get("started_at"),
         finished_at: row.get("finished_at"),
+        gpu_seconds_spent: row.get("gpu_seconds_spent"),
     })
+}
+
+/// When an attempt is considered to have ended, for charging purposes.
+///
+/// The distinction exists because the two ways an attempt ends are observed at
+/// different moments. A worker that reported its own ending is charged to now; a
+/// worker that stopped answering is charged to the moment its lease ran out,
+/// which is the last instant it was holding the slot and the last instant anyone
+/// can say it was not working. Charging a reaped attempt to `now()` instead would
+/// bill it for however long the reaper took to notice.
+#[derive(Clone, Copy, Debug)]
+enum AttemptEnd {
+    Now,
+    LeaseExpiry,
+}
+
+/// Add this attempt's wall-clock to the job's running total (SPEC §8, AT-66).
+///
+/// Idempotent by construction: it clears `attempt_started_at`, so charging twice
+/// charges once. That matters because `fail` can be reached for a job the reaper
+/// has already handled.
+async fn charge_attempt(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    job_id: &str,
+    end: AttemptEnd,
+) -> Result<(), JobStoreError> {
+    let until = match end {
+        AttemptEnd::Now => "now()",
+        // `lease_expires_at` can be NULL if the lease was cleared already; then
+        // the coalesce falls back to the start, charging zero rather than
+        // charging from the epoch.
+        AttemptEnd::LeaseExpiry => "coalesce(lease_expires_at, attempt_started_at)",
+    };
+    let sql = format!(
+        "UPDATE jobs \
+            SET gpu_seconds_spent = gpu_seconds_spent \
+                  + greatest(0, extract(epoch from ({until} - attempt_started_at))), \
+                attempt_started_at = NULL \
+          WHERE job_id = $1 AND attempt_started_at IS NOT NULL"
+    );
+    sqlx::query(&sql).bind(job_id).execute(&mut **tx).await?;
+    Ok(())
 }
 
 /// A sortable, time-prefixed job id (`job_` + 26-char ULID-style string).

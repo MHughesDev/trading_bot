@@ -14,6 +14,7 @@ use std::time::Duration;
 use serde_json::Value;
 use tracing::{debug, error, info, warn};
 
+use crate::checkpoint::{remaining_budget, BudgetStatus};
 use crate::store::{Job, JobStore, LEASE_SECONDS};
 use crate::types::*;
 
@@ -24,6 +25,9 @@ pub struct JobContext {
     /// worker without one (INV-16).
     pub trial: Option<ledger::TrialTicket>,
     pub project_id: Option<uuid::Uuid>,
+    /// What this attempt may still run for, after subtracting what earlier
+    /// attempts already spent. `None` for the classes that declare no GPU ceiling.
+    pub budget_remaining: Option<Duration>,
     store: Arc<JobStore>,
     cancelled: Arc<AtomicBool>,
     last_progress: std::sync::Mutex<std::time::Instant>,
@@ -242,11 +246,19 @@ impl WorkerPool {
             None
         };
 
+        // The remaining ceiling, not the declared one. A job that already spent
+        // 0.9 of its hour gets 0.1 of an hour, however many times it has died.
+        let budget = gpu_budget(&job).map(|limit| remaining_budget(limit, job.gpu_seconds_spent));
+
         let cancelled = Arc::new(AtomicBool::new(false));
         let ctx = JobContext {
             trial,
             job_id: job.job_id.clone(),
             project_id: job.project_id,
+            budget_remaining: match budget {
+                Some(BudgetStatus::Remaining(d)) => Some(d),
+                _ => None,
+            },
             store: Arc::clone(&self.store),
             cancelled: Arc::clone(&cancelled),
             last_progress: std::sync::Mutex::new(
@@ -280,16 +292,34 @@ impl WorkerPool {
         // A job that has spent its budget is killed where it stands and settles
         // `budget_exceeded`, which INV-17 censors `right_budget` — a censored
         // observation, not a failure, because nothing went wrong with the work.
-        let outcome = match gpu_budget(&job) {
-            Some(limit) => {
-                let deadline = Duration::from_secs_f64(limit * 3600.0);
+        //
+        // The deadline is the **remainder**, not the declared ceiling. It used to
+        // be the ceiling, which was correct exactly once per job: a re-queued job
+        // got a fresh `max_gpu_hours` on every attempt, so a job that died at 0.9 h
+        // of a 1 h cap could run for 1.9 h, and dying repeatedly was a way to spend
+        // without bound. `store::charge_attempt` accumulates the spend from the
+        // lease on every ending — completed, failed, and above all reaped, because
+        // the reaped attempt is the one whose worker is gone and will never report.
+        let outcome = match budget {
+            Some(BudgetStatus::Exhausted { declared_s, spent_s }) => Err(JobError::terminal(
+                ledger::TerminalReason::BudgetExceeded,
+                "budget_exceeded",
+                format!(
+                    "earlier attempts of this job already spent {spent_s:.0} s of its \
+                     {declared_s:.0} s ceiling; it is not started again"
+                ),
+            )),
+            Some(BudgetStatus::Remaining(deadline)) => {
                 match tokio::time::timeout(deadline, worker.run(&ctx, &job.manifest)).await {
                     Ok(result) => result,
                     Err(_) => Err(JobError::terminal(
                         ledger::TerminalReason::BudgetExceeded,
                         "budget_exceeded",
                         format!(
-                            "the job declared max_gpu_hours = {limit} and was stopped at the limit"
+                            "the job declared max_gpu_hours = {} and was stopped when the \
+                             {:.0} s left after earlier attempts ran out",
+                            gpu_budget(&job).unwrap_or_default(),
+                            deadline.as_secs_f64()
                         ),
                     )),
                 }
