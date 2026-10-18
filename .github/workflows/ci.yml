@@ -220,6 +220,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run the JSON hot-path lint
         run: cargo xtask lint-no-json-hotpath
+      # `cargo test --workspace --lib` above does not reach a binary crate, so the
+      # classifiers behind this check and the frozen-table ones have no other run in
+      # CI. Their unit tests are what keep the checks from quietly agreeing with
+      # whatever the tree happens to contain.
+      - name: Run the guards' own tests
+        run: cargo test -p xtask
 
   check-bars-v1-frozen:
     name: Bars schema (nothing writes the retired market_bars)
@@ -237,8 +243,9 @@ jobs:
   # destroyed silently. Measured on the live store: 1,441 sorting-key
   # collisions on v2 against 0 on `market_bar`.
   #
-  # `cargo test -p xtask` already enforces this through the guard's own
-  # self-test, so the rule is mechanism rather than comment either way. The job
+  # `cargo test -p xtask` (run by the hot-path lint job above) already enforces
+  # this through the guard's own self-test, so the rule is mechanism rather than
+  # comment either way. The job
   # exists so a violation is named in CI by the thing it violated, instead of
   # arriving as one failing unit test in another crate's suite.
   check-bars-v2-frozen:

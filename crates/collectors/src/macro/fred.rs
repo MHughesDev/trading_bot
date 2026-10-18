@@ -227,12 +227,12 @@ fn redact_key(body: &str) -> String {
 /// [`MacroObservation::validate`] — a vintage that precedes its own observation
 /// period is refused rather than stored.
 pub fn parse_vintages(series_id: &str, body: &str) -> Result<Vec<MacroObservation>, FredError> {
-    // Decoding a body fetched from an external REST API, which is the documented
-    // exception in `cargo xtask lint-no-json-hotpath`. NOTE: that lint's exception
-    // is a substring match on the argument spelling, and the spelling it accepts
-    // (`&body[..]`) is one clippy rejects as redundant slicing. The lint already
-    // reports 15 pre-existing violations in this crate and is evidently not wired
-    // into CI, so this is written to be correct rather than to satisfy the grep.
+    // Decoding a body fetched from an external REST API. `cargo xtask
+    // lint-no-json-hotpath` allows a boundary decode and refuses only JSON
+    // *encoding* in a hot-path crate (Set C ADR-C-LINT-1); it is green and runs in
+    // CI. (It used to match substrings of the argument spelling, accepted only
+    // `&body[..]`, which clippy rejects as redundant slicing, and was not wired
+    // into CI — which is why this note once said to ignore it.)
     let parsed = serde_json::from_str::<AlfredObservationsResponse>(body)
         .map_err(|e| FredError::Parse(e.to_string()))?;
     let mut out = Vec::with_capacity(parsed.observations.len());

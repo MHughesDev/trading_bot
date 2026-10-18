@@ -260,7 +260,7 @@ lane keep JSON, so historical replay tooling is unaffected.
 ## 7. Acceptance Criteria (Restated Against This Design)
 
 - [ ] All 9 payload types derive rkyv; none carries a `schema_version` String
-- [ ] `cargo xtask lint-no-json-hotpath` passes and runs in CI
+- [x] `cargo xtask lint-no-json-hotpath` passes and runs in CI — ADR-C-LINT-1, on main 2026-10-17
 - [ ] All 5 JSON-encoding collectors emit rkyv payload bytes
 - [ ] JetStream consumers use checked `access_payload`; ring consumers may use trusted access
 - [ ] Intern epoch header stamped by producers, verified (cached) by consumers; mismatch routes to quarantine

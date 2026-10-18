@@ -28,7 +28,7 @@ Phase 0 and 1: done. Phase 2: every item done except 2.1, 2.14 and 2.16, which a
 
 ## 3. Open failures
 
-- **`lint-no-json-hotpath`** fails on one pre-existing line (`crates/collectors/src/crypto/kraken.rs:20`, a `RawValue` import for zero-copy parsing). Not a CI job; predates this work.
+- ~~**`lint-no-json-hotpath`** fails~~ — **fixed and CI-wired (Set C ADR-C-LINT-1, landed on main 2026-10-17).** The diagnosis here was too narrow: the check flagged 15 lines, not one, because it matched substrings of the argument spelling rather than the call being made, and its only passing spelling for a `&str` body was one clippy rejects. Its rule is now "no JSON *encoding* in a hot-path crate; boundary *decoding* is allowed", so `RawValue` imports and `serde_json::Number` fields are no longer violations.
 - **Four `storage` live suites fail, and were failing before this work.** `ledger_append`, `ledger_writer` and `pnl_schema` need a `ledger_events` table **no migration in this repository creates**; `registry_seed` expects 8 asset classes where migration 0006 seeds 6. All four files are unchanged from `HEAD`. They belong to the execution subsystem rather than this pack, and fixing them means deciding whether the test or the migration is right.
 - ClickHouse's container healthcheck reports unhealthy while the server answers queries normally. Pre-existing.
 
@@ -139,7 +139,7 @@ cargo test --workspace -j 2          # -j 2 is not optional: full parallelism OO
 cargo clippy --workspace --all-targets -j 2 -- -D warnings
 cargo run -q -p xtask -- check-money-f64
 cargo run -q -p xtask -- check-bars-v1-frozen
-cargo run -q -p xtask -- lint-no-json-hotpath   # one known pre-existing failure
+cargo run -q -p xtask -- lint-no-json-hotpath   # green and CI-enforced (ADR-C-LINT-1)
 python -m pytest apps/model-trainer/tests -q    # the post-hoc pipeline, AT-35
 cd frontend && npx tsc --noEmit
 ```

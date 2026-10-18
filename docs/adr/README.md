@@ -60,6 +60,7 @@ ADR that replaces it.
 | [ADR-0047](0047-decision-journal-and-replay-parity.md) | Every Decision Is Journaled, and Paper Is Replayed Through the Backtest Nightly | Accepted | 2026-10-01 |
 | [ADR-0048](0048-paper-trading-runs-in-the-app.md) | Paper Trading Runs in the App, Never on a Broker's Paper Account | Accepted | 2026-10-02 |
 | [ADR-0049](0049-retrieval-store-pgvector-and-postgres-full-text.md) | The Retrieval Store Is pgvector Plus Postgres Full-Text; Milvus Stays Deferred | Accepted | 2026-10-04 |
+| [ADR-0050](0050-hot-path-json-is-marked-at-the-boundary-rejected.md) | Hot-Path JSON Is Marked at the Boundary, Not Guessed From Source Text | Rejected (superseded by Set C ADR-C-LINT-1) | 2026-09-22 |
 
 ## Decision Relationships
 

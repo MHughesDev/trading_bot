@@ -1013,8 +1013,9 @@ AT-62 is live and scans Rust, TypeScript, Python, SQL and JSON across `crates`,
   any check in the suite (OQ-12); it is visible only as the 1.10 CV/WF gap, and
   the test asserts that, so the day a static check does catch it the test fails
   and the claim gets updated.
-- **`lint-no-json-hotpath` fails** on one pre-existing line
-  (`crates/collectors/src/crypto/kraken.rs:20`). Not a CI job, predates this work.
+- ~~**`lint-no-json-hotpath` fails**~~ — **fixed and CI-wired (Set C ADR-C-LINT-1, landed on main 2026-10-17).** It was
+  15 lines rather than one, and most of them were `serde_json::Number` field types that
+  encode nothing. See EXECUTION-BOARD §2.6.
 - **Migrations 0043–0052 are still not applied to the developer database** (it is
   at 42). The next platform start applies them and needs
   `PLATFORM_DB_APP_PASSWORD`, `PLATFORM_LEDGER_SIGNING_KEY` and

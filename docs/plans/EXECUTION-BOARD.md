@@ -243,7 +243,12 @@ any of this work:
 - Four `storage` live suites — `ledger_append`, `ledger_writer`, `pnl_schema` want a
   `ledger_events` table no migration creates; `registry_seed` expects 8 asset classes where
   0006 seeds 6.
-- `cargo xtask lint-no-json-hotpath` — one line in `crates/collectors/src/crypto/kraken.rs`.
+- ~~`cargo xtask lint-no-json-hotpath`~~ — **fixed and CI-wired (Set C ADR-C-LINT-1, landed on main 2026-10-17).** It was
+  never one line: the check matched substrings of the *argument spelling*, so it counted
+  `serde_json::Number` and `RawValue` type mentions as payload encoding, and its only
+  passing spelling for a `&str` body was `clippy::redundant_slicing` — which the clippy job
+  rejects. Nothing could satisfy both gates. It now refuses JSON encoding in a hot-path
+  crate and allows a boundary decode, and `cargo test -p xtask` runs its classifier's tests.
 - **`cargo xtask check-money-f64` fails.** Track 5 enumerated the 10 on a clean baseline:
   `apps/platform/src/book_feed.rs:72`; `backtest/src/gates/evaluators.rs:615,987`;
   `backtest/src/gates/profile.rs:70,72`; `backtest/src/synthetic.rs:153,204`;
