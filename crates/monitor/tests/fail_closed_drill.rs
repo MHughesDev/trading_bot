@@ -432,6 +432,12 @@ impl Drop for Drill {
 
                 // The lease last, and only if this drill took it.
                 //
+                // And only while one of this drill's holders still has it. A guard
+                // that drops late must not clobber a monitor — or a later drill —
+                // that took the lease over in the meantime: restoring the row
+                // under a real monitor would hand the gate a stale expiry and
+                // close it on a healthy platform.
+                //
                 // Restoring a row that had already expired restores an expired
                 // row, which closes the gate until the real holder renews. That is
                 // the right direction: the alternative — leaving the drill's own
@@ -450,13 +456,15 @@ impl Drop for Drill {
                                SET holder = EXCLUDED.holder,
                                    cadence_ms = EXCLUDED.cadence_ms,
                                    renewed_at = EXCLUDED.renewed_at,
-                                   expires_at = EXCLUDED.expires_at",
+                                   expires_at = EXCLUDED.expires_at
+                               WHERE monitor.lease.holder = ANY($6)",
                         )
                         .bind(monitor::LEASE_ID)
                         .bind(&before.holder)
                         .bind(before.cadence_ms)
                         .bind(before.renewed_at)
                         .bind(before.expires_at)
+                        .bind(&holders)
                         .execute(&pg)
                         .await
                         {
@@ -464,9 +472,12 @@ impl Drop for Drill {
                         }
                     }
                     Some(None) => {
-                        if let Err(e) = sqlx::query("DELETE FROM monitor.lease WHERE lease_id = $1")
-                            .bind(monitor::LEASE_ID)
-                            .execute(&pg)
+                        if let Err(e) = sqlx::query(
+                            "DELETE FROM monitor.lease WHERE lease_id = $1 AND holder = ANY($2)",
+                        )
+                        .bind(monitor::LEASE_ID)
+                        .bind(&holders)
+                        .execute(&pg)
                             .await
                         {
                             eprintln!("CLEANUP FAILED: the lease is still held by a drill: {e}");
