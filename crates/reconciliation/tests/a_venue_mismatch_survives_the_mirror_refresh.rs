@@ -142,6 +142,17 @@ struct Cleanup {
     /// Whether a lease row existed before the test. Only a row this test created
     /// is removed.
     lease_was_absent: bool,
+    /// The `tbot-monitor` instance this test beat as, for
+    /// `monitor.heartbeat`.
+    ///
+    /// The lease was always deleted here and the heartbeat never was, which is
+    /// not a small asymmetry: `MonitorService::tick` writes both, so every green
+    /// run of this file left one more permanently stale `tbot-monitor` instance
+    /// behind. Nine of them had accumulated in the live database by 2026-09-21,
+    /// beside sixteen from `crates/monitor`'s drills — and a stale
+    /// `tbot-monitor` beat is the input `monitor::platform::assess` turns into a
+    /// global halt.
+    holder: String,
 }
 
 impl Drop for Cleanup {
@@ -149,6 +160,7 @@ impl Drop for Cleanup {
         let url = self.url.clone();
         let scopes = std::mem::take(&mut self.scopes);
         let drop_lease = self.lease_was_absent;
+        let holder = std::mem::take(&mut self.holder);
         let handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -168,6 +180,16 @@ impl Drop for Cleanup {
                             eprintln!("CLEANUP FAILED for {scope}: {e}");
                         }
                     }
+                }
+                if let Err(e) = sqlx::query(
+                    "DELETE FROM monitor.heartbeat WHERE component = $1 AND instance = $2",
+                )
+                .bind(monitor::LEASE_ID)
+                .bind(&holder)
+                .execute(&pg)
+                .await
+                {
+                    eprintln!("CLEANUP FAILED for the heartbeat row: {e}");
                 }
                 if drop_lease {
                     if let Err(e) = sqlx::query("DELETE FROM monitor.lease WHERE lease_id = $1")
@@ -229,23 +251,24 @@ fn runtime(store: &MonitorStore) -> (Arc<KillSwitch>, RiskGate, LeaseWatcher) {
 }
 
 /// Take the lease so the gate is not refusing everything with
-/// `monitor_unavailable`, and report whether this test is the one that created
-/// the row.
-async fn hold_the_lease(store: &MonitorStore, pg: &PgPool) -> bool {
+/// `monitor_unavailable`; report whether this test is the one that created the
+/// row, and under which holder it beat.
+///
+/// The holder is returned rather than discarded because `tick` writes two rows,
+/// not one, and the caller has to be able to name both to the guard.
+async fn hold_the_lease(store: &MonitorStore, pg: &PgPool) -> (bool, String) {
     let before: i64 = sqlx::query_scalar("SELECT count(*) FROM monitor.lease WHERE lease_id = $1")
         .bind(monitor::LEASE_ID)
         .fetch_one(pg)
         .await
         .expect("count the lease");
-    let terms = LeaseTerms::new(
-        format!("reconciliation-drill-{}", Uuid::new_v4()),
-        LEASE_CADENCE_MS,
-    );
+    let holder = format!("reconciliation-drill-{}", Uuid::new_v4());
+    let terms = LeaseTerms::new(holder.clone(), LEASE_CADENCE_MS);
     MonitorService::new(store.clone(), terms)
         .tick()
         .await
         .expect("the drill renews the lease");
-    before == 0
+    (before == 0, holder)
 }
 
 fn dec(s: &str) -> Decimal {
@@ -268,7 +291,7 @@ async fn a_reconciliation_halt_is_still_a_halt_after_the_mirror_refresh() {
     let diverging = format!("kraken-{}", Uuid::new_v4());
     let quiet = format!("alpaca-{}", Uuid::new_v4());
 
-    let lease_was_absent = hold_the_lease(&store, &pg).await;
+    let (lease_was_absent, holder) = hold_the_lease(&store, &pg).await;
     let _cleanup = Cleanup {
         url: url.clone(),
         scopes: vec![
@@ -276,6 +299,7 @@ async fn a_reconciliation_halt_is_still_a_halt_after_the_mirror_refresh() {
             Scope::venue(&quiet).to_string(),
         ],
         lease_was_absent,
+        holder,
     };
 
     let (ks, gate, watcher) = runtime(&store);
@@ -344,11 +368,12 @@ async fn a_sweep_halts_the_venue_once_however_many_instruments_disagree() {
     let store = MonitorStore::new(pg.clone());
     let venue = format!("coinbase-{}", Uuid::new_v4());
 
-    let lease_was_absent = hold_the_lease(&store, &pg).await;
+    let (lease_was_absent, holder) = hold_the_lease(&store, &pg).await;
     let _cleanup = Cleanup {
         url: url.clone(),
         scopes: vec![Scope::venue(&venue).to_string()],
         lease_was_absent,
+        holder,
     };
 
     let (ks, gate, watcher) = runtime(&store);
