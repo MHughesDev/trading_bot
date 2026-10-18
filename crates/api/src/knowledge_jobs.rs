@@ -127,6 +127,14 @@ impl TensorProjection {
         // clustering exist: a fact in the "unknown regime" cell is still a fact,
         // and refusing to write one until the clustering lands would leave the
         // completion model with nothing to be fitted on when it arrives.
+        //
+        // The outcome comes off the trial's latest event rather than the
+        // `mlops.trial_state` view: the view is the same latest-event join, but it
+        // drops `censor_at_step`, which is half of the censored-regression input
+        // this table exists to carry (§5.5, INV-17). And `knowledge_time` is when
+        // that event settled the trial, not when the projection happened to run
+        // (INV-01): stamping `now()` also made every rebuild rewrite every row, so
+        // a re-run was not the no-op a projection should be.
         let written = sqlx::query(
             "INSERT INTO knowledge.outcome_tensor_fact
                  (tenant_id, asset_cluster, venue_id, regime_id, strategy_family, config_hash,
@@ -140,21 +148,28 @@ impl TensorProjection {
                     t.config_hash,
                     t.trial_id,
                     'sharpe_net' AS metric_name,
-                    (s.outcome).sharpe_net,
+                    (e.outcome).sharpe_net,
                     t.propensity,
-                    s.censoring,
-                    NULL::int,
-                    now()
+                    coalesce(e.censoring, 'none'),
+                    e.censor_at_step,
+                    e.occurred_at
              FROM mlops.trial t
-             JOIN mlops.trial_state s ON s.trial_id = t.trial_id
+             JOIN LATERAL (
+                 SELECT ev.outcome, ev.censoring, ev.censor_at_step, ev.occurred_at
+                 FROM mlops.trial_event ev
+                 WHERE ev.trial_id = t.trial_id
+                 ORDER BY ev.event_seq DESC
+                 LIMIT 1
+             ) e ON true
              WHERE t.tenant_id = $1
-               AND (s.outcome).sharpe_net IS NOT NULL
+               AND (e.outcome).sharpe_net IS NOT NULL
              ORDER BY t.registered_at
              LIMIT $2
              ON CONFLICT (tenant_id, trial_id, metric_name) DO UPDATE
-               SET metric_value = EXCLUDED.metric_value,
-                   propensity   = EXCLUDED.propensity,
-                   censoring    = EXCLUDED.censoring,
+               SET metric_value   = EXCLUDED.metric_value,
+                   propensity     = EXCLUDED.propensity,
+                   censoring      = EXCLUDED.censoring,
+                   censor_at_step = EXCLUDED.censor_at_step,
                    knowledge_time = EXCLUDED.knowledge_time",
         )
         .bind(tenant_id)
