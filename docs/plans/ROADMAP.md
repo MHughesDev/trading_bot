@@ -392,8 +392,20 @@ managed the way Set S already manages its own:
 | **Set P data reach** | **0097–0104** | this file |
 | **Set T forward evidence** | **0105–0112** | this file |
 | Stage 2 pack remainder | 0113–0120 | reserved |
-| Stage 4 (M-res, N, O) | 0121–0140 | reserved |
+| Stage 4 (M-res, N, O) | 0121–**0139** | reserved; **exhausted** — `0140` was taken out of band, see below |
 | Stage 5 (R-a, R-b) | 0141–0160 | reserved |
+
+**`0140_strategy_definition_head_required.sql` is taken** (2026-09-21), and it is
+not Stage 4's. It deletes 18 test-residue rows from `strategy_definitions` and
+makes `head_revision` `NOT NULL`. It took the next free number rather than one
+past the reservations because sqlx applies any unrecorded file *in file order*
+and does not object to a version below the highest already applied — so a file
+parked at `0161` would not have been refused, it would have been applied before
+`0141–0160` were written and after them everywhere else. The live database and a
+freshly migrated one would then hold the same set of migrations applied in two
+different orders, which is precisely what `db_invariants`' *"every migration
+applies to an empty database"* cannot catch. **The next Stage 4 migration starts
+at `0161`** — coordinate with Stage 5 before taking it.
 
 **Shared files** beyond Set S's list (`Cargo.toml`, `Cargo.lock`, `taxonomy.rs`,
 `routes/mod.rs`, `App.tsx`, `TopBar.tsx`), for Sets P and T:

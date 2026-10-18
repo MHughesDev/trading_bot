@@ -9,13 +9,80 @@
 //! DATABASE_URL=postgres://trading:trading@localhost:5432/trading \
 //!   cargo test -p ledger --test pg_strategy_revision -- --ignored --test-threads=1
 //! ```
+//!
+//! `DATABASE_URL` names the database the platform serves from — there is no
+//! second one — so every test here runs inside a transaction that is rolled
+//! back, and nothing below ever commits. The version of this file that did
+//! commit left 18 `strategy_definitions` rows with `definition_json = '{}'` and
+//! a NULL head, all of them visible to `list_strategies` and none of them a
+//! definition of anything; migration 0140 removes those and makes the shape
+//! unwritable. See [`Scratch`] for why a `DELETE` teardown is not available.
 
-use sqlx::{PgPool, Row};
+use sqlx::postgres::PgArguments;
+use sqlx::query::Query;
+use sqlx::{PgConnection, PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
-async fn pool() -> PgPool {
-    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
-    PgPool::connect(&url).await.expect("connect")
+/// A transaction against the platform's own database that is never committed.
+///
+/// A teardown that deletes what each test minted is not available here:
+/// `strategy_revision` is append-only by trigger, so a row written to it can be
+/// removed only by never having committed it. That forces the transaction, and
+/// the transaction then forces [`Scratch::refused`] — half the assertions in
+/// this file are that a write is *rejected*, and Postgres aborts the enclosing
+/// transaction at the first error.
+struct Scratch {
+    _pool: PgPool,
+    tx: Transaction<'static, Postgres>,
+}
+
+impl Scratch {
+    async fn open() -> Self {
+        let url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+        let pool = PgPool::connect(&url).await.expect("connect");
+        let tx = pool.begin().await.expect("begin");
+        Self { _pool: pool, tx }
+    }
+
+    fn conn(&mut self) -> &mut PgConnection {
+        &mut self.tx
+    }
+
+    /// Run a statement that must be refused, between a savepoint and a rollback
+    /// to it, and hand back the error.
+    ///
+    /// Without the savepoint the first refusal would poison the transaction and
+    /// every statement after it would fail with `current transaction is
+    /// aborted` — a test that still goes red, for a reason that has nothing to
+    /// do with what it was checking.
+    async fn refused(&mut self, q: Query<'_, Postgres, PgArguments>) -> sqlx::Error {
+        sqlx::query("SAVEPOINT probe")
+            .execute(&mut *self.tx)
+            .await
+            .expect("savepoint");
+        let outcome = q.execute(&mut *self.tx).await;
+        sqlx::query("ROLLBACK TO SAVEPOINT probe")
+            .execute(&mut *self.tx)
+            .await
+            .expect("rollback to savepoint");
+        sqlx::query("RELEASE SAVEPOINT probe")
+            .execute(&mut *self.tx)
+            .await
+            .expect("release savepoint");
+        match outcome {
+            Err(e) => e,
+            Ok(_) => panic!("the statement was accepted and had to be refused"),
+        }
+    }
+
+    /// Discard everything the test wrote.
+    ///
+    /// `Transaction`'s own `Drop` rolls back too, which is what covers a
+    /// panicking test; this is the path a passing one takes, and it reports a
+    /// failed rollback instead of swallowing it.
+    async fn discard(self) {
+        self.tx.rollback().await.expect("rollback");
+    }
 }
 
 /// A deterministic 64-hex string from a seed. FNV-1a over the whole seed rather
@@ -36,16 +103,18 @@ fn hash(seed: &str) -> String {
     out
 }
 
+/// Fresh per test. The rollback is what makes these suites re-runnable now, but
+/// a fresh id is still what keeps one test's rows out of another's `WHERE`
+/// clause, and out of the way of whatever the database already holds.
 fn strategy_id() -> String {
     format!("s_{}", Uuid::new_v4().simple())
 }
 
-async fn insert_revision(
-    pool: &PgPool,
-    revision: &str,
-    strategy: &str,
-    parent: Option<&str>,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+fn insert_revision<'q>(
+    revision: &'q str,
+    strategy: &'q str,
+    parent: Option<&'q str>,
+) -> Query<'q, Postgres, PgArguments> {
     sqlx::query(
         "INSERT INTO strategy_revision (
              revision_hash, strategy_id, parent_hash, definition_version, asset_class,
@@ -56,8 +125,18 @@ async fn insert_revision(
     .bind(revision)
     .bind(strategy)
     .bind(parent)
-    .execute(pool)
-    .await
+}
+
+fn insert_definition<'q>(
+    strategy: &'q str,
+    head: Option<&'q str>,
+) -> Query<'q, Postgres, PgArguments> {
+    sqlx::query(
+        "INSERT INTO strategy_definitions (strategy_id, asset_class, definition_json, head_revision)
+         VALUES ($1, 'crypto_spot_cex', '{}'::jsonb, $2)",
+    )
+    .bind(strategy)
+    .bind(head)
 }
 
 // ── shape ────────────────────────────────────────────────────────────────────
@@ -67,20 +146,18 @@ async fn insert_revision(
 #[tokio::test]
 #[ignore = "requires a live Postgres"]
 async fn a_revision_hash_must_be_sixty_four_lowercase_hex_characters() {
-    let pool = pool().await;
+    let mut db = Scratch::open().await;
     let s = strategy_id();
 
     for bad in ["not-a-hash", &"A".repeat(64), &"a".repeat(63), &"g".repeat(64)] {
-        assert!(
-            insert_revision(&pool, bad, &s, None).await.is_err(),
-            "{bad:?} is not a revision hash and must be refused"
-        );
+        db.refused(insert_revision(bad, &s, None)).await;
     }
-    // Derived from `s`, which is a fresh UUID per run. A constant here passes
-    // the first time against a database and fails forever after on the
-    // primary key — these suites are run repeatedly against the developer
-    // database, so a non-idempotent live test is a test that breaks itself.
-    assert!(insert_revision(&pool, &hash(&s), &s, None).await.is_ok());
+    insert_revision(&hash(&s), &s, None)
+        .execute(db.conn())
+        .await
+        .expect("a well-formed hash is accepted");
+
+    db.discard().await;
 }
 
 /// A revision that is its own parent is a cycle of length one, and the only way
@@ -88,38 +165,43 @@ async fn a_revision_hash_must_be_sixty_four_lowercase_hex_characters() {
 #[tokio::test]
 #[ignore = "requires a live Postgres"]
 async fn a_revision_cannot_be_its_own_parent() {
-    let pool = pool().await;
+    let mut db = Scratch::open().await;
     let s = strategy_id();
     let h = hash(&s);
-    assert!(insert_revision(&pool, &h, &s, Some(&h)).await.is_err());
+    db.refused(insert_revision(&h, &s, Some(&h))).await;
+    db.discard().await;
 }
 
 // ── append-only ──────────────────────────────────────────────────────────────
 
-/// The property the whole migration exists for.
+/// The property the whole migration exists for — and the reason the teardown
+/// here is a rollback rather than a `DELETE`.
 #[tokio::test]
 #[ignore = "requires a live Postgres"]
 async fn a_revision_cannot_be_edited_or_deleted() {
-    let pool = pool().await;
+    let mut db = Scratch::open().await;
     let s = strategy_id();
     let h = hash(&s);
-    insert_revision(&pool, &h, &s, None).await.expect("inserted");
-
-    let err = sqlx::query("UPDATE strategy_revision SET definition_json = '{\"x\":1}'::jsonb WHERE revision_hash = $1")
-        .bind(&h)
-        .execute(&pool)
+    insert_revision(&h, &s, None)
+        .execute(db.conn())
         .await
-        .expect_err("editing a revision must be refused");
+        .expect("inserted");
+
+    let err = db
+        .refused(
+            sqlx::query(
+                "UPDATE strategy_revision SET definition_json = '{\"x\":1}'::jsonb
+                  WHERE revision_hash = $1",
+            )
+            .bind(&h),
+        )
+        .await;
     assert!(err.to_string().to_lowercase().contains("append"), "{err}");
 
-    assert!(
-        sqlx::query("DELETE FROM strategy_revision WHERE revision_hash = $1")
-            .bind(&h)
-            .execute(&pool)
-            .await
-            .is_err(),
-        "deleting a revision must be refused"
-    );
+    db.refused(sqlx::query("DELETE FROM strategy_revision WHERE revision_hash = $1").bind(&h))
+        .await;
+
+    db.discard().await;
 }
 
 /// The chain is assigned by the trigger, not by the caller — every insert above
@@ -127,18 +209,18 @@ async fn a_revision_cannot_be_edited_or_deleted() {
 #[tokio::test]
 #[ignore = "requires a live Postgres"]
 async fn the_chain_is_assigned_by_the_database_and_links_each_row_to_the_last() {
-    let pool = pool().await;
+    let mut db = Scratch::open().await;
     let s = strategy_id();
     let (a, b) = (hash(&format!("{s}a")), hash(&format!("{s}b")));
-    insert_revision(&pool, &a, &s, None).await.expect("a");
-    insert_revision(&pool, &b, &s, Some(&a)).await.expect("b");
+    insert_revision(&a, &s, None).execute(db.conn()).await.expect("a");
+    insert_revision(&b, &s, Some(&a)).execute(db.conn()).await.expect("b");
 
     let rows = sqlx::query(
         "SELECT revision_hash, seq, prev_hash, row_hash FROM strategy_revision
           WHERE strategy_id = $1 ORDER BY seq",
     )
     .bind(&s)
-    .fetch_all(&pool)
+    .fetch_all(db.conn())
     .await
     .expect("rows");
 
@@ -151,6 +233,8 @@ async fn the_chain_is_assigned_by_the_database_and_links_each_row_to_the_last() 
     let prev_b: Vec<u8> = rows[1].get("prev_hash");
     assert_eq!(prev_b, row_a, "each row's prev_hash is the previous row's row_hash");
     assert_eq!(row_a.len(), 32, "sha256");
+
+    db.discard().await;
 }
 
 /// Re-saving an identical document is a no-op, because the content hash is the
@@ -158,21 +242,23 @@ async fn the_chain_is_assigned_by_the_database_and_links_each_row_to_the_last() 
 #[tokio::test]
 #[ignore = "requires a live Postgres"]
 async fn the_same_document_twice_is_one_revision() {
-    let pool = pool().await;
+    let mut db = Scratch::open().await;
     let s = strategy_id();
     let h = hash(&s);
-    insert_revision(&pool, &h, &s, None).await.expect("first");
-    assert!(
-        insert_revision(&pool, &h, &s, None).await.is_err(),
-        "a bare re-insert conflicts; the write path uses ON CONFLICT DO NOTHING"
-    );
+    insert_revision(&h, &s, None).execute(db.conn()).await.expect("first");
+    db.refused(insert_revision(&h, &s, None)).await;
 
     let n: i64 = sqlx::query_scalar("SELECT count(*) FROM strategy_revision WHERE strategy_id = $1")
         .bind(&s)
-        .fetch_one(&pool)
+        .fetch_one(db.conn())
         .await
         .expect("count");
-    assert_eq!(n, 1);
+    assert_eq!(
+        n, 1,
+        "a bare re-insert conflicts; the write path uses ON CONFLICT DO NOTHING"
+    );
+
+    db.discard().await;
 }
 
 // ── the pointer ──────────────────────────────────────────────────────────────
@@ -182,21 +268,18 @@ async fn the_same_document_twice_is_one_revision() {
 #[tokio::test]
 #[ignore = "requires a live Postgres"]
 async fn a_definition_cannot_point_at_another_strategys_revision() {
-    let pool = pool().await;
+    let mut db = Scratch::open().await;
     let (mine, theirs) = (strategy_id(), strategy_id());
     let h = hash(&theirs);
-    insert_revision(&pool, &h, &theirs, None).await.expect("theirs");
+    insert_revision(&h, &theirs, None)
+        .execute(db.conn())
+        .await
+        .expect("theirs");
 
-    let err = sqlx::query(
-        "INSERT INTO strategy_definitions (strategy_id, asset_class, definition_json, head_revision)
-         VALUES ($1, 'crypto_spot_cex', '{}'::jsonb, $2)",
-    )
-    .bind(&mine)
-    .bind(&h)
-    .execute(&pool)
-    .await
-    .expect_err("a head belonging to another strategy must be refused");
+    let err = db.refused(insert_definition(&mine, Some(&h))).await;
     assert!(err.to_string().contains("belongs to strategy"), "{err}");
+
+    db.discard().await;
 }
 
 /// The same rule for instances: an instance that names a revision it has no
@@ -204,71 +287,82 @@ async fn a_definition_cannot_point_at_another_strategys_revision() {
 #[tokio::test]
 #[ignore = "requires a live Postgres"]
 async fn an_instance_cannot_bind_to_another_strategys_revision() {
-    let pool = pool().await;
+    let mut db = Scratch::open().await;
     let (a, b) = (strategy_id(), strategy_id());
-    let h = hash(&b);
-    insert_revision(&pool, &h, &b, None).await.expect("b's revision");
+    let (ha, hb) = (hash(&a), hash(&b));
 
-    for s in [&a, &b] {
-        sqlx::query(
-            "INSERT INTO strategy_definitions (strategy_id, asset_class, definition_json)
-             VALUES ($1, 'crypto_spot_cex', '{}'::jsonb) ON CONFLICT DO NOTHING",
-        )
-        .bind(s)
-        .execute(&pool)
-        .await
-        .expect("definition");
+    for (s, h) in [(&a, &ha), (&b, &hb)] {
+        insert_revision(h, s, None)
+            .execute(db.conn())
+            .await
+            .expect("revision");
+        insert_definition(s, Some(h))
+            .execute(db.conn())
+            .await
+            .expect("definition");
     }
 
     // The instance table references accounts and instruments, so this asserts
     // against the trigger by targeting it directly rather than by inserting a
     // full instance row: the point is which check fires first, and the trigger
     // is BEFORE INSERT.
-    let err = sqlx::query(
-        "INSERT INTO strategy_instances (strategy_id, account_id, instrument_id, revision_hash)
-         VALUES ($1, gen_random_uuid(), 'nonexistent', $2)",
-    )
-    .bind(&a)
-    .bind(&h)
-    .execute(&pool)
-    .await
-    .expect_err("mismatched revision must be refused");
+    let err = db
+        .refused(
+            sqlx::query(
+                "INSERT INTO strategy_instances (strategy_id, account_id, instrument_id, revision_hash)
+                 VALUES ($1, gen_random_uuid(), 'nonexistent', $2)",
+            )
+            .bind(&a)
+            .bind(&hb),
+        )
+        .await;
     assert!(
         err.to_string().contains("but revision"),
         "the revision/strategy trigger must fire before the foreign keys: {err}"
     );
+
+    db.discard().await;
 }
 
 /// A head naming a revision that does not exist at all.
 #[tokio::test]
 #[ignore = "requires a live Postgres"]
 async fn a_head_revision_that_does_not_exist_is_refused() {
-    let pool = pool().await;
+    let mut db = Scratch::open().await;
     let s = strategy_id();
-    assert!(sqlx::query(
-        "INSERT INTO strategy_definitions (strategy_id, asset_class, definition_json, head_revision)
-         VALUES ($1, 'crypto_spot_cex', '{}'::jsonb, $2)",
-    )
-    .bind(&s)
-    .bind(hash("nothing-points-here"))
-    .execute(&pool)
-    .await
-    .is_err());
+    let missing = hash("nothing-points-here");
+    db.refused(insert_definition(&s, Some(&missing))).await;
+    db.discard().await;
 }
 
-/// Rows predating 0058 keep a NULL head, and must still be writable — a
-/// migration that breaks every existing definition is one that gets reverted.
+/// 0058 left a NULL head legal for two reasons, and both are spent: rows that
+/// predated it were backfilled, and the backfill's own intermediate state ended
+/// when it committed. What the hatch was still being used for was this file,
+/// which minted 18 definitions of nothing before it learned to roll back — so
+/// 0140 closed it. A definition names the revision it serves or it is not a
+/// definition, and a slug whose document is `{}` is one `list_strategies` hands
+/// out and `get_strategy` then answers with a 500.
 #[tokio::test]
 #[ignore = "requires a live Postgres"]
-async fn a_definition_with_no_head_is_still_accepted() {
-    let pool = pool().await;
+async fn a_definition_must_name_the_revision_it_serves() {
+    let mut db = Scratch::open().await;
     let s = strategy_id();
-    assert!(sqlx::query(
-        "INSERT INTO strategy_definitions (strategy_id, asset_class, definition_json)
-         VALUES ($1, 'crypto_spot_cex', '{}'::jsonb)",
-    )
-    .bind(&s)
-    .execute(&pool)
-    .await
-    .is_ok());
+    let h = hash(&s);
+
+    let err = db.refused(insert_definition(&s, None)).await;
+    assert!(
+        err.to_string().contains("head_revision"),
+        "a headless definition must be refused by name: {err}"
+    );
+
+    insert_revision(&h, &s, None)
+        .execute(db.conn())
+        .await
+        .expect("revision");
+    insert_definition(&s, Some(&h))
+        .execute(db.conn())
+        .await
+        .expect("a definition with a head of its own is accepted");
+
+    db.discard().await;
 }

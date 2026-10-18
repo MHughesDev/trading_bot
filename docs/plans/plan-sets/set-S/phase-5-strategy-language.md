@@ -151,6 +151,15 @@ down. The tests are using the `head_revision IS NULL` escape hatch that
 migration `0058` left open for its own backfill **as a normal write path**, and
 all of it is visible to `list_strategies`.
 
+> **Closed 2026-09-21.** The test now runs inside a transaction it rolls back —
+> a `DELETE` teardown is not available, because `strategy_revision` is
+> append-only and a row written there can only be removed by never having
+> committed it. Migration `0140` deletes the 18 rows and makes
+> `head_revision` `NOT NULL`, so the shape cannot be written again by anything.
+> **The registry is now 14 rows, and all 14 deserialise.** The figures above are
+> left as measured; where a count below was drawn from the same residue it is
+> corrected in place.
+
 ### Two more open questions, neither implemented
 
 **Lineage.** `parent_version` does not exist anywhere in the repo. Lineage is
@@ -158,15 +167,43 @@ all of it is visible to `list_strategies`.
 **the same `strategy_id`** — while `create_strategy`'s own description advises
 *"mint versioned slugs (`my_strat_v2`) when iterating"*. A new slug has no head,
 so `parent_hash` is NULL; the only way to get a parent is to reuse the slug,
-which overwrites the head the advice warns about. **Measured: 40 agent-authored
-revisions across 34 slugs, 6 with a parent — 85% of the agent's authoring
-history has no lineage at all.**
+which overwrites the head the advice warns about. ~~**Measured: 40
+agent-authored revisions across 34 slugs, 6 with a parent — 85% of the agent's
+authoring history has no lineage at all.**~~
+
+> **Corrected 2026-09-21: there is no agent authoring history, and that
+> measurement is the same test residue as the 18 rows above.** All 40 `'agent'`
+> revisions carry `actor_id = 'a'`, `definition_version = '1.3'`,
+> `definition_json = '{}'` and `definition_bytes = '\x00'` — every one of them a
+> literal in `insert_revision` in `pg_strategy_revision.rs` — across 40
+> `s_<32 hex>` slugs, none of which has a definition row. The 34-slugs-6-parents
+> shape is the file's own arithmetic: six runs, each writing about seven
+> revisions over six slugs with exactly one parent link, from
+> `the_chain_is_assigned_by_the_database_and_links_each_row_to_the_last`.
+> **The real figure is zero agent-authored revisions**, so the lineage question
+> is open on the argument alone and has no evidence behind it either way. The
+> argument still holds: a new slug has no head, so `parent_hash` is NULL.
 
 **Authorship.** `routes/strategies.rs` binds `actor_kind = "human"`
 unconditionally, while migration `0058` says that column *"distinguishes a human
 author from the research agent, which is the difference between a hypothesis and
-a sample"*. The live table holds 40 `'agent'` rows, so a second writer exists
-and the two paths disagree about who wrote a revision.
+a sample"*. ~~The live table holds 40 `'agent'` rows, so a second writer exists
+and the two paths disagree about who wrote a revision.~~
+
+> **Corrected 2026-09-21.** Those 40 rows are the test file, per the note above.
+> `routes/strategies.rs` is the *only* writer of `strategy_revision` in the
+> repo, and it binds `'human'` unconditionally — so the column does not
+> distinguish anything, and every revision the platform has ever written claims
+> a human author. That is a worse finding than a disagreement between two
+> paths, and it is still open.
+>
+> **And the same route never writes `strategy_definitions.created_by` at all.**
+> It is not in the column list of the `INSERT`, so all 14 surviving definitions
+> have a NULL author — the FK to `users` has never been exercised. Found while
+> writing `0140`'s delete predicate, where `created_by IS NULL` looked like a
+> way to tell residue from real rows and turned out to match every row in the
+> table. Two columns for *who wrote this*, one hardcoded and one unwritten:
+> whatever is decided about `actor_kind` should settle both at once.
 
 ### Blocked, with the exact missing symbol
 
