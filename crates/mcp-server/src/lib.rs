@@ -244,6 +244,17 @@ pub struct AuditSink {
 /// Sealed on purpose: only [`AuditSink::open`] mints one, so holding it *is* the
 /// evidence that a `pre` row exists. Passing one to [`dispatch_under`] is how the
 /// type system, rather than a convention, keeps dispatch and audit together.
+///
+/// # The seal, adversarially (AT-64)
+///
+/// The inner field is private, so no crate outside this one can forge an
+/// envelope — which is what makes "a new dispatch path that forgets to audit
+/// fails to *compile*" a checkable statement rather than a hope:
+///
+/// ```compile_fail,E0423
+/// let forged = mcp_server_lib::AuditEnvelope(uuid::Uuid::nil());
+/// mcp_server_lib::dispatch_under(&ctx, "open_vault", &params, None, &forged);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AuditEnvelope(Uuid);
 
