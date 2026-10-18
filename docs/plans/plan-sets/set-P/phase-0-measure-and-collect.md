@@ -142,6 +142,19 @@ while someone runs the binary.
 
 Earlier: `NOT STARTED`
 
+**The heartbeat join, fixed 2026-09-22 on a branch and merged 2026-10-18
+(`claude/magical-bohr-313c13`).** `service.rs` wrote `series = "funding"` and
+`series = "open_interest"`, while `observability::silence::FeedExpectation::owns`
+matches a heartbeat to its registry row on `series_id` **or** `store_table`:
+`"open_interest"` matched the store table of the same name by coincidence, and
+`"funding"` matched neither `kraken_futures.funding` nor `funding_rates` — so a healthy
+funding feed's heartbeat reads `CannotJudge` while its registry row reads `NeverSeen`, a
+false page. The constants are now the registry's own ids (`kraken_futures.funding`,
+`kraken_futures.open_interest`), and
+`the_series_the_sink_writes_are_the_ones_the_alarm_joins_on` parses migration 0098 and
+pins both strings against the rows it seeds. Heartbeat rows already stored under the old
+names stay where they are and read as unowned until they age out.
+
 A collector for a free, US-accessible public derivatives API (DATA-005 S6 names Kraken
 Futures public as the candidate; **verify geo-restrictions and terms before building** — a
 prior 451 from Binance is recorded in project memory). Two ClickHouse tables (migration 0098):

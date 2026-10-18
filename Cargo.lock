@@ -1120,6 +1120,7 @@ dependencies = [
  "event-bus",
  "futures-util",
  "hex",
+ "observability",
  "reqwest",
  "rkyv 0.8.16",
  "rtrb",
