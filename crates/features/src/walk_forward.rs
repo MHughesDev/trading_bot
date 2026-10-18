@@ -132,14 +132,46 @@ pub fn walk_forward_folds(
 /// runtime. Names no implementation answers to produce no column, so they
 /// contribute nothing. Settlement lag is zero: the training path serves spot
 /// instruments that settle as they trade (ADR-P0-25).
+///
+/// **This form counts feature lag only, and that is not the whole of the rule.**
+/// ADR-P2-24 decided to flag rather than block datasets that span the knowledge-time
+/// sentinel, and the reason it is safe to do so is that *the dataset's sources'
+/// maximum declared lag enters `max_knowledge_lag_ms`*, so the computed embargo
+/// already exceeds any error the sentinel introduces. A dataset built over raw bars
+/// with zero-lag features gets `max_knowledge_lag_ms = 0` from this function and
+/// therefore absorbs nothing. Use [`embargo_inputs_with_sources`] wherever the
+/// dataset's sources are known.
 #[must_use]
 pub fn embargo_inputs(features: &[String], horizon_bars: u64) -> EmbargoInputs {
+    embargo_inputs_with_sources(features, horizon_bars, &[])
+}
+
+/// [`embargo_inputs`], plus the declared vendor lag of every source the dataset
+/// draws on (`dataplane.source.declared_vendor_lag_ms`).
+///
+/// This is the mechanism ADR-P2-24 leans on. A backfilled row's `knowledge_time` is
+/// the sentinel `bar close + declared_vendor_lag`; if the true instant the fact
+/// became knowable was later, the error is bounded by that same declared lag. Taking
+/// the maximum declared lag over the dataset's sources into the embargo makes the
+/// purge window strictly larger than the bound, which is why a flagged sentinel row
+/// can be *used* rather than dropped — and why dropping was rejected: it would have
+/// removed essentially every bar the platform has to guard against an effect the
+/// embargo already dominates.
+///
+/// The maximum, not the mean or the per-row value: an embargo is one number for the
+/// whole split, and a window sized for the average source is too small for the
+/// slowest one.
+#[must_use]
+pub fn embargo_inputs_with_sources(features: &[String], horizon_bars: u64, source_declared_lags_ms: &[u64]) -> EmbargoInputs {
     let (mut max_lookback, mut max_lag) = (0_u32, 0_u64);
     for name in features {
         if let Ok(f) = crate::runtime::feature(name) {
             max_lookback = max_lookback.max(f.def().lookback_bars);
             max_lag = max_lag.max(f.def().knowledge_lag_ms);
         }
+    }
+    for lag in source_declared_lags_ms {
+        max_lag = max_lag.max(*lag);
     }
     EmbargoInputs {
         horizon_bars: u32::try_from(horizon_bars).unwrap_or(u32::MAX),
@@ -174,6 +206,38 @@ mod tests {
             purge_bars: 5,
             embargo_bars: 5,
         }
+    }
+
+    /// ADR-P2-24's structural absorption, as arithmetic. A dataset drawing on a
+    /// 900 s source must purge at least the 15 bars that lag can hide, whatever its
+    /// features declare — that is the whole reason a sentinel row may be used rather
+    /// than dropped.
+    #[test]
+    fn a_datasets_source_lag_widens_the_embargo() {
+        let bare = embargo_inputs_with_sources(&[], 10, &[]);
+        assert_eq!(bare.max_knowledge_lag_ms, 0);
+        let delayed = embargo_inputs_with_sources(&[], 10, &[60_000, 900_000, 5_000]);
+        assert_eq!(delayed.max_knowledge_lag_ms, 900_000, "the slowest source sets the window");
+        assert!(
+            compute_embargo(&delayed) > compute_embargo(&bare),
+            "the embargo must grow with the declared lag, or the sentinel is absorbed by nothing"
+        );
+        // Against the arithmetic, not against `bare`: the bare embargo is lifted to
+        // its `horizon + 1` floor, so the difference between the two is 14, not 15.
+        assert_eq!(
+            compute_embargo(&delayed),
+            10 + 15,
+            "horizon 10 plus 900 s, which is 15 minute-bars"
+        );
+    }
+
+    /// The plain form is the same call with no sources, which is exactly why it
+    /// absorbs nothing on a raw-bar dataset. Pinned so the gap is visible rather
+    /// than assumed closed.
+    #[test]
+    fn the_plain_form_absorbs_no_source_lag() {
+        assert_eq!(embargo_inputs(&[], 10), embargo_inputs_with_sources(&[], 10, &[]));
+        assert_eq!(embargo_inputs(&[], 10).max_knowledge_lag_ms, 0);
     }
 
     #[test]
