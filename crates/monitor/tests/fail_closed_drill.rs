@@ -27,7 +27,7 @@ use domain::{
 use monitor::control::ResetRequest;
 use monitor::events::{EventKind, MonitorEvent};
 use monitor::family::Family;
-use monitor::lease::LeaseTerms;
+use monitor::lease::{Lease, LeaseTerms};
 use monitor::service::{LeaseWatcher, MonitorService};
 use monitor::store::MonitorStore;
 use risk::{GateContext, GlobalRiskLimits, KillSwitch, RiskGate, Scope};
@@ -114,6 +114,151 @@ async fn clear_scope(pg: &PgPool, scope: &str) {
         .ok();
 }
 
+/// The lease a drill takes, and the undertaking to give back what it displaced.
+///
+/// Two leaks this closes, both measured against
+/// `postgres://trading:trading@localhost:5432/trading` on 2026-09-21 on a **fully
+/// green** run — neither is a panic-path leak.
+///
+/// 1. `MonitorService::tick` beats as `("tbot-monitor", <holder>)`, and nothing
+///    deletes heartbeats. Six drills took six `drill-<uuid>` holders and left six
+///    rows behind per run (12 before, 18 after). Those rows are read by
+///    [`MonitorStore::component_beats`] into [`Family::Platform`], where each one
+///    is a component that will never beat again — a manufactured platform fault,
+///    in the one table whose job is to tell a real fault from silence.
+///
+/// 2. `monitor.lease` is one row keyed on [`monitor::LEASE_ID`], so a drill does
+///    not take *a* lease, it takes *the* lease, and left it expired under a
+///    `drill-<uuid>` holder. A live monitor running against the same database
+///    would be evicted by running the test suite. It cannot be fixed by giving
+///    the drill a lease id of its own: `MonitorStore::read_lease` reads the
+///    `tbot-monitor` row and no other, so a drill on a private id would be
+///    asserting against a lease the gate never consults. Taking the real row is
+///    the point; putting it back is the obligation.
+///
+/// The restoration is conditional on still holding it (`AND holder = <ours>`), so
+/// a guard that drops late never clobbers a monitor — or a later drill — that has
+/// since taken over.
+struct DrillLease {
+    holder: String,
+    cadence_ms: i64,
+    /// The lease row as it stood before this drill overwrote it, or `None` if
+    /// there was no monitor lease at all.
+    prior: Option<Lease>,
+    scopes: Vec<String>,
+}
+
+impl DrillLease {
+    /// Read what is there, then hand back terms that will overwrite it.
+    async fn take(store: &MonitorStore, cadence_ms: i64) -> Self {
+        Self {
+            holder: format!("drill-{}", Uuid::new_v4()),
+            cadence_ms,
+            prior: store.read_lease().await.ok().flatten(),
+            scopes: Vec::new(),
+        }
+    }
+
+    fn terms(&self) -> LeaseTerms {
+        LeaseTerms::new(self.holder.clone(), self.cadence_ms)
+    }
+
+    /// Also clear this scope's `monitor.events` and `monitor.kill_switch` rows on
+    /// the way out — the panic-safe form of a trailing [`clear_scope`] call.
+    fn clearing(mut self, scope: impl Into<String>) -> Self {
+        self.scopes.push(scope.into());
+        self
+    }
+}
+
+impl Drop for DrillLease {
+    /// Why an OS thread rather than the obvious `block_on` or `block_in_place`.
+    ///
+    /// `Drop` cannot `await`, and `#[tokio::test]` is current-thread by default,
+    /// so `block_in_place` panics ("can call blocking only when running on the
+    /// multi-threaded runtime") and `Handle::block_on` deadlocks on the runtime it
+    /// is already inside. The test's own `PgPool` is no use either: it is bound to
+    /// the dying runtime, and one of these tests (`a_database_the_runtime_cannot_
+    /// read_closes_the_gate`) has deliberately closed it by this point. So the
+    /// cleanup gets a thread, a runtime and a connection entirely of its own.
+    ///
+    /// Everything here is best-effort and nothing panics: a `Drop` that panics
+    /// while the test is already unwinding aborts the process and takes the real
+    /// failure's message with it.
+    fn drop(&mut self) {
+        let holder = std::mem::take(&mut self.holder);
+        let prior = self.prior.take();
+        let scopes = std::mem::take(&mut self.scopes);
+        let Ok(url) = std::env::var("MONITOR_TEST_DATABASE_URL")
+            .or_else(|_| std::env::var("API_TEST_DATABASE_URL"))
+        else {
+            return;
+        };
+
+        let cleanup = std::thread::spawn(move || {
+            let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                return;
+            };
+            rt.block_on(async move {
+                let Ok(pg) = PgPool::connect(&url).await else {
+                    return;
+                };
+
+                // The heartbeat this drill's holder beat. The instance is a uuid,
+                // so this names exactly one row and never a real component's.
+                sqlx::query("DELETE FROM monitor.heartbeat WHERE instance = $1")
+                    .bind(&holder)
+                    .execute(&pg)
+                    .await
+                    .ok();
+
+                match prior {
+                    Some(l) => {
+                        sqlx::query(
+                            "UPDATE monitor.lease
+                                SET holder = $2, cadence_ms = $3,
+                                    renewed_at = $4, expires_at = $5
+                              WHERE lease_id = $1 AND holder = $6",
+                        )
+                        .bind(&l.lease_id)
+                        .bind(&l.holder)
+                        .bind(l.cadence_ms)
+                        .bind(l.renewed_at)
+                        .bind(l.expires_at)
+                        .bind(&holder)
+                        .execute(&pg)
+                        .await
+                        .ok();
+                    }
+                    // Nothing held the lease before the drill, so nothing should
+                    // hold it after.
+                    None => {
+                        sqlx::query(
+                            "DELETE FROM monitor.lease WHERE lease_id = $1 AND holder = $2",
+                        )
+                        .bind(monitor::LEASE_ID)
+                        .bind(&holder)
+                        .execute(&pg)
+                        .await
+                        .ok();
+                    }
+                }
+
+                for scope in &scopes {
+                    clear_scope(&pg, scope).await;
+                }
+
+                pg.close().await;
+            });
+        });
+        // Joined, so the next test reads a database this one has finished tidying.
+        let _ = cleanup.join();
+    }
+}
+
 // ── §8.1 / §8.2 — killing the monitor stops order flow ──────────────────────
 
 #[tokio::test]
@@ -127,8 +272,8 @@ async fn killing_the_monitor_stops_order_flow_within_one_cadence() {
     // A 300 ms cadence so the drill runs in under a second. The arithmetic the
     // test asserts is the same at 60 s.
     let cadence_ms = 300;
-    let terms = LeaseTerms::new(format!("drill-{}", Uuid::new_v4()), cadence_ms);
-    let service = MonitorService::new(store.clone(), terms.clone());
+    let lease = DrillLease::take(&store, cadence_ms).await;
+    let service = MonitorService::new(store.clone(), lease.terms());
     service.tick().await.expect("the monitor renews its lease");
 
     let (ks, gate, watcher) = runtime(&store);
@@ -175,8 +320,8 @@ async fn a_database_the_runtime_cannot_read_closes_the_gate() {
     // can get without unplugging something.
     let pg = db!();
     let store = MonitorStore::new(pg.clone());
-    let terms = LeaseTerms::new(format!("drill-{}", Uuid::new_v4()), 60_000);
-    MonitorService::new(store.clone(), terms)
+    let lease = DrillLease::take(&store, 60_000).await;
+    MonitorService::new(store.clone(), lease.terms())
         .tick()
         .await
         .expect("renew");
@@ -207,8 +352,8 @@ async fn a_trip_survives_a_restart_and_the_boot_path_agrees() {
     let store = MonitorStore::new(pg.clone());
     clear_scope(&pg, "global").await;
 
-    let terms = LeaseTerms::new(format!("drill-{}", Uuid::new_v4()), 60_000);
-    MonitorService::new(store.clone(), terms).tick().await.expect("renew");
+    let lease = DrillLease::take(&store, 60_000).await.clearing("global");
+    MonitorService::new(store.clone(), lease.terms()).tick().await.expect("renew");
 
     // Trip, as `POST /api/trading/kill` now does.
     let event = MonitorEvent::new(Scope::Global, Family::Platform, EventKind::Tripped, "human:test")
@@ -249,7 +394,6 @@ async fn a_trip_survives_a_restart_and_the_boot_path_agrees() {
         })
         .await
         .expect("reset");
-    clear_scope(&pg, "global").await;
 }
 
 // ── §8.3 — a venue halt is one venue ────────────────────────────────────────
@@ -262,8 +406,10 @@ async fn an_injected_mismatch_halts_one_venue_and_blocks_resume_until_clean() {
     let good = format!("alpaca-{}", Uuid::new_v4());
     let bad_scope = Scope::venue(&bad);
 
-    let terms = LeaseTerms::new(format!("drill-{}", Uuid::new_v4()), 60_000);
-    MonitorService::new(store.clone(), terms).tick().await.expect("renew");
+    let lease = DrillLease::take(&store, 60_000)
+        .await
+        .clearing(bad_scope.to_string());
+    MonitorService::new(store.clone(), lease.terms()).tick().await.expect("renew");
 
     let event = MonitorEvent::new(bad_scope.clone(), Family::Venue, EventKind::Halted, "monitor")
         .expect("monitor")
@@ -295,8 +441,6 @@ async fn an_injected_mismatch_halts_one_venue_and_blocks_resume_until_clean() {
         })
         .await;
     assert!(refused.is_err(), "a global resume must wait for reconciliation");
-
-    clear_scope(&pg, &bad_scope.to_string()).await;
 }
 
 // ── §8.5 — the trip record exists before the first refused order ────────────
@@ -308,8 +452,10 @@ async fn the_trip_record_is_present_before_the_first_refused_order() {
     let sid = format!("s-{}", Uuid::new_v4());
     let scope = Scope::strategy(&sid);
 
-    let terms = LeaseTerms::new(format!("drill-{}", Uuid::new_v4()), 60_000);
-    MonitorService::new(store.clone(), terms).tick().await.expect("renew");
+    let lease = DrillLease::take(&store, 60_000)
+        .await
+        .clearing(scope.to_string());
+    MonitorService::new(store.clone(), lease.terms()).tick().await.expect("renew");
 
     let event = MonitorEvent::new(scope.clone(), Family::Pnl, EventKind::Halted, "monitor")
         .expect("monitor")
@@ -346,8 +492,6 @@ async fn the_trip_record_is_present_before_the_first_refused_order() {
     .expect("event");
     assert_eq!(row.0.as_deref(), Some("pnl_cusum"));
     assert!(row.1.is_some() && row.2.is_some());
-
-    clear_scope(&pg, &scope.to_string()).await;
 }
 
 // ── §8.6 — no agent, at any layer ───────────────────────────────────────────
@@ -630,8 +774,10 @@ async fn a_mismatch_halt_survives_the_refresh_that_erases_an_in_memory_one() {
     let in_memory_only = format!("alpaca-{}", Uuid::new_v4());
     let untouched = format!("coinbase-{}", Uuid::new_v4());
 
-    let terms = LeaseTerms::new(format!("drill-{}", Uuid::new_v4()), 60_000);
-    MonitorService::new(store.clone(), terms).tick().await.expect("renew");
+    let lease = DrillLease::take(&store, 60_000)
+        .await
+        .clearing(Scope::venue(&recorded).to_string());
+    MonitorService::new(store.clone(), lease.terms()).tick().await.expect("renew");
 
     let (ks, gate, watcher) = runtime(&store);
     watcher.refresh().await;
@@ -693,8 +839,6 @@ async fn a_mismatch_halt_survives_the_refresh_that_erases_an_in_memory_one() {
     .await
     .expect("count");
     assert_eq!(events, 1, "one incident, one trip record");
-
-    clear_scope(&pg, &halted.to_string()).await;
 }
 
 // ── S-7.13 — a drill that measures, and a window that suppresses ─────────────
