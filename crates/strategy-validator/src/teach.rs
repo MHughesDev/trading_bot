@@ -113,6 +113,26 @@ pub const TEACHINGS: &[Teaching] = &[
         see: Some("guide#nodes"),
     },
     Teaching {
+        code: "model_forecast_without_model",
+        fix: "set `model_ref` to the id or slug of a registered model — the one whose \
+              forecast this node reads. A forecast node with no model has nothing to ask, so \
+              the signal watching it could never fire.",
+        see: Some("guide#nodes"),
+    },
+    Teaching {
+        code: "model_forecast_unknown_direction",
+        fix: "set `direction` to `bullish`, `bearish` or `any` — the forecast direction that \
+              makes this node true. Any other word is not a direction the inference gateway \
+              reports, so the node would never match.",
+        see: Some("guide#nodes"),
+    },
+    Teaching {
+        code: "model_forecast_confidence_out_of_range",
+        fix: "write `min_confidence` as a probability between 0.0 and 1.0 — `0.6`, not `60`. \
+              Above 1.0 the node can never fire; below 0.0 it always does.",
+        see: Some("guide#nodes"),
+    },
+    Teaching {
         code: "unknown_signal",
         fix: "`on_signal` must name a signal some node emits. Check the `emit` value on your \
               signal nodes — a mismatch here is why a strategy previews entries and takes \

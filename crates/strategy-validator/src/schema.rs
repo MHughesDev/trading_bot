@@ -5,7 +5,10 @@
 //!   (see [`crate::version`])
 //! - `strategy_id` is non-empty
 //! - All node IDs are unique within the definition
-//! - Every `signal.when` references an existing `condition` node ID
+//! - Every `signal.when` references an existing `condition` or `model_forecast`
+//!   node ID (both evaluate into the runtime's one condition-results map)
+//! - Every `model_forecast` node names a model, a known direction, and a
+//!   confidence threshold inside 0.0..=1.0
 //! - Every `action.on_signal` matches some `signal.emit` value
 
 use std::collections::HashSet;
@@ -68,17 +71,58 @@ pub fn validate_schema(def: &StrategyDefinition) -> Vec<ValidationError> {
         }
     }
 
+    // Nodes a `signal.when` may reference: anything that produces a boolean.
+    // That is both expression `Condition` nodes and v1.1 `ModelForecast` nodes —
+    // the live runtime evaluates a ModelForecast into the same condition-results
+    // map (`strategy_runtime::runtime`), so refusing it here meant the stored 1.1
+    // definition `ai_model_smoke` could never be re-validated.
     let condition_ids: HashSet<&str> = def
         .nodes
         .iter()
         .filter_map(|n| {
-            if matches!(n.kind, NodeKind::Condition { .. }) {
+            if matches!(
+                n.kind,
+                NodeKind::Condition { .. } | NodeKind::ModelForecast { .. }
+            ) {
                 Some(n.id.as_str())
             } else {
                 None
             }
         })
         .collect();
+
+    // Validate v1.1 ModelForecast node fields.
+    for node in &def.nodes {
+        if let NodeKind::ModelForecast {
+            model_ref,
+            direction,
+            min_confidence,
+            ..
+        } = &node.kind
+        {
+            if model_ref.trim().is_empty() {
+                errors.push(ValidationError {
+                    code: "model_forecast_without_model",
+                    path: format!("nodes[{}].model_ref", node.id),
+                    message: "must not be empty; select a model".into(),
+                });
+            }
+            if !matches!(direction.as_str(), "bullish" | "bearish" | "any") {
+                errors.push(ValidationError {
+                    code: "model_forecast_unknown_direction",
+                    path: format!("nodes[{}].direction", node.id),
+                    message: format!("expected 'bullish', 'bearish', or 'any', got '{direction}'"),
+                });
+            }
+            if !(0.0..=1.0).contains(min_confidence) {
+                errors.push(ValidationError {
+                    code: "model_forecast_confidence_out_of_range",
+                    path: format!("nodes[{}].min_confidence", node.id),
+                    message: format!("must be between 0.0 and 1.0, got {min_confidence}"),
+                });
+            }
+        }
+    }
 
     let signal_emits: HashSet<&str> = def
         .nodes
@@ -92,7 +136,7 @@ pub fn validate_schema(def: &StrategyDefinition) -> Vec<ValidationError> {
         })
         .collect();
 
-    // Every signal.when must reference an existing condition node.
+    // Every signal.when must reference an existing condition (or model) node.
     for node in &def.nodes {
         if let NodeKind::Signal { when, .. } = &node.kind {
             if !condition_ids.contains(when.as_str()) {
@@ -193,6 +237,46 @@ mod tests {
         d.definition_version = "2.0".into();
         let errs = validate_schema(&d);
         assert!(errs.iter().any(|e| e.path == "definition_version"));
+    }
+
+    fn with_model_node(direction: &str, min_confidence: f64, model_ref: &str) -> StrategyDefinition {
+        let mut d = minimal();
+        d.definition_version = "1.1".into();
+        d.nodes = vec![
+            Node {
+                id: "m1".into(),
+                kind: NodeKind::ModelForecast {
+                    model_ref: model_ref.into(),
+                    alias: "production".into(),
+                    direction: direction.into(),
+                    min_confidence,
+                    input: None,
+                },
+            },
+            Node {
+                id: "s1".into(),
+                kind: NodeKind::Signal {
+                    when: "m1".into(),
+                    emit: "long".into(),
+                },
+            },
+        ];
+        d
+    }
+
+    #[test]
+    fn v1_1_model_forecast_passes() {
+        // A signal watching a ModelForecast node is valid, and v1.1 is accepted.
+        let errs = validate_schema(&with_model_node("bullish", 0.6, "btc_forecaster"));
+        assert!(errs.is_empty(), "{errs:?}");
+    }
+
+    #[test]
+    fn model_forecast_bad_fields_rejected() {
+        let errs = validate_schema(&with_model_node("sideways", 1.5, "   "));
+        assert!(errs.iter().any(|e| e.path.ends_with("direction")));
+        assert!(errs.iter().any(|e| e.path.ends_with("min_confidence")));
+        assert!(errs.iter().any(|e| e.path.ends_with("model_ref")));
     }
 
     #[test]

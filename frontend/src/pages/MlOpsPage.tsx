@@ -227,6 +227,7 @@ export function MlOpsPage() {
         <div className="spacer" />
         <Button size="sm" onClick={() => navigate('/mlops/leaderboard')}>Leaderboard / compare</Button>
         <Button size="sm" onClick={() => navigate('/mlops/graph')}>Lineage</Button>
+        <Button size="sm" onClick={() => navigate('/mlops/data')}>Training data</Button>
         <Button size="sm" variant="primary" icon={<Plus size={13} aria-hidden />} onClick={() => navigate('/mlops/create')}>
           New model
         </Button>

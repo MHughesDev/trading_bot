@@ -41,6 +41,9 @@ const ModelCreatePage = lazy(() =>
 const ModelLineagePage = lazy(() =>
   import('@/pages/ModelLineagePage').then((m) => ({ default: m.ModelLineagePage })),
 )
+const DataWorkbenchPage = lazy(() =>
+  import('@/pages/DataWorkbenchPage').then((m) => ({ default: m.DataWorkbenchPage })),
+)
 const LeaderboardPage = lazy(() =>
   import('@/pages/LeaderboardPage').then((m) => ({ default: m.LeaderboardPage })),
 )
@@ -199,6 +202,7 @@ export default function App() {
               <Route path="/mlops/create" element={<ModelCreatePage />} />
               <Route path="/mlops/graph" element={<ModelLineagePage />} />
               <Route path="/mlops/leaderboard" element={<LeaderboardPage />} />
+              <Route path="/mlops/data" element={<DataWorkbenchPage />} />
               <Route path="/mlops/studio/*" element={<ModelStudioPage />} />
               <Route path="/mlops/:id" element={<ModelDetailPage />} />
               {/* One desk (AGENT-012). /agent and /research were two surfaces
