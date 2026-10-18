@@ -162,7 +162,11 @@ pub fn embargo_inputs(features: &[String], horizon_bars: u64) -> EmbargoInputs {
 /// whole split, and a window sized for the average source is too small for the
 /// slowest one.
 #[must_use]
-pub fn embargo_inputs_with_sources(features: &[String], horizon_bars: u64, source_declared_lags_ms: &[u64]) -> EmbargoInputs {
+pub fn embargo_inputs_with_sources(
+    features: &[String],
+    horizon_bars: u64,
+    source_declared_lags_ms: &[u64],
+) -> EmbargoInputs {
     let (mut max_lookback, mut max_lag) = (0_u32, 0_u64);
     for name in features {
         if let Ok(f) = crate::runtime::feature(name) {
@@ -217,7 +221,10 @@ mod tests {
         let bare = embargo_inputs_with_sources(&[], 10, &[]);
         assert_eq!(bare.max_knowledge_lag_ms, 0);
         let delayed = embargo_inputs_with_sources(&[], 10, &[60_000, 900_000, 5_000]);
-        assert_eq!(delayed.max_knowledge_lag_ms, 900_000, "the slowest source sets the window");
+        assert_eq!(
+            delayed.max_knowledge_lag_ms, 900_000,
+            "the slowest source sets the window"
+        );
         assert!(
             compute_embargo(&delayed) > compute_embargo(&bare),
             "the embargo must grow with the declared lag, or the sentinel is absorbed by nothing"
@@ -236,7 +243,10 @@ mod tests {
     /// than assumed closed.
     #[test]
     fn the_plain_form_absorbs_no_source_lag() {
-        assert_eq!(embargo_inputs(&[], 10), embargo_inputs_with_sources(&[], 10, &[]));
+        assert_eq!(
+            embargo_inputs(&[], 10),
+            embargo_inputs_with_sources(&[], 10, &[])
+        );
         assert_eq!(embargo_inputs(&[], 10).max_knowledge_lag_ms, 0);
     }
 

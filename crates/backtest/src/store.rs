@@ -19,12 +19,12 @@ use std::collections::{BTreeSet, HashMap};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use clickhouse::Row;
 use dataplane::bar::{self, CanonicalBar, VendorLag, PRICE_SCALE};
-use tracing::warn;
 use dataplane::identity::{AssetClass, InstrumentKey, VenueKey};
 use dataplane::quality::QualityFlags;
 use domain::payloads::bar::Timeframe;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use crate::types::TimeframeExt;
 

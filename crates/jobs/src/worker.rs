@@ -301,7 +301,10 @@ impl WorkerPool {
         // lease on every ending — completed, failed, and above all reaped, because
         // the reaped attempt is the one whose worker is gone and will never report.
         let outcome = match budget {
-            Some(BudgetStatus::Exhausted { declared_s, spent_s }) => Err(JobError::terminal(
+            Some(BudgetStatus::Exhausted {
+                declared_s,
+                spent_s,
+            }) => Err(JobError::terminal(
                 ledger::TerminalReason::BudgetExceeded,
                 "budget_exceeded",
                 format!(

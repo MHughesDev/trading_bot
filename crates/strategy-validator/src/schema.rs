@@ -239,7 +239,11 @@ mod tests {
         assert!(errs.iter().any(|e| e.path == "definition_version"));
     }
 
-    fn with_model_node(direction: &str, min_confidence: f64, model_ref: &str) -> StrategyDefinition {
+    fn with_model_node(
+        direction: &str,
+        min_confidence: f64,
+        model_ref: &str,
+    ) -> StrategyDefinition {
         let mut d = minimal();
         d.definition_version = "1.1".into();
         d.nodes = vec![

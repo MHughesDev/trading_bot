@@ -657,9 +657,15 @@ mod budget_tests {
                     attempts += 1;
                     assert!(attempts < 100, "the budget never ran out");
                 }
-                BudgetStatus::Exhausted { declared_s, spent_s } => {
+                BudgetStatus::Exhausted {
+                    declared_s,
+                    spent_s,
+                } => {
                     assert_eq!(attempts, 1, "the first attempt should spend the lot");
-                    assert!((spent_s - declared_s).abs() < 1e-6, "{spent_s} vs {declared_s}");
+                    assert!(
+                        (spent_s - declared_s).abs() < 1e-6,
+                        "{spent_s} vs {declared_s}"
+                    );
                     break;
                 }
             }
@@ -674,7 +680,10 @@ mod budget_tests {
         }
         assert_eq!(
             remaining_budget(declared, spent),
-            BudgetStatus::Exhausted { declared_s: 7200.0, spent_s: 7200.0 }
+            BudgetStatus::Exhausted {
+                declared_s: 7200.0,
+                spent_s: 7200.0
+            }
         );
     }
 
@@ -683,7 +692,10 @@ mod budget_tests {
     fn an_exhausted_budget_never_becomes_a_tiny_timeout() {
         for spent in [3600.0, 3600.1, 10_000.0] {
             match remaining_budget(1.0, spent) {
-                BudgetStatus::Exhausted { declared_s, spent_s } => {
+                BudgetStatus::Exhausted {
+                    declared_s,
+                    spent_s,
+                } => {
                     assert_eq!(declared_s, 3600.0);
                     assert_eq!(spent_s, spent);
                 }

@@ -92,7 +92,15 @@ where
             .census_bars(&s.instrument_id, &s.venue, period_secs)
             .await?;
         let cal = calendar_for(&s.venue);
-        let c = census(&s.instrument_id, &s.venue, &s.timeframe, period_secs, &bars, &cal, as_of);
+        let c = census(
+            &s.instrument_id,
+            &s.venue,
+            &s.timeframe,
+            period_secs,
+            &bars,
+            &cal,
+            as_of,
+        );
         // A number on a page nobody reads is not a control. A series holding rows
         // that claim an observed knowledge time their source could not have
         // supported means something is still writing them, and it means this
@@ -121,7 +129,10 @@ where
 /// re-derive the condition from the persisted rows.
 #[must_use]
 pub fn provenance_alarms(records: &[CensusRecord]) -> Vec<dataplane::census::ProvenanceAlarm> {
-    records.iter().filter_map(|r| r.census.provenance_alarm()).collect()
+    records
+        .iter()
+        .filter_map(|r| r.census.provenance_alarm())
+        .collect()
 }
 
 /// Rows across every series that may honestly be offered to Gate 15 as forward
@@ -131,7 +142,10 @@ pub fn provenance_alarms(records: &[CensusRecord]) -> Vec<dataplane::census::Pro
 /// single number on purpose: it is the one an operator should be able to ask for.
 #[must_use]
 pub fn defensibly_observed_bars(records: &[CensusRecord]) -> u64 {
-    records.iter().map(|r| r.census.defensibly_observed_bars()).sum()
+    records
+        .iter()
+        .map(|r| r.census.defensibly_observed_bars())
+        .sum()
 }
 
 /// Census rows for the forward-only series (P-0.6 item 3), so the coverage page
@@ -169,7 +183,9 @@ pub fn forward_census(
             bad.open_ns
         );
     }
-    let cal = Calendar::Continuous { version: CalendarVersion::crypto_24_7() };
+    let cal = Calendar::Continuous {
+        version: CalendarVersion::crypto_24_7(),
+    };
     let tf = cadence_key(cadence_secs);
     let c = census(series, venue, &tf, cadence_secs, observations, &cal, as_of);
     Ok(CensusRecord::new(c, SeriesKind::Forward))

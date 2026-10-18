@@ -55,15 +55,27 @@ fn identity() -> Arc<MemoryIdentity> {
         let id = Arc::new(MemoryIdentity::new());
         id.add_source(
             "coinbase_rest",
-            SourceInfo { source_id: 2, declared_vendor_lag: std::time::Duration::from_secs(60), live: false },
+            SourceInfo {
+                source_id: 2,
+                declared_vendor_lag: std::time::Duration::from_secs(60),
+                live: false,
+            },
         );
         id.add_source(
             "alpaca_rest",
-            SourceInfo { source_id: 5, declared_vendor_lag: std::time::Duration::from_secs(900), live: false },
+            SourceInfo {
+                source_id: 5,
+                declared_vendor_lag: std::time::Duration::from_secs(900),
+                live: false,
+            },
         );
         id.add_source(
             "kraken_ws",
-            SourceInfo { source_id: 9, declared_vendor_lag: std::time::Duration::ZERO, live: true },
+            SourceInfo {
+                source_id: 9,
+                declared_vendor_lag: std::time::Duration::ZERO,
+                live: true,
+            },
         );
         storage::identity::install(id.clone());
         id
@@ -81,12 +93,22 @@ async fn scratch(name: &str) -> Option<String> {
         return None;
     };
     let admin = storage::clickhouse::connect(&base);
-    admin.query(&format!("DROP DATABASE IF EXISTS {name}")).execute().await.unwrap();
-    admin.query(&format!("CREATE DATABASE {name}")).execute().await.unwrap();
+    admin
+        .query(&format!("DROP DATABASE IF EXISTS {name}"))
+        .execute()
+        .await
+        .unwrap();
+    admin
+        .query(&format!("CREATE DATABASE {name}"))
+        .execute()
+        .await
+        .unwrap();
     let (scheme, rest) = base.split_once("://").unwrap();
     let host = rest.split('/').next().unwrap();
     let url = format!("{scheme}://{host}/{name}");
-    storage::clickhouse::migrate::run_migrations(&url).await.unwrap();
+    storage::clickhouse::migrate::run_migrations(&url)
+        .await
+        .unwrap();
     Some(url)
 }
 
@@ -118,18 +140,42 @@ fn bar(close: DateTime<Utc>, price: i64) -> CollectedBar {
 /// the pre-revision value. A revision's knowledge time is now its receipt.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_revision_is_a_second_row_and_as_of_returns_the_value_current_then() {
-    let Some(url) = scratch("bf_revisions").await else { return };
+    let Some(url) = scratch("bf_revisions").await else {
+        return;
+    };
     let id = identity();
     let store = BarStore::connect(&url);
     let close = historical_close();
 
-    let first = store.write_collected("RV-USD", "coinbase", "coinbase_rest", Timeframe::Minutes1, &[bar(close, 100)]).await.unwrap();
+    let first = store
+        .write_collected(
+            "RV-USD",
+            "coinbase",
+            "coinbase_rest",
+            Timeframe::Minutes1,
+            &[bar(close, 100)],
+        )
+        .await
+        .unwrap();
     assert_eq!(first.inserted, 1);
     let between = Utc::now();
     tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
 
-    let second = store.write_collected("RV-USD", "coinbase", "coinbase_rest", Timeframe::Minutes1, &[bar(close, 101)]).await.unwrap();
-    assert_eq!((second.inserted, second.restated), (0, 1), "a changed cell is a revision, not a new bar");
+    let second = store
+        .write_collected(
+            "RV-USD",
+            "coinbase",
+            "coinbase_rest",
+            Timeframe::Minutes1,
+            &[bar(close, 101)],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        (second.inserted, second.restated),
+        (0, 1),
+        "a changed cell is a revision, not a new bar"
+    );
     id.sync_dims(&url).await.unwrap();
 
     let range = (close - Duration::minutes(5), close + Duration::minutes(5));
@@ -142,7 +188,10 @@ async fn a_revision_is_a_second_row_and_as_of_returns_the_value_current_then() {
         .fetch_one()
         .await
         .unwrap();
-    assert_eq!(rows, 2, "a revision must not overwrite the row it restates (DA-16)");
+    assert_eq!(
+        rows, 2,
+        "a revision must not overwrite the row it restates (DA-16)"
+    );
 
     // As of before the revision was received, the original value stands.
     let earlier = BarStore::connect(&url)
@@ -151,15 +200,26 @@ async fn a_revision_is_a_second_row_and_as_of_returns_the_value_current_then() {
         .await
         .unwrap();
     assert_eq!(earlier.len(), 1);
-    assert_eq!(earlier[0].close, Decimal::from(100), "an as_of before the revision must not see it");
+    assert_eq!(
+        earlier[0].close,
+        Decimal::from(100),
+        "an as_of before the revision must not see it"
+    );
 
     // And afterwards, the revision.
-    let latest = BarStore::connect(&url).load_bars("RV-USD", Timeframe::Minutes1, range.0, range.1).await.unwrap();
+    let latest = BarStore::connect(&url)
+        .load_bars("RV-USD", Timeframe::Minutes1, range.0, range.1)
+        .await
+        .unwrap();
     assert_eq!(latest.len(), 1, "one bar, resolved to its current revision");
     assert_eq!(latest[0].close, Decimal::from(101));
-    assert!(latest[0].quality_flags.contains(QualityFlags::VENDOR_REVISED));
+    assert!(latest[0]
+        .quality_flags
+        .contains(QualityFlags::VENDOR_REVISED));
     assert!(
-        latest[0].quality_flags.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME),
+        latest[0]
+            .quality_flags
+            .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME),
         "a revision of a backfilled bar is still a backfilled bar"
     );
 }
@@ -170,7 +230,9 @@ async fn a_revision_is_a_second_row_and_as_of_returns_the_value_current_then() {
 /// This is the test that fails if the flag is dropped.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_observed_row_and_a_backfilled_row_of_one_bar_stay_distinguishable() {
-    let Some(url) = scratch("bf_distinguish").await else { return };
+    let Some(url) = scratch("bf_distinguish").await else {
+        return;
+    };
     let id = identity();
     let store = BarStore::connect(&url);
 
@@ -178,12 +240,31 @@ async fn an_observed_row_and_a_backfilled_row_of_one_bar_stay_distinguishable() 
     // real observation.
     let now = Utc::now();
     let close = now - Duration::seconds(5);
-    let close = close - Duration::nanoseconds(close.timestamp_nanos_opt().unwrap() % 60_000_000_000);
-    store.write_collected("DS-USD", "kraken", "kraken_ws", Timeframe::Minutes1, &[bar(close, 200)]).await.unwrap();
+    let close =
+        close - Duration::nanoseconds(close.timestamp_nanos_opt().unwrap() % 60_000_000_000);
+    store
+        .write_collected(
+            "DS-USD",
+            "kraken",
+            "kraken_ws",
+            Timeframe::Minutes1,
+            &[bar(close, 200)],
+        )
+        .await
+        .unwrap();
 
     // The same bar close, from a source polled long after: a backfill.
     let old = historical_close();
-    store.write_collected("DS-USD", "kraken", "coinbase_rest", Timeframe::Minutes1, &[bar(old, 200)]).await.unwrap();
+    store
+        .write_collected(
+            "DS-USD",
+            "kraken",
+            "coinbase_rest",
+            Timeframe::Minutes1,
+            &[bar(old, 200)],
+        )
+        .await
+        .unwrap();
     id.sync_dims(&url).await.unwrap();
 
     #[derive(clickhouse::Row, serde::Deserialize)]
@@ -204,8 +285,14 @@ async fn an_observed_row_and_a_backfilled_row_of_one_bar_stay_distinguishable() 
         .unwrap();
     assert_eq!(rows.len(), 2);
 
-    let backfilled = rows.iter().find(|r| is_backfilled(QualityFlags(r.flags))).expect("the historical row is flagged");
-    let observed = rows.iter().find(|r| !is_backfilled(QualityFlags(r.flags))).expect("the live row is not flagged");
+    let backfilled = rows
+        .iter()
+        .find(|r| is_backfilled(QualityFlags(r.flags)))
+        .expect("the historical row is flagged");
+    let observed = rows
+        .iter()
+        .find(|r| !is_backfilled(QualityFlags(r.flags)))
+        .expect("the live row is not flagged");
 
     // The backfilled row carries exactly the declared sentinel: close + 60 s.
     assert_eq!(
@@ -232,14 +319,34 @@ async fn an_observed_row_and_a_backfilled_row_of_one_bar_stay_distinguishable() 
 /// because the lag is read per source rather than assumed equal.
 #[tokio::test(flavor = "multi_thread")]
 async fn two_sources_backfilling_one_bar_close_disagree_by_their_declared_lags() {
-    let Some(url) = scratch("bf_two_lags").await else { return };
+    let Some(url) = scratch("bf_two_lags").await else {
+        return;
+    };
     let id = identity();
     let store = BarStore::connect(&url);
     let close = historical_close();
 
     // Same symbol, same bar close, two venues so the rows do not collide.
-    store.write_collected("TL-USD", "coinbase", "coinbase_rest", Timeframe::Minutes1, &[bar(close, 300)]).await.unwrap();
-    store.write_collected("TL-USD", "alpaca", "alpaca_rest", Timeframe::Minutes1, &[bar(close, 300)]).await.unwrap();
+    store
+        .write_collected(
+            "TL-USD",
+            "coinbase",
+            "coinbase_rest",
+            Timeframe::Minutes1,
+            &[bar(close, 300)],
+        )
+        .await
+        .unwrap();
+    store
+        .write_collected(
+            "TL-USD",
+            "alpaca",
+            "alpaca_rest",
+            Timeframe::Minutes1,
+            &[bar(close, 300)],
+        )
+        .await
+        .unwrap();
     id.sync_dims(&url).await.unwrap();
 
     #[derive(clickhouse::Row, serde::Deserialize)]
@@ -259,9 +366,15 @@ async fn two_sources_backfilling_one_bar_close_disagree_by_their_declared_lags()
         .await
         .unwrap();
     assert_eq!(rows.len(), 2, "two venues, two rows");
-    assert!(rows.iter().all(|r| is_backfilled(QualityFlags(r.flags))), "both are backfills");
+    assert!(
+        rows.iter().all(|r| is_backfilled(QualityFlags(r.flags))),
+        "both are backfills"
+    );
 
-    let coinbase = rows.iter().find(|r| r.source_id == 2).expect("coinbase_rest");
+    let coinbase = rows
+        .iter()
+        .find(|r| r.source_id == 2)
+        .expect("coinbase_rest");
     let alpaca = rows.iter().find(|r| r.source_id == 5).expect("alpaca_rest");
     // open + period + declared lag.
     assert_eq!(coinbase.lag_ns, 60_000_000_000 + 60_000_000_000);
@@ -281,7 +394,9 @@ async fn two_sources_backfilling_one_bar_close_disagree_by_their_declared_lags()
 /// writes nothing new.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_backfill_sink_writes_flagged_rows_and_a_repeat_page_is_free() {
-    let Some(url) = scratch("bf_sink").await else { return };
+    let Some(url) = scratch("bf_sink").await else {
+        return;
+    };
     let id = identity();
     let sink = BarStoreSink::new(Arc::new(BarStore::connect(&url)));
     let close = historical_close();
@@ -297,22 +412,38 @@ async fn the_backfill_sink_writes_flagged_rows_and_a_repeat_page_is_free() {
         })
         .collect();
 
-    let first = sink.write_page("coinbase_rest", "coinbase", "SK-USD", "1m", &bars).await.unwrap();
+    let first = sink
+        .write_page("coinbase_rest", "coinbase", "SK-USD", "1m", &bars)
+        .await
+        .unwrap();
     assert_eq!((first.inserted, first.rejected), (10, 0));
 
     // Resuming over an already-covered range must be free, or every restart
     // would rewrite history it already holds.
-    let again = sink.write_page("coinbase_rest", "coinbase", "SK-USD", "1m", &bars).await.unwrap();
-    assert_eq!((again.inserted, again.unchanged, again.restated), (0, 10, 0));
+    let again = sink
+        .write_page("coinbase_rest", "coinbase", "SK-USD", "1m", &bars)
+        .await
+        .unwrap();
+    assert_eq!(
+        (again.inserted, again.unchanged, again.restated),
+        (0, 10, 0)
+    );
     id.sync_dims(&url).await.unwrap();
 
     let loaded = BarStore::connect(&url)
-        .load_bars("SK-USD", Timeframe::Minutes1, close - Duration::minutes(1), close + Duration::hours(1))
+        .load_bars(
+            "SK-USD",
+            Timeframe::Minutes1,
+            close - Duration::minutes(1),
+            close + Duration::hours(1),
+        )
         .await
         .unwrap();
     assert_eq!(loaded.len(), 10);
     assert!(
-        loaded.iter().all(|b| b.quality_flags.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME)),
+        loaded.iter().all(|b| b
+            .quality_flags
+            .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME)),
         "every row the backfill writes says so"
     );
 }

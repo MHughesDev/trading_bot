@@ -676,10 +676,15 @@ mod tests {
     fn seeded_forward_series() -> Vec<(String, String, String)> {
         const M0098: &str = include_str!("../../../../migrations/0098_forward_series.sql");
 
-        let from = M0098.find("INSERT INTO dataplane.forward_series").expect("0098 seeds the registry");
+        let from = M0098
+            .find("INSERT INTO dataplane.forward_series")
+            .expect("0098 seeds the registry");
         let block = &M0098[from..];
-        let block = &block[..block.find("ON CONFLICT").expect("the seed ends in an upsert")];
-        let values = &block[block.find("VALUES").expect("the seed has a VALUES clause") + "VALUES".len()..];
+        let block = &block[..block
+            .find("ON CONFLICT")
+            .expect("the seed ends in an upsert")];
+        let values =
+            &block[block.find("VALUES").expect("the seed has a VALUES clause") + "VALUES".len()..];
 
         // Quoted text is scanned through rather than split on: the seeded notes
         // carry both commas ("8,870 hourly rates") and parentheses ("(FM-11)"),
@@ -725,7 +730,10 @@ mod tests {
                 _ => {}
             }
         }
-        assert!(!rows.is_empty(), "the registry seed parsed as nothing, which no assertion below would notice");
+        assert!(
+            !rows.is_empty(),
+            "the registry seed parsed as nothing, which no assertion below would notice"
+        );
         rows
     }
 
@@ -744,7 +752,9 @@ mod tests {
                 retention: RetentionPolicy::None,
                 enabled: true,
             },
-            arrival: Arrival::Polled { poll_period_secs: 3600 },
+            arrival: Arrival::Polled {
+                poll_period_secs: 3600,
+            },
             roster: Roster::WhateverAppears,
         }
     }
@@ -766,22 +776,37 @@ mod tests {
     #[tokio::test]
     async fn the_series_the_sink_writes_are_the_ones_the_alarm_joins_on() {
         let seeded = seeded_forward_series();
-        let expectations: Vec<FeedExpectation> =
-            seeded.iter().map(|(s, t, v)| expectation(s, t, v)).collect();
+        let expectations: Vec<FeedExpectation> = seeded
+            .iter()
+            .map(|(s, t, v)| expectation(s, t, v))
+            .collect();
 
         // The names as they are written, not as the constants declare them: what
         // the alarm joins on is whatever reaches `forward_series_heartbeat`.
         let c = ForwardCollector::new(FixtureSource::new(), CountingSink::default());
         c.poll_once().await.unwrap();
         c.backfill_funding("PF_XBTUSD").await.unwrap();
-        let written: BTreeSet<(String, String)> =
-            c.sink.beats.lock().unwrap().iter().map(|b| (b.series.clone(), b.venue.clone())).collect();
-        assert_eq!(written.len(), 2, "a poll and a backfill write two series between them: {written:?}");
+        let written: BTreeSet<(String, String)> = c
+            .sink
+            .beats
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|b| (b.series.clone(), b.venue.clone()))
+            .collect();
+        assert_eq!(
+            written.len(),
+            2,
+            "a poll and a backfill write two series between them: {written:?}"
+        );
 
         for (series, venue) in &written {
             let key = FeedKey::new(series, venue, "PF_XBTUSD");
-            let owners: Vec<&str> =
-                expectations.iter().filter(|e| e.owns(&key)).map(|e| e.spec.series_id.as_str()).collect();
+            let owners: Vec<&str> = expectations
+                .iter()
+                .filter(|e| e.owns(&key))
+                .map(|e| e.spec.series_id.as_str())
+                .collect();
             assert_eq!(
                 owners.len(),
                 1,
@@ -803,7 +828,10 @@ mod tests {
         // The shorthand that used to be here joined to nothing at all. Kept as a
         // witness, because it is the value a future rename would reach for first.
         let stale = FeedKey::new("funding", VENUE, "PF_XBTUSD");
-        assert!(!expectations.iter().any(|e| e.owns(&stale)), "no registry row has ever covered {stale:?}");
+        assert!(
+            !expectations.iter().any(|e| e.owns(&stale)),
+            "no registry row has ever covered {stale:?}"
+        );
     }
 
     #[tokio::test(start_paused = true)]
