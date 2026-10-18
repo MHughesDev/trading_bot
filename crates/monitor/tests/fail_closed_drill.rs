@@ -195,6 +195,14 @@ struct Drill {
     windows: Vec<Uuid>,
     /// Strategy ids whose `monitor.limits` rows the test declared.
     limits: Vec<String>,
+    /// Scope prefixes whose rows are the test's own, for scopes it cannot name in
+    /// advance: `Rehearsal::run` mints `drill:<label>-<uuid>` inside the call, so
+    /// a failure inside `run` would otherwise leave rows nothing registered.
+    scope_prefixes: Vec<String>,
+    /// `global_risk_config.trading_enabled` as it stood before the drill, for a
+    /// drill that trips the global switch. A failure between the trip and the
+    /// typed reset leaves the column false, and the next boot comes up halted.
+    trading_enabled_before: Option<bool>,
 }
 
 impl Drill {
@@ -224,6 +232,8 @@ impl Drill {
             drills: Vec::new(),
             windows: Vec::new(),
             limits: Vec::new(),
+            scope_prefixes: Vec::new(),
+            trading_enabled_before: None,
         }
     }
 
@@ -291,6 +301,23 @@ impl Drill {
     fn owns_limits_for(&mut self, strategy_id: impl Into<String>) {
         self.limits.push(strategy_id.into());
     }
+
+    /// Every scope starting with `prefix` belongs to the test. Register it
+    /// *before* the call that mints the scope, so a failure inside that call is
+    /// still cleaned up.
+    fn owns_scope_prefix(&mut self, prefix: impl Into<String>) {
+        self.scope_prefixes.push(prefix.into());
+    }
+
+    /// Remember `global_risk_config.trading_enabled`, so a drill that trips the
+    /// global switch puts the boot column back however it ends.
+    async fn remembers_trading_enabled(&mut self, pg: &PgPool) {
+        self.trading_enabled_before =
+            sqlx::query_scalar("SELECT trading_enabled FROM global_risk_config LIMIT 1")
+                .fetch_optional(pg)
+                .await
+                .expect("global_risk_config is readable");
+    }
 }
 
 impl Drop for Drill {
@@ -303,6 +330,8 @@ impl Drop for Drill {
         let drills = std::mem::take(&mut self.drills);
         let windows = std::mem::take(&mut self.windows);
         let limits = std::mem::take(&mut self.limits);
+        let scope_prefixes = std::mem::take(&mut self.scope_prefixes);
+        let trading_enabled_before = self.trading_enabled_before.take();
         let took_lease_at = self.took_lease_at;
         let lease = took_lease_at.map(|_| self.lease_before.clone());
 
@@ -314,6 +343,8 @@ impl Drop for Drill {
             && drills.is_empty()
             && windows.is_empty()
             && limits.is_empty()
+            && scope_prefixes.is_empty()
+            && trading_enabled_before.is_none()
         {
             return;
         }
@@ -409,6 +440,27 @@ impl Drop for Drill {
                         strategy_id,
                     )
                     .await;
+                }
+                for prefix in &scope_prefixes {
+                    let like = format!("{prefix}%");
+                    for sql in [
+                        "DELETE FROM monitor.events WHERE scope LIKE $1",
+                        "DELETE FROM monitor.kill_switch WHERE scope LIKE $1",
+                        "DELETE FROM monitor.drill WHERE scope LIKE $1",
+                    ] {
+                        purge(&pg, sql, &like).await;
+                    }
+                }
+                // The boot column a global trip flips. The test's own reset puts it
+                // back on success; this covers the failure between the two.
+                if let Some(enabled) = trading_enabled_before {
+                    if let Err(e) = sqlx::query("UPDATE global_risk_config SET trading_enabled = $1")
+                        .bind(enabled)
+                        .execute(&pg)
+                        .await
+                    {
+                        eprintln!("CLEANUP FAILED: global_risk_config.trading_enabled not restored: {e}");
+                    }
                 }
 
                 // The `global`/`lease` rows the *watcher* wrote while the drill
@@ -663,6 +715,7 @@ async fn a_trip_survives_a_restart_and_the_boot_path_agrees() {
     let store = MonitorStore::new(pg.clone());
     clear_scope(&pg, "global").await;
     drill.owns_scope("global");
+    drill.remembers_trading_enabled(&pg).await;
 
     let terms = drill.terms(60_000);
     MonitorService::new(store.clone(), terms)
@@ -1207,6 +1260,9 @@ async fn a_drill_measures_its_own_propagation_and_leaves_nothing_behind() {
     let (pg, mut drill) = db!();
     let store = MonitorStore::new(pg.clone());
 
+    // By prefix, and before `run`: it mints `drill:track-d4-<uuid>` inside the
+    // call, so a failure in there would otherwise leave rows nobody registered.
+    drill.owns_scope_prefix("drill:track-d4-");
     let rehearsal =
         monitor::Rehearsal::new(store.clone(), 60_000, "human:test").expect("a human may rehearse");
     let outcome = rehearsal
