@@ -760,6 +760,33 @@ exit time 48 bars
         assert_eq!(def.definition_version, "1.3", "the exits block is a 1.3 document");
     }
 
+    /// **What the language compiles, the platform accepts.**
+    ///
+    /// This replaces `the_only_thing_the_validator_holds_against_a_compiled_strategy_is_its_version`,
+    /// the pin that recorded the gate refusing every document SLv2 could produce.
+    /// That test's own doc said the repair on the day the gate opened was to
+    /// delete it *and assert `validate` is `Ok`*; deleting it alone leaves the
+    /// join untested, which is how the blockage lasted as long as it did.
+    ///
+    /// It has to live here. `strategy-lang` and `strategy-validator` do not
+    /// depend on each other, and `mcp-server-lib` is the only crate that depends
+    /// on both — so `the_version_gate_is_a_range` can check the gate against
+    /// hand-written version strings, but nothing there can notice the compiler
+    /// walking away from what the gate accepts. That is the divergence that
+    /// actually happened.
+    ///
+    /// Asserting `Ok` rather than "no version error" is deliberate: the version
+    /// was the only complaint last time, and a narrower assertion would still
+    /// pass if the next divergence were an exits rule or a feature name.
+    #[test]
+    fn a_compiled_strategy_is_accepted_by_the_validator() {
+        let def: domain::strategy_def::StrategyDefinition =
+            serde_json::from_value(compiled(TREND)).expect("a definition");
+        if let Err(errs) = strategy_validator::validate(&def) {
+            panic!("the language compiled a document the platform refuses: {errs:#?}");
+        }
+    }
+
     /// A refusal names the clause and carries a fix, because the whole argument
     /// of AGENT-011 §5 is that a model iterates against the diagnostics.
     #[test]
