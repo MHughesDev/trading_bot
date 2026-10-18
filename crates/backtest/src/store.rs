@@ -932,7 +932,7 @@ impl BarStore {
                 // shape of a PIT hole rather than a PIT store. The row keeps
                 // BACKFILLED_KNOWLEDGE_TIME — its provenance is still a
                 // backfill — so P-1.6's distinguishability is unaffected
-                // (Set P P-1.5; ADR-P1-01).
+                // (Set P P-1.5; ADR-SETP-05).
                 if cb.knowledge_time < cb.ingest_time {
                     cb.knowledge_time = cb.ingest_time;
                 }

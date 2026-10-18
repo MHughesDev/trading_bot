@@ -100,6 +100,12 @@ fn at01_only_the_pit_reader_touches_raw_bar_tables() {
         "crates/storage/tests/clickhouse_migrate.rs",
         // AT-02's comparison scan exists only to prove the reader has no excuse.
         "crates/backtest/tests/bar_store_pit.rs",
+        // Set P P-1.5/P-1.6 (merged from claude/set-p-phase-1-backfill). It counts the
+        // physical rows of a restated bar and reads their flags and knowledge times, because
+        // "the revision is retained" and "the two rows differ in both signals" are claims
+        // about storage that the PIT reader, by design, resolves away. Its reads are asserts,
+        // never model inputs, against a throwaway database it creates.
+        "crates/backtest/tests/backfill_revisions.rs",
         "crates/invariants/tests/static_invariants.rs",
         "crates/invariants/tests/db_invariants.rs",
     ];
