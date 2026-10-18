@@ -407,32 +407,32 @@ impl AgentManager {
             let Some(conversation_id) = conversation_id else {
                 // A run from before conversations existed has no workspace to
                 // resume into.
-                self.mark_failed(run_id, "interrupted by platform restart").await;
+                self.mark_failed(run_id, "interrupted by platform restart")
+                    .await;
                 continue;
             };
             if status == "waiting_backtest" {
                 match self.suspended_job(run_id).await {
-                    Some(job_id) => {
-                        match self.mint_run_token(user_id, run_id).await {
-                            Ok(token) => {
-                                self.waiting.lock().expect("agent waiting lock").insert(
-                                    run_id,
-                                    WaitingRun {
-                                        user_id,
-                                        conversation_id,
-                                        job_id,
-                                        token,
-                                    },
-                                );
-                            }
-                            Err(e) => {
-                                tracing::warn!(%run_id, error = %e, "could not re-issue a token for a suspended run");
-                            }
+                    Some(job_id) => match self.mint_run_token(user_id, run_id).await {
+                        Ok(token) => {
+                            self.waiting.lock().expect("agent waiting lock").insert(
+                                run_id,
+                                WaitingRun {
+                                    user_id,
+                                    conversation_id,
+                                    job_id,
+                                    token,
+                                },
+                            );
                         }
-                    }
+                        Err(e) => {
+                            tracing::warn!(%run_id, error = %e, "could not re-issue a token for a suspended run");
+                        }
+                    },
                     // Waiting under the old driver, which kept no resume contract.
                     None => {
-                        self.mark_failed(run_id, "interrupted by platform restart").await;
+                        self.mark_failed(run_id, "interrupted by platform restart")
+                            .await;
                     }
                 }
                 continue;
@@ -630,14 +630,20 @@ impl AgentManager {
                         .ok()
                         .flatten();
                 if status.as_deref() != Some("waiting_backtest") {
-                    self.waiting.lock().expect("agent waiting lock").remove(&run_id);
+                    self.waiting
+                        .lock()
+                        .expect("agent waiting lock")
+                        .remove(&run_id);
                     self.revoke_run_tokens(run_id).await;
                     continue;
                 }
                 let Some(done) = job_status(&self.base_url, &w.token, &w.job_id).await else {
                     continue;
                 };
-                self.waiting.lock().expect("agent waiting lock").remove(&run_id);
+                self.waiting
+                    .lock()
+                    .expect("agent waiting lock")
+                    .remove(&run_id);
                 let provider: Option<String> =
                     sqlx::query_scalar("SELECT provider FROM agent_runs WHERE run_id = $1")
                         .bind(run_id)
@@ -657,8 +663,11 @@ impl AgentManager {
                     }
                     Err(e) => {
                         tracing::warn!(%run_id, error = %e, "the job ended but the run cannot be resumed without a client");
-                        self.mark_failed(run_id, &format!("its job ended and it could not resume: {e}"))
-                            .await;
+                        self.mark_failed(
+                            run_id,
+                            &format!("its job ended and it could not resume: {e}"),
+                        )
+                        .await;
                     }
                 }
             }
@@ -911,12 +920,7 @@ impl AgentManager {
         // Every run in flight stops at its next boundary still `running`, with
         // its next effect already in the log, and the next process resumes it
         // (S-2.15). Not cancelled: a deploy is not a reason to end a run.
-        for control in self
-            .running
-            .lock()
-            .expect("agent running lock")
-            .values()
-        {
+        for control in self.running.lock().expect("agent running lock").values() {
             control.detach();
         }
 
@@ -1793,7 +1797,10 @@ fn snapshot_outcome(job_id: &str, snapshot: &serde_json::Value) -> Option<bool> 
         if study_entry(job_id, snapshot).is_some() {
             return Some(true);
         }
-        return match snapshot.pointer(&format!("/detached/{study}/status")).and_then(serde_json::Value::as_str) {
+        return match snapshot
+            .pointer(&format!("/detached/{study}/status"))
+            .and_then(serde_json::Value::as_str)
+        {
             Some("running") => None,
             Some(_) => Some(false),
             // Neither sealed nor running: the process that was running it is gone
@@ -1802,12 +1809,20 @@ fn snapshot_outcome(job_id: &str, snapshot: &serde_json::Value) -> Option<bool> 
         };
     }
     if job_id.starts_with("training:") {
-        let status = snapshot.get("status").and_then(serde_json::Value::as_str).unwrap_or("");
-        return matches!(status, "succeeded" | "completed" | "failed" | "cancelled" | "error")
-            .then(|| matches!(status, "succeeded" | "completed"));
+        let status = snapshot
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        return matches!(
+            status,
+            "succeeded" | "completed" | "failed" | "cancelled" | "error"
+        )
+        .then(|| matches!(status, "succeeded" | "completed"));
     }
     if job_id.starts_with("campaign:") {
-        let terminal = snapshot.get("terminal").and_then(serde_json::Value::as_str)?;
+        let terminal = snapshot
+            .get("terminal")
+            .and_then(serde_json::Value::as_str)?;
         return Some(terminal != "halted");
     }
     let status = snapshot
@@ -1831,11 +1846,26 @@ mod snapshot_outcome_tests {
         let failed = json!({"studies": [], "detached": {"s1": {"status": "failed", "error": "x"}}});
         assert_eq!(snapshot_outcome("study:e:s1", &failed), Some(false));
         // Gone with the process that was running it: ended, not still waiting.
-        assert_eq!(snapshot_outcome("study:e:s1", &json!({"studies": [], "detached": {}})), Some(false));
-        assert_eq!(snapshot_outcome("training:m:r", &json!({"status": "running"})), None);
-        assert_eq!(snapshot_outcome("training:m:r", &json!({"status": "succeeded"})), Some(true));
-        assert_eq!(snapshot_outcome("training:m:r", &json!({"status": "failed"})), Some(false));
-        assert_eq!(super::study_entry("study:e:s1", &sealed), Some(json!({"study_id": "s1"})));
+        assert_eq!(
+            snapshot_outcome("study:e:s1", &json!({"studies": [], "detached": {}})),
+            Some(false)
+        );
+        assert_eq!(
+            snapshot_outcome("training:m:r", &json!({"status": "running"})),
+            None
+        );
+        assert_eq!(
+            snapshot_outcome("training:m:r", &json!({"status": "succeeded"})),
+            Some(true)
+        );
+        assert_eq!(
+            snapshot_outcome("training:m:r", &json!({"status": "failed"})),
+            Some(false)
+        );
+        assert_eq!(
+            super::study_entry("study:e:s1", &sealed),
+            Some(json!({"study_id": "s1"}))
+        );
     }
 
     #[test]
@@ -1847,9 +1877,18 @@ mod snapshot_outcome_tests {
         let halted = json!({"phase": "halted", "terminal": "halted"});
         assert_eq!(snapshot_outcome("campaign:c", &halted), Some(false));
         // A sweep still reads its status; a campaign's `status` key means nothing.
-        assert_eq!(snapshot_outcome("sweep:1", &json!({"status": "completed"})), Some(true));
-        assert_eq!(snapshot_outcome("sweep:1", &json!({"status": "running"})), None);
-        assert_eq!(snapshot_outcome("campaign:c", &json!({"status": "completed"})), None);
+        assert_eq!(
+            snapshot_outcome("sweep:1", &json!({"status": "completed"})),
+            Some(true)
+        );
+        assert_eq!(
+            snapshot_outcome("sweep:1", &json!({"status": "running"})),
+            None
+        );
+        assert_eq!(
+            snapshot_outcome("campaign:c", &json!({"status": "completed"})),
+            None
+        );
     }
 }
 
@@ -1973,7 +2012,10 @@ mod one_runtime_tests {
                 "manager.rs still contains `{forbidden}`: a second path by tier"
             );
         }
-        assert!(code.contains("local_driver::run("), "the one driver is reached");
+        assert!(
+            code.contains("local_driver::run("),
+            "the one driver is reached"
+        );
     }
 
     /// AGENT-005 P6: nothing the runtime writes can read `[elided` without a

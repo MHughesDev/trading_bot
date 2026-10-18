@@ -29,7 +29,10 @@ pub(crate) fn new_session_token() -> String {
 /// minted with it (as every login was between 0038 and 0150) held no scope at
 /// all. The expiry starts at the idle window and slides on use
 /// ([`super::session::touch_key`]).
-pub(crate) async fn mint_web_session(pg: &sqlx::PgPool, user_id: Uuid) -> Result<String, sqlx::Error> {
+pub(crate) async fn mint_web_session(
+    pg: &sqlx::PgPool,
+    user_id: Uuid,
+) -> Result<String, sqlx::Error> {
     let token = new_session_token();
     sqlx::query(
         "INSERT INTO sessions (token, user_id, kind, scopes, expires_at, last_seen_at) \
@@ -262,12 +265,13 @@ pub async fn touch(
             extended: true,
         }));
     }
-    let expires_at: Option<chrono::DateTime<Utc>> =
-        sqlx::query_scalar("SELECT expires_at FROM sessions WHERE token = $1 AND expires_at > now()")
-            .bind(&bearer.token)
-            .fetch_optional(&state.pg)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
+    let expires_at: Option<chrono::DateTime<Utc>> = sqlx::query_scalar(
+        "SELECT expires_at FROM sessions WHERE token = $1 AND expires_at > now()",
+    )
+    .bind(&bearer.token)
+    .fetch_optional(&state.pg)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
     let expires_at = expires_at
         .ok_or_else(|| (StatusCode::UNAUTHORIZED, "session expired or invalid").into_response())?;
     Ok(Json(TouchResponse {

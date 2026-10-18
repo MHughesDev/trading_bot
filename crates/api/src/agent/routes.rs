@@ -1081,6 +1081,8 @@ mod message_body_tests {
         assert_eq!(b.workflow, Some(harness::state::Workflow::Falsify));
         assert!(b.steer);
         // A misspelt field is refused rather than silently ignored.
-        assert!(serde_json::from_str::<MessageBody>(r#"{"text":"x","workflw":"falsify"}"#).is_err());
+        assert!(
+            serde_json::from_str::<MessageBody>(r#"{"text":"x","workflw":"falsify"}"#).is_err()
+        );
     }
 }

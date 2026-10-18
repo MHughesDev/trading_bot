@@ -201,12 +201,21 @@ impl SkillStore {
     ///
     /// # Errors
     /// A core skill that fails admission, or the database.
-    pub async fn sync_core(&self, core: &[skills::core::CoreSkill]) -> Result<SyncReport, StoreError> {
+    pub async fn sync_core(
+        &self,
+        core: &[skills::core::CoreSkill],
+    ) -> Result<SyncReport, StoreError> {
         let catalogue = tool_catalogue();
         let mut report = SyncReport::default();
         for c in core {
-            let draft = Draft::check(Scope::Core, &c.category, &c.name, c.files.clone(), &catalogue)
-                .map_err(|e| StoreError::Refused(format!("core skill {}: {e}", c.name)))?;
+            let draft = Draft::check(
+                Scope::Core,
+                &c.category,
+                &c.name,
+                c.files.clone(),
+                &catalogue,
+            )
+            .map_err(|e| StoreError::Refused(format!("core skill {}: {e}", c.name)))?;
             let current: Option<String> = sqlx::query(
                 "SELECT current_version FROM skill_registry.skill WHERE name = $1 AND scope = 'core'",
             )
@@ -232,8 +241,16 @@ impl SkillStore {
                     if shipped {
                         report.unchanged += 1;
                     } else {
-                        self.admit(&draft, Status::Admitted, None, None, false, Some(&v), "release")
-                            .await?;
+                        self.admit(
+                            &draft,
+                            Status::Admitted,
+                            None,
+                            None,
+                            false,
+                            Some(&v),
+                            "release",
+                        )
+                        .await?;
                         report.patched += 1;
                     }
                 }
@@ -349,12 +366,17 @@ impl SkillStore {
     ///
     /// # Errors
     /// The database.
-    pub async fn bundle(&self, version: &str) -> Result<Option<BTreeMap<String, Vec<u8>>>, StoreError> {
-        Ok(sqlx::query("SELECT files FROM skill_registry.skill_bundle WHERE version_hash = $1")
-            .bind(version)
-            .fetch_optional(&self.pg)
-            .await?
-            .map(|r| files_from_json(&r.get::<Value, _>(0))))
+    pub async fn bundle(
+        &self,
+        version: &str,
+    ) -> Result<Option<BTreeMap<String, Vec<u8>>>, StoreError> {
+        Ok(
+            sqlx::query("SELECT files FROM skill_registry.skill_bundle WHERE version_hash = $1")
+                .bind(version)
+                .fetch_optional(&self.pg)
+                .await?
+                .map(|r| files_from_json(&r.get::<Value, _>(0))),
+        )
     }
 
     /// Bundles for a set of registry rows, keyed by skill name.
@@ -412,7 +434,11 @@ impl SkillStore {
     ///
     /// # Errors
     /// The database.
-    pub async fn record_activation(&self, session: Uuid, skill_name: &str) -> Result<bool, StoreError> {
+    pub async fn record_activation(
+        &self,
+        session: Uuid,
+        skill_name: &str,
+    ) -> Result<bool, StoreError> {
         let done = sqlx::query(
             "INSERT INTO skill_registry.skill_run (skill_id, version_hash, project_id, session_id, state)
              SELECT x.skill_id, x.version_hash, x.project_id, x.session_id, 'activated'
@@ -510,10 +536,15 @@ impl SkillStore {
     ///
     /// # Errors
     /// The database.
-    pub async fn settle_provisional(&self, n: u32) -> Result<(Vec<String>, Vec<String>), StoreError> {
-        let rows = sqlx::query("SELECT skill_id, name FROM skill_registry.skill WHERE status = 'provisional'")
-            .fetch_all(&self.pg)
-            .await?;
+    pub async fn settle_provisional(
+        &self,
+        n: u32,
+    ) -> Result<(Vec<String>, Vec<String>), StoreError> {
+        let rows = sqlx::query(
+            "SELECT skill_id, name FROM skill_registry.skill WHERE status = 'provisional'",
+        )
+        .fetch_all(&self.pg)
+        .await?;
         let (mut promoted, mut flagged) = (Vec::new(), Vec::new());
         for r in rows {
             let (id, name): (Uuid, String) = (r.get(0), r.get(1));
@@ -576,7 +607,10 @@ impl SkillStore {
     ///
     /// # Errors
     /// The database.
-    pub async fn resolve_alias(&self, skill: Uuid) -> Result<Option<(Uuid, String, String)>, StoreError> {
+    pub async fn resolve_alias(
+        &self,
+        skill: Uuid,
+    ) -> Result<Option<(Uuid, String, String)>, StoreError> {
         Ok(sqlx::query(
             "SELECT s.skill_id, s.name, s.current_version FROM skill_registry.skill s
               WHERE s.skill_id = skill_registry.resolve_alias($1)",
@@ -591,7 +625,10 @@ impl SkillStore {
     ///
     /// # Errors
     /// The database.
-    pub async fn notices_since(&self, after: i64) -> Result<Vec<(i64, String, String, String)>, StoreError> {
+    pub async fn notices_since(
+        &self,
+        after: i64,
+    ) -> Result<Vec<(i64, String, String, String)>, StoreError> {
         Ok(sqlx::query(
             "SELECT notice_id, skill_name, kind, reason FROM skill_registry.skill_notice
               WHERE notice_id > $1 ORDER BY notice_id",
@@ -609,10 +646,12 @@ impl SkillStore {
     /// # Errors
     /// The database.
     pub async fn latest_notice(&self) -> Result<i64, StoreError> {
-        Ok(sqlx::query("SELECT COALESCE(max(notice_id), 0) FROM skill_registry.skill_notice")
-            .fetch_one(&self.pg)
-            .await?
-            .get(0))
+        Ok(
+            sqlx::query("SELECT COALESCE(max(notice_id), 0) FROM skill_registry.skill_notice")
+                .fetch_one(&self.pg)
+                .await?
+                .get(0),
+        )
     }
 
     // ── promotion (RB-2.1) ──────────────────────────────────────────────────
@@ -650,7 +689,12 @@ impl SkillStore {
     ///
     /// # Errors
     /// [`StoreError::Refused`] when the finding does not exist for this user; the database.
-    pub async fn cite_finding(&self, skill: Uuid, user: Uuid, finding: &str) -> Result<bool, StoreError> {
+    pub async fn cite_finding(
+        &self,
+        skill: Uuid,
+        user: Uuid,
+        finding: &str,
+    ) -> Result<bool, StoreError> {
         let tainted: bool = sqlx::query(
             "SELECT COALESCE((extra ->> 'tainted')::boolean, false)
                FROM agent_memory.entry WHERE entry_id = $1 AND user_id = $2",
@@ -725,13 +769,20 @@ impl SkillStore {
     ///
     /// # Errors
     /// The registry's shadowing trigger, or the database.
-    pub async fn move_scope(&self, skill: Uuid, to: &str, owner: Uuid, approved_by: Uuid) -> Result<(), StoreError> {
-        let from: String = sqlx::query("SELECT scope FROM skill_registry.skill WHERE skill_id = $1")
-            .bind(skill)
-            .fetch_optional(&self.pg)
-            .await?
-            .map(|r| r.get(0))
-            .ok_or_else(|| StoreError::NotFound(skill.to_string()))?;
+    pub async fn move_scope(
+        &self,
+        skill: Uuid,
+        to: &str,
+        owner: Uuid,
+        approved_by: Uuid,
+    ) -> Result<(), StoreError> {
+        let from: String =
+            sqlx::query("SELECT scope FROM skill_registry.skill WHERE skill_id = $1")
+                .bind(skill)
+                .fetch_optional(&self.pg)
+                .await?
+                .map(|r| r.get(0))
+                .ok_or_else(|| StoreError::NotFound(skill.to_string()))?;
         let mut tx = self.pg.begin().await?;
         sqlx::query("SELECT skill_registry.move_scope($1, $2, $3)")
             .bind(skill)
@@ -852,7 +903,10 @@ impl SkillStore {
     ///
     /// # Errors
     /// The database.
-    pub async fn sweep_retirements(&self, n: u32) -> Result<Vec<(String, &'static str)>, StoreError> {
+    pub async fn sweep_retirements(
+        &self,
+        n: u32,
+    ) -> Result<Vec<(String, &'static str)>, StoreError> {
         let rows = sqlx::query(
             "SELECT skill_id, name FROM skill_registry.skill
               WHERE status IN ('provisional', 'admitted') AND scope <> 'core'",
@@ -881,7 +935,10 @@ impl SkillStore {
     ///
     /// # Errors
     /// The database.
-    pub async fn reevaluations(&self, model: &str) -> Result<Vec<skills::lifecycle::ReEvaluation>, StoreError> {
+    pub async fn reevaluations(
+        &self,
+        model: &str,
+    ) -> Result<Vec<skills::lifecycle::ReEvaluation>, StoreError> {
         Ok(sqlx::query(
             "SELECT model, completed, failing FROM skill_registry.skill_library_reeval
               WHERE model = $1 ORDER BY reeval_id",
@@ -896,7 +953,11 @@ impl SkillStore {
             failing: r
                 .get::<Value, _>(2)
                 .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
                 .unwrap_or_default(),
         })
         .collect())
@@ -906,7 +967,12 @@ impl SkillStore {
     ///
     /// # Errors
     /// The database.
-    pub async fn record_reevaluation(&self, model: &str, completed: bool, failing: &[String]) -> Result<(), StoreError> {
+    pub async fn record_reevaluation(
+        &self,
+        model: &str,
+        completed: bool,
+        failing: &[String],
+    ) -> Result<(), StoreError> {
         sqlx::query("INSERT INTO skill_registry.skill_library_reeval (model, completed, failing) VALUES ($1, $2, $3)")
             .bind(model)
             .bind(completed)
@@ -925,16 +991,32 @@ impl SkillStore {
     ///
     /// # Errors
     /// The database.
-    pub async fn curator_input(&self, tenant: &str) -> Result<harness::memory::curator::CuratorInput, StoreError> {
+    pub async fn curator_input(
+        &self,
+        tenant: &str,
+    ) -> Result<harness::memory::curator::CuratorInput, StoreError> {
         use harness::memory::curator::{CuratorInput, FamilyRow, SimilarPair, SkillRow};
         fn ident(s: &str) -> String {
             let t: String = s
                 .to_ascii_lowercase()
                 .chars()
-                .map(|c| if c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-' | '.' | ':') { c } else { '_' })
+                .map(|c| {
+                    if c.is_ascii_lowercase()
+                        || c.is_ascii_digit()
+                        || matches!(c, '_' | '-' | '.' | ':')
+                    {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
                 .take(64)
                 .collect();
-            if t.is_empty() { "unnamed".to_string() } else { t }
+            if t.is_empty() {
+                "unnamed".to_string()
+            } else {
+                t
+            }
         }
         let rows = sqlx::query(
             "SELECT skill_id, name, current_version FROM skill_registry.skill
@@ -965,7 +1047,11 @@ impl SkillStore {
             for j in (i + 1)..bodies.len() {
                 let sim = skills::registry::similarity(&bodies[i].1, &bodies[j].1);
                 if sim >= 0.5 {
-                    pairs.push(SimilarPair { a: bodies[i].0.clone(), b: bodies[j].0.clone(), similarity: sim });
+                    pairs.push(SimilarPair {
+                        a: bodies[i].0.clone(),
+                        b: bodies[j].0.clone(),
+                        similarity: sim,
+                    });
                 }
             }
         }
@@ -984,17 +1070,29 @@ impl SkillStore {
             passed: u32::try_from(r.get::<i64, _>(2)).unwrap_or(u32::MAX),
         })
         .collect();
-        Ok(CuratorInput { skills, pairs, families })
+        Ok(CuratorInput {
+            skills,
+            pairs,
+            families,
+        })
     }
 
     /// Store a curator run's items as open proposals. Nothing here changes a skill.
     ///
     /// # Errors
     /// The database.
-    pub async fn save_curator_items(&self, run: Uuid, items: &[harness::memory::curator::CuratorItem]) -> Result<usize, StoreError> {
+    pub async fn save_curator_items(
+        &self,
+        run: Uuid,
+        items: &[harness::memory::curator::CuratorItem],
+    ) -> Result<usize, StoreError> {
         for item in items {
             let v = serde_json::to_value(item).unwrap_or(Value::Null);
-            let kind = v.get("kind").and_then(Value::as_str).unwrap_or("deprecate").to_string();
+            let kind = v
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("deprecate")
+                .to_string();
             sqlx::query("INSERT INTO skill_registry.curator_item (run_id, kind, detail) VALUES ($1, $2, $3)")
                 .bind(run)
                 .bind(kind)
@@ -1030,7 +1128,12 @@ impl SkillStore {
     ///
     /// # Errors
     /// The database; a decided or missing item.
-    pub async fn decide_curator_item(&self, item: i64, accept: bool, by: Uuid) -> Result<(), StoreError> {
+    pub async fn decide_curator_item(
+        &self,
+        item: i64,
+        accept: bool,
+        by: Uuid,
+    ) -> Result<(), StoreError> {
         let done = sqlx::query(
             "UPDATE skill_registry.curator_item SET status = $2, decided_by = $3, decided_at = now()
               WHERE item_id = $1 AND status = 'open'",

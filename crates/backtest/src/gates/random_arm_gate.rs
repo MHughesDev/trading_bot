@@ -33,19 +33,28 @@ impl ArmRequirement {
     /// The arm completed.
     #[must_use]
     pub fn met(campaign_id: impl Into<String>) -> Self {
-        Self { campaign_id: campaign_id.into(), refusal: None }
+        Self {
+            campaign_id: campaign_id.into(),
+            refusal: None,
+        }
     }
 
     /// The arm is missing or incomplete, for `reason` (the text of `research`'s `ArmError`).
     #[must_use]
     pub fn refused(campaign_id: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self { campaign_id: campaign_id.into(), refusal: Some(reason.into()) }
+        Self {
+            campaign_id: campaign_id.into(),
+            refusal: Some(reason.into()),
+        }
     }
 
     /// The arm could not be read. A gate that could not look does not pass.
     #[must_use]
     pub fn unreadable(campaign_id: impl Into<String>, error: impl std::fmt::Display) -> Self {
-        Self::refused(campaign_id, format!("the random arm could not be read: {error}"))
+        Self::refused(
+            campaign_id,
+            format!("the random arm could not be read: {error}"),
+        )
     }
 
     /// # Errors
@@ -62,7 +71,9 @@ impl ArmRequirement {
 #[must_use]
 pub fn apply_to_stack(mut verdict: StackVerdict, req: Option<&ArmRequirement>) -> StackVerdict {
     let Some(req) = req else { return verdict };
-    let Err(reason) = req.satisfied() else { return verdict };
+    let Err(reason) = req.satisfied() else {
+        return verdict;
+    };
     for o in &mut verdict.outcomes {
         if o.gate_no >= 3 {
             let was = std::mem::take(&mut o.detail);
@@ -77,7 +88,11 @@ pub fn apply_to_stack(mut verdict: StackVerdict, req: Option<&ArmRequirement>) -
             };
         }
     }
-    verdict.blocked_at = verdict.outcomes.iter().find(|o| !o.passed).map(|o| o.gate_no);
+    verdict.blocked_at = verdict
+        .outcomes
+        .iter()
+        .find(|o| !o.passed)
+        .map(|o| o.gate_no);
     verdict
 }
 
@@ -86,9 +101,13 @@ mod tests {
     use super::*;
 
     fn passing_stack() -> StackVerdict {
-        let outcomes: Vec<GateOutcome> =
-            (1..=16).map(|n| GateOutcome::structural_pass(n, "g", format!("gate {n} ok"))).collect();
-        StackVerdict { blocked_at: None, outcomes }
+        let outcomes: Vec<GateOutcome> = (1..=16)
+            .map(|n| GateOutcome::structural_pass(n, "g", format!("gate {n} ok")))
+            .collect();
+        StackVerdict {
+            blocked_at: None,
+            outcomes,
+        }
     }
 
     #[test]
@@ -96,22 +115,42 @@ mod tests {
         let v = apply_to_stack(passing_stack(), Some(&ArmRequirement::met("c")));
         assert_eq!(v.blocked_at, None);
         assert!(v.outcomes.iter().all(|o| o.passed));
-        assert_eq!(apply_to_stack(passing_stack(), None).blocked_at, None, "a non-campaign candidate has no arm");
+        assert_eq!(
+            apply_to_stack(passing_stack(), None).blocked_at,
+            None,
+            "a non-campaign candidate has no arm"
+        );
     }
 
     #[test]
     fn a_missing_or_incomplete_arm_refuses_gate_3_and_every_later_gate_naming_the_arm() {
         let req = ArmRequirement::refused("camp-1", "the random arm has run 4 of 10 trials");
         let v = apply_to_stack(passing_stack(), Some(&req));
-        assert_eq!(v.blocked_at, Some(3), "gates 1 and 2 stand; the block is at 3");
+        assert_eq!(
+            v.blocked_at,
+            Some(3),
+            "gates 1 and 2 stand; the block is at 3"
+        );
         for o in &v.outcomes {
             if o.gate_no < 3 {
-                assert!(o.passed, "gate {} is about the hypothesis and the data", o.gate_no);
+                assert!(
+                    o.passed,
+                    "gate {} is about the hypothesis and the data",
+                    o.gate_no
+                );
             } else {
                 assert!(!o.passed, "gate {} passed without the arm", o.gate_no);
                 assert!(!o.inconclusive);
-                assert!(o.detail.contains("camp-1") && o.detail.contains("4 of 10"), "{}", o.detail);
-                assert!(o.detail.contains("the gate itself read"), "what the gate said is kept: {}", o.detail);
+                assert!(
+                    o.detail.contains("camp-1") && o.detail.contains("4 of 10"),
+                    "{}",
+                    o.detail
+                );
+                assert!(
+                    o.detail.contains("the gate itself read"),
+                    "what the gate said is kept: {}",
+                    o.detail
+                );
             }
         }
     }
@@ -120,6 +159,9 @@ mod tests {
     fn an_unreadable_arm_is_a_refusal_not_a_pass() {
         let req = ArmRequirement::unreadable("c", "connection refused");
         assert!(req.satisfied().unwrap_err().contains("could not be read"));
-        assert_eq!(apply_to_stack(passing_stack(), Some(&req)).blocked_at, Some(3));
+        assert_eq!(
+            apply_to_stack(passing_stack(), Some(&req)).blocked_at,
+            Some(3)
+        );
     }
 }

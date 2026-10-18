@@ -71,9 +71,11 @@ impl From<Layer1Error> for JobError {
             Layer1Error::Refused { reason, message } => {
                 JobError::logic(ledger::TerminalReason::IntegrityRejected, reason, message)
             }
-            Layer1Error::Invalid(m) => {
-                JobError::logic(ledger::TerminalReason::IntegrityRejected, "invalid_series", m)
-            }
+            Layer1Error::Invalid(m) => JobError::logic(
+                ledger::TerminalReason::IntegrityRejected,
+                "invalid_series",
+                m,
+            ),
             Layer1Error::Infra(m) => JobError::infrastructure(m),
         }
     }
@@ -106,9 +108,16 @@ fn series_from(
     units: PositionUnits,
     allow_short: bool,
 ) -> Result<PositionSeries, Layer1Error> {
-    let bad = |m: &str| Layer1Error::Invalid(format!("the harness returned a malformed `{key}`: {m}"));
-    let ts = detail.get("ts").and_then(Value::as_array).ok_or_else(|| bad("no ts"))?;
-    let tg = detail.get("target").and_then(Value::as_array).ok_or_else(|| bad("no target"))?;
+    let bad =
+        |m: &str| Layer1Error::Invalid(format!("the harness returned a malformed `{key}`: {m}"));
+    let ts = detail
+        .get("ts")
+        .and_then(Value::as_array)
+        .ok_or_else(|| bad("no ts"))?;
+    let tg = detail
+        .get("target")
+        .and_then(Value::as_array)
+        .ok_or_else(|| bad("no target"))?;
     if ts.len() != tg.len() {
         return Err(bad("ts and target differ in length"));
     }
@@ -126,7 +135,11 @@ fn series_from(
             })
         })
         .collect::<Result<Vec<_>, Layer1Error>>()?;
-    Ok(PositionSeries { position_units: units, allow_short, points })
+    Ok(PositionSeries {
+        position_units: units,
+        allow_short,
+        points,
+    })
 }
 
 /// Turn the harness's answer into the full series and the truncation verdict.
@@ -139,33 +152,60 @@ pub fn assemble(
 ) -> Result<(PositionSeries, TruncationVerdict, Value), Layer1Error> {
     if out.get("refused").and_then(Value::as_bool) == Some(true) {
         return Err(Layer1Error::Refused {
-            reason: out.get("reason").and_then(Value::as_str).unwrap_or("refused").to_string(),
-            message: out.pointer("/detail/message").and_then(Value::as_str).unwrap_or("").to_string(),
+            reason: out
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("refused")
+                .to_string(),
+            message: out
+                .pointer("/detail/message")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
         });
     }
-    let d = out.get("detail").ok_or_else(|| Layer1Error::Invalid("no detail".into()))?;
+    let d = out
+        .get("detail")
+        .ok_or_else(|| Layer1Error::Invalid("no detail".into()))?;
     let units = match d.get("position_units").and_then(Value::as_str) {
         Some("units") => PositionUnits::Units,
         _ => PositionUnits::Fraction,
     };
-    let allow_short = d.get("allow_short").and_then(Value::as_bool).unwrap_or(false);
+    let allow_short = d
+        .get("allow_short")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let full = series_from(
-        d.get("full").ok_or_else(|| Layer1Error::Invalid("no full series".into()))?,
+        d.get("full")
+            .ok_or_else(|| Layer1Error::Invalid("no full series".into()))?,
         "full",
         units,
         allow_short,
     )?;
-    full.validate(Some(decision_times)).map_err(|e| Layer1Error::Invalid(e.to_string()))?;
+    full.validate(Some(decision_times))
+        .map_err(|e| Layer1Error::Invalid(e.to_string()))?;
     let mut cases = Vec::new();
-    for c in d.get("cases").and_then(Value::as_array).cloned().unwrap_or_default() {
+    for c in d
+        .get("cases")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+    {
         let cut_ns = c
             .get("cut_ns")
             .and_then(Value::as_i64)
             .ok_or_else(|| Layer1Error::Invalid("a case has no cut_ns".into()))?;
-        cases.push(TruncationCase { cut_ns, truncated: series_from(&c, "case", units, allow_short)? });
+        cases.push(TruncationCase {
+            cut_ns,
+            truncated: series_from(&c, "case", units, allow_short)?,
+        });
     }
     let verdict = check_truncation(&full, &cases);
-    Ok((full, verdict, d.get("lint").cloned().unwrap_or_else(|| json!([]))))
+    Ok((
+        full,
+        verdict,
+        d.get("lint").cloned().unwrap_or_else(|| json!([])),
+    ))
 }
 
 fn bars_parquet(bars: &[RawBar]) -> Result<Vec<u8>, Layer1Error> {
@@ -186,7 +226,9 @@ fn bars_parquet(bars: &[RawBar]) -> Result<Vec<u8>, Layer1Error> {
         Arc::new(Float64Array::from(bars.iter().map(g).collect::<Vec<_>>()))
     };
     let cols: Vec<ArrayRef> = vec![
-        Arc::new(Int64Array::from(bars.iter().map(|b| b.ts_ns).collect::<Vec<_>>())),
+        Arc::new(Int64Array::from(
+            bars.iter().map(|b| b.ts_ns).collect::<Vec<_>>(),
+        )),
         f(|b| b.open),
         f(|b| b.high),
         f(|b| b.low),
@@ -222,7 +264,11 @@ pub async fn compute(
     }
     let code_sha = sha256_hex(m.source.as_bytes());
     let times: Vec<i64> = bars.iter().map(|b| b.ts_ns).collect();
-    let cuts = truncation_points(cut_seed(&m.experiment_id, &code_sha), m.truncation_cuts, &times);
+    let cuts = truncation_points(
+        cut_seed(&m.experiment_id, &code_sha),
+        m.truncation_cuts,
+        &times,
+    );
 
     std::fs::create_dir_all(scratch).map_err(|e| Layer1Error::Infra(e.to_string()))?;
     let path = scratch.join("bars.parquet");
@@ -257,7 +303,10 @@ pub async fn compute(
     });
     let done = skills::runner::run(&skill, &payload, &config).await;
     let out = done.result.ok_or_else(|| {
-        Layer1Error::Infra(format!("the harness did not return a result: {:?}", done.record.outcome))
+        Layer1Error::Infra(format!(
+            "the harness did not return a result: {:?}",
+            done.record.outcome
+        ))
     })?;
     let (full, verdict, lint) = assemble(&out, &times)?;
     let declared = out
@@ -279,13 +328,22 @@ pub async fn compute(
         series: full,
         bars: bars
             .iter()
-            .map(|b| ArtifactBar { ts_ns: b.ts_ns, open: b.open, close: b.close })
+            .map(|b| ArtifactBar {
+                ts_ns: b.ts_ns,
+                open: b.open,
+                close: b.close,
+            })
             .collect(),
         initial_equity: m.initial_equity,
         fee_bps,
         half_spread_bps,
         cost_model_ref: cost.map_or_else(
-            || format!("cost:flat:fee={}bps:half_spread={}bps", m.fee_bps, m.half_spread_bps),
+            || {
+                format!(
+                    "cost:flat:fee={}bps:half_spread={}bps",
+                    m.fee_bps, m.half_spread_bps
+                )
+            },
             backtest::cost::CostModel::reference,
         ),
         data_snapshot: format!("asof:{}", m.as_of.to_rfc3339()),
@@ -294,7 +352,12 @@ pub async fn compute(
         params: m.params.clone().into_iter().collect(),
         seed: m.seed,
     };
-    Ok(Computed { artifact, verdict, lint, declared })
+    Ok(Computed {
+        artifact,
+        verdict,
+        lint,
+        declared,
+    })
 }
 
 /// The manifest's cost model, parsed and checked point-in-time against the window it prices.
@@ -302,14 +365,28 @@ pub async fn compute(
 /// # Errors
 /// A model that does not parse, is dated after the window, or asks for latency this evaluator
 /// does not apply (stated rather than silently ignored).
-pub fn resolve_cost_model(m: &Layer1Manifest) -> Result<Option<backtest::cost::CostModel>, JobError> {
-    let Some(v) = &m.cost_model else { return Ok(None) };
-    let refuse = |code: &str, why: String| JobError::logic(ledger::TerminalReason::IntegrityRejected, code, why);
-    let model: backtest::cost::CostModel =
-        serde_json::from_value(v.clone()).map_err(|e| refuse("invalid_cost_model", e.to_string()))?;
-    model.check_point_in_time(m.start.date_naive()).map_err(|e| refuse("cost_model_not_point_in_time", e.to_string()))?;
+pub fn resolve_cost_model(
+    m: &Layer1Manifest,
+) -> Result<Option<backtest::cost::CostModel>, JobError> {
+    let Some(v) = &m.cost_model else {
+        return Ok(None);
+    };
+    let refuse = |code: &str, why: String| {
+        JobError::logic(ledger::TerminalReason::IntegrityRejected, code, why)
+    };
+    let model: backtest::cost::CostModel = serde_json::from_value(v.clone())
+        .map_err(|e| refuse("invalid_cost_model", e.to_string()))?;
+    model
+        .check_point_in_time(m.start.date_naive())
+        .map_err(|e| refuse("cost_model_not_point_in_time", e.to_string()))?;
     if model.instrument != m.instrument {
-        return Err(refuse("cost_model_instrument", format!("the model prices {} and the run trades {}", model.instrument, m.instrument)));
+        return Err(refuse(
+            "cost_model_instrument",
+            format!(
+                "the model prices {} and the run trades {}",
+                model.instrument, m.instrument
+            ),
+        ));
     }
     if model.latency_bars > 0 {
         return Err(refuse(
@@ -336,8 +413,15 @@ impl Layer1Worker {
         clickhouse_url: String,
         artifacts: Option<Arc<ArtifactRegistry>>,
     ) -> Self {
-        let root = std::env::var("WORKSPACE_ROOT").map_or_else(|_| PathBuf::from("."), PathBuf::from);
-        Self { store, pg, clickhouse_url, artifacts, root }
+        let root =
+            std::env::var("WORKSPACE_ROOT").map_or_else(|_| PathBuf::from("."), PathBuf::from);
+        Self {
+            store,
+            pg,
+            clickhouse_url,
+            artifacts,
+            root,
+        }
     }
 
     async fn load_bars(&self, m: &Layer1Manifest) -> Result<Vec<RawBar>, Layer1Error> {
@@ -372,13 +456,24 @@ impl Worker for Layer1Worker {
     }
 
     fn estimate(&self, m: &Value) -> Cost {
-        let cuts = m.get("truncation_cuts").and_then(Value::as_f64).unwrap_or(8.0);
-        Cost { compute_s: Some(10.0 * (cuts + 1.0)), gpu_s: None, cost_usd: Some(0.0) }
+        let cuts = m
+            .get("truncation_cuts")
+            .and_then(Value::as_f64)
+            .unwrap_or(8.0);
+        Cost {
+            compute_s: Some(10.0 * (cuts + 1.0)),
+            gpu_s: None,
+            cost_usd: Some(0.0),
+        }
     }
 
     async fn run(&self, ctx: &JobContext, manifest: &Value) -> Result<JobOutput, JobError> {
         let m = Layer1Manifest::from_value(manifest).map_err(|e| {
-            JobError::logic(ledger::TerminalReason::IntegrityRejected, "invalid_manifest", e)
+            JobError::logic(
+                ledger::TerminalReason::IntegrityRejected,
+                "invalid_manifest",
+                e,
+            )
         })?;
         let job = self
             .store
@@ -401,10 +496,15 @@ impl Worker for Layer1Worker {
         .await;
         match m.sweep {
             None => {
-                let member = self.evaluate(&job, &m, &bars, cost_model.as_ref(), "single").await?;
+                let member = self
+                    .evaluate(&job, &m, &bars, cost_model.as_ref(), "single")
+                    .await?;
                 Ok(member.into_output())
             }
-            Some(sw) => self.sweep(&job, &m, &bars, cost_model.as_ref(), sw.max_runs).await,
+            Some(sw) => {
+                self.sweep(&job, &m, &bars, cost_model.as_ref(), sw.max_runs)
+                    .await
+            }
         }
     }
 }
@@ -444,7 +544,12 @@ impl Layer1Worker {
         let scratch = std::env::temp_dir().join(format!("layer1-{}-{tag}", job.job_id));
         let computed = compute(m, bars, &self.root, &scratch, cost_model).await;
         let _ = std::fs::remove_dir_all(&scratch);
-        let Computed { artifact, verdict, lint, .. } = computed?;
+        let Computed {
+            artifact,
+            verdict,
+            lint,
+            ..
+        } = computed?;
 
         let bytes = artifact.to_bytes();
         let series_sha = artifact.sha256();
@@ -481,11 +586,19 @@ impl Layer1Worker {
 
         let a = Arc::new(artifact);
         let cfg = a.run_config().map_err(|e| {
-            JobError::logic(ledger::TerminalReason::IntegrityRejected, "unsupported_run", e.to_string())
+            JobError::logic(
+                ledger::TerminalReason::IntegrityRejected,
+                "unsupported_run",
+                e.to_string(),
+            )
         })?;
         let verdict_for_run = verdict.clone();
-        let (pg, a2, experiment, job_id) =
-            (self.pg.clone(), a.clone(), m.experiment_id.clone(), job.job_id.clone());
+        let (pg, a2, experiment, job_id) = (
+            self.pg.clone(),
+            a.clone(),
+            m.experiment_id.clone(),
+            job.job_id.clone(),
+        );
         let cfg2 = cfg.clone();
         let (result, trial_id) = tokio::task::spawn_blocking(move || {
             let bt = Backtest::new(
@@ -494,10 +607,14 @@ impl Layer1Worker {
                 ledger::pg::PgTrialLedger::new(pg),
             );
             let dctx = ledger::DispatchContext::policy_without_effect_size(
-                &tenant, &job_id, "layer1_run", 1,
+                &tenant,
+                &job_id,
+                "layer1_run",
+                1,
             )
             .with_experiment(experiment);
-            bt.run_traced_with_trial(&RunDispatch::new(&dctx, &cfg2, 1.0)).map(|(r, _, t)| (r, t))
+            bt.run_traced_with_trial(&RunDispatch::new(&dctx, &cfg2, 1.0))
+                .map(|(r, _, t)| (r, t))
         })
         .await
         .map_err(|e| JobError::infrastructure(format!("the evaluation task: {e}")))?
@@ -518,7 +635,9 @@ impl Layer1Worker {
             Err(e) => Err(e.to_string()),
         };
         let rejected = result.status == RunStatus::RejectedIntegrity;
-        let res = a.resolution().unwrap_or(backtest::run::EvalResolution::Hour1);
+        let res = a
+            .resolution()
+            .unwrap_or(backtest::run::EvalResolution::Hour1);
         Ok(MemberOutput {
             summary: format!(
                 "layer1 run {}: {} trades, sharpe {:.2}; truncation {}{}",
@@ -526,9 +645,17 @@ impl Layer1Worker {
                 result.trades.len(),
                 result.metrics.sharpe,
                 if verdict.passed() { "passed" } else { "FAILED" },
-                if rejected { " (run rejected at Gate 0)" } else { "" }
+                if rejected {
+                    " (run rejected at Gate 0)"
+                } else {
+                    ""
+                }
             ),
-            metric: result.metrics.sharpe.is_finite().then_some(result.metrics.sharpe),
+            metric: result
+                .metrics
+                .sharpe
+                .is_finite()
+                .then_some(result.metrics.sharpe),
             rejected,
             result: json!({
                 "run_id": result.run_id.as_str(),
@@ -594,9 +721,16 @@ impl Layer1Worker {
                 high: spec["high"].as_f64().unwrap_or(f64::NAN),
             })
             .collect();
-        let seed = cut_seed(&m.experiment_id, &format!("sweep|{}", sha256_hex(m.source.as_bytes())));
+        let seed = cut_seed(
+            &m.experiment_id,
+            &format!("sweep|{}", sha256_hex(m.source.as_bytes())),
+        );
         let points = draw_points(&declared, n, seed).map_err(|e| {
-            JobError::logic(ledger::TerminalReason::IntegrityRejected, "invalid_sweep", e.to_string())
+            JobError::logic(
+                ledger::TerminalReason::IntegrityRejected,
+                "invalid_sweep",
+                e.to_string(),
+            )
         })?;
         let mut outcomes = Vec::with_capacity(points.len());
         let mut artifacts = Vec::new();
@@ -606,10 +740,16 @@ impl Layer1Worker {
                 sweep: None,
                 ..m.clone()
             };
-            match self.evaluate(job, &member_manifest, bars, cost_model, &format!("m{i}")).await {
+            match self
+                .evaluate(job, &member_manifest, bars, cost_model, &format!("m{i}"))
+                .await
+            {
                 Ok(o) => {
                     artifacts.extend(o.artifacts);
-                    outcomes.push(Ok(Member { metric: o.metric, rejected: o.rejected }));
+                    outcomes.push(Ok(Member {
+                        metric: o.metric,
+                        rejected: o.rejected,
+                    }));
                 }
                 // A member that could not run is counted by the report and not retried.
                 Err(e) => outcomes.push(Err(e.code.clone())),
@@ -655,10 +795,12 @@ mod tests {
     }
 
     fn manifest(source: &str) -> Layer1Manifest {
-        Layer1Manifest::from_value(&json!({"experiment_id":"e","source":source,"instrument":"BTC-USD",
+        Layer1Manifest::from_value(
+            &json!({"experiment_id":"e","source":source,"instrument":"BTC-USD",
             "timeframe":"1h","start":"2025-01-01T00:00:00Z","end":"2025-02-01T00:00:00Z",
             "as_of":"2025-03-01T00:00:00Z","params":{"lb":5},"seed":3,"fee_bps":10.0,
-            "half_spread_bps":2.0}))
+            "half_spread_bps":2.0}),
+        )
         .unwrap()
     }
 
@@ -670,7 +812,10 @@ mod tests {
         if std::env::var_os("SKILL_RUNNER_STACK_PATH").is_none() {
             let py = std::env::var("SKILL_RUNNER_PYTHON").unwrap_or_else(|_| "python".into());
             if let Ok(o) = std::process::Command::new(py)
-                .args(["-c", "import numpy, os; print(os.path.dirname(os.path.dirname(numpy.__file__)))"])
+                .args([
+                    "-c",
+                    "import numpy, os; print(os.path.dirname(os.path.dirname(numpy.__file__)))",
+                ])
                 .output()
             {
                 let dir = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -679,7 +824,11 @@ mod tests {
                 }
             }
         }
-        Path::new(env!("CARGO_MANIFEST_DIR")).parent().and_then(Path::parent).unwrap().to_path_buf()
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .unwrap()
+            .to_path_buf()
     }
 
     fn scratch(tag: &str) -> PathBuf {
@@ -710,7 +859,9 @@ mod tests {
             eprintln!("skipped: {why}");
             return;
         }
-        let c = compute(&manifest(CAUSAL), &bars(260), &root(), &scratch("ok"), None).await.expect("computes");
+        let c = compute(&manifest(CAUSAL), &bars(260), &root(), &scratch("ok"), None)
+            .await
+            .expect("computes");
         assert!(c.verdict.passed(), "{:?}", c.verdict);
         assert_eq!(c.artifact.series.points.len(), 260);
         assert!(c.artifact.strategy_version().starts_with("layer1."));
@@ -722,7 +873,15 @@ mod tests {
             return;
         }
         let leaky = CAUSAL.replace("shift(p.lb)", "shift(-p.lb)");
-        let c = compute(&manifest(&leaky), &bars(260), &root(), &scratch("leak"), None).await.expect("computes");
+        let c = compute(
+            &manifest(&leaky),
+            &bars(260),
+            &root(),
+            &scratch("leak"),
+            None,
+        )
+        .await
+        .expect("computes");
         let TruncationVerdict::Fail(f) = &c.verdict else {
             panic!("a shift(-n) must fail: {:?}", c.verdict)
         };
@@ -737,15 +896,24 @@ mod tests {
             return;
         }
         let none = CAUSAL.replace("params={\"lb\": Param.int(2, 50, 5)}", "params={}");
-        let e = compute(&manifest(&none), &bars(100), &root(), &scratch("np"), None).await.err().expect("refused");
-        assert!(matches!(&e, Layer1Error::Refused { reason, .. } if reason == "meta.no_params"), "{e}");
+        let e = compute(&manifest(&none), &bars(100), &root(), &scratch("np"), None)
+            .await
+            .err()
+            .expect("refused");
+        assert!(
+            matches!(&e, Layer1Error::Refused { reason, .. } if reason == "meta.no_params"),
+            "{e}"
+        );
     }
 
     #[test]
     fn a_series_that_is_not_on_decision_times_is_refused_at_assembly() {
         let times = [1_i64, 2, 3];
         let out = json!({"detail": {"full": {"ts": [1, 9], "target": [1.0, 0.0]}, "cases": [], "position_units": "fraction"}});
-        assert!(matches!(assemble(&out, &times), Err(Layer1Error::Invalid(_))));
+        assert!(matches!(
+            assemble(&out, &times),
+            Err(Layer1Error::Invalid(_))
+        ));
     }
 
     #[test]

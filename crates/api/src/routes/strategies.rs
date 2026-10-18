@@ -239,9 +239,15 @@ pub(crate) struct Written {
 #[derive(Debug)]
 pub enum RevisionError {
     /// The named parent cannot be the parent (422).
-    Lineage { error: &'static str, message: String },
+    Lineage {
+        error: &'static str,
+        message: String,
+    },
     /// The database (500).
-    Database { error: &'static str, message: String },
+    Database {
+        error: &'static str,
+        message: String,
+    },
 }
 
 impl RevisionError {
@@ -366,14 +372,13 @@ pub async fn append_revision(
     // row as "this is a first version" — an absent measurement recorded
     // as a reading, in the one column whose whole job is to say what
     // came before.
-    let own_head: Option<String> = sqlx::query_scalar(
-        "SELECT head_revision FROM strategy_definitions WHERE strategy_id = $1",
-    )
-    .bind(w.strategy_id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(|e| RevisionError::db("parent_lookup_failed", e))?
-    .flatten();
+    let own_head: Option<String> =
+        sqlx::query_scalar("SELECT head_revision FROM strategy_definitions WHERE strategy_id = $1")
+            .bind(w.strategy_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| RevisionError::db("parent_lookup_failed", e))?
+            .flatten();
 
     // The case the slug rule cannot express: a definition derived from a
     // *different* lineage. Resolved to that strategy's head, and refused
@@ -805,7 +810,11 @@ pub async fn apply_list(
             if backtest::runner::is_v3(&def_json) {
                 let g = serde_json::from_value::<domain::strategy_graph::StrategyGraph>(def_json)
                     .ok()?;
-                if params.asset_class.as_deref().is_some_and(|a| a != g.asset_class) {
+                if params
+                    .asset_class
+                    .as_deref()
+                    .is_some_and(|a| a != g.asset_class)
+                {
                     return None;
                 }
                 return Some(json!({

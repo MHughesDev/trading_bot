@@ -1200,10 +1200,10 @@ fn a_finding_may_cite_an_open_question_the_brief_showed() {
             })
             .to_string(),
         });
-        fx.iter().any(
-            |e| matches!(e, Effect::Note(harness::drive::Note::Rejected { code, .. })
-            if *code == "drive.finding_evidence_unattributable"),
-        )
+        fx.iter().any(|e| {
+            matches!(e, Effect::Note(harness::drive::Note::Rejected { code, .. })
+            if *code == "drive.finding_evidence_unattributable")
+        })
     };
     assert!(
         !rejected_as_unattributable(true),

@@ -273,10 +273,34 @@ mod tests {
     fn a_suspended_run_resumes_across_a_harness_version_change() {
         let rows = vec![
             row_v(1, "input", "Admission", json!({}), "0.1.0"),
-            row_v(2, "effect", "ExecuteTool", json!({ "name": "run_sweep", "idempotent": false }), "0.1.0"),
-            row_v(3, "input", "JobAccepted", json!({ "job_id": "sweep:1" }), "0.1.0"),
-            row_v(4, "effect", "Await", json!({ "job_id": "sweep:1" }), "0.1.0"),
-            row_v(5, "state", "Suspended", json!({ "job_id": "sweep:1", "schema": 1 }), "0.1.0"),
+            row_v(
+                2,
+                "effect",
+                "ExecuteTool",
+                json!({ "name": "run_sweep", "idempotent": false }),
+                "0.1.0",
+            ),
+            row_v(
+                3,
+                "input",
+                "JobAccepted",
+                json!({ "job_id": "sweep:1" }),
+                "0.1.0",
+            ),
+            row_v(
+                4,
+                "effect",
+                "Await",
+                json!({ "job_id": "sweep:1" }),
+                "0.1.0",
+            ),
+            row_v(
+                5,
+                "state",
+                "Suspended",
+                json!({ "job_id": "sweep:1", "schema": 1 }),
+                "0.1.0",
+            ),
         ];
         let Resume::Replay { pending, .. } = decide_for_resume(&rows, "0.2.0", 1) else {
             panic!("a compatible schema resumes across the version change");

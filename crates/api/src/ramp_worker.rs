@@ -66,7 +66,8 @@ pub struct PassReport {
 /// Where a size becomes an effect.
 #[async_trait]
 pub trait RampEffects: Send + Sync {
-    async fn apply_size(&self, deployment_id: Uuid, size: Size, reason: &str) -> Result<(), String>;
+    async fn apply_size(&self, deployment_id: Uuid, size: Size, reason: &str)
+        -> Result<(), String>;
 }
 
 /// The production effects: the monitor's own controls.
@@ -97,7 +98,10 @@ impl RampEffects for MonitorEffects {
             )
             .map_err(|e| e.to_string())?
             .with_reason(reason.to_owned());
-            store.record_event(&event).await.map_err(|e| e.to_string())?;
+            store
+                .record_event(&event)
+                .await
+                .map_err(|e| e.to_string())?;
             let state = if pct >= 100 { "nominal" } else { "scaled_down" };
             store
                 .set_strategy_state(&key, state, i16::from(pct))
@@ -141,11 +145,12 @@ async fn running(pg: &PgPool, policy: &RampPolicy) -> Result<Vec<Running>, sqlx:
         let profile_id: String = r
             .get::<Option<String>, _>("profile_id")
             .unwrap_or_else(|| "paper_v1".to_owned());
-        let authorises: Option<bool> =
-            sqlx::query_scalar("SELECT authorises_capital FROM mlops.gate_profile WHERE profile_id = $1")
-                .bind(&profile_id)
-                .fetch_optional(pg)
-                .await?;
+        let authorises: Option<bool> = sqlx::query_scalar(
+            "SELECT authorises_capital FROM mlops.gate_profile WHERE profile_id = $1",
+        )
+        .bind(&profile_id)
+        .fetch_optional(pg)
+        .await?;
         let verdict: Vec<(i32, bool)> = r
             .get::<Option<serde_json::Value>, _>("verdict")
             .and_then(|v| v.as_array().cloned())
@@ -239,7 +244,11 @@ async fn evidence(
         ev.signal_match = r.get("sig");
         let (sr, sm): (f64, f64) = (r.get("slip_r"), r.get("slip_m"));
         ev.slippage_ratio = Some(if sm.abs() < 1e-12 {
-            if sr.abs() < 1e-12 { 1.0 } else { 1e9 }
+            if sr.abs() < 1e-12 {
+                1.0
+            } else {
+                1e9
+            }
         } else {
             sr / sm
         });
@@ -340,7 +349,9 @@ async fn one(
         Some(p) => p,
         None => {
             let (s, e) = next_period(d.anchor, d.period_days);
-            open_period(pg, d.deployment_id, 1, s, e).await.map_err(db)?;
+            open_period(pg, d.deployment_id, 1, s, e)
+                .await
+                .map_err(db)?;
             report.periods_opened += 1;
             (1, s, e)
         }
@@ -375,7 +386,9 @@ async fn one(
             break;
         }
         let (s, e) = next_period(end, d.period_days);
-        open_period(pg, d.deployment_id, no + 1, s, e).await.map_err(db)?;
+        open_period(pg, d.deployment_id, no + 1, s, e)
+            .await
+            .map_err(db)?;
         report.periods_opened += 1;
         current = (no + 1, s, e);
     }
@@ -420,7 +433,12 @@ async fn review_one(
     let ev = evidence(pg, d, start, end, now).await.map_err(db)?;
     let judgement = ramp_gate::judge(&inputs, &ev);
     let authority = if judgement.step_up_allowed {
-        let mut verdicts: Vec<(i32, bool)> = d.verdict.iter().copied().filter(|(n, _)| *n != 16).collect();
+        let mut verdicts: Vec<(i32, bool)> = d
+            .verdict
+            .iter()
+            .copied()
+            .filter(|(n, _)| *n != 16)
+            .collect();
         verdicts.push((16, true));
         Some(
             capital::authorise(&d.profile_id, d.authorises_capital, &verdicts)
@@ -431,7 +449,11 @@ async fn review_one(
     };
     let rung_before = ramp.rung();
     let event = ramp
-        .review(u32::try_from(no).map_err(|e| e.to_string())?, &judgement, authority.as_ref())
+        .review(
+            u32::try_from(no).map_err(|e| e.to_string())?,
+            &judgement,
+            authority.as_ref(),
+        )
         .map_err(|e| e.to_string())?;
     // Gate 16, rendered from the judged period (T-3.2): the gate's own verdict is
     // stored beside the judgement it was rendered from.
@@ -440,7 +462,12 @@ async fn review_one(
     } else {
         backtest::gates::profile::GateProfile::strict_v1().authorising_capital(d.authorises_capital)
     };
-    let mut gate_verdicts: Vec<(i32, bool)> = d.verdict.iter().copied().filter(|(n, _)| *n != 16).collect();
+    let mut gate_verdicts: Vec<(i32, bool)> = d
+        .verdict
+        .iter()
+        .copied()
+        .filter(|(n, _)| *n != 16)
+        .collect();
     gate_verdicts.push((16, true));
     let gate16 = backtest::gates::evaluators::gate_16_capital_ramp(
         &profile,
@@ -491,7 +518,9 @@ async fn review_one(
         let (Some(before), Some(after)) = (rung_before, ramp.rung()) else {
             return Err("a step-up without rungs".into());
         };
-        record_raise(&mut tx, d, before, after, review_id).await.map_err(db)?;
+        record_raise(&mut tx, d, before, after, review_id)
+            .await
+            .map_err(db)?;
     }
     tx.commit().await.map_err(db)?;
     Ok(event.outcome)
@@ -515,7 +544,11 @@ async fn record_raise(
     .bind(&d.profile_id)
     .bind(format!("{:.3}", before.value()))
     .bind(format!("{:.3}", after.value()))
-    .bind(format!("Gate 16 passed a completed review period: {} -> {}", before.as_str(), after.as_str()))
+    .bind(format!(
+        "Gate 16 passed a completed review period: {} -> {}",
+        before.as_str(),
+        after.as_str()
+    ))
     .bind(ACTOR)
     .bind(review_id)
     .execute(&mut **tx)

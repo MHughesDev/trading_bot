@@ -202,7 +202,9 @@ mod tests {
 
     #[test]
     fn the_close_path_equals_the_high_low_path_on_a_series_with_no_wicks() {
-        let close = [100.0, 100.5, 101.0, 102.5, 103.0, 99.0, 98.0, 98.5, 97.0, 99.0];
+        let close = [
+            100.0, 100.5, 101.0, 102.5, 103.0, 99.0, 98.0, 98.5, 97.0, 99.0,
+        ];
         let b: Vec<PriceBar> = close
             .iter()
             .map(|&c| PriceBar {

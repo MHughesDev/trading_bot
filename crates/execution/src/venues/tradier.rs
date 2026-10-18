@@ -325,7 +325,10 @@ mod inbound_tests {
 
     #[test]
     fn an_unknown_order_type_is_refused_not_read_as_a_limit() {
-        assert_eq!(parse_order_type("stop_limit").unwrap(), OrderType::StopLimit);
+        assert_eq!(
+            parse_order_type("stop_limit").unwrap(),
+            OrderType::StopLimit
+        );
         assert!(parse_order_type("").is_err());
         assert!(parse_order_type("debit").is_err());
     }

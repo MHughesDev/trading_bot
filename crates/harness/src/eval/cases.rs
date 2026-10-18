@@ -1515,7 +1515,12 @@ mod tests {
         assert_eq!(open.len() + sealed.len(), all().len());
         assert!(!sealed.is_empty());
         // Every suite with two or more cases keeps at least one open case.
-        for suite in [Suite::Routing, Suite::Budget, Suite::Stopping, Suite::Honesty] {
+        for suite in [
+            Suite::Routing,
+            Suite::Budget,
+            Suite::Stopping,
+            Suite::Honesty,
+        ] {
             let total = all().iter().filter(|c| c.suite == suite).count();
             let open_n = open.iter().filter(|c| c.suite == suite).count();
             assert!(total < 2 || open_n >= 1, "{suite:?} has no open case");
@@ -1607,7 +1612,10 @@ mod tests {
         skipped.null_family = None;
         let c = review(&skipped);
         assert!(c.blocks(), "a draft that skipped the null is sent back");
-        assert!(c.findings.iter().any(|f| f.check == Check::NullComparisonRan));
+        assert!(c
+            .findings
+            .iter()
+            .any(|f| f.check == Check::NullComparisonRan));
     }
 
     /// S-4.11: the gate applied to the scorecard a PR actually produces.
@@ -1645,7 +1653,9 @@ mod tests {
             .iter_mut()
             .find(|s| s.suite == "routing")
             .expect("a routing suite");
-        routing.failed_cases.push("routing/a_case_that_just_started_failing".into());
+        routing
+            .failed_cases
+            .push("routing/a_case_that_just_started_failing".into());
         routing.passed = routing.passed.saturating_sub(1);
         // The frontier improves (or, with no frontier cases, a synthetic card
         // that is strictly better than its baseline).

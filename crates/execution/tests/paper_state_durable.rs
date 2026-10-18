@@ -53,11 +53,17 @@ async fn a_restart_restores_cash_positions_and_realized_pnl() {
     let before = PaperTradingEngine::new();
     before.on_mark("BTC-USD", Price::from_str("50000").unwrap());
     before
-        .submit(AssetClass::CryptoSpotCex, &market("BTC-USD", Side::Buy, "1"))
+        .submit(
+            AssetClass::CryptoSpotCex,
+            &market("BTC-USD", Side::Buy, "1"),
+        )
         .unwrap();
     before.on_mark("BTC-USD", Price::from_str("52000").unwrap());
     before
-        .submit(AssetClass::CryptoSpotCex, &market("BTC-USD", Side::Sell, "0.5"))
+        .submit(
+            AssetClass::CryptoSpotCex,
+            &market("BTC-USD", Side::Sell, "0.5"),
+        )
         .unwrap();
 
     let mut last = HashMap::new();
@@ -88,12 +94,22 @@ async fn a_restart_restores_cash_positions_and_realized_pnl() {
         before.snapshot(AssetClass::CryptoSpotCex),
         after.snapshot(AssetClass::CryptoSpotCex),
     );
-    assert_ne!(fresh.cash, a.cash, "the test must trade enough to tell a reseed apart");
+    assert_ne!(
+        fresh.cash, a.cash,
+        "the test must trade enough to tell a reseed apart"
+    );
     assert_eq!(b.cash, a.cash, "cash survived the restart");
-    assert_eq!(b.realized_pnl, a.realized_pnl, "realized P&L survived the restart");
+    assert_eq!(
+        b.realized_pnl, a.realized_pnl,
+        "realized P&L survived the restart"
+    );
     assert_eq!(b.fees_paid, a.fees_paid);
     assert_eq!(b.positions.len(), 1);
-    assert_eq!(b.positions[0].quantity, Decimal::new(5, 1), "the open position survived");
+    assert_eq!(
+        b.positions[0].quantity,
+        Decimal::new(5, 1),
+        "the open position survived"
+    );
     assert_eq!(
         before.daily_loss_usd(AssetClass::CryptoSpotCex),
         after.daily_loss_usd(AssetClass::CryptoSpotCex),

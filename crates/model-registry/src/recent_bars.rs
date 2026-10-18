@@ -91,7 +91,11 @@ mod tests {
     #[test]
     fn a_bad_price_drops_everything_before_it() {
         let r = log_returns(&[100.0, 101.0, 0.0, 50.0, 51.0]);
-        assert_eq!(r.len(), 1, "only the return after the bad close survives: {r:?}");
+        assert_eq!(
+            r.len(),
+            1,
+            "only the return after the bad close survives: {r:?}"
+        );
         assert!(log_returns(&[100.0]).is_empty());
         assert!(log_returns(&[f64::NAN, 1.0, 2.0]).len() == 1);
     }
@@ -99,6 +103,9 @@ mod tests {
     #[tokio::test]
     async fn no_store_means_no_series() {
         let b = RecentBars::with_store(None);
-        assert!(b.recent_returns("BTC-USD", "1m", Utc::now()).await.is_none());
+        assert!(b
+            .recent_returns("BTC-USD", "1m", Utc::now())
+            .await
+            .is_none());
     }
 }

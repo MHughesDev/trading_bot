@@ -188,7 +188,10 @@ pub fn cost_axis_inert(measurements: &[Measurement]) -> bool {
     use std::collections::BTreeMap;
     let mut by_window: BTreeMap<u32, Vec<f64>> = BTreeMap::new();
     for m in measurements {
-        by_window.entry(m.replicate.window).or_default().push(m.value);
+        by_window
+            .entry(m.replicate.window)
+            .or_default()
+            .push(m.value);
     }
     let comparable: Vec<&Vec<f64>> = by_window.values().filter(|v| v.len() >= 2).collect();
     !comparable.is_empty()
@@ -411,8 +414,8 @@ pub type Evaluator = Arc<dyn CampaignEvaluator>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::campaign_driver::study_worker::{SweepCall, SweepOutcome};
     use crate::campaign_driver::study_worker::EvaluationSpec;
+    use crate::campaign_driver::study_worker::{SweepCall, SweepOutcome};
     use std::sync::Mutex;
 
     /// An evaluator that scores each candidate by a closure over (params, cost
@@ -636,7 +639,15 @@ mod tests {
         let start = src.find("pub struct CompareBody").expect("request type");
         let end = src[start..].find("\n}\n").expect("end of struct") + start;
         let body = &src[start..end];
-        for forbidden in ["seed", "delta", "rope", "scale", "replicates", "alpha", "k_max"] {
+        for forbidden in [
+            "seed",
+            "delta",
+            "rope",
+            "scale",
+            "replicates",
+            "alpha",
+            "k_max",
+        ] {
             assert!(
                 !body.to_lowercase().contains(forbidden),
                 "the request type must not carry `{forbidden}`:\n{body}"

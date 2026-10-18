@@ -74,12 +74,13 @@ async fn a_minted_session_token_carries_exactly_the_research_scopes() {
     expected.sort();
     assert_eq!(granted, expected);
 
-    let stored: Vec<String> = sqlx::query("SELECT scopes FROM sessions WHERE token = session_token_hash($1)")
-        .bind(&minted.token)
-        .fetch_one(&pool)
-        .await
-        .expect("stored session")
-        .get("scopes");
+    let stored: Vec<String> =
+        sqlx::query("SELECT scopes FROM sessions WHERE token = session_token_hash($1)")
+            .bind(&minted.token)
+            .fetch_one(&pool)
+            .await
+            .expect("stored session")
+            .get("scopes");
     assert_eq!(stored.len(), scopes::RESEARCH_SCOPES.len());
 
     cleanup(&pool, user).await;
@@ -168,12 +169,13 @@ async fn revoking_a_token_makes_it_unusable() {
         .await
         .expect("revoke");
 
-    let remaining: i64 = sqlx::query("SELECT count(*) AS n FROM sessions WHERE token = session_token_hash($1)")
-        .bind(&minted.token)
-        .fetch_one(&pool)
-        .await
-        .unwrap()
-        .get("n");
+    let remaining: i64 =
+        sqlx::query("SELECT count(*) AS n FROM sessions WHERE token = session_token_hash($1)")
+            .bind(&minted.token)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get("n");
     assert_eq!(
         remaining, 0,
         "a container that outlives its session must not keep working"
@@ -201,12 +203,13 @@ async fn a_session_token_is_bound_to_one_project() {
         .await
         .expect("mint");
 
-    let bound: Uuid = sqlx::query("SELECT project_id FROM sessions WHERE token = session_token_hash($1)")
-        .bind(&minted.token)
-        .fetch_one(&pool)
-        .await
-        .unwrap()
-        .get("project_id");
+    let bound: Uuid =
+        sqlx::query("SELECT project_id FROM sessions WHERE token = session_token_hash($1)")
+            .bind(&minted.token)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get("project_id");
 
     assert_eq!(bound, first.project_id);
     assert_ne!(

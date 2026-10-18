@@ -6,6 +6,8 @@ pub mod agent_falsification;
 pub mod agent_preview;
 pub mod agent_sessions;
 pub mod agent_templates;
+pub mod alerts_inbox;
+pub mod alpha_chain;
 pub mod asset_lifecycle;
 pub mod assets;
 pub mod automations;
@@ -16,17 +18,14 @@ pub mod data;
 pub mod deployments;
 pub mod desk_catalogue;
 pub mod desk_charter;
-pub mod alerts_inbox;
 pub mod desk_digest;
-pub mod exec_quality;
 pub mod desk_running;
 pub mod dossiers;
 pub mod evidence;
-pub mod strategy_notes;
+pub mod exec_quality;
 pub mod experiments;
-pub mod falsification;
-pub mod alpha_chain;
 pub mod explain_trade;
+pub mod falsification;
 pub mod jobs;
 pub mod ledger;
 pub mod lifecycle;
@@ -45,9 +44,10 @@ pub mod proposals;
 pub mod research;
 pub mod research_sessions;
 pub mod selections;
+pub mod skills;
 pub mod strategies;
 pub mod strategies_v3;
-pub mod skills;
+pub mod strategy_notes;
 pub mod streams;
 pub mod synthetic;
 pub mod trading;
@@ -409,7 +409,10 @@ pub fn router(state: AppState) -> Router {
             "/api/desk/runs/{run_id}/hypotheses",
             get(desk_running::hypotheses),
         )
-        .route("/api/desk/kill-switch/events", get(desk_digest::kill_switch_events))
+        .route(
+            "/api/desk/kill-switch/events",
+            get(desk_digest::kill_switch_events),
+        )
         // S-8.2: has this hypothesis already been registered?
         .route(
             "/api/lifecycle/hypotheses/similar",
@@ -434,45 +437,106 @@ pub fn router(state: AppState) -> Router {
         .route("/api/skills/glossary", get(skills::glossary))
         .route("/api/skills/search", get(skills::search))
         .route("/api/skills/notices", get(skills::notices))
-        .route("/api/skills/proposals", get(skills::list_proposals).post(skills::propose))
-        .route("/api/skills/proposals/{proposal_id}/pairs", post(skills::add_pair))
-        .route("/api/skills/proposals/{proposal_id}/steps", post(skills::add_step))
-        .route("/api/skills/proposals/{proposal_id}/verify", post(skills::verify))
-        .route("/api/skills/proposals/{proposal_id}/admit", post(skills::admit))
-        .route("/api/skills/runs/{session_id}/bill", get(skills::bill_of_materials))
+        .route(
+            "/api/skills/proposals",
+            get(skills::list_proposals).post(skills::propose),
+        )
+        .route(
+            "/api/skills/proposals/{proposal_id}/pairs",
+            post(skills::add_pair),
+        )
+        .route(
+            "/api/skills/proposals/{proposal_id}/steps",
+            post(skills::add_step),
+        )
+        .route(
+            "/api/skills/proposals/{proposal_id}/verify",
+            post(skills::verify),
+        )
+        .route(
+            "/api/skills/proposals/{proposal_id}/admit",
+            post(skills::admit),
+        )
+        .route(
+            "/api/skills/runs/{session_id}/bill",
+            get(skills::bill_of_materials),
+        )
         // `item/` because a bare `{skill_id}` beside the Python library's static
         // `/api/skills/run` would shadow GET on it (the shadowing test).
         .route("/api/skills/item/{skill_id}", get(skills::get_skill))
         .route("/api/skills/{skill_id}/vote", post(skills::vote))
-        .route("/api/skills/{skill_id}/quarantine", post(skills::quarantine))
+        .route(
+            "/api/skills/{skill_id}/quarantine",
+            post(skills::quarantine),
+        )
         .route("/api/skills/{skill_id}/deprecate", post(skills::deprecate))
-        .route("/api/skills/{skill_id}/conditions", post(skills::record_condition))
+        .route(
+            "/api/skills/{skill_id}/conditions",
+            post(skills::record_condition),
+        )
         .route("/api/skills/{skill_id}/promote", post(skills::promote))
         .route("/api/skills/curator/run", post(skills::curator_run))
         .route("/api/skills/curator/items", get(skills::curator_items))
-        .route("/api/skills/curator/items/{item_id}/decide", post(skills::curator_decide))
+        .route(
+            "/api/skills/curator/items/{item_id}/decide",
+            post(skills::curator_decide),
+        )
         // Set R-b: the knowledge model (move memory, analogs, regimes, the tier ladder,
         // the random arm). Platform-write routes need `knowledge.write`.
-        .route("/api/knowledge/analogs", get(crate::knowledge_routes::analogs))
-        .route("/api/knowledge/moves/veto", post(crate::knowledge_routes::veto))
-        .route("/api/knowledge/moves/records", post(crate::knowledge_routes::record_move))
-        .route("/api/knowledge/moves/overrides", post(crate::knowledge_routes::override_veto))
-        .route("/api/knowledge/hypothesis-sources", post(crate::knowledge_routes::hypothesis_source))
+        .route(
+            "/api/knowledge/analogs",
+            get(crate::knowledge_routes::analogs),
+        )
+        .route(
+            "/api/knowledge/moves/veto",
+            post(crate::knowledge_routes::veto),
+        )
+        .route(
+            "/api/knowledge/moves/records",
+            post(crate::knowledge_routes::record_move),
+        )
+        .route(
+            "/api/knowledge/moves/overrides",
+            post(crate::knowledge_routes::override_veto),
+        )
+        .route(
+            "/api/knowledge/hypothesis-sources",
+            post(crate::knowledge_routes::hypothesis_source),
+        )
         .route("/api/knowledge/tiers", get(crate::knowledge_routes::tiers))
-        .route("/api/knowledge/regimes/profile", get(crate::knowledge_routes::regime_profile))
+        .route(
+            "/api/knowledge/regimes/profile",
+            get(crate::knowledge_routes::regime_profile),
+        )
         .route(
             "/api/knowledge/regimes/prior",
-            get(crate::knowledge_routes::regime_prior).post(crate::knowledge_routes::update_regime_prior),
+            get(crate::knowledge_routes::regime_prior)
+                .post(crate::knowledge_routes::update_regime_prior),
         )
-        .route("/api/knowledge/regimes/gate", post(crate::knowledge_routes::regime_gate))
-        .route("/api/knowledge/campaigns/{campaign_id}/random-arm", post(crate::knowledge_routes::create_arm))
-        .route("/api/knowledge/campaigns/{campaign_id}/scores", post(crate::knowledge_routes::record_arm_score))
-        .route("/api/knowledge/campaigns/{campaign_id}/compare-to-random", get(crate::knowledge_routes::compare_random))
+        .route(
+            "/api/knowledge/regimes/gate",
+            post(crate::knowledge_routes::regime_gate),
+        )
+        .route(
+            "/api/knowledge/campaigns/{campaign_id}/random-arm",
+            post(crate::knowledge_routes::create_arm),
+        )
+        .route(
+            "/api/knowledge/campaigns/{campaign_id}/scores",
+            post(crate::knowledge_routes::record_arm_score),
+        )
+        .route(
+            "/api/knowledge/campaigns/{campaign_id}/compare-to-random",
+            get(crate::knowledge_routes::compare_random),
+        )
         // Evidence for the falsification tools (ADR-P7-05). None of these
         // returns a verdict; each answers one defect class with a number.
         // The comments an author wrote, kept beside the revision (S-5.15).
         .route("/api/strategy-notes", post(strategy_notes::put))
-        .route("/api/strategy-notes/{revision_hash}", get(strategy_notes::get))
+        .route(
+            "/api/strategy-notes/{revision_hash}",
+            get(strategy_notes::get),
+        )
         .route("/api/evidence/trades", post(evidence::trades))
         .route("/api/evidence/data-quality", post(evidence::data_quality))
         .route(
@@ -483,7 +547,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/data/coverage", get(data::get_coverage))
         .route("/api/data/universe/{name}", get(data::get_universe))
         .route("/api/data/macro", get(data::get_macro))
-        .route("/api/data/prediction_markets", get(data::get_prediction_markets))
+        .route(
+            "/api/data/prediction_markets",
+            get(data::get_prediction_markets),
+        )
         .route("/api/data/text", get(data::get_text))
         .route("/api/data/bars/derived", get(data::get_derived_bars))
         .route("/api/data/search", get(data::get_search))
@@ -923,7 +990,10 @@ pub fn router(state: AppState) -> Router {
         // A `transform` (Set U U-5.7): custom code with a declared contract.
         .route("/api/models/transforms", post(models::register_transform))
         // Model Studio (Set N): families, declarations, fleet, verdicts, promotion proposals.
-        .route("/api/models/studio/families", get(models_studio::list_families))
+        .route(
+            "/api/models/studio/families",
+            get(models_studio::list_families),
+        )
         .route(
             "/api/models/declarations/validate",
             post(models_studio::validate_declaration),
@@ -1040,7 +1110,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/models/{id}/traces", get(models::get_traces))
         .route("/api/models/{id}/used-by", get(models::get_used_by))
         // H-5.4 / H-5.5: the activity feed and the recorded loss curve.
-        .route("/api/models/{id}/events", get(model_training_progress::events))
+        .route(
+            "/api/models/{id}/events",
+            get(model_training_progress::events),
+        )
         .route(
             "/api/models/{id}/runs/{run_id}/curve",
             get(model_training_progress::curve),

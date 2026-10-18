@@ -571,7 +571,11 @@ mod tests {
         let id = uuid::Uuid::from_u128(7);
         let v = decide_series(&series("X"), graded("C"), Some((id, good_waiver())));
         assert!(v.admitted());
-        assert_eq!(v.waiver_id, Some(id), "the waiver id travels to the lineage");
+        assert_eq!(
+            v.waiver_id,
+            Some(id),
+            "the waiver id travels to the lineage"
+        );
     }
 
     /// A waiver is never recorded against a grade that did not need it, and never
@@ -604,7 +608,10 @@ mod tests {
         assert!(!v.admitted());
         assert_eq!(v.refusal, Some("data_ungraded"));
         assert!(v.fix.unwrap().contains("data_qc job"));
-        assert!(v.grade.is_none(), "it must read as ungraded, never as a letter");
+        assert!(
+            v.grade.is_none(),
+            "it must read as ungraded, never as a letter"
+        );
     }
 
     #[test]
@@ -630,13 +637,18 @@ mod tests {
         let create = body.find("state.suite.create_experiment(").unwrap();
         assert!(gate < create, "the gate must precede creation");
         let between = &body[gate..create];
-        assert!(!between.contains("permits("), "no scope branch may sit between");
-        for scope in crate::auth::scopes::RESEARCH_SCOPES
-            .iter()
-            .copied()
-            .chain([crate::auth::scopes::WEB_FULL, crate::auth::scopes::TEXT_READER])
-        {
-            assert!(!between.contains(scope), "scope {scope} must not appear in the gate path");
+        assert!(
+            !between.contains("permits("),
+            "no scope branch may sit between"
+        );
+        for scope in crate::auth::scopes::RESEARCH_SCOPES.iter().copied().chain([
+            crate::auth::scopes::WEB_FULL,
+            crate::auth::scopes::TEXT_READER,
+        ]) {
+            assert!(
+                !between.contains(scope),
+                "scope {scope} must not appear in the gate path"
+            );
             assert_eq!(
                 decide_series(&series("X"), graded("D"), None).refusal,
                 Some("data_grade_d_refused"),

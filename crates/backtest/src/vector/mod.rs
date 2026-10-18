@@ -114,9 +114,16 @@ pub fn calibrate(
     now: DateTime<Utc>,
 ) -> Result<Calibration, CalibrationError> {
     if screen_scores.len() != engine_scores.len() {
-        return Err(CalibrationError::LengthMismatch(screen_scores.len(), engine_scores.len()));
+        return Err(CalibrationError::LengthMismatch(
+            screen_scores.len(),
+            engine_scores.len(),
+        ));
     }
-    if screen_scores.iter().chain(engine_scores).any(|x| !x.is_finite()) {
+    if screen_scores
+        .iter()
+        .chain(engine_scores)
+        .any(|x| !x.is_finite())
+    {
         return Err(CalibrationError::NotFinite);
     }
     Ok(Calibration {
@@ -151,9 +158,14 @@ impl Tier0 {
             return Err(Tier0Off::TooFewPairs { n: c.n_pairs });
         }
         if c.spearman_rho < MIN_RHO {
-            return Err(Tier0Off::BelowThreshold { rho: c.spearman_rho, needed: MIN_RHO });
+            return Err(Tier0Off::BelowThreshold {
+                rho: c.spearman_rho,
+                needed: MIN_RHO,
+            });
         }
-        Ok(Self { calibration: c.clone() })
+        Ok(Self {
+            calibration: c.clone(),
+        })
     }
 
     #[must_use]
@@ -163,7 +175,12 @@ impl Tier0 {
 
     /// Screen candidates over one set of bars. A series the evaluator refuses scores `None`.
     #[must_use]
-    pub fn screen(&self, series: &[PositionSeries], bars: &[Bar], cfg: &EvalConfig) -> Vec<Option<ScreenResult>> {
+    pub fn screen(
+        &self,
+        series: &[PositionSeries],
+        bars: &[Bar],
+        cfg: &EvalConfig,
+    ) -> Vec<Option<ScreenResult>> {
         series
             .iter()
             .map(|s| {
@@ -183,22 +200,39 @@ mod tests {
     use chrono::TimeZone;
 
     fn cal(rho: f64, n: usize) -> Calibration {
-        Calibration { spearman_rho: rho, n_pairs: n, measured_at: Utc.with_ymd_and_hms(2026, 10, 4, 0, 0, 0).unwrap(), engine: "event".into() }
+        Calibration {
+            spearman_rho: rho,
+            n_pairs: n,
+            measured_at: Utc.with_ymd_and_hms(2026, 10, 4, 0, 0, 0).unwrap(),
+            engine: "event".into(),
+        }
     }
 
     #[test]
     fn tier_0_is_off_until_a_calibration_row_exists_and_says_so() {
         assert_eq!(Tier0::enable(None).unwrap_err(), Tier0Off::NoCalibration);
-        assert!(Tier0::enable(None).unwrap_err().to_string().contains("no calibration row"));
+        assert!(Tier0::enable(None)
+            .unwrap_err()
+            .to_string()
+            .contains("no calibration row"));
     }
 
     #[test]
     fn a_calibration_below_0_8_keeps_it_off_and_says_why() {
         let e = Tier0::enable(Some(&cal(0.79, 100))).unwrap_err();
         assert!(matches!(e, Tier0Off::BelowThreshold { .. }));
-        assert!(e.to_string().contains("0.790") && e.to_string().contains("0.8"), "{e}");
-        assert!(Tier0::enable(Some(&cal(0.8, 100))).is_ok(), "the bar is inclusive");
-        assert!(matches!(Tier0::enable(Some(&cal(0.95, 5))), Err(Tier0Off::TooFewPairs { n: 5 })));
+        assert!(
+            e.to_string().contains("0.790") && e.to_string().contains("0.8"),
+            "{e}"
+        );
+        assert!(
+            Tier0::enable(Some(&cal(0.8, 100))).is_ok(),
+            "the bar is inclusive"
+        );
+        assert!(matches!(
+            Tier0::enable(Some(&cal(0.95, 5))),
+            Err(Tier0Off::TooFewPairs { n: 5 })
+        ));
     }
 
     #[allow(clippy::float_cmp)] // exact constants
@@ -207,12 +241,20 @@ mod tests {
         let a = [1.0, 2.0, 3.0, 4.0, 5.0];
         assert!((spearman(&a, &[10.0, 20.0, 35.0, 80.0, 90.0]).unwrap() - 1.0).abs() < 1e-12);
         assert!((spearman(&a, &[5.0, 4.0, 3.0, 2.0, 1.0]).unwrap() + 1.0).abs() < 1e-12);
-        assert!(spearman(&[1.0, 1.0, 1.0], &[1.0, 2.0, 3.0]).is_none(), "no variance in rank, no correlation");
+        assert!(
+            spearman(&[1.0, 1.0, 1.0], &[1.0, 2.0, 3.0]).is_none(),
+            "no variance in rank, no correlation"
+        );
         let calibrated = calibrate(&a, &[1.0, 2.0, 3.0, 4.0, 5.0], "event", Utc::now()).unwrap();
         assert!((calibrated.spearman_rho - 1.0).abs() < 1e-12);
         assert!(calibrate(&a, &[1.0], "event", Utc::now()).is_err());
         assert!(calibrate(&[f64::NAN, 1.0], &[1.0, 2.0], "event", Utc::now()).is_err());
-        assert_eq!(calibrate(&[1.0; 30], &[1.0; 30], "event", Utc::now()).unwrap().spearman_rho, 0.0);
+        assert_eq!(
+            calibrate(&[1.0; 30], &[1.0; 30], "event", Utc::now())
+                .unwrap()
+                .spearman_rho,
+            0.0
+        );
     }
 
     #[test]
@@ -220,17 +262,45 @@ mod tests {
         let bars: Vec<Bar> = (0..60)
             .map(|i| {
                 let p = 100.0 + f64::from(i) * 0.3;
-                Bar { ts_ns: (i64::from(i) + 1) * 60_000_000_000, open: p, close: p + 0.1 }
+                Bar {
+                    ts_ns: (i64::from(i) + 1) * 60_000_000_000,
+                    open: p,
+                    close: p + 0.1,
+                }
             })
             .collect();
-        let long: Vec<PositionPoint> = bars.iter().map(|b| PositionPoint::new(b.ts_ns, 1.0)).collect();
-        let good = PositionSeries { points: long, position_units: PositionUnits::Fraction, allow_short: false };
-        let off_grid = PositionSeries { points: vec![PositionPoint::new(7, 1.0)], position_units: PositionUnits::Fraction, allow_short: false };
-        let cfg = EvalConfig { initial_equity: 10_000.0, costs: Costs { fee_bps: 5.0, half_spread_bps: 1.0 }, lot_size: None };
+        let long: Vec<PositionPoint> = bars
+            .iter()
+            .map(|b| PositionPoint::new(b.ts_ns, 1.0))
+            .collect();
+        let good = PositionSeries {
+            points: long,
+            position_units: PositionUnits::Fraction,
+            allow_short: false,
+        };
+        let off_grid = PositionSeries {
+            points: vec![PositionPoint::new(7, 1.0)],
+            position_units: PositionUnits::Fraction,
+            allow_short: false,
+        };
+        let cfg = EvalConfig {
+            initial_equity: 10_000.0,
+            costs: Costs {
+                fee_bps: 5.0,
+                half_spread_bps: 1.0,
+            },
+            lot_size: None,
+        };
         let tier0 = Tier0::enable(Some(&cal(0.9, 50))).unwrap();
         let out = tier0.screen(&[good, off_grid], &bars, &cfg);
-        assert!(out[0].as_ref().unwrap().total_return > 0.0, "a long series in a rising market earns");
-        assert!(out[1].is_none(), "a series not on the decision times is refused, not scored");
+        assert!(
+            out[0].as_ref().unwrap().total_return > 0.0,
+            "a long series in a rising market earns"
+        );
+        assert!(
+            out[1].is_none(),
+            "a series not on the decision times is refused, not scored"
+        );
         assert_eq!(tier0.calibration().engine, "event");
     }
 }

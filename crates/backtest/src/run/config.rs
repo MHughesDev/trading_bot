@@ -465,7 +465,9 @@ mod tests {
     #[test]
     fn a_cost_scale_is_a_different_run_and_its_absence_hashes_as_before() {
         let plain = RunConfigBuilder::new("s", "v", slice(), "c", "z", "snap").build();
-        assert!(!serde_json::to_string(&plain).unwrap().contains("cost_scale"));
+        assert!(!serde_json::to_string(&plain)
+            .unwrap()
+            .contains("cost_scale"));
         let dearer = RunConfigBuilder::new("s", "v", slice(), "c", "z", "snap")
             .cost_scale_bp(2000)
             .build();

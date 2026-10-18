@@ -70,13 +70,18 @@ impl Layer1Manifest {
             return Err("start must be before end".into());
         }
         if m.experiment_id.trim().is_empty() {
-            return Err("experiment_id is required: a Layer 1 run is a trial of an experiment".into());
+            return Err(
+                "experiment_id is required: a Layer 1 run is a trial of an experiment".into(),
+            );
         }
         if !(1..=64).contains(&m.truncation_cuts) {
             return Err("truncation_cuts must be 1..=64: zero would skip the Gate-0 test".into());
         }
         let bad = |x: f64| !x.is_finite() || x < 0.0;
-        if bad(m.fee_bps) || bad(m.half_spread_bps) || !(m.initial_equity.is_finite() && m.initial_equity > 0.0) {
+        if bad(m.fee_bps)
+            || bad(m.half_spread_bps)
+            || !(m.initial_equity.is_finite() && m.initial_equity > 0.0)
+        {
             return Err("fee_bps and half_spread_bps must be finite and non-negative, initial_equity positive".into());
         }
         if let Some(sw) = m.sweep {
@@ -113,7 +118,9 @@ mod tests {
     fn zero_cuts_would_skip_the_gate_zero_test_and_is_refused() {
         let mut v = ok();
         v["truncation_cuts"] = serde_json::json!(0);
-        assert!(Layer1Manifest::from_value(&v).unwrap_err().contains("truncation_cuts"));
+        assert!(Layer1Manifest::from_value(&v)
+            .unwrap_err()
+            .contains("truncation_cuts"));
     }
 
     #[test]
@@ -134,6 +141,9 @@ mod tests {
         use crate::types::{JobKind, WorkerClass};
         assert_eq!(JobKind::parse("layer1_run"), Some(JobKind::Layer1Run));
         assert_eq!(JobKind::Layer1Run.worker_class(), WorkerClass::Research);
-        assert!(!JobKind::Layer1Run.counts_trial(), "the trial is registered inside the run, after the code ran");
+        assert!(
+            !JobKind::Layer1Run.counts_trial(),
+            "the trial is registered inside the run, after the code ran"
+        );
     }
 }

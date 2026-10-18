@@ -83,8 +83,14 @@ async fn interrupted_run(pg: &sqlx::PgPool, with_spec: bool) -> (Uuid, Uuid, Uui
         .await
         .unwrap();
     let trial = ticket.trial_id();
-    for st in [TrialState::Queued, TrialState::Provision, TrialState::Running] {
-        led.transition_async(&mut ticket, TrialEvent::to(st)).await.unwrap();
+    for st in [
+        TrialState::Queued,
+        TrialState::Provision,
+        TrialState::Running,
+    ] {
+        led.transition_async(&mut ticket, TrialEvent::to(st))
+            .await
+            .unwrap();
     }
     if with_spec {
         sqlx::query(
@@ -108,28 +114,48 @@ async fn the_platform_role_can_write_checkpoints_and_never_edit_them() {
     let pg = pool().await;
     for role in ["app_role"] {
         let mut tx = pg.begin().await.unwrap();
-        sqlx::query(&format!("SET LOCAL ROLE {role}")).execute(&mut *tx).await.unwrap();
+        sqlx::query(&format!("SET LOCAL ROLE {role}"))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
         let run = Uuid::new_v4();
         assert!(sqlx::query("INSERT INTO mlops.training_checkpoint (run_id, step, manifest) VALUES ($1, 1, '{}')")
             .bind(run)
             .execute(&mut *tx)
             .await
             .is_ok(), "{role} cannot append a checkpoint (sequence grant?)");
-        assert!(sqlx::query("SELECT 1 FROM mlops.training_checkpoint").fetch_all(&mut *tx).await.is_ok());
-        assert!(sqlx::query("UPDATE mlops.training_checkpoint SET step = 2").execute(&mut *tx).await.is_err());
+        assert!(sqlx::query("SELECT 1 FROM mlops.training_checkpoint")
+            .fetch_all(&mut *tx)
+            .await
+            .is_ok());
+        assert!(sqlx::query("UPDATE mlops.training_checkpoint SET step = 2")
+            .execute(&mut *tx)
+            .await
+            .is_err());
         tx.rollback().await.unwrap();
         let mut tx = pg.begin().await.unwrap();
-        sqlx::query(&format!("SET LOCAL ROLE {role}")).execute(&mut *tx).await.unwrap();
-        assert!(sqlx::query("DELETE FROM mlops.training_checkpoint").execute(&mut *tx).await.is_err());
-        assert!(sqlx::query("DELETE FROM mlops.training_run_spec").execute(&mut *tx).await.is_err());
+        sqlx::query(&format!("SET LOCAL ROLE {role}"))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        assert!(sqlx::query("DELETE FROM mlops.training_checkpoint")
+            .execute(&mut *tx)
+            .await
+            .is_err());
+        assert!(sqlx::query("DELETE FROM mlops.training_run_spec")
+            .execute(&mut *tx)
+            .await
+            .is_err());
         tx.rollback().await.unwrap();
     }
     // A non-object manifest is refused by the table, not by a code path.
-    assert!(sqlx::query("INSERT INTO mlops.training_checkpoint (run_id, step, manifest) VALUES ($1, 1, '[]')")
-        .bind(Uuid::new_v4())
-        .execute(&pg)
-        .await
-        .is_err());
+    assert!(sqlx::query(
+        "INSERT INTO mlops.training_checkpoint (run_id, step, manifest) VALUES ($1, 1, '[]')"
+    )
+    .bind(Uuid::new_v4())
+    .execute(&pg)
+    .await
+    .is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -138,12 +164,25 @@ async fn a_progress_frame_stores_a_good_checkpoint_and_refuses_a_partial_one() {
     let pg = pool().await;
     let (run, _, _) = interrupted_run(&pg, true).await;
     let mgr = ModelManager::from_env(pg.clone());
-    mgr.apply_nats_progress(run, "checkpoint", 40.0, Some(json!({ "checkpoint": manifest(3) }))).await;
+    mgr.apply_nats_progress(
+        run,
+        "checkpoint",
+        40.0,
+        Some(json!({ "checkpoint": manifest(3) })),
+    )
+    .await;
     let mut partial = manifest(4);
     partial.as_object_mut().unwrap().remove("rng_state");
-    mgr.apply_nats_progress(run, "checkpoint", 50.0, Some(json!({ "checkpoint": partial }))).await;
+    mgr.apply_nats_progress(
+        run,
+        "checkpoint",
+        50.0,
+        Some(json!({ "checkpoint": partial })),
+    )
+    .await;
     // An ordinary frame stores nothing.
-    mgr.apply_nats_progress(run, "fitting", 60.0, Some(json!({ "epoch": 6 }))).await;
+    mgr.apply_nats_progress(run, "fitting", 60.0, Some(json!({ "epoch": 6 })))
+        .await;
     let steps: Vec<(i64,)> =
         sqlx::query_as("SELECT step FROM mlops.training_checkpoint WHERE run_id = $1 ORDER BY id")
             .bind(run)
@@ -162,12 +201,14 @@ async fn boot_recovery_fails_runs_it_cannot_resume_with_a_named_reason() {
     // Has a checkpoint and a spec, but the plan cannot be rebuilt here (no model
     // definition, no bars): the redrive fails and says so, rather than hanging.
     let (unrebuildable, _, _) = interrupted_run(&pg, true).await;
-    sqlx::query("INSERT INTO mlops.training_checkpoint (run_id, step, manifest) VALUES ($1, 2, $2)")
-        .bind(unrebuildable)
-        .bind(manifest(2))
-        .execute(&pg)
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO mlops.training_checkpoint (run_id, step, manifest) VALUES ($1, 2, $2)",
+    )
+    .bind(unrebuildable)
+    .bind(manifest(2))
+    .execute(&pg)
+    .await
+    .unwrap();
 
     let mgr = ModelManager::from_env(pg.clone());
     let report = mgr.recover_interrupted_runs().await;
@@ -190,20 +231,22 @@ async fn boot_recovery_fails_runs_it_cannot_resume_with_a_named_reason() {
     };
     let (s, e) = err(no_ckpt).await;
     assert_eq!(s, "failed");
-    assert!(e.contains("interrupted_no_checkpoint") && e.contains("not restarted from step 0"), "{e}");
+    assert!(
+        e.contains("interrupted_no_checkpoint") && e.contains("not restarted from step 0"),
+        "{e}"
+    );
     let (_, e) = err(no_spec).await;
     assert!(e.contains("interrupted_no_spec"), "{e}");
     let (_, e) = err(unrebuildable).await;
     assert!(e.contains("interrupted_unrecoverable"), "{e}");
 
     // The trial is settled as abandoned-after-preemption, not left running.
-    let (state, reason): (String, Option<String>) = sqlx::query_as(
-        "SELECT state, terminal_reason FROM mlops.trial_state WHERE trial_id = $1",
-    )
-    .bind(trial)
-    .fetch_one(&pg)
-    .await
-    .unwrap();
+    let (state, reason): (String, Option<String>) =
+        sqlx::query_as("SELECT state, terminal_reason FROM mlops.trial_state WHERE trial_id = $1")
+            .bind(trial)
+            .fetch_one(&pg)
+            .await
+            .unwrap();
     assert_eq!(state, "failed");
     assert_eq!(reason.as_deref(), Some("preempted_abandoned"));
 

@@ -30,10 +30,12 @@ async fn apply(pg: &sqlx::PgPool) {
         .execute(pg)
         .await
         .expect("0183 applies (and applies twice)");
-    sqlx::raw_sql(include_str!("../../../migrations/0184_instrument_fingerprint.sql"))
-        .execute(pg)
-        .await
-        .expect("0184 applies (and applies twice)");
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/0184_instrument_fingerprint.sql"
+    ))
+    .execute(pg)
+    .await
+    .expect("0184 applies (and applies twice)");
 }
 
 #[tokio::test]
@@ -76,11 +78,18 @@ async fn app_role_appends_insight_events_but_never_edits_or_deletes_one() {
         .bind(trial)
         .execute(&mut *tx)
         .await;
-        assert!(ins.is_ok(), "{role} cannot append an insight event: {:?}", ins.err());
+        assert!(
+            ins.is_ok(),
+            "{role} cannot append an insight event: {:?}",
+            ins.err()
+        );
         let read = sqlx::query("SELECT 1 FROM knowledge.insight_event")
             .fetch_all(&mut *tx)
             .await;
-        assert!(read.is_ok() && read.unwrap().len() == 1, "{role} cannot read its tenant's events");
+        assert!(
+            read.is_ok() && read.unwrap().len() == 1,
+            "{role} cannot read its tenant's events"
+        );
         // Append-only: the counts on the insight are a summary of this log.
         let upd = sqlx::query("UPDATE knowledge.insight_event SET note = 'edited'")
             .execute(&mut *tx)
@@ -102,7 +111,10 @@ async fn app_role_appends_insight_events_but_never_edits_or_deletes_one() {
 
     // Another tenant sees none of it: RLS is forced on the table.
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     sqlx::query("SELECT set_config('app.tenant_id', 'someone-else', true)")
         .execute(&mut *tx)
         .await
@@ -124,7 +136,10 @@ async fn app_role_appends_insight_events_but_never_edits_or_deletes_one() {
     .bind(insight)
     .execute(&pg)
     .await;
-    assert!(no_evidence.is_err(), "a confirmation with no evidence must be refused");
+    assert!(
+        no_evidence.is_err(),
+        "a confirmation with no evidence must be refused"
+    );
 }
 
 #[tokio::test]
@@ -135,7 +150,10 @@ async fn fingerprints_are_written_by_the_platform_and_never_edited() {
     let instrument: i64 = 9_000_000 + i64::from(Uuid::new_v4().as_u128() as u32 % 1_000_000);
 
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     let ins = sqlx::query(
         "INSERT INTO knowledge.instrument_fingerprint
              (instrument_id, venue_id, window_spec, dimension_order, tier1, absent, bars_used, knowledge_time)
@@ -144,7 +162,11 @@ async fn fingerprints_are_written_by_the_platform_and_never_edited() {
     .bind(instrument)
     .execute(&mut *tx)
     .await;
-    assert!(ins.is_ok(), "app_role cannot write a fingerprint: {:?}", ins.err());
+    assert!(
+        ins.is_ok(),
+        "app_role cannot write a fingerprint: {:?}",
+        ins.err()
+    );
     // NULL is "not measured", and the shape CHECK counts it as an element.
     let bad = sqlx::query(
         "INSERT INTO knowledge.instrument_fingerprint
@@ -154,11 +176,17 @@ async fn fingerprints_are_written_by_the_platform_and_never_edited() {
     .bind(instrument)
     .execute(&mut *tx)
     .await;
-    assert!(bad.is_err(), "a tier1 vector shorter than its dimension order must be refused");
+    assert!(
+        bad.is_err(),
+        "a tier1 vector shorter than its dimension order must be refused"
+    );
     tx.rollback().await.unwrap();
 
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     assert!(
         sqlx::query("UPDATE knowledge.instrument_fingerprint SET bars_used = 1")
             .execute(&mut *tx)
@@ -169,7 +197,10 @@ async fn fingerprints_are_written_by_the_platform_and_never_edited() {
     tx.rollback().await.unwrap();
 
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE agent_role").execute(&mut *tx).await.unwrap();
+    sqlx::query("SET LOCAL ROLE agent_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     assert!(
         sqlx::query("SELECT 1 FROM knowledge.instrument_fingerprint LIMIT 1")
             .fetch_all(&mut *tx)

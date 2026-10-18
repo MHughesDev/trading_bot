@@ -179,7 +179,8 @@ fn conditions_multiplied_as_numbers_translate_to_what_v1_meant() {
     )
     .unwrap_or_else(|f| panic!("{f:#?}"));
     assert!(
-        v.text.contains("if(feature(\"ema_7\") > feature(\"ema_21\"), 1"),
+        v.text
+            .contains("if(feature(\"ema_7\") > feature(\"ema_21\"), 1"),
         "{}",
         v.text
     );
@@ -205,7 +206,11 @@ fn a_feature_named_by_parameter_translates_to_the_operator_with_its_port() {
                    "order": {"side": "buy", "size_mode": "fixed", "size": "0.1"}}]
     }));
     let t = translate(&d, "1h").unwrap_or_else(|r| panic!("{r}"));
-    assert!(t.text.contains("ema(close, $fast) > ema(close, $slow)"), "{}", t.text);
+    assert!(
+        t.text.contains("ema(close, $fast) > ema(close, $slow)"),
+        "{}",
+        t.text
+    );
     validate(
         Source::Graph(t.graph),
         &StdRegistries::new(),
@@ -222,7 +227,10 @@ fn a_feature_named_by_parameter_translates_to_the_operator_with_its_port() {
       "actions": [{"on_signal": "long", "type": "place_order",
                    "order": {"side": "buy", "size_mode": "fixed", "size": "0.1"}}]
     }));
-    assert_eq!(translate(&rsi, "1h").unwrap_err().construct, "parameterised feature name");
+    assert_eq!(
+        translate(&rsi, "1h").unwrap_err().construct,
+        "parameterised feature name"
+    );
 }
 
 /// U-7.3: a decision model's class map translates — each class it may
@@ -247,7 +255,11 @@ fn a_decision_models_class_map_becomes_one_condition_per_class() {
       ]
     }));
     let t = translate(&d, "1h").unwrap_or_else(|r| panic!("{r}"));
-    assert!(t.text.contains("is(d__model.action, \"long\")"), "{}", t.text);
+    assert!(
+        t.text.contains("is(d__model.action, \"long\")"),
+        "{}",
+        t.text
+    );
     assert!(t.text.contains("d__model.confidence >= 0.6"), "{}", t.text);
     let reg = StdRegistries::new().with_model(
         "trader@production",

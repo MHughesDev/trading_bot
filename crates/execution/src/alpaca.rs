@@ -356,7 +356,10 @@ mod inbound_parsing_tests {
         assert_eq!(domain_order_type("limit").unwrap(), OrderType::Limit);
         assert_eq!(domain_order_type("stop").unwrap(), OrderType::Stop);
         for bad in ["", "Market", "lmt", "oco"] {
-            assert!(domain_order_type(bad).is_err(), "type {bad:?} must be refused");
+            assert!(
+                domain_order_type(bad).is_err(),
+                "type {bad:?} must be refused"
+            );
         }
     }
 }

@@ -115,10 +115,15 @@ pub fn answers_from_rows(
     rows: &[(i64, String)],
     output: Option<&str>,
 ) -> Result<(Vec<Answer>, SeriesCounts), PredictionError> {
-    let mut counts = SeriesCounts { rows: rows.len(), ..SeriesCounts::default() };
+    let mut counts = SeriesCounts {
+        rows: rows.len(),
+        ..SeriesCounts::default()
+    };
     let mut parsed: Vec<(i64, BTreeMap<String, f64>)> = Vec::new();
     for (at, json) in rows {
-        let Some(outs) = numeric_outputs(json) else { continue };
+        let Some(outs) = numeric_outputs(json) else {
+            continue;
+        };
         counts.answered += 1;
         parsed.push((*at, outs));
     }
@@ -133,7 +138,10 @@ pub fn answers_from_rows(
             [] => return Err(PredictionError::NoSuchOutput("(any)".into())),
             many => {
                 return Err(PredictionError::AmbiguousOutput(
-                    many.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "),
+                    many.iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
                 ))
             }
         }
@@ -141,7 +149,10 @@ pub fn answers_from_rows(
     let mut answers = Vec::new();
     for (at, outs) in parsed {
         match outs.get(&chosen) {
-            Some(x) => answers.push(Answer { at_ns: at, y_hat: *x }),
+            Some(x) => answers.push(Answer {
+                at_ns: at,
+                y_hat: *x,
+            }),
             None => counts.not_numeric += 1,
         }
     }
@@ -243,7 +254,9 @@ mod tests {
     fn row(at: i64, name: &str, x: f64) -> (i64, String) {
         (
             at,
-            format!(r#"{{"outcome":"answered","outputs":{{"{name}":{{"kind":"num","value":{x}}}}}}}"#),
+            format!(
+                r#"{{"outcome":"answered","outputs":{{"{name}":{{"kind":"num","value":{x}}}}}}}"#
+            ),
         )
     }
 
@@ -273,9 +286,15 @@ mod tests {
             1,
             r#"{"outcome":"answered","outputs":{"a":{"kind":"num","value":1.0},"b":{"kind":"num","value":2.0}}}"#.to_string(),
         )];
-        assert!(matches!(answers_from_rows(&rows, None), Err(PredictionError::AmbiguousOutput(_))));
+        assert!(matches!(
+            answers_from_rows(&rows, None),
+            Err(PredictionError::AmbiguousOutput(_))
+        ));
         assert_eq!(answers_from_rows(&rows, Some("b")).unwrap().0[0].y_hat, 2.0);
-        assert!(matches!(answers_from_rows(&rows, Some("zz")), Err(PredictionError::NoSuchOutput(_))));
+        assert!(matches!(
+            answers_from_rows(&rows, Some("zz")),
+            Err(PredictionError::NoSuchOutput(_))
+        ));
     }
 
     /// The decision sees the last *closed* bar, and the label runs from its close.
@@ -284,17 +303,26 @@ mod tests {
         // Bars open at 0,1,2,3 hours with closes 100, 110, 121, 133.1.
         let bars: Vec<BarClose> = vec![(0, 100.0), (H, 110.0), (2 * H, 121.0), (3 * H, 133.1)];
         // Decision at t=2h: bars 0 and 1 have closed (open+1h <= 2h); the last is bar 1.
-        let a = vec![Answer { at_ns: 2 * H, y_hat: 0.0 }];
+        let a = vec![Answer {
+            at_ns: 2 * H,
+            y_hat: 0.0,
+        }];
         let f = forward_returns(&a, &bars, H, &[1, 2, 5]);
         assert!((f[0][0] - (121.0f64 / 110.0).ln()).abs() < 1e-12);
         assert!((f[0][1] - (133.1f64 / 110.0).ln()).abs() < 1e-12);
-        assert!(f[0][2].is_nan(), "a horizon past the bars is absent, not zero");
+        assert!(
+            f[0][2].is_nan(),
+            "a horizon past the bars is absent, not zero"
+        );
     }
 
     #[test]
     fn a_decision_before_any_bar_closed_has_no_label() {
         let bars: Vec<BarClose> = vec![(H, 100.0), (2 * H, 101.0)];
-        let a = vec![Answer { at_ns: 0, y_hat: 0.0 }];
+        let a = vec![Answer {
+            at_ns: 0,
+            y_hat: 0.0,
+        }];
         assert!(forward_returns(&a, &bars, H, &[1])[0][0].is_nan());
     }
 }

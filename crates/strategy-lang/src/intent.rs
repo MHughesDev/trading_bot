@@ -138,7 +138,10 @@ exit time 48 bars
         assert!(entry.lines[0].starts_with("60 rather than 70"));
         // Addressed to the clause below, not the one above.
         assert!(by("exit[1]").unwrap().lines[0].contains("two days"));
-        assert!(by("exit[0]").is_none(), "the stop has no comment of its own");
+        assert!(
+            by("exit[0]").is_none(),
+            "the stop has no comment of its own"
+        );
     }
 
     #[test]

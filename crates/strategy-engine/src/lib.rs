@@ -38,18 +38,18 @@ pub mod trace;
 
 pub use checkpoint::{Checkpoint, RestoreError};
 pub use compile::compile;
-pub use external::ExternalData;
 pub use diagnostic::Diagnostic;
 pub use engine::{Engine, EngineError, Event, Step};
 pub use env::{
     cycle, Clock, Journal, MarketData, MarketEvent, Membership, ModelProvider, VenuePort,
 };
+pub use external::ExternalData;
 pub use history::Bar;
 pub use models::{ModelInput, ModelOutcome, ModelRequest, ModelResponse};
 pub use plan::Plan;
 pub use portfolio::{
-    SelectionContext,
-    Fill, InstrumentSpec, OrderClosed, OrderClosedReason, PortfolioView, VenueCaps, WorkingOrder,
+    Fill, InstrumentSpec, OrderClosed, OrderClosedReason, PortfolioView, SelectionContext,
+    VenueCaps, WorkingOrder,
 };
 pub use registry::{Registries, ResolvedModel, StdRegistries};
 pub use selection::{SelectionEngine, SelectionRun, SelectionStep};

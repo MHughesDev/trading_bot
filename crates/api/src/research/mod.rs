@@ -434,8 +434,8 @@ impl SweepBackend for Backend {
         // A v3 graph sweeps over its own typed parameters; the batches run the
         // stored graph through the format-routed executor (Set U U-8.3).
         if backtest::runner::is_v3(&json) {
-            let g: domain::strategy_graph::StrategyGraph = serde_json::from_value(json)
-                .map_err(|e| format!("invalid stored graph: {e}"))?;
+            let g: domain::strategy_graph::StrategyGraph =
+                serde_json::from_value(json).map_err(|e| format!("invalid stored graph: {e}"))?;
             return research::space::parameter_carrier(&g)
                 .map_err(|e| format!("graph parameters: {e}"));
         }

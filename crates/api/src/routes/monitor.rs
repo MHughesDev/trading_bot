@@ -815,7 +815,9 @@ pub async fn list_feeds(
         .into_iter()
         .map(|d| d.strategy_id.clone())
         .collect();
-    Ok(Json(json!({ "feeds": feeds, "unwatched_deployments": unwatched })))
+    Ok(Json(
+        json!({ "feeds": feeds, "unwatched_deployments": unwatched }),
+    ))
 }
 
 /// `GET /api/monitor/venues` — each venue's last reconciliation verdict (S-7.6).
@@ -916,7 +918,9 @@ pub async fn resolve_defect(
         .resolve_defect(defect_id, &actor, &body.resolution)
         .await
     {
-        Ok(true) => Ok(Json(json!({ "defect_id": defect_id, "status": "resolved" }))),
+        Ok(true) => Ok(Json(
+            json!({ "defect_id": defect_id, "status": "resolved" }),
+        )),
         Ok(false) => Err((
             StatusCode::CONFLICT,
             Json(json!({ "error": "not_open", "detail": "no open defect has that id" })),
@@ -932,7 +936,10 @@ pub async fn list_drill_runs(
     _token: BearerToken,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, Response> {
-    let last = store(&state).last_drill_runs().await.map_err(server_error)?;
+    let last = store(&state)
+        .last_drill_runs()
+        .await
+        .map_err(server_error)?;
     Ok(Json(json!({
         "suite_due": reconciliation::drills::suite_is_due(&last, chrono::Utc::now()),
         "interval_days": reconciliation::drills::DRILL_SUITE_INTERVAL_DAYS,
@@ -980,7 +987,9 @@ async fn kill_switch_snapshot(s: &MonitorStore) -> serde_json::Value {
             "halted_scopes": halted.iter().map(ToString::to_string).collect::<Vec<_>>(),
         }),
         // Unreadable is not "nothing halted": the client is told it does not know.
-        Err(e) => json!({ "lease": "unreadable", "orders_permitted": false, "error": e.to_string() }),
+        Err(e) => {
+            json!({ "lease": "unreadable", "orders_permitted": false, "error": e.to_string() })
+        }
     }
 }
 
@@ -1004,23 +1013,41 @@ pub async fn stream(
     use axum::response::sse::{Event, KeepAlive, Sse};
     let s = store(&state);
     let mut listener = s.listener().await.map_err(server_error)?;
-    let (tx, rx) =
-        tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(64);
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(64);
     tokio::spawn(async move {
-        let snapshot = |v: serde_json::Value| Event::default().event("kill_switch").data(v.to_string());
-        if tx.send(Ok(snapshot(kill_switch_snapshot(&s).await))).await.is_err() {
+        let snapshot =
+            |v: serde_json::Value| Event::default().event("kill_switch").data(v.to_string());
+        if tx
+            .send(Ok(snapshot(kill_switch_snapshot(&s).await)))
+            .await
+            .is_err()
+        {
             return;
         }
         loop {
-            let note = tokio::time::timeout(
-                std::time::Duration::from_secs(15),
-                listener.try_recv(),
-            )
-            .await;
+            let note =
+                tokio::time::timeout(std::time::Duration::from_secs(15), listener.try_recv()).await;
             let event = match note {
                 Ok(Ok(Some(n))) if n.channel() == "monitor_events" => {
-                    let Ok(id) = n.payload().parse::<Uuid>() else { continue };
-                    let row = sqlx::query_as::<_, (Uuid, DateTime<Utc>, String, String, String, Option<String>, Option<String>, Option<f64>, Option<f64>, String, bool)>(
+                    let Ok(id) = n.payload().parse::<Uuid>() else {
+                        continue;
+                    };
+                    let row = sqlx::query_as::<
+                        _,
+                        (
+                            Uuid,
+                            DateTime<Utc>,
+                            String,
+                            String,
+                            String,
+                            Option<String>,
+                            Option<String>,
+                            Option<f64>,
+                            Option<f64>,
+                            String,
+                            bool,
+                        ),
+                    >(
                         "SELECT event_id, occurred_at, scope, family, kind, metric, reason,
                                 observed_value::float8, limit_value::float8, actor, is_drill
                            FROM monitor.events WHERE event_id = $1",
@@ -1029,8 +1056,22 @@ pub async fn stream(
                     .fetch_optional(s.pool())
                     .await;
                     match row {
-                        Ok(Some((event_id, occurred_at, scope, family, kind, metric, reason, observed_value, limit_value, actor, is_drill))) => {
-                            Event::default().event("monitor_event").id(event_id.to_string()).data(
+                        Ok(Some((
+                            event_id,
+                            occurred_at,
+                            scope,
+                            family,
+                            kind,
+                            metric,
+                            reason,
+                            observed_value,
+                            limit_value,
+                            actor,
+                            is_drill,
+                        ))) => Event::default()
+                            .event("monitor_event")
+                            .id(event_id.to_string())
+                            .data(
                                 json!({
                                     "event_id": event_id, "occurred_at": occurred_at,
                                     "scope": scope, "family": family, "kind": kind,
@@ -1040,8 +1081,7 @@ pub async fn stream(
                                     "is_drill": is_drill,
                                 })
                                 .to_string(),
-                            )
-                        }
+                            ),
                         _ => continue,
                     }
                 }
@@ -1062,10 +1102,14 @@ pub async fn stream(
             }
         }
     });
-    Ok(Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
-        .keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)).text("keep-alive")))
+    Ok(
+        Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx)).keep_alive(
+            KeepAlive::new()
+                .interval(std::time::Duration::from_secs(15))
+                .text("keep-alive"),
+        ),
+    )
 }
-
 
 // Read-only handlers below that need the caller's identity (for tenant scoping)
 // name the token `reader`, not `token`: `tests/monitor_authority.rs` treats a
@@ -1185,9 +1229,15 @@ pub async fn fleet(
 ) -> Result<Json<serde_json::Value>, Response> {
     let tenant = reader.user_id().to_string();
     let store = monitor::store::MonitorStore::new(state.pg.clone());
-    let a = reconciliation::fleet_job::assess_tenant(&state.pg, &store, &tenant, chrono::Utc::now(), false)
-        .await
-        .map_err(server_error)?;
+    let a = reconciliation::fleet_job::assess_tenant(
+        &state.pg,
+        &store,
+        &tenant,
+        chrono::Utc::now(),
+        false,
+    )
+    .await
+    .map_err(server_error)?;
     Ok(Json(reconciliation::fleet_job::report_json(&a)))
 }
 
@@ -1232,8 +1282,12 @@ mod tests {
     #[test]
     fn both_event_surfaces_serve_observed_and_limit_values() {
         let src = include_str!("monitor.rs");
-        let body = &src[..src.find("#[cfg(test)]
-mod tests").expect("tests module")];
+        let body = &src[..src
+            .find(
+                "#[cfg(test)]
+mod tests",
+            )
+            .expect("tests module")];
         for needle in [
             "\"observed_value\": e.observed_value",
             "\"limit_value\": e.limit_value",
@@ -1241,7 +1295,10 @@ mod tests").expect("tests module")];
             "\"limit_value\": limit_value",
             "observed_value::float8, limit_value::float8",
         ] {
-            assert!(body.contains(needle), "the monitor event surfaces lost {needle}");
+            assert!(
+                body.contains(needle),
+                "the monitor event surfaces lost {needle}"
+            );
         }
     }
 

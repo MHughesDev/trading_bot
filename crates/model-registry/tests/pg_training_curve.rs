@@ -72,10 +72,16 @@ async fn a_strategy_that_names_the_model_by_id_or_slug_is_used_by_it() {
 
     let mgr = ModelManager::from_env(pg.clone());
     let used = mgr.get_used_by(&mid).await.expect("the read does not fail");
-    let ids: Vec<&str> = used.iter().filter_map(|u| u["strategy_id"].as_str()).collect();
+    let ids: Vec<&str> = used
+        .iter()
+        .filter_map(|u| u["strategy_id"].as_str())
+        .collect();
     assert!(ids.contains(&by_id.as_str()), "by id: {ids:?}");
     assert!(ids.contains(&by_slug.as_str()), "by slug: {ids:?}");
-    assert!(!ids.contains(&unrelated.as_str()), "another model's strategy leaked: {ids:?}");
+    assert!(
+        !ids.contains(&unrelated.as_str()),
+        "another model's strategy leaked: {ids:?}"
+    );
 
     // Removing the reference removes it.
     sqlx::query("UPDATE strategy_definitions SET definition_json = '{\"nodes\": []}'::jsonb WHERE strategy_id = $1")
@@ -102,17 +108,45 @@ async fn progress_frames_leave_a_curve_the_owner_can_read() {
         .unwrap();
     let mgr = ModelManager::from_env(pg.clone());
     for (e, t, v) in [(1, 0.9, 1.0), (2, 0.6, 0.8), (3, 0.4, 0.7)] {
-        mgr.apply_nats_progress(run, "fitting", 30.0 * f32::from(e as u8), Some(json!({"epoch": e, "train_loss": t, "val_loss": v}))).await;
+        mgr.apply_nats_progress(
+            run,
+            "fitting",
+            30.0 * f32::from(e as u8),
+            Some(json!({"epoch": e, "train_loss": t, "val_loss": v})),
+        )
+        .await;
     }
     // A re-reported epoch keeps the first row; a frame with no epoch stores nothing.
-    mgr.apply_nats_progress(run, "fitting", 90.0, Some(json!({"epoch": 3, "train_loss": 9.0, "val_loss": 9.0}))).await;
-    mgr.apply_nats_progress(run, "evaluating", 95.0, Some(json!({"final_train_loss": 0.4}))).await;
+    mgr.apply_nats_progress(
+        run,
+        "fitting",
+        90.0,
+        Some(json!({"epoch": 3, "train_loss": 9.0, "val_loss": 9.0})),
+    )
+    .await;
+    mgr.apply_nats_progress(
+        run,
+        "evaluating",
+        95.0,
+        Some(json!({"final_train_loss": 0.4})),
+    )
+    .await;
     // No validation split: NaN arrives as null and is stored as NULL, not 0.
-    mgr.apply_nats_progress(run, "fitting", 99.0, Some(json!({"epoch": 4, "train_loss": 0.3, "val_loss": null}))).await;
+    mgr.apply_nats_progress(
+        run,
+        "fitting",
+        99.0,
+        Some(json!({"epoch": 4, "train_loss": 0.3, "val_loss": null})),
+    )
+    .await;
 
     let curve = mgr.training_curve(&mid, run, user).await.unwrap();
     assert_eq!(curve.len(), 4);
-    assert_eq!(curve[2].train_loss, Some(0.4), "the first report of epoch 3 stands");
+    assert_eq!(
+        curve[2].train_loss,
+        Some(0.4),
+        "the first report of epoch 3 stands"
+    );
     assert_eq!(curve[3].val_loss, None);
 
     // Someone else's model's curve is not served.
@@ -127,17 +161,34 @@ async fn progress_frames_leave_a_curve_the_owner_can_read() {
 async fn the_platform_role_can_append_metrics_and_never_edit_them() {
     let pg = pool().await;
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
-    assert!(sqlx::query("INSERT INTO mlops.training_metric (run_id, epoch, train_loss) VALUES ($1, 1, 0.5)")
-        .bind(Uuid::new_v4())
+    sqlx::query("SET LOCAL ROLE app_role")
         .execute(&mut *tx)
         .await
+        .unwrap();
+    assert!(sqlx::query(
+        "INSERT INTO mlops.training_metric (run_id, epoch, train_loss) VALUES ($1, 1, 0.5)"
+    )
+    .bind(Uuid::new_v4())
+    .execute(&mut *tx)
+    .await
+    .is_ok());
+    assert!(sqlx::query("SELECT 1 FROM mlops.training_metric")
+        .fetch_all(&mut *tx)
+        .await
         .is_ok());
-    assert!(sqlx::query("SELECT 1 FROM mlops.training_metric").fetch_all(&mut *tx).await.is_ok());
-    assert!(sqlx::query("UPDATE mlops.training_metric SET epoch = 2").execute(&mut *tx).await.is_err());
+    assert!(sqlx::query("UPDATE mlops.training_metric SET epoch = 2")
+        .execute(&mut *tx)
+        .await
+        .is_err());
     tx.rollback().await.unwrap();
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
-    assert!(sqlx::query("DELETE FROM mlops.training_metric").execute(&mut *tx).await.is_err());
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    assert!(sqlx::query("DELETE FROM mlops.training_metric")
+        .execute(&mut *tx)
+        .await
+        .is_err());
     tx.rollback().await.unwrap();
 }

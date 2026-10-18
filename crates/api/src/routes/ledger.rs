@@ -380,7 +380,10 @@ mod chat_reservation_tests {
     fn a_reservation_naming_a_chat_run_is_refused_and_a_research_run_is_not() {
         let refusal = chat_refusal(Some("chat")).expect("a chat run spends no trials");
         assert_eq!(refusal["error"], "chat_turn_spends_no_trials");
-        assert!(refusal["message"].as_str().unwrap().contains("Research run"));
+        assert!(refusal["message"]
+            .as_str()
+            .unwrap()
+            .contains("Research run"));
         assert!(chat_refusal(Some("research")).is_none());
         // A run with no recorded mode (a front door with no agent behind it) is not
         // a Chat turn; the mode that cannot be *read* is refused by the handler.

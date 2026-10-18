@@ -182,7 +182,8 @@ pub fn refuse_ids(
             if let Some(obj) = v.as_object_mut() {
                 for (k, val) in ids {
                     if !matches!(*k, "error" | "summary") {
-                        obj.entry((*k).to_string()).or_insert(serde_json::json!(clip(val, 60)));
+                        obj.entry((*k).to_string())
+                            .or_insert(serde_json::json!(clip(val, 60)));
                     }
                 }
             }
@@ -331,7 +332,9 @@ mod tests {
         let v = missing_field("strategy_id");
         let e = &v["error"];
         assert_eq!(e["code"], "missing_field");
-        assert!(e["message"].as_str().is_some_and(|m| m.contains("strategy_id")));
+        assert!(e["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("strategy_id")));
         assert!(e["fix"].as_str().is_some_and(|f| f.contains("strategy_id")));
         assert_eq!(e["retryable"], false);
         assert_eq!(e["ids"]["field"], "strategy_id");
@@ -374,7 +377,11 @@ mod tests {
         assert_eq!(e["error"], "forbidden");
         assert_eq!(e["retryable"], false);
         assert!(e["fix"].as_str().is_some_and(|f| !f.is_empty()));
-        let down = crate::ApiError { status: Some(503), body: json!({}) }.to_tool_error();
+        let down = crate::ApiError {
+            status: Some(503),
+            body: json!({}),
+        }
+        .to_tool_error();
         assert_eq!(down["retryable"], true);
     }
 
@@ -467,7 +474,10 @@ mod tests {
             let rest = src[i + "\"error\":".len()..].trim_start();
             if rest.starts_with('"') || rest.starts_with("format!(") {
                 let line = src[..i].matches('\n').count() + 1;
-                out.push(format!("line {line}: {}", clip(rest.lines().next().unwrap_or(""), 60)));
+                out.push(format!(
+                    "line {line}: {}",
+                    clip(rest.lines().next().unwrap_or(""), 60)
+                ));
             }
         }
         out
@@ -530,21 +540,29 @@ mod tests {
             for marker in ["refuse(", "refuse_ids(", "ToolError::new("] {
                 for code in first_literals(src, marker) {
                     n += 1;
-                    if !TOOL_ERROR_CODES.contains(&code.as_str()) && !ERROR_CODES.contains(&code.as_str()) {
+                    if !TOOL_ERROR_CODES.contains(&code.as_str())
+                        && !ERROR_CODES.contains(&code.as_str())
+                    {
                         bad.push(format!("{file}: `{code}`"));
                     }
                 }
             }
         }
         assert!(bad.is_empty(), "undeclared or computed codes: {bad:#?}");
-        assert!(n >= 20, "the scan found only {n} refusals; it has stopped reading the handlers");
+        assert!(
+            n >= 20,
+            "the scan found only {n} refusals; it has stopped reading the handlers"
+        );
     }
 
     /// Adversarial: the scan itself must reject what it exists to reject.
     #[test]
     fn the_scan_rejects_a_free_text_code_and_a_bare_string_error() {
         let bad = "fn f() -> Value { refuse(\"it went wrong\", \"m\", \"f\") }\nfn g() -> Value { json!({ \"error\": \"nope\" }) }";
-        assert_eq!(first_literals(bad, "refuse("), vec!["it went wrong".to_string()]);
+        assert_eq!(
+            first_literals(bad, "refuse("),
+            vec!["it went wrong".to_string()]
+        );
         assert!(!TOOL_ERROR_CODES.contains(&"it went wrong"));
         assert_eq!(ad_hoc_error_sites(bad).len(), 1);
         let ok = "fn g() -> Value { json!({ \"error\": snap.get(\"error\") }) }";

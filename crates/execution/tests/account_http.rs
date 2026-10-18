@@ -8,9 +8,9 @@
 #[path = "support/mock_http.rs"]
 mod mock_http;
 
-use mock_http::serve;
 use execution::account::{TradierAccountSource, TradovateAccountSource};
 use execution::account_source::{AccountSource, AccountSourceError, VenueCredentials};
+use mock_http::serve;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
@@ -110,7 +110,10 @@ async fn tradovate_exchanges_once_caches_the_token_and_resolves_contract_ids() {
     assert_eq!(bal[0].available.inner(), Decimal::from(7500));
     let pos = src.fetch_positions(&c).await.expect("positions");
     assert_eq!(pos.len(), 1, "the closed row is dropped");
-    assert_eq!(pos[0].instrument_id, "ESM6", "contractId resolved to a symbol");
+    assert_eq!(
+        pos[0].instrument_id, "ESM6",
+        "contractId resolved to a symbol"
+    );
 
     assert_eq!(
         mock.hits("POST /auth/accesstoken"),
@@ -132,8 +135,14 @@ async fn tradovate_renews_after_a_401_and_retries_once() {
         (
             "POST /auth/accesstoken",
             vec![
-                (200, r#"{"accessToken":"AT-OLD","expirationTime":"2099-01-01T00:00:00Z"}"#),
-                (200, r#"{"accessToken":"AT-NEW","expirationTime":"2099-01-01T00:00:00Z"}"#),
+                (
+                    200,
+                    r#"{"accessToken":"AT-OLD","expirationTime":"2099-01-01T00:00:00Z"}"#,
+                ),
+                (
+                    200,
+                    r#"{"accessToken":"AT-NEW","expirationTime":"2099-01-01T00:00:00Z"}"#,
+                ),
             ],
         ),
         (
@@ -151,7 +160,11 @@ async fn tradovate_renews_after_a_401_and_retries_once() {
         .await
         .expect("the retry with a fresh token succeeds");
     assert!(tx.is_empty());
-    assert_eq!(mock.hits("POST /auth/accesstoken"), 2, "the second exchange is the renewal");
+    assert_eq!(
+        mock.hits("POST /auth/accesstoken"),
+        2,
+        "the second exchange is the renewal"
+    );
     assert_eq!(mock.hits("GET /fill/list"), 2);
 }
 

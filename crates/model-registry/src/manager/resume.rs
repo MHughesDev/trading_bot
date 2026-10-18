@@ -77,7 +77,9 @@ pub fn resume_decision(
 ) -> ResumeDecision {
     use jobs::checkpoint::ResumePlan;
     match jobs::checkpoint::plan_resume(latest, code_hash, image_digest, dataset_id) {
-        ResumePlan::Resume { .. } => latest.cloned().map_or(ResumeDecision::Start, ResumeDecision::Resume),
+        ResumePlan::Resume { .. } => latest
+            .cloned()
+            .map_or(ResumeDecision::Start, ResumeDecision::Resume),
         ResumePlan::Restart { reason } => {
             tracing::info!(%reason, "training starts from step 0 under the same trial");
             ResumeDecision::Start
@@ -201,16 +203,22 @@ impl ModelManager {
             if self.jobs.read().await.contains_key(&run_id) {
                 continue; // alive in this process
             }
-            let spec: Option<(Uuid, Value, Value, Option<String>, chrono::DateTime<Utc>, chrono::DateTime<Utc>)> =
-                sqlx::query_as(
-                    "SELECT trial_id, hyperparameters, data, version_note, window_start, window_end
+            let spec: Option<(
+                Uuid,
+                Value,
+                Value,
+                Option<String>,
+                chrono::DateTime<Utc>,
+                chrono::DateTime<Utc>,
+            )> = sqlx::query_as(
+                "SELECT trial_id, hyperparameters, data, version_note, window_start, window_end
                        FROM mlops.training_run_spec WHERE run_id = $1",
-                )
-                .bind(run_id)
-                .fetch_optional(&self.pg)
-                .await
-                .ok()
-                .flatten();
+            )
+            .bind(run_id)
+            .fetch_optional(&self.pg)
+            .await
+            .ok()
+            .flatten();
             let has_checkpoint = self.latest_checkpoint(run_id).await.is_some();
             match recovery_action(spec.is_some(), has_checkpoint) {
                 RecoveryAction::FailNoSpec => {
@@ -225,12 +233,26 @@ impl ModelManager {
                 RecoveryAction::Resume => {
                     let (trial_id, hp, data, note, ws, we) = spec.expect("Resume implies a spec");
                     match self
-                        .redrive(run_id, &model_id, user_id, trial_id, hp, data, note, (ws, we))
+                        .redrive(
+                            run_id,
+                            &model_id,
+                            user_id,
+                            trial_id,
+                            hp,
+                            data,
+                            note,
+                            (ws, we),
+                        )
                         .await
                     {
                         Ok(()) => report.resumed.push(run_id),
                         Err(why) => {
-                            self.mark_interrupted(run_id, Some((user_id, trial_id)), &format!("interrupted_unrecoverable: {why}")).await;
+                            self.mark_interrupted(
+                                run_id,
+                                Some((user_id, trial_id)),
+                                &format!("interrupted_unrecoverable: {why}"),
+                            )
+                            .await;
                             report.failed_no_checkpoint.push(run_id);
                         }
                     }
@@ -260,7 +282,10 @@ impl ModelManager {
                 Ok(mut ticket) => {
                     let _ = self
                         .ledger
-                        .transition_async(&mut ticket, ledger::TrialEvent::to(ledger::TrialState::Preempted))
+                        .transition_async(
+                            &mut ticket,
+                            ledger::TrialEvent::to(ledger::TrialState::Preempted),
+                        )
                         .await;
                     if let Err(e) = self
                         .ledger
@@ -276,7 +301,9 @@ impl ModelManager {
                         tracing::warn!(%run_id, error = %e, "could not settle an interrupted run's trial");
                     }
                 }
-                Err(e) => tracing::warn!(%run_id, error = %e, "interrupted run's trial is not resumable"),
+                Err(e) => {
+                    tracing::warn!(%run_id, error = %e, "interrupted run's trial is not resumable")
+                }
             }
         }
         tracing::warn!(%run_id, reason, "an interrupted training run was failed at boot");
@@ -374,7 +401,10 @@ mod tests {
     #[test]
     fn an_interrupted_run_is_resumed_only_if_it_has_a_checkpoint() {
         assert_eq!(recovery_action(true, true), RecoveryAction::Resume);
-        assert_eq!(recovery_action(true, false), RecoveryAction::FailNoCheckpoint);
+        assert_eq!(
+            recovery_action(true, false),
+            RecoveryAction::FailNoCheckpoint
+        );
         assert_eq!(recovery_action(false, true), RecoveryAction::FailNoSpec);
         assert_eq!(recovery_action(false, false), RecoveryAction::FailNoSpec);
     }
@@ -393,9 +423,18 @@ mod tests {
     #[test]
     fn a_checkpoint_from_a_different_computation_starts_over() {
         let m = manifest("old-code");
-        assert_eq!(resume_decision(Some(&m), "new-code", "img", "ds"), ResumeDecision::Start);
-        assert_eq!(resume_decision(Some(&m), "old-code", "other", "ds"), ResumeDecision::Start);
-        assert_eq!(resume_decision(Some(&m), "old-code", "img", "other"), ResumeDecision::Start);
+        assert_eq!(
+            resume_decision(Some(&m), "new-code", "img", "ds"),
+            ResumeDecision::Start
+        );
+        assert_eq!(
+            resume_decision(Some(&m), "old-code", "other", "ds"),
+            ResumeDecision::Start
+        );
+        assert_eq!(
+            resume_decision(Some(&m), "old-code", "img", "other"),
+            ResumeDecision::Start
+        );
         assert_eq!(resume_decision(None, "c", "i", "d"), ResumeDecision::Start);
     }
 

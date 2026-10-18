@@ -513,7 +513,11 @@ pub fn evaluate_with_impact(
     cfg: &EvalConfig,
     impact: Option<SqrtImpact>,
 ) -> Result<PositionRun, EvalError> {
-    if impact.is_some_and(|i| ![i.y, i.sigma, i.volume_usd].iter().all(|x| x.is_finite() && *x >= 0.0)) {
+    if impact.is_some_and(|i| {
+        ![i.y, i.sigma, i.volume_usd]
+            .iter()
+            .all(|x| x.is_finite() && *x >= 0.0)
+    }) {
         return Err(EvalError::BadCost);
     }
     if bars.is_empty() {

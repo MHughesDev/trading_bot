@@ -670,9 +670,9 @@ impl Validated {
         // no longer a refused or trainer-handed field; strategy events need the strategy's
         // entry timestamps, which the trainer resolves.
         let native_sampling = match &d.sampling {
-            Sampling::Cusum { h_sigma } => Some(dataplane::sampling::SamplingSpec::Cusum {
-                h_sigma: *h_sigma,
-            }),
+            Sampling::Cusum { h_sigma } => {
+                Some(dataplane::sampling::SamplingSpec::Cusum { h_sigma: *h_sigma })
+            }
             _ => None,
         };
         if !matches!(d.sampling, Sampling::EveryBar) && native_sampling.is_none() {
@@ -1226,7 +1226,11 @@ mod tests {
         // CUSUM is sampled natively (N-1.7): it lowers into the label spec, no trainer hand-off.
         let mut cu = t.clone();
         cu.sampling = Sampling::Cusum { h_sigma: 3.0 };
-        let l = cu.validate(None).unwrap().lower_for_trainer(&ctx()).unwrap();
+        let l = cu
+            .validate(None)
+            .unwrap()
+            .lower_for_trainer(&ctx())
+            .unwrap();
         assert_eq!(
             l.request.label_spec.sampling,
             Some(dataplane::sampling::SamplingSpec::Cusum { h_sigma: 3.0 })

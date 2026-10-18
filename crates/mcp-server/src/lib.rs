@@ -29,9 +29,9 @@ pub mod gate;
 pub mod idempotency;
 // Set S S-1.2 / S-1.19: the answer shape and the typed refusal, one seam each.
 pub mod result_shape;
-pub mod tool_error;
 pub mod spec;
 pub mod taxonomy;
+pub mod tool_error;
 pub mod tools;
 
 use std::collections::HashMap;
@@ -892,7 +892,9 @@ async fn dispatch_untraced(
         "preview_signals" => tools::strategy_lang::preview_signals(&ctx.api, params).await,
         "compile_strategy" => tools::strategy::compile_strategy(params),
         // The base answer plus the author's comments (S-5.15).
-        "explain_strategy" => tools::strategy_lang::explain_strategy_with_stored_notes(&ctx.api, params).await,
+        "explain_strategy" => {
+            tools::strategy_lang::explain_strategy_with_stored_notes(&ctx.api, params).await
+        }
         "diff_strategies" => tools::strategy::diff_strategies(params),
         "apply_move" => tools::strategy::apply_move(params),
         // Set S S-5.11–S-5.13, S-5.15: the rest of the SLv2 surface.
@@ -1077,8 +1079,12 @@ async fn dispatch_untraced(
         "propose_skill" => tools::skills_registry::propose_skill(&ctx.api, params).await,
         // Set R-b: the knowledge model's questions. None records a measurement.
         "check_move_history" => tools::knowledge_model::check_move_history(&ctx.api, params).await,
-        "find_analog_windows" => tools::knowledge_model::find_analog_windows(&ctx.api, params).await,
-        "tag_hypothesis_source" => tools::knowledge_model::tag_hypothesis_source(&ctx.api, params).await,
+        "find_analog_windows" => {
+            tools::knowledge_model::find_analog_windows(&ctx.api, params).await
+        }
+        "tag_hypothesis_source" => {
+            tools::knowledge_model::tag_hypothesis_source(&ctx.api, params).await
+        }
         "get_regime_profile" => tools::knowledge_model::get_regime_profile(&ctx.api, params).await,
         "get_regime_prior" => tools::knowledge_model::get_regime_prior(&ctx.api, params).await,
         "compare_to_random" => tools::knowledge_model::compare_to_random(&ctx.api, params).await,
@@ -1305,7 +1311,10 @@ mod catalogue_tests {
                 1,
                 "{marker} appears more than once in the guide"
             );
-            assert!(protocol.contains(marker), "{marker} belongs to the protocol");
+            assert!(
+                protocol.contains(marker),
+                "{marker} belongs to the protocol"
+            );
         }
     }
 
@@ -1656,12 +1665,19 @@ size fixed 0.01
                     exit stop 2 % from entry
 exit time 48 bars
 ";
-        let out =
-            dispatch_under(&ctx, "compile_strategy", &json!({ "text": text }), None, &envelope())
-                .await;
+        let out = dispatch_under(
+            &ctx,
+            "compile_strategy",
+            &json!({ "text": text }),
+            None,
+            &envelope(),
+        )
+        .await;
         assert!(out.get("error").is_none(), "{out:#}");
         assert!(
-            out["summary"].as_str().is_some_and(|s| s.contains("trend_v1")),
+            out["summary"]
+                .as_str()
+                .is_some_and(|s| s.contains("trend_v1")),
             "{out:#}"
         );
         assert_eq!(out["summary_fields"]["strategy_id"], "trend_v1");

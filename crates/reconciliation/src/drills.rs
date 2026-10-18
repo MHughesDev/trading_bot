@@ -146,15 +146,20 @@ fn monitor_lost(lease: Option<&monitor::lease::Lease>, now: DateTime<Utc>) -> Ou
                 "gate_refuses_now": refused,
                 "note": "no monitor has renewed a lease: the gate is already closed",
             }),
-            failure: (!refused).then(|| "no lease exists and the gate still admitted an order".to_owned()),
+            failure: (!refused)
+                .then(|| "no lease exists and the gate still admitted an order".to_owned()),
         };
     };
     // The moment the monitor died is its last renewal; the gate closes when the
     // lease it left behind expires. That interval is the whole of §8.1.
     let closes_after_ms = (lease.expires_at - lease.renewed_at).num_milliseconds();
-    ks.observe_lease(LeaseStatus::of(Some(lease), lease.expires_at - Duration::milliseconds(1)).permits_orders());
+    ks.observe_lease(
+        LeaseStatus::of(Some(lease), lease.expires_at - Duration::milliseconds(1)).permits_orders(),
+    );
     let open_before_expiry = gate.check(intent(None), &ctx()).is_ok();
-    ks.observe_lease(LeaseStatus::of(Some(lease), lease.expires_at + Duration::milliseconds(1)).permits_orders());
+    ks.observe_lease(
+        LeaseStatus::of(Some(lease), lease.expires_at + Duration::milliseconds(1)).permits_orders(),
+    );
     let refused_after = gate.check(intent(None), &ctx()).is_err();
     let within_cadence = closes_after_ms <= lease.cadence_ms;
     let passed = refused_after && within_cadence;
@@ -251,7 +256,11 @@ fn every_deployment_stops(strategy_ids: &[String]) -> (bool, bool, serde_json::V
     let ks = Arc::new(KillSwitch::new(false));
     let gate = RiskGate::new(GlobalRiskLimits::default(), Arc::clone(&ks));
     let synthetic = [format!("drill-fleet-{}", Uuid::new_v4())];
-    let ids: &[String] = if strategy_ids.is_empty() { &synthetic } else { strategy_ids };
+    let ids: &[String] = if strategy_ids.is_empty() {
+        &synthetic
+    } else {
+        strategy_ids
+    };
     ks.trip();
     let refused: Vec<bool> = ids
         .iter()
@@ -310,16 +319,27 @@ pub async fn run_all(
     // 1. The monitor dies.
     let started = Utc::now();
     let lease = store.read_lease().await?;
-    let cadence_ms = lease
-        .as_ref()
-        .map_or_else(|| i64::try_from(monitor::DEFAULT_CADENCE_MS).unwrap_or(60_000), |l| l.cadence_ms);
+    let cadence_ms = lease.as_ref().map_or_else(
+        || i64::try_from(monitor::DEFAULT_CADENCE_MS).unwrap_or(60_000),
+        |l| l.cadence_ms,
+    );
     let o = monitor_lost(lease.as_ref(), started);
     out.push(record(store, DrillKind::MonitorLost, scheduled, run_by, started, o).await?);
 
     // 2. A divergence is planted.
     let started = Utc::now();
     let o = divergence_planted();
-    out.push(record(store, DrillKind::DivergencePlanted, scheduled, run_by, started, o).await?);
+    out.push(
+        record(
+            store,
+            DrillKind::DivergencePlanted,
+            scheduled,
+            run_by,
+            started,
+            o,
+        )
+        .await?,
+    );
 
     // 3. The kill switch trips: through the real tables, at a drill scope.
     let started = Utc::now();
@@ -365,7 +385,8 @@ pub async fn run_all(
         Some(
             [
                 trip_failure,
-                (!all_refused).then(|| "a running deployment was admitted through a global trip".to_owned()),
+                (!all_refused)
+                    .then(|| "a running deployment was admitted through a global trip".to_owned()),
                 (!agent_refused).then(|| "an agent reset was not refused".to_owned()),
             ]
             .into_iter()
@@ -417,7 +438,17 @@ pub async fn run_all(
             }
         }),
     };
-    out.push(record(store, DrillKind::ServiceRestored, scheduled, run_by, started, o).await?);
+    out.push(
+        record(
+            store,
+            DrillKind::ServiceRestored,
+            scheduled,
+            run_by,
+            started,
+            o,
+        )
+        .await?,
+    );
     Ok(out)
 }
 
@@ -530,7 +561,10 @@ mod tests {
     #[test]
     fn the_venue_class_is_asserted_in_code_and_in_the_schema() {
         let src = include_str!("drills.rs");
-        assert!(src.contains("d.environment != \"paper\""), "run_all must refuse a non-paper deployment");
+        assert!(
+            src.contains("d.environment != \"paper\""),
+            "run_all must refuse a non-paper deployment"
+        );
         let migration = include_str!("../../../migrations/0165_monitor_measurement.sql");
         assert!(
             migration.contains("venue_class   TEXT        NOT NULL CHECK (venue_class = 'paper')"),

@@ -61,7 +61,10 @@ mod tests {
         let w = weights(0.4, 5);
         assert_eq!(w[0], 1.0);
         assert!((w[1] - -0.4).abs() < 1e-15, "w1 = -d");
-        assert!((w[2] - 0.4 * (0.4 - 1.0) / 2.0).abs() < 1e-15, "w2 = d(d-1)/2");
+        assert!(
+            (w[2] - 0.4 * (0.4 - 1.0) / 2.0).abs() < 1e-15,
+            "w2 = d(d-1)/2"
+        );
         // For 0 < d < 1 every weight after the first is negative: the memory
         // decays without changing sign.
         assert!(w[1..].iter().all(|x| *x < 0.0), "{w:?}");
@@ -104,13 +107,22 @@ mod tests {
             let m = v.iter().sum::<f64>() / v.len() as f64;
             v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / v.len() as f64
         };
-        assert!(var(&series) < 0.2 * var(level), "{} vs {}", var(&series), var(level));
+        assert!(
+            var(&series) < 0.2 * var(level),
+            "{} vs {}",
+            var(&series),
+            var(level)
+        );
         // Not flat: it still moves with the level (positive correlation).
         let (ml, ms) = (
             level.iter().sum::<f64>() / level.len() as f64,
             series.iter().sum::<f64>() / series.len() as f64,
         );
-        let cov: f64 = level.iter().zip(&series).map(|(a, b)| (a - ml) * (b - ms)).sum();
+        let cov: f64 = level
+            .iter()
+            .zip(&series)
+            .map(|(a, b)| (a - ml) * (b - ms))
+            .sum();
         assert!(cov > 0.0, "it kept no memory of the level");
     }
 

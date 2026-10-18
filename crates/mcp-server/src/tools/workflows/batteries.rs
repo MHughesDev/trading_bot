@@ -447,7 +447,10 @@ fn precapital(b: &Battery) -> Verdict {
         .and_then(|s| s.field("verdict"))
         .and_then(Value::as_str)
         .map(str::to_string);
-    if matches!(timing.as_deref(), Some("timing_fragile" | "no_edge_to_delay")) {
+    if matches!(
+        timing.as_deref(),
+        Some("timing_fragile" | "no_edge_to_delay")
+    ) {
         return because(
             "reject",
             if timing.as_deref() == Some("timing_fragile") {

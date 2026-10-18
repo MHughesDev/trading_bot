@@ -138,7 +138,9 @@ pub fn decompose(obs: &[ForwardObservation]) -> Result<DivergenceReport, Diverge
     let (dominant, verdict) = if n < MIN_BARS {
         (
             "insufficient_data",
-            format!("{n} observed bars; at least {MIN_BARS} are needed to name a dominant component"),
+            format!(
+                "{n} observed bars; at least {MIN_BARS} are needed to name a dominant component"
+            ),
         )
     } else if signal.abs() >= matched.abs() {
         (
@@ -190,7 +192,13 @@ mod tests {
     use domain::numeraire::Numeraire;
     use uuid::Uuid;
 
-    fn obs(i: i64, realised: f64, expected: f64, matched: bool, src: ObservationSource) -> ForwardObservation {
+    fn obs(
+        i: i64,
+        realised: f64,
+        expected: f64,
+        matched: bool,
+        src: ObservationSource,
+    ) -> ForwardObservation {
         ForwardObservation {
             deployment_id: Uuid::nil(),
             strategy_id: "s".into(),
@@ -274,6 +282,9 @@ mod tests {
     #[test]
     fn nothing_observed_is_an_error_not_a_zero() {
         let o = vec![obs(0, 0.0, 0.0, true, ObservationSource::Backfill)];
-        assert_eq!(decompose(&o), Err(DivergenceError::NoObservedRows { backfilled: 1 }));
+        assert_eq!(
+            decompose(&o),
+            Err(DivergenceError::NoObservedRows { backfilled: 1 })
+        );
     }
 }

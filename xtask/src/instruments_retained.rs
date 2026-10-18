@@ -49,11 +49,7 @@ fn contains_ident(hay: &str, needle: &str) -> bool {
 #[must_use]
 pub fn line_removes_an_instrument(line: &str) -> bool {
     let l = normalise(line);
-    const TABLES: &[&str] = &[
-        "instruments",
-        "public.instruments",
-        "dataplane.instrument",
-    ];
+    const TABLES: &[&str] = &["instruments", "public.instruments", "dataplane.instrument"];
     TABLES.iter().any(|t| {
         contains_ident(&l, &format!("delete from {t}"))
             || contains_ident(&l, &format!("truncate {t}"))

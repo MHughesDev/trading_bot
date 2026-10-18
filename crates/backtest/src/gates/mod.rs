@@ -10,9 +10,9 @@
 //! GATE 0 integrity → GATE 1 single-path → GATE 2 robustness → GATE 3 significance → GATE 4 vault
 //! ```
 
-pub mod evaluators;
 pub mod alpha_chain;
 pub mod dossier_clauses;
+pub mod evaluators;
 pub mod model_binding;
 pub mod model_leakage;
 pub mod position_leakage;
@@ -329,7 +329,10 @@ impl<'e> GateRunner<'e> {
     /// This strategy is a Layer 2 version of a Layer 1 idea: Significance and the Vault are
     /// refused until a passed reconciliation for exactly that pair stands (Set M M-4.4).
     #[must_use]
-    pub fn with_reconciliation(mut self, req: reconciliation_gate::ReconciliationRequirement) -> Self {
+    pub fn with_reconciliation(
+        mut self,
+        req: reconciliation_gate::ReconciliationRequirement,
+    ) -> Self {
         self.reconciliation = Some(req);
         self
     }
@@ -846,13 +849,16 @@ mod tests {
         use reconciliation_gate::{ReconRecord, ReconciliationRequirement};
         let run = |records: Vec<ReconRecord>| {
             let mut e = experiment();
-            let mut runner = GateRunner::new(&mut e).with_reconciliation(ReconciliationRequirement {
-                layer2_revision: "L2".into(),
-                layer1_parent: "L1".into(),
-                records,
-            });
+            let mut runner =
+                GateRunner::new(&mut e).with_reconciliation(ReconciliationRequirement {
+                    layer2_revision: "L2".into(),
+                    layer1_parent: "L1".into(),
+                    records,
+                });
             runner.gate0(&clean_integrity()).unwrap();
-            runner.gate1(&study("wf", vec![0.1], verdict(true, None))).unwrap();
+            runner
+                .gate1(&study("wf", vec![0.1], verdict(true, None)))
+                .unwrap();
             runner
                 .gate2(
                     &study("cpcv", vec![0.1, 0.2], verdict(true, None)),
@@ -867,21 +873,51 @@ mod tests {
                 .gate3(
                     -10.0,
                     &null,
-                    crate::nulls::Null::new(crate::nulls::NullKind::SignalReturnDecouple, crate::nulls::NullParams::default())
-                        .unwrap()
-                        .null_id,
-                    &CorroboratorInputs { sharpe: 3.0, n_obs: 252, skew: 0.0, kurtosis: 3.0, sharpe_variance_across_trials: 0.01, pbo_performance: &perf, pbo_groups: 2 },
+                    crate::nulls::Null::new(
+                        crate::nulls::NullKind::SignalReturnDecouple,
+                        crate::nulls::NullParams::default(),
+                    )
+                    .unwrap()
+                    .null_id,
+                    &CorroboratorInputs {
+                        sharpe: 3.0,
+                        n_obs: 252,
+                        skew: 0.0,
+                        kurtosis: 3.0,
+                        sharpe_variance_across_trials: 0.01,
+                        pbo_performance: &perf,
+                        pbo_groups: 2,
+                    },
                     &ledger::TrialLedger::n_eff(&InMemoryLedger::new(), "tenant-test").unwrap(),
                     0.05,
                 )
                 .map(|(_, passed)| passed)
         };
         let refused = run(vec![]).unwrap_err();
-        assert!(matches!(&refused, GateError::ReconciliationRequired(why) if why.contains("no reconciliation")), "{refused}");
-        let failed = run(vec![ReconRecord { layer1_revision: "L1".into(), layer2_revision: "L2".into(), passed: false, created_at: Utc::now() }]);
-        assert!(matches!(failed, Err(GateError::ReconciliationRequired(_))), "a failed one stays refused");
-        let ok = run(vec![ReconRecord { layer1_revision: "L1".into(), layer2_revision: "L2".into(), passed: true, created_at: Utc::now() }]);
-        assert!(ok.is_ok(), "a passed one proceeds to the gate's own judgement: {ok:?}");
+        assert!(
+            matches!(&refused, GateError::ReconciliationRequired(why) if why.contains("no reconciliation")),
+            "{refused}"
+        );
+        let failed = run(vec![ReconRecord {
+            layer1_revision: "L1".into(),
+            layer2_revision: "L2".into(),
+            passed: false,
+            created_at: Utc::now(),
+        }]);
+        assert!(
+            matches!(failed, Err(GateError::ReconciliationRequired(_))),
+            "a failed one stays refused"
+        );
+        let ok = run(vec![ReconRecord {
+            layer1_revision: "L1".into(),
+            layer2_revision: "L2".into(),
+            passed: true,
+            created_at: Utc::now(),
+        }]);
+        assert!(
+            ok.is_ok(),
+            "a passed one proceeds to the gate's own judgement: {ok:?}"
+        );
     }
 
     #[test]

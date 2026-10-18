@@ -135,7 +135,9 @@ pub enum RampError {
     PeriodSkipped { last: u32, got: u32 },
     #[error("the deployment is already at zero size; no further period is reviewed")]
     AlreadyZero,
-    #[error("the review records {before} -> {after} halvings, which is not what a `{outcome}` does")]
+    #[error(
+        "the review records {before} -> {after} halvings, which is not what a `{outcome}` does"
+    )]
     BadArithmetic {
         outcome: &'static str,
         before: u8,
@@ -143,7 +145,9 @@ pub enum RampError {
     },
     #[error("the review starts from {recorded} halvings but the ladder is at {actual}")]
     Discontinuous { recorded: u8, actual: u8 },
-    #[error("this deployment is not on the capital ladder: its profile does not authorise capital")]
+    #[error(
+        "this deployment is not on the capital ladder: its profile does not authorise capital"
+    )]
     NotOnCapitalLadder,
     #[error("already at the top rung")]
     AtTheTop,
@@ -331,7 +335,10 @@ pub fn replay(profile_authorises_capital: bool, events: &[ReviewEvent]) -> Resul
 /// ended. Computed from the **recorded** end, never from "now" or from the period
 /// count, so a worker that ran late does not shift the schedule.
 #[must_use]
-pub fn next_period(previous_end: DateTime<Utc>, period_days: i64) -> (DateTime<Utc>, DateTime<Utc>) {
+pub fn next_period(
+    previous_end: DateTime<Utc>,
+    period_days: i64,
+) -> (DateTime<Utc>, DateTime<Utc>) {
     (previous_end, previous_end + Duration::days(period_days))
 }
 
@@ -345,8 +352,8 @@ pub fn steps_down(v: &StepVerdict) -> bool {
 mod tests {
     use super::*;
     use crate::capital::authorise;
-    use crate::ramp_gate::tests::{evidence, inputs};
     use crate::ramp_gate::judge;
+    use crate::ramp_gate::tests::{evidence, inputs};
 
     fn passing(profile: &str, capital: bool, rung: Option<AllowedFraction>) -> StepJudgement {
         judge(&inputs(profile, capital, rung), &evidence())
@@ -375,7 +382,12 @@ mod tests {
         let outcomes: Vec<_> = events.iter().map(|e| e.outcome).collect();
         assert_eq!(
             outcomes,
-            vec![Outcome::Halve, Outcome::Halve, Outcome::Halve, Outcome::Zero]
+            vec![
+                Outcome::Halve,
+                Outcome::Halve,
+                Outcome::Halve,
+                Outcome::Zero
+            ]
         );
         assert!(r.size().is_zero());
         // And nothing follows zero.
@@ -384,7 +396,9 @@ mod tests {
 
     #[test]
     fn the_monitor_scale_rounds_down_never_up() {
-        let pcts: Vec<u8> = (0..=4).map(|h| Size::from_halvings(h).unwrap().scale_pct()).collect();
+        let pcts: Vec<u8> = (0..=4)
+            .map(|h| Size::from_halvings(h).unwrap().scale_pct())
+            .collect();
         assert_eq!(pcts, vec![100, 50, 25, 12, 0]);
         for h in 0..=4 {
             let s = Size::from_halvings(h).unwrap();
@@ -398,7 +412,12 @@ mod tests {
     #[test]
     fn size_never_rises_whatever_the_period_resolves_to() {
         let mut r = Ramp::enter(false);
-        let seq = [failing(), passing("paper_v1", false, None), failing(), passing("paper_v1", false, None)];
+        let seq = [
+            failing(),
+            passing("paper_v1", false, None),
+            failing(),
+            passing("paper_v1", false, None),
+        ];
         let mut last = r.size();
         for (i, j) in seq.iter().enumerate() {
             r.review(u32::try_from(i).unwrap() + 1, j, None).unwrap();
@@ -442,7 +461,10 @@ mod tests {
         // A judgement that wrongly allowed a step still cannot move a paper_v1 ramp.
         let mut j = passing("paper_v1", false, None);
         j.step_up_allowed = true;
-        assert_eq!(r.review(1, &j, Some(&auth)), Err(RampError::NotOnCapitalLadder));
+        assert_eq!(
+            r.review(1, &j, Some(&auth)),
+            Err(RampError::NotOnCapitalLadder)
+        );
     }
 
     #[test]
@@ -480,7 +502,10 @@ mod tests {
         let mut r = Ramp::enter(true);
         let j = passing("strict_v1", true, r.rung());
         assert!(j.step_up_allowed);
-        assert!(matches!(r.review(1, &j, None), Err(RampError::StepUpRefused(_))));
+        assert!(matches!(
+            r.review(1, &j, None),
+            Err(RampError::StepUpRefused(_))
+        ));
         assert_eq!(r.rung(), Some(AllowedFraction::Zero), "nothing moved");
         assert_eq!(r.last_period(), 0, "and the period was not consumed");
     }
@@ -522,7 +547,12 @@ mod tests {
 
     #[test]
     fn a_log_that_skips_a_period_or_breaks_the_arithmetic_is_not_a_state() {
-        let e = |p, o, b, a| ReviewEvent { period_no: p, outcome: o, halvings_before: b, halvings_after: a };
+        let e = |p, o, b, a| ReviewEvent {
+            period_no: p,
+            outcome: o,
+            halvings_before: b,
+            halvings_after: a,
+        };
         assert!(matches!(
             replay(false, &[e(2, Outcome::Hold, 0, 0)]),
             Err(RampError::PeriodSkipped { .. })

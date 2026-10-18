@@ -141,7 +141,9 @@ impl Worker for DatasetBuildWorker {
         ctx.progress(Progress {
             pct: Some(0.0),
             stage: Some("dataset_build".into()),
-            message: Some("pulling bars, building features and labels, checking for leakage".into()),
+            message: Some(
+                "pulling bars, building features and labels, checking for leakage".into(),
+            ),
         })
         .await;
         run_build(self.builder.as_ref(), manifest).await
@@ -156,7 +158,10 @@ mod tests {
 
     #[async_trait::async_trait]
     impl DatasetBuilder for Fake {
-        async fn build(&self, _: &DatasetBuildManifest) -> Result<DatasetBuildOutcome, BuildFailure> {
+        async fn build(
+            &self,
+            _: &DatasetBuildManifest,
+        ) -> Result<DatasetBuildOutcome, BuildFailure> {
             (self.0)()
         }
     }
@@ -169,8 +174,14 @@ mod tests {
     fn the_kind_is_dataset_build_and_a_manifest_needs_a_tenant_and_a_request() {
         assert_eq!(JobKind::DatasetBuild.as_str(), "dataset_build");
         assert!(DatasetBuildManifest::from_value(&manifest()).is_ok());
-        assert!(DatasetBuildManifest::from_value(&serde_json::json!({"tenant": "", "request": {}})).is_err());
-        assert!(DatasetBuildManifest::from_value(&serde_json::json!({"tenant": "t", "request": 3})).is_err());
+        assert!(DatasetBuildManifest::from_value(
+            &serde_json::json!({"tenant": "", "request": {}})
+        )
+        .is_err());
+        assert!(DatasetBuildManifest::from_value(
+            &serde_json::json!({"tenant": "t", "request": 3})
+        )
+        .is_err());
         assert!(DatasetBuildManifest::from_value(
             &serde_json::json!({"tenant": "t", "request": {}, "extra": 1})
         )
@@ -213,7 +224,9 @@ mod tests {
         assert!(!e.retryable);
         let down = Fake(|| Err(BuildFailure::Other(anyhow::anyhow!("clickhouse down"))));
         assert!(run_build(&down, &manifest()).await.unwrap_err().retryable);
-        let bad = run_build(&down, &serde_json::json!({"nope": 1})).await.unwrap_err();
+        let bad = run_build(&down, &serde_json::json!({"nope": 1}))
+            .await
+            .unwrap_err();
         assert_eq!(bad.code, "invalid_manifest");
     }
 }

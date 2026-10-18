@@ -216,7 +216,9 @@ impl MonitorStore {
         resolution: &str,
     ) -> Result<bool, StoreError> {
         if !actor.starts_with("human:") || actor.len() <= "human:".len() {
-            return Err(StoreError::Invalid(format!("{actor} may not resolve a defect")));
+            return Err(StoreError::Invalid(format!(
+                "{actor} may not resolve a defect"
+            )));
         }
         if resolution.trim().is_empty() {
             return Err(StoreError::Invalid(
@@ -242,9 +244,15 @@ impl MonitorStore {
     ///
     /// # Errors
     /// The database, or an `agent:` runner.
-    pub async fn record_drill_run(&self, run: &DrillRun) -> Result<(Uuid, Option<Uuid>), StoreError> {
+    pub async fn record_drill_run(
+        &self,
+        run: &DrillRun,
+    ) -> Result<(Uuid, Option<Uuid>), StoreError> {
         if run.run_by.starts_with("agent:") {
-            return Err(StoreError::Invalid(format!("{} may not run a drill", run.run_by)));
+            return Err(StoreError::Invalid(format!(
+                "{} may not run a drill",
+                run.run_by
+            )));
         }
         let defect = if run.passed {
             None
@@ -274,7 +282,11 @@ impl MonitorStore {
              RETURNING run_id",
         )
         .bind(run.drill.as_str())
-        .bind(if run.scheduled { "scheduled" } else { "on_demand" })
+        .bind(if run.scheduled {
+            "scheduled"
+        } else {
+            "on_demand"
+        })
         .bind(run.started_at)
         .bind(run.finished_at)
         .bind(duration_ms)

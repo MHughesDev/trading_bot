@@ -1986,12 +1986,20 @@ mod tests {
     fn a_label_at_t_does_not_change_when_later_bars_arrive() {
         let all = daily(NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(), 300, |i| {
             let amp = if (150..250).contains(&i) { 0.08 } else { 0.004 };
-            if i % 2 == 0 { amp } else { -amp }
+            if i % 2 == 0 {
+                amp
+            } else {
+                -amp
+            }
         });
         let full = vol_tercile_regimes(&all, 21);
         for cut in [5usize, 30, 100, 149, 200, 299] {
             let prefix = vol_tercile_regimes(&all[..cut], 21);
-            assert_eq!(prefix.as_slice(), &full[..cut], "labels up to {cut} moved when later bars were appended");
+            assert_eq!(
+                prefix.as_slice(),
+                &full[..cut],
+                "labels up to {cut} moved when later bars were appended"
+            );
         }
         // The tail really is different, so the assertion above is not vacuous: whole-window
         // terciles would have labelled the quiet start differently once the tail existed.
@@ -3231,7 +3239,11 @@ mod tests {
         ledger::ramp_gate::StepJudgement {
             verdict,
             step_up_allowed: up,
-            step_up_refusal: if up { None } else { Some("at the top rung".into()) },
+            step_up_refusal: if up {
+                None
+            } else {
+                Some("at the top rung".into())
+            },
         }
     }
 
@@ -3246,7 +3258,11 @@ mod tests {
 
         let pass = run(&judgement(StepVerdict::Pass, true));
         assert!(pass.passed && !pass.inconclusive, "{}", pass.detail);
-        assert!((pass.statistic.unwrap() - 0.25).abs() < 1e-12, "{}", pass.detail);
+        assert!(
+            (pass.statistic.unwrap() - 0.25).abs() < 1e-12,
+            "{}",
+            pass.detail
+        );
 
         let hold = run(&judgement(StepVerdict::Pass, false));
         assert!(hold.passed, "{}", hold.detail);
@@ -3274,7 +3290,11 @@ mod tests {
             false,
         ));
         assert!(nc.inconclusive && !nc.passed, "{}", nc.detail);
-        assert!(nc.detail.contains("3 observed forward bars"), "{}", nc.detail);
+        assert!(
+            nc.detail.contains("3 observed forward bars"),
+            "{}",
+            nc.detail
+        );
     }
 
     /// A flawless period does not make a paper profile eligible for capital.

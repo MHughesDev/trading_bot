@@ -457,8 +457,14 @@ pub fn required_steps(files: &BTreeMap<String, Vec<u8>>) -> Vec<&'static str> {
 
 /// [`first_unmet_step`] over an explicit list of required steps.
 #[must_use]
-pub fn first_unmet_in<'a>(required: &[&'a str], latest: &BTreeMap<String, bool>) -> Option<&'a str> {
-    required.iter().copied().find(|s| latest.get(*s) != Some(&true))
+pub fn first_unmet_in<'a>(
+    required: &[&'a str],
+    latest: &BTreeMap<String, bool>,
+) -> Option<&'a str> {
+    required
+        .iter()
+        .copied()
+        .find(|s| latest.get(*s) != Some(&true))
 }
 
 /// The first required step that has not passed, given each step's latest verdict
@@ -478,7 +484,10 @@ pub fn rename_bundle(
     new_name: &str,
 ) -> BTreeMap<String, Vec<u8>> {
     let mut out = files.clone();
-    if let Some(text) = files.get("SKILL.md").and_then(|b| std::str::from_utf8(b).ok()) {
+    if let Some(text) = files
+        .get("SKILL.md")
+        .and_then(|b| std::str::from_utf8(b).ok())
+    {
         let mut in_front = false;
         let mut done = false;
         let mut lines: Vec<String> = Vec::new();
@@ -495,8 +504,15 @@ pub fn rename_bundle(
                 lines.push(l.to_string());
             }
         }
-        out.insert("SKILL.md".to_string(), lines.join("
-").into_bytes());
+        out.insert(
+            "SKILL.md".to_string(),
+            lines
+                .join(
+                    "
+",
+                )
+                .into_bytes(),
+        );
     }
     out
 }
@@ -515,29 +531,41 @@ pub fn reviewer_context(
         "You are reviewing a proposed skill. Judge whether it is a reusable procedure that          grants no capability and contains no finding. You have only what follows.
 ",
     );
-    out.push_str("
+    out.push_str(
+        "
 ## Bundle
-");
+",
+    );
     for (path, bytes) in files {
-        out.push_str(&format!("
+        out.push_str(&format!(
+            "
 ### {path}
-"));
+"
+        ));
         out.push_str(&String::from_utf8_lossy(bytes));
         out.push('\n');
     }
-    out.push_str("
+    out.push_str(
+        "
 ## Tests
-");
+",
+    );
     for t in tests {
-        out.push_str(&format!("- {t}
-"));
+        out.push_str(&format!(
+            "- {t}
+"
+        ));
     }
-    out.push_str("
+    out.push_str(
+        "
 ## Tasks it was evaluated on
-");
+",
+    );
     for t in task_descriptions {
-        out.push_str(&format!("- {t}
-"));
+        out.push_str(&format!(
+            "- {t}
+"
+        ));
     }
     out
 }
@@ -569,8 +597,14 @@ mod tests {
     #[test]
     fn a_clean_skill_is_admissible_and_its_hash_is_its_digest() {
         let files = bundle("clean-skill", "", "Do the plain thing.\n");
-        let d = Draft::check(Scope::Project, "research", "clean-skill", files.clone(), &cat())
-            .unwrap();
+        let d = Draft::check(
+            Scope::Project,
+            "research",
+            "clean-skill",
+            files.clone(),
+            &cat(),
+        )
+        .unwrap();
         assert_eq!(d.version_hash, core::bundle_digest(&files));
         assert_eq!(d.description_tokens, 7);
         assert_eq!(d.body_lines, 1);
@@ -683,7 +717,9 @@ mod tests {
         let body = "run the augmented dickey fuller test on the returns then difference the series until it is stationary";
         let (d, s) = decide(body, &existing, DEFAULT_PATCH_THRESHOLD);
         assert!(s > 0.85, "{s}");
-        assert!(matches!(d, Disposition::Patch { ref target, .. } if target == "stationarity-check"));
+        assert!(
+            matches!(d, Disposition::Patch { ref target, .. } if target == "stationarity-check")
+        );
         // The same body against a threshold above any score is a new skill: it is configuration.
         let (d, _) = decide(body, &existing, 1.01);
         assert_eq!(d, Disposition::New);
@@ -704,7 +740,10 @@ mod tests {
 
     #[test]
     fn a_proposal_needs_a_trajectory_a_reason_and_one_trusted_source() {
-        assert_eq!(check_proposal("T2", "  ", &[]), Err(ProposalError::NoSource));
+        assert_eq!(
+            check_proposal("T2", "  ", &[]),
+            Err(ProposalError::NoSource)
+        );
         assert!(matches!(
             check_proposal("T9", "run:1", &[]),
             Err(ProposalError::BadReason(_))
@@ -729,34 +768,54 @@ mod tests {
 
     #[test]
     fn a_proposal_is_admissible_only_when_every_required_step_passed() {
-        let mut m: BTreeMap<String, bool> = REQUIRED_STEPS.iter().map(|s| (s.to_string(), true)).collect();
+        let mut m: BTreeMap<String, bool> = REQUIRED_STEPS
+            .iter()
+            .map(|s| (s.to_string(), true))
+            .collect();
         assert_eq!(first_unmet_step(&m), None);
         m.insert("replay".into(), false);
         assert_eq!(first_unmet_step(&m), Some("replay"));
         m.remove("reviewer");
         m.insert("replay".into(), true);
-        assert_eq!(first_unmet_step(&m), Some("reviewer"), "a step never recorded has not passed");
+        assert_eq!(
+            first_unmet_step(&m),
+            Some("reviewer"),
+            "a step never recorded has not passed"
+        );
     }
 
     #[test]
     fn renaming_a_bundle_changes_only_the_frontmatter_name() {
-        let f = bundle("old-name", "", "name: not-me
+        let f = bundle(
+            "old-name",
+            "",
+            "name: not-me
 body
-");
+",
+        );
         let r = rename_bundle(&f, "new-name");
         let t = String::from_utf8(r["SKILL.md"].clone()).unwrap();
-        assert!(t.contains("
+        assert!(t.contains(
+            "
 name: new-name
-"));
+"
+        ));
         assert!(t.contains("body"));
-        assert!(t.contains("name: not-me"), "only the frontmatter line moves");
+        assert!(
+            t.contains("name: not-me"),
+            "only the frontmatter line moves"
+        );
         assert!(Draft::check(Scope::Project, "c", "new-name", r, &cat()).is_ok());
     }
 
     #[test]
     fn the_reviewer_sees_the_bundle_tests_and_tasks_and_nothing_else() {
-        let f = bundle("rev", "", "Do the thing.
-");
+        let f = bundle(
+            "rev",
+            "",
+            "Do the thing.
+",
+        );
         let ctx = reviewer_context(&f, &["unit: parses".to_string()], &["task one".to_string()]);
         assert!(ctx.contains("Do the thing."));
         assert!(ctx.contains("unit: parses"));
@@ -764,7 +823,10 @@ name: new-name
         // The signature has no parameter a trajectory could arrive through; the
         // assembled text carries only its three sections.
         let headings: Vec<&str> = ctx.lines().filter(|l| l.starts_with("## ")).collect();
-        assert_eq!(headings, vec!["## Bundle", "## Tests", "## Tasks it was evaluated on"]);
+        assert_eq!(
+            headings,
+            vec!["## Bundle", "## Tests", "## Tasks it was evaluated on"]
+        );
     }
 
     #[test]
@@ -777,8 +839,15 @@ name: new-name
         let cheap = bundle("cheap-a", "claims: savings\n", "Steps.\n");
         assert!(claims_savings(&cheap));
         assert_eq!(required_steps(&cheap).last(), Some(&"savings"));
-        let mut m: BTreeMap<String, bool> = REQUIRED_STEPS.iter().map(|s| ((*s).to_string(), true)).collect();
-        assert_eq!(first_unmet_in(&required_steps(&analysis), &m), Some("tests"), "a never-recorded step has not passed");
+        let mut m: BTreeMap<String, bool> = REQUIRED_STEPS
+            .iter()
+            .map(|s| ((*s).to_string(), true))
+            .collect();
+        assert_eq!(
+            first_unmet_in(&required_steps(&analysis), &m),
+            Some("tests"),
+            "a never-recorded step has not passed"
+        );
         m.insert("tests".into(), true);
         assert_eq!(first_unmet_in(&required_steps(&analysis), &m), None);
     }

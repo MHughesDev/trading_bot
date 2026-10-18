@@ -149,7 +149,11 @@ mod tests {
         }
         let sd = yang_zhang_vol(&o, &h, &l, &c);
         let want = 4.016_469_204_811_634e-5;
-        assert!((sd * sd - want).abs() / want < 1e-9, "{} vs {want}", sd * sd);
+        assert!(
+            (sd * sd - want).abs() / want < 1e-9,
+            "{} vs {want}",
+            sd * sd
+        );
     }
 
     #[test]
@@ -214,7 +218,10 @@ mod tests {
         let (mut o, h, l, c) = bars(30, 0.0);
         o[2] = 0.0;
         assert!(yang_zhang_vol(&o, &h, &l, &c).is_nan());
-        assert!(yang_zhang_vol(&o, &h, &l, &c[..29]).is_nan(), "ragged slices");
+        assert!(
+            yang_zhang_vol(&o, &h, &l, &c[..29]).is_nan(),
+            "ragged slices"
+        );
     }
 
     /// The overnight pairing is open of the newer bar against close of the older

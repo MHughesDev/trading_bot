@@ -342,15 +342,18 @@ impl SimRunExecutor {
         // What the run read, for the receipt. Taken before any null generator touches
         // the bars: the receipt describes the data, and a null world's draw is in
         // the config's own hash.
-        self.observed.lock().expect("observed lock poisoned").insert(
-            cfg.run_id.as_str().to_string(),
-            Observed {
-                dataset_hash: bars_digest(&bars),
-                strategy_hash,
-                venue_id: venue_id.clone(),
-                asset_class: asset_class.clone(),
-            },
-        );
+        self.observed
+            .lock()
+            .expect("observed lock poisoned")
+            .insert(
+                cfg.run_id.as_str().to_string(),
+                Observed {
+                    dataset_hash: bars_digest(&bars),
+                    strategy_hash,
+                    venue_id: venue_id.clone(),
+                    asset_class: asset_class.clone(),
+                },
+            );
 
         // A null-world Run sees generated bars, not the stored ones (spec §2.1).
         // The transformation happens here, at the single point where a Run's data

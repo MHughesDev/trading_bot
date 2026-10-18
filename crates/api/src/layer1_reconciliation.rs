@@ -52,7 +52,10 @@ pub async fn record(
 ///
 /// # Errors
 /// A backend failure.
-pub async fn records_for(pg: &PgPool, layer2_revision: &str) -> Result<Vec<ReconRecord>, sqlx::Error> {
+pub async fn records_for(
+    pg: &PgPool,
+    layer2_revision: &str,
+) -> Result<Vec<ReconRecord>, sqlx::Error> {
     let rows = sqlx::query(
         "SELECT layer1_revision, layer2_revision, passed, created_at FROM strategy_reconciliation \
          WHERE layer2_revision = $1 ORDER BY created_at",
@@ -81,9 +84,11 @@ pub async fn requirement_for(
     layer2_revision: &str,
     layer1_parent: &str,
 ) -> Result<backtest::gates::reconciliation_gate::ReconciliationRequirement, sqlx::Error> {
-    Ok(backtest::gates::reconciliation_gate::ReconciliationRequirement {
-        layer2_revision: layer2_revision.to_string(),
-        layer1_parent: layer1_parent.to_string(),
-        records: records_for(pg, layer2_revision).await?,
-    })
+    Ok(
+        backtest::gates::reconciliation_gate::ReconciliationRequirement {
+            layer2_revision: layer2_revision.to_string(),
+            layer1_parent: layer1_parent.to_string(),
+            records: records_for(pg, layer2_revision).await?,
+        },
+    )
 }

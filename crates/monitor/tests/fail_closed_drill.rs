@@ -839,10 +839,19 @@ async fn an_injected_mismatch_halts_one_venue_and_blocks_resume_until_clean() {
         "a venue that disagrees with our book was resumable"
     );
     store
-        .record_venue_check(&bad, monitor::reconciled::VenueVerdict::Agreed, 1, None, "reconciliation")
+        .record_venue_check(
+            &bad,
+            monitor::reconciled::VenueVerdict::Agreed,
+            1,
+            None,
+            "reconciliation",
+        )
         .await
         .expect("agreed");
-    store.reset(&venue_reset).await.expect("clean now, so a human may resume it");
+    store
+        .reset(&venue_reset)
+        .await
+        .expect("clean now, so a human may resume it");
 }
 
 // ── §8.5 — the trip record exists before the first refused order ────────────

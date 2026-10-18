@@ -54,8 +54,13 @@ struct Scratch {
 impl Scratch {
     async fn new() -> Self {
         let name = format!("skills_flow_{}", &Uuid::new_v4().simple().to_string()[..8]);
-        let mut admin = PgConnection::connect(&with_db(&base_url(), "postgres")).await.expect("postgres reachable");
-        admin.execute(format!("CREATE DATABASE {name}").as_str()).await.unwrap();
+        let mut admin = PgConnection::connect(&with_db(&base_url(), "postgres"))
+            .await
+            .expect("postgres reachable");
+        admin
+            .execute(format!("CREATE DATABASE {name}").as_str())
+            .await
+            .unwrap();
         let pg = PgPool::connect(&with_db(&base_url(), &name)).await.unwrap();
         pg.execute(
             "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_role') \
@@ -63,15 +68,21 @@ impl Scratch {
         )
         .await
         .unwrap();
-        pg.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto").await.ok();
-        let has_vector = sqlx::query_scalar::<_, i64>("SELECT count(*) FROM pg_available_extensions WHERE name = 'vector'")
-            .fetch_one(&pg)
+        pg.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
             .await
-            .unwrap_or(0)
+            .ok();
+        let has_vector = sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM pg_available_extensions WHERE name = 'vector'",
+        )
+        .fetch_one(&pg)
+        .await
+        .unwrap_or(0)
             > 0;
         let mut mem = migration("0122_semantic_memory.sql");
         if has_vector {
-            pg.execute("CREATE EXTENSION IF NOT EXISTS vector").await.unwrap();
+            pg.execute("CREATE EXTENSION IF NOT EXISTS vector")
+                .await
+                .unwrap();
         } else {
             mem = mem.replace("embedding       vector(768),", "embedding       bytea,");
         }
@@ -85,15 +96,21 @@ impl Scratch {
             "0214_regime_strategy_prior.sql",
             "0225_campaign_arms_and_curator.sql",
         ] {
-            pg.execute(migration(m).as_str()).await.unwrap_or_else(|e| panic!("{m}: {e}"));
+            pg.execute(migration(m).as_str())
+                .await
+                .unwrap_or_else(|e| panic!("{m}: {e}"));
         }
         Self { name, pg }
     }
 
     async fn drop(self) {
         self.pg.close().await;
-        let mut admin = PgConnection::connect(&with_db(&base_url(), "postgres")).await.unwrap();
-        let _ = admin.execute(format!("DROP DATABASE IF EXISTS {} WITH (FORCE)", self.name).as_str()).await;
+        let mut admin = PgConnection::connect(&with_db(&base_url(), "postgres"))
+            .await
+            .unwrap();
+        let _ = admin
+            .execute(format!("DROP DATABASE IF EXISTS {} WITH (FORCE)", self.name).as_str())
+            .await;
     }
 }
 
@@ -111,7 +128,13 @@ fn bundle(name: &str, description: &str, body: &str) -> BTreeMap<String, Vec<u8>
 }
 
 fn finding(id: &str, subject: &str, claim: &str, run: &str) -> Entry {
-    let mut e = Entry::finding(id, subject, claim, DataWindow::new("2026-01-01", "2026-02-01"), Provenance::new(run, "run_backtest", "3", "hash"));
+    let mut e = Entry::finding(
+        id,
+        subject,
+        claim,
+        DataWindow::new("2026-01-01", "2026-02-01"),
+        Provenance::new(run, "run_backtest", "3", "hash"),
+    );
     e.created_by = "test".into();
     e
 }
@@ -137,8 +160,18 @@ async fn session_start_mounts_core_records_exposure_once_and_a_read_activates() 
 
     let s = session_start(&db.pg, &ws, user, session, "test-model").await;
     assert_eq!(s.degraded, None, "{s:?}");
-    for want in ["playbook", "skill-finder", "skill-authoring", "tbot-howto", "qc-rules-and-pitfalls"] {
-        assert!(s.resident.iter().any(|n| n == want), "{want} not resident: {:?}", s.resident);
+    for want in [
+        "playbook",
+        "skill-finder",
+        "skill-authoring",
+        "tbot-howto",
+        "qc-rules-and-pitfalls",
+    ] {
+        assert!(
+            s.resident.iter().any(|n| n == want),
+            "{want} not resident: {:?}",
+            s.resident
+        );
         assert!(root.join("agents").read_dir().is_ok());
     }
     let mount = ws.root().join(".claude/skills");
@@ -147,31 +180,44 @@ async fn session_start_mounts_core_records_exposure_once_and_a_read_activates() 
     assert!(s.hint.contains("Resident skills"));
 
     // One exposure per resident skill; asking again for the same session adds none.
-    let n: i64 = sqlx::query("SELECT count(*) FROM skill_registry.skill_run WHERE session_id = $1 AND state = 'exposed'")
-        .bind(session)
-        .fetch_one(&db.pg)
-        .await
-        .unwrap()
-        .get(0);
+    let n: i64 = sqlx::query(
+        "SELECT count(*) FROM skill_registry.skill_run WHERE session_id = $1 AND state = 'exposed'",
+    )
+    .bind(session)
+    .fetch_one(&db.pg)
+    .await
+    .unwrap()
+    .get(0);
     assert_eq!(usize::try_from(n).unwrap(), s.resident.len());
     let again = session_start(&db.pg, &ws, user, session, "test-model").await;
     assert_eq!(again.degraded, None);
-    let n2: i64 = sqlx::query("SELECT count(*) FROM skill_registry.skill_run WHERE session_id = $1")
-        .bind(session)
-        .fetch_one(&db.pg)
-        .await
-        .unwrap()
-        .get(0);
-    assert_eq!(n, n2, "a repeat session start must not double-count exposures");
+    let n2: i64 =
+        sqlx::query("SELECT count(*) FROM skill_registry.skill_run WHERE session_id = $1")
+            .bind(session)
+            .fetch_one(&db.pg)
+            .await
+            .unwrap()
+            .get(0);
+    assert_eq!(
+        n, n2,
+        "a repeat session start must not double-count exposures"
+    );
 
     // The agent reads the mounted SKILL.md through its own tool: that is the activation.
-    let args = serde_json::from_value(json!({ "path": ".claude/skills/playbook/SKILL.md" })).unwrap();
+    let args =
+        serde_json::from_value(json!({ "path": ".claude/skills/playbook/SKILL.md" })).unwrap();
     let (text, is_error) = execute(&ws, "read_file", &args).await;
     assert!(!is_error && text.contains("Playbook"), "{text}");
-    assert_eq!(activated_skill(".claude/skills/playbook/SKILL.md").as_deref(), Some("playbook"));
+    assert_eq!(
+        activated_skill(".claude/skills/playbook/SKILL.md").as_deref(),
+        Some("playbook")
+    );
     let store = SkillStore::new(db.pg.clone());
     assert!(store.record_activation(session, "playbook").await.unwrap());
-    assert!(!store.record_activation(session, "playbook").await.unwrap(), "once per session");
+    assert!(
+        !store.record_activation(session, "playbook").await.unwrap(),
+        "once per session"
+    );
     let id: Uuid = sqlx::query("SELECT skill_id FROM skill_registry.skill WHERE name = 'playbook'")
         .fetch_one(&db.pg)
         .await
@@ -181,14 +227,19 @@ async fn session_start_mounts_core_records_exposure_once_and_a_read_activates() 
     assert_eq!((st.exposures, st.activations), (1, 1));
 
     // And it cannot write there: the mount is not one of the five writable areas.
-    let w = serde_json::from_value(json!({ "path": ".claude/skills/playbook/SKILL.md", "content": "x" })).unwrap();
+    let w = serde_json::from_value(
+        json!({ "path": ".claude/skills/playbook/SKILL.md", "content": "x" }),
+    )
+    .unwrap();
     let (msg, err) = execute(&ws, "write_file", &w).await;
     assert!(err, "{msg}");
 
     // The run's bill of materials is read from skill_run alone.
     let bom = store.bill_of_materials(session).await.unwrap();
     assert_eq!(bom.len(), s.resident.len());
-    assert!(bom.iter().any(|b| b["name"] == "playbook" && b["activated"] == true));
+    assert!(bom
+        .iter()
+        .any(|b| b["name"] == "playbook" && b["activated"] == true));
 
     clean_up(&root);
     db.drop().await;
@@ -196,7 +247,8 @@ async fn session_start_mounts_core_records_exposure_once_and_a_read_activates() 
 
 #[tokio::test]
 #[ignore = "needs DATABASE_URL pointing at a scratch Postgres"]
-async fn core_sync_is_idempotent_and_a_changed_bundle_is_a_new_version_that_leaves_the_old_readable() {
+async fn core_sync_is_idempotent_and_a_changed_bundle_is_a_new_version_that_leaves_the_old_readable(
+) {
     let db = Scratch::new().await;
     let store = SkillStore::new(db.pg.clone());
     let dir = api::agent::skills_mount::core_dir().expect("skills/core is found");
@@ -204,15 +256,31 @@ async fn core_sync_is_idempotent_and_a_changed_bundle_is_a_new_version_that_leav
     let r1 = store.sync_core(&core).await.unwrap();
     assert_eq!((r1.admitted, r1.patched, r1.unchanged), (core.len(), 0, 0));
     let r2 = store.sync_core(&core).await.unwrap();
-    assert_eq!((r2.admitted, r2.patched, r2.unchanged), (0, 0, core.len()), "loading twice is a no-op");
+    assert_eq!(
+        (r2.admitted, r2.patched, r2.unchanged),
+        (0, 0, core.len()),
+        "loading twice is a no-op"
+    );
 
     // A changed SKILL.md is a second version, never an edit.
     let mut changed = core.clone();
     let pb = changed.iter_mut().find(|c| c.name == "playbook").unwrap();
     let mut files = pb.files.clone();
-    files.insert("SKILL.md".into(), format!("{}\nAn added line.\n", String::from_utf8_lossy(&files["SKILL.md"])).into_bytes());
+    files.insert(
+        "SKILL.md".into(),
+        format!(
+            "{}\nAn added line.\n",
+            String::from_utf8_lossy(&files["SKILL.md"])
+        )
+        .into_bytes(),
+    );
     *pb = skills::core::validate(&pb.category, "playbook", files).unwrap();
-    let old_digest = core.iter().find(|c| c.name == "playbook").unwrap().digest.clone();
+    let old_digest = core
+        .iter()
+        .find(|c| c.name == "playbook")
+        .unwrap()
+        .digest
+        .clone();
     let r3 = store.sync_core(&changed).await.unwrap();
     assert_eq!(r3.patched, 1);
     let versions: i64 = sqlx::query("SELECT count(*) FROM skill_registry.skill_version v JOIN skill_registry.skill s USING (skill_id) WHERE s.name = 'playbook'")
@@ -221,23 +289,28 @@ async fn core_sync_is_idempotent_and_a_changed_bundle_is_a_new_version_that_leav
         .unwrap()
         .get(0);
     assert_eq!(versions, 2);
-    assert!(store.bundle(&old_digest).await.unwrap().is_some(), "the first version stays readable");
+    assert!(
+        store.bundle(&old_digest).await.unwrap().is_some(),
+        "the first version stays readable"
+    );
     // An admitted delta above a version this release already shipped is not overwritten by
     // the release loading the older bytes again (KM-05).
     let r4 = store.sync_core(&core).await.unwrap();
     assert_eq!(r4.patched, 0, "{r4:?}");
-    let cur: String = sqlx::query("SELECT current_version FROM skill_registry.skill WHERE name = 'playbook'")
-        .fetch_one(&db.pg)
-        .await
-        .unwrap()
-        .get(0);
+    let cur: String =
+        sqlx::query("SELECT current_version FROM skill_registry.skill WHERE name = 'playbook'")
+            .fetch_one(&db.pg)
+            .await
+            .unwrap()
+            .get(0);
     assert_ne!(cur, old_digest);
     // Every core skill is in the glossary view.
-    let g: i64 = sqlx::query("SELECT count(*) FROM skill_registry.skill_glossary WHERE scope = 'core'")
-        .fetch_one(&db.pg)
-        .await
-        .unwrap()
-        .get(0);
+    let g: i64 =
+        sqlx::query("SELECT count(*) FROM skill_registry.skill_glossary WHERE scope = 'core'")
+            .fetch_one(&db.pg)
+            .await
+            .unwrap()
+            .get(0);
     assert_eq!(usize::try_from(g).unwrap(), core.len());
     db.drop().await;
 }
@@ -254,7 +327,11 @@ fn input(user: Uuid, project: Uuid, name: &str, body: &str, source_ref: &str) ->
         reason: "T2".into(),
         source_ref: source_ref.into(),
         sources: vec![],
-        files: bundle(name, "use when a backtest result needs its cost model checked", body),
+        files: bundle(
+            name,
+            "use when a backtest result needs its cost model checked",
+            body,
+        ),
     }
 }
 
@@ -269,26 +346,53 @@ async fn propose_verify_and_admit_with_every_refusal_naming_its_step() {
 
     // A speculative proposal (no trajectory) and an untrusted-only one are refused, and
     // nothing is written for either.
-    let e = propose(&db.pg, input(user, project, "cost-check", GOOD_BODY, "  ")).await.unwrap_err();
+    let e = propose(&db.pg, input(user, project, "cost-check", GOOD_BODY, "  "))
+        .await
+        .unwrap_err();
     assert!(e.to_string().contains("trajectory"), "{e}");
     let mut untrusted = input(user, project, "cost-check", GOOD_BODY, "run:1");
     untrusted.sources = vec!["web_text".into()];
     assert!(propose(&db.pg, untrusted).await.is_err());
-    let n: i64 = sqlx::query("SELECT count(*) FROM skill_registry.skill_proposal").fetch_one(&db.pg).await.unwrap().get(0);
+    let n: i64 = sqlx::query("SELECT count(*) FROM skill_registry.skill_proposal")
+        .fetch_one(&db.pg)
+        .await
+        .unwrap()
+        .get(0);
     assert_eq!(n, 0);
 
     // The static lint rejects a ticker and a fitted constant, naming the step and the line.
-    let bad = propose(&db.pg, input(user, project, "bad-skill", "Buy BTC-USD when x crosses 0.7312.\n", "run:1")).await.unwrap();
+    let bad = propose(
+        &db.pg,
+        input(
+            user,
+            project,
+            "bad-skill",
+            "Buy BTC-USD when x crosses 0.7312.\n",
+            "run:1",
+        ),
+    )
+    .await
+    .unwrap();
     assert_eq!(bad.status, "rejected");
     let lint = bad.verdicts.iter().find(|v| v["step"] == "lint").unwrap();
     assert_eq!(lint["passed"], json!(false));
-    assert!(lint["detail"]["findings"].as_array().unwrap().len() >= 2, "{lint}");
+    assert!(
+        lint["detail"]["findings"].as_array().unwrap().len() >= 2,
+        "{lint}"
+    );
 
     // A clean proposal is submitted; admission is refused until every step has passed.
-    let ok = propose(&db.pg, input(user, project, "cost-check", GOOD_BODY, "run:abc")).await.unwrap();
+    let ok = propose(
+        &db.pg,
+        input(user, project, "cost-check", GOOD_BODY, "run:abc"),
+    )
+    .await
+    .unwrap();
     assert_eq!(ok.status, "submitted");
     assert_eq!(ok.disposition, Disposition::New);
-    let refused = admit_proposal(&db.pg, ok.proposal_id, "admin").await.unwrap_err();
+    let refused = admit_proposal(&db.pg, ok.proposal_id, "admin")
+        .await
+        .unwrap_err();
     assert!(refused.to_string().contains("`replay`"), "{refused}");
 
     // The harness records paired outcomes (3 variants); the verify step computes the replay verdict.
@@ -301,7 +405,13 @@ async fn propose_verify_and_admit_with_every_refusal_naming_its_step() {
                     "replay",
                     "m",
                     variant,
-                    &Pair { activated: true, with_success: true, without_success: i == 99, with_cost: 80.0, without_cost: 100.0 },
+                    &Pair {
+                        activated: true,
+                        with_success: true,
+                        without_success: i == 99,
+                        with_cost: 80.0,
+                        without_cost: 100.0,
+                    },
                 )
                 .await
                 .unwrap();
@@ -309,61 +419,172 @@ async fn propose_verify_and_admit_with_every_refusal_naming_its_step() {
     }
     let v = verify(&db.pg, ok.proposal_id).await.unwrap();
     assert_eq!(v["first_unmet"], json!("reviewer"), "{v}");
-    record_step(&db.pg, ok.proposal_id, "reviewer", true, json!({ "by": "isolated-reviewer" })).await.unwrap();
+    record_step(
+        &db.pg,
+        ok.proposal_id,
+        "reviewer",
+        true,
+        json!({ "by": "isolated-reviewer" }),
+    )
+    .await
+    .unwrap();
     let v = verify(&db.pg, ok.proposal_id).await.unwrap();
     assert_eq!(v["admissible"], json!(true), "{v}");
 
-    let skill = admit_proposal(&db.pg, ok.proposal_id, "admin").await.unwrap();
-    let st: String = sqlx::query("SELECT status FROM skill_registry.skill WHERE skill_id = $1").bind(skill).fetch_one(&db.pg).await.unwrap().get(0);
+    let skill = admit_proposal(&db.pg, ok.proposal_id, "admin")
+        .await
+        .unwrap();
+    let st: String = sqlx::query("SELECT status FROM skill_registry.skill WHERE skill_id = $1")
+        .bind(skill)
+        .fetch_one(&db.pg)
+        .await
+        .unwrap()
+        .get(0);
     assert_eq!(st, "provisional");
     // Visible to the project, in the glossary view, and frozen into its selection.
     let vis = store.visible(user, Some(project)).await.unwrap();
-    assert!(vis.iter().any(|s| s.name == "cost-check" && s.scope == Scope::Project));
-    assert!(!store.visible(user, None).await.unwrap().iter().any(|s| s.name == "cost-check"), "other projects do not see it");
-    assert!(store.frozen_selection(Some(project)).await.unwrap().contains(&"cost-check".to_string()));
-    assert!(store.bundle(&vis.iter().find(|s| s.name == "cost-check").unwrap().version).await.unwrap().is_some());
+    assert!(vis
+        .iter()
+        .any(|s| s.name == "cost-check" && s.scope == Scope::Project));
+    assert!(
+        !store
+            .visible(user, None)
+            .await
+            .unwrap()
+            .iter()
+            .any(|s| s.name == "cost-check"),
+        "other projects do not see it"
+    );
+    assert!(store
+        .frozen_selection(Some(project))
+        .await
+        .unwrap()
+        .contains(&"cost-check".to_string()));
+    assert!(store
+        .bundle(&vis.iter().find(|s| s.name == "cost-check").unwrap().version)
+        .await
+        .unwrap()
+        .is_some());
 
     // A near-duplicate (a lightly edited copy) becomes a patch of the existing skill, and the
     // proposed name is rewritten to the target's.
-    let dup = propose(&db.pg, input(user, project, "cost-check-v2", &format!("{GOOD_BODY}Then record it.\n"), "run:def")).await.unwrap();
-    assert!(matches!(dup.disposition, Disposition::Patch { ref target, .. } if target == "cost-check"), "{:?}", dup.disposition);
+    let dup = propose(
+        &db.pg,
+        input(
+            user,
+            project,
+            "cost-check-v2",
+            &format!("{GOOD_BODY}Then record it.\n"),
+            "run:def",
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(dup.disposition, Disposition::Patch { ref target, .. } if target == "cost-check"),
+        "{:?}",
+        dup.disposition
+    );
     // The same name is an explicit patch.
-    let same = propose(&db.pg, input(user, project, "cost-check", "A different procedure about position sizing and volatility targets.\n", "run:ghi")).await.unwrap();
+    let same = propose(
+        &db.pg,
+        input(
+            user,
+            project,
+            "cost-check",
+            "A different procedure about position sizing and volatility targets.\n",
+            "run:ghi",
+        ),
+    )
+    .await
+    .unwrap();
     assert!(matches!(same.disposition, Disposition::Patch { .. }));
 
     // A proposal may not take a core name and win: it is a patch of the core skill, which only a
     // person admits.
-    let core_patch = propose(&db.pg, input(user, project, "playbook", "Another playbook.\n", "run:jkl")).await.unwrap();
-    assert!(matches!(core_patch.disposition, Disposition::Patch { ref target, .. } if target == "playbook"));
+    let core_patch = propose(
+        &db.pg,
+        input(user, project, "playbook", "Another playbook.\n", "run:jkl"),
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(core_patch.disposition, Disposition::Patch { ref target, .. } if target == "playbook")
+    );
 
     // KM-05: the playbook changes only through an admitted delta. Verified and admitted, the
     // patch is a new version of the *core* skill whose parent is the old one; the old version
     // stays readable, no project selection is touched, and the release loading its own older
     // bytes again does not overwrite the delta.
-    let before: String = sqlx::query("SELECT current_version FROM skill_registry.skill WHERE name = 'playbook'").fetch_one(&db.pg).await.unwrap().get(0);
+    let before: String =
+        sqlx::query("SELECT current_version FROM skill_registry.skill WHERE name = 'playbook'")
+            .fetch_one(&db.pg)
+            .await
+            .unwrap()
+            .get(0);
     for (i, variant) in ["source", "v1", "v2"].iter().enumerate() {
         for _ in 0..3 {
             store
-                .record_pair(Some(core_patch.proposal_id), None, "replay", "m", variant, &Pair { activated: true, with_success: true, without_success: i == 99, with_cost: 1.0, without_cost: 1.0 })
+                .record_pair(
+                    Some(core_patch.proposal_id),
+                    None,
+                    "replay",
+                    "m",
+                    variant,
+                    &Pair {
+                        activated: true,
+                        with_success: true,
+                        without_success: i == 99,
+                        with_cost: 1.0,
+                        without_cost: 1.0,
+                    },
+                )
                 .await
                 .unwrap();
         }
     }
     verify(&db.pg, core_patch.proposal_id).await.unwrap();
-    record_step(&db.pg, core_patch.proposal_id, "reviewer", true, json!({})).await.unwrap();
-    admit_proposal(&db.pg, core_patch.proposal_id, "admin").await.unwrap();
+    record_step(&db.pg, core_patch.proposal_id, "reviewer", true, json!({}))
+        .await
+        .unwrap();
+    admit_proposal(&db.pg, core_patch.proposal_id, "admin")
+        .await
+        .unwrap();
     let (after, scope): (String, String) = {
-        let r = sqlx::query("SELECT current_version, scope FROM skill_registry.skill WHERE name = 'playbook'").fetch_one(&db.pg).await.unwrap();
+        let r = sqlx::query(
+            "SELECT current_version, scope FROM skill_registry.skill WHERE name = 'playbook'",
+        )
+        .fetch_one(&db.pg)
+        .await
+        .unwrap();
         (r.get(0), r.get(1))
     };
     assert_ne!(after, before);
-    assert_eq!(scope, "core", "a patch changes the version, not the skill's scope");
-    let parent: Option<String> = sqlx::query("SELECT parent_version FROM skill_registry.skill_version WHERE version_hash = $1").bind(&after).fetch_one(&db.pg).await.unwrap().get(0);
+    assert_eq!(
+        scope, "core",
+        "a patch changes the version, not the skill's scope"
+    );
+    let parent: Option<String> = sqlx::query(
+        "SELECT parent_version FROM skill_registry.skill_version WHERE version_hash = $1",
+    )
+    .bind(&after)
+    .fetch_one(&db.pg)
+    .await
+    .unwrap()
+    .get(0);
     assert_eq!(parent.as_deref(), Some(before.as_str()));
     assert!(store.bundle(&before).await.unwrap().is_some());
     let r = store.sync_core(&core).await.unwrap();
-    assert_eq!(r.patched, 0, "the release's older bytes do not overwrite an admitted delta");
-    let still: String = sqlx::query("SELECT current_version FROM skill_registry.skill WHERE name = 'playbook'").fetch_one(&db.pg).await.unwrap().get(0);
+    assert_eq!(
+        r.patched, 0,
+        "the release's older bytes do not overwrite an admitted delta"
+    );
+    let still: String =
+        sqlx::query("SELECT current_version FROM skill_registry.skill WHERE name = 'playbook'")
+            .fetch_one(&db.pg)
+            .await
+            .unwrap()
+            .get(0);
     assert_eq!(still, after);
     db.drop().await;
 }
@@ -373,9 +594,30 @@ async fn propose_verify_and_admit_with_every_refusal_naming_its_step() {
 async fn provisional_becomes_admitted_only_at_n_exposures_with_a_non_negative_balance() {
     let db = Scratch::new().await;
     let store = SkillStore::new(db.pg.clone());
-    let draft = Draft::check(Scope::Global, "research", "ramp-skill", bundle("ramp-skill", "use when ramping", "Steps.\n"), &catalogue()).unwrap();
-    let id = store.admit(&draft, Status::Provisional, None, None, false, None, "admin").await.unwrap();
-    let rows = |_sess: Uuid| skills::materialiser::ExposureRow { skill: "ramp-skill".into(), version: draft.version_hash.clone() };
+    let draft = Draft::check(
+        Scope::Global,
+        "research",
+        "ramp-skill",
+        bundle("ramp-skill", "use when ramping", "Steps.\n"),
+        &catalogue(),
+    )
+    .unwrap();
+    let id = store
+        .admit(
+            &draft,
+            Status::Provisional,
+            None,
+            None,
+            false,
+            None,
+            "admin",
+        )
+        .await
+        .unwrap();
+    let rows = |_sess: Uuid| skills::materialiser::ExposureRow {
+        skill: "ramp-skill".into(),
+        version: draft.version_hash.clone(),
+    };
     for i in 0..19 {
         let s = Uuid::new_v4();
         store.record_exposures(&[rows(s)], s, None).await.unwrap();
@@ -384,7 +626,10 @@ async fn provisional_becomes_admitted_only_at_n_exposures_with_a_non_negative_ba
     let (promoted, _) = store.settle_provisional(20).await.unwrap();
     assert!(promoted.is_empty(), "19 exposures is below N");
     let s20 = Uuid::new_v4();
-    store.record_exposures(&[rows(s20)], s20, None).await.unwrap();
+    store
+        .record_exposures(&[rows(s20)], s20, None)
+        .await
+        .unwrap();
     // A negative vote at N keeps it provisional and flags it.
     store.vote(id, s20, -1).await.unwrap();
     let (promoted, flagged) = store.settle_provisional(20).await.unwrap();
@@ -402,15 +647,44 @@ async fn provisional_becomes_admitted_only_at_n_exposures_with_a_non_negative_ba
 async fn quarantine_leaves_every_glossary_in_one_statement_and_notifies_live_sessions() {
     let db = Scratch::new().await;
     let store = SkillStore::new(db.pg.clone());
-    let draft = Draft::check(Scope::Global, "research", "shared-skill", bundle("shared-skill", "use when sharing", "Steps.\n"), &catalogue()).unwrap();
-    let id = store.admit(&draft, Status::Admitted, None, None, true, None, "admin").await.unwrap();
+    let draft = Draft::check(
+        Scope::Global,
+        "research",
+        "shared-skill",
+        bundle("shared-skill", "use when sharing", "Steps.\n"),
+        &catalogue(),
+    )
+    .unwrap();
+    let id = store
+        .admit(&draft, Status::Admitted, None, None, true, None, "admin")
+        .await
+        .unwrap();
     let (u1, u2) = (Uuid::new_v4(), Uuid::new_v4());
-    assert!(store.visible(u1, None).await.unwrap().iter().any(|s| s.name == "shared-skill"));
+    assert!(store
+        .visible(u1, None)
+        .await
+        .unwrap()
+        .iter()
+        .any(|s| s.name == "shared-skill"));
     let cursor = store.latest_notice().await.unwrap();
-    assert!(store.retire(id, "quarantined", "").await.is_err(), "a reason is required");
-    store.retire(id, "quarantined", "found to leak a ticker").await.unwrap();
+    assert!(
+        store.retire(id, "quarantined", "").await.is_err(),
+        "a reason is required"
+    );
+    store
+        .retire(id, "quarantined", "found to leak a ticker")
+        .await
+        .unwrap();
     for u in [u1, u2] {
-        assert!(!store.visible(u, None).await.unwrap().iter().any(|s| s.name == "shared-skill"), "gone for everyone at once");
+        assert!(
+            !store
+                .visible(u, None)
+                .await
+                .unwrap()
+                .iter()
+                .any(|s| s.name == "shared-skill"),
+            "gone for everyone at once"
+        );
     }
     let (next, msgs) = pending_notices(&db.pg, cursor, &["shared-skill".to_string()]).await;
     assert!(next > cursor);
@@ -430,15 +704,57 @@ async fn promotion_to_global_needs_six_recorded_conditions_and_a_tainted_finding
     let mem = api::memory_store::MemoryStore::new(db.pg.clone());
     let owner = Uuid::new_v4();
     let project = Uuid::new_v4();
-    let draft = Draft::check(Scope::Project, "research", "promo-skill", bundle("promo-skill", "use when promoting", "Steps.\n"), &catalogue()).unwrap();
-    let id = store.admit(&draft, Status::Admitted, None, Some(project), false, None, "agent-7").await.unwrap();
+    let draft = Draft::check(
+        Scope::Project,
+        "research",
+        "promo-skill",
+        bundle("promo-skill", "use when promoting", "Steps.\n"),
+        &catalogue(),
+    )
+    .unwrap();
+    let id = store
+        .admit(
+            &draft,
+            Status::Admitted,
+            None,
+            Some(project),
+            false,
+            None,
+            "agent-7",
+        )
+        .await
+        .unwrap();
 
-    let all = [Condition::CrossProjectEvals, Condition::Sanitiser, Condition::OwnerConsent, Condition::SecurityScan, Condition::IndependentReviewer, Condition::NoTaint];
+    let all = [
+        Condition::CrossProjectEvals,
+        Condition::Sanitiser,
+        Condition::OwnerConsent,
+        Condition::SecurityScan,
+        Condition::IndependentReviewer,
+        Condition::NoTaint,
+    ];
     for c in &all[..5] {
-        store.record_condition(id, *c, true, if *c == Condition::IndependentReviewer { "mason" } else { "platform" }, &json!({})).await.unwrap();
+        store
+            .record_condition(
+                id,
+                *c,
+                true,
+                if *c == Condition::IndependentReviewer {
+                    "mason"
+                } else {
+                    "platform"
+                },
+                &json!({}),
+            )
+            .await
+            .unwrap();
     }
     let refused = check_promotion(&store.promotion_file(id).await.unwrap()).unwrap_err();
-    assert_eq!(refused.0.iter().map(|(c, _)| *c).collect::<Vec<_>>(), vec![Condition::NoTaint], "names the one missing");
+    assert_eq!(
+        refused.0.iter().map(|(c, _)| *c).collect::<Vec<_>>(),
+        vec![Condition::NoTaint],
+        "names the one missing"
+    );
 
     // A finding derived from a fetched page is tainted; citing it taints the skill's provenance
     // whatever the caller says, and promotion is refused even with all six recorded.
@@ -449,23 +765,67 @@ async fn promotion_to_global_needs_six_recorded_conditions_and_a_tainted_finding
     assert!(!store.cite_finding(id, owner, "fnd_clean").await.unwrap());
     assert!(store.cite_finding(id, owner, "fnd_dirty").await.unwrap());
     assert!(store.cite_finding(id, owner, "nonexistent").await.is_err());
-    store.record_condition(id, Condition::NoTaint, true, "platform", &json!({})).await.unwrap();
+    store
+        .record_condition(id, Condition::NoTaint, true, "platform", &json!({}))
+        .await
+        .unwrap();
     let refused = check_promotion(&store.promotion_file(id).await.unwrap()).unwrap_err();
-    assert!(refused.0.iter().any(|(c, why)| *c == Condition::NoTaint && why.contains("tainted")), "{refused}");
+    assert!(
+        refused
+            .0
+            .iter()
+            .any(|(c, why)| *c == Condition::NoTaint && why.contains("tainted")),
+        "{refused}"
+    );
 
     // The author cannot be the reviewer.
-    db.pg.execute("DELETE FROM skill_registry.skill_provenance").await.unwrap();
-    store.record_condition(id, Condition::IndependentReviewer, true, "agent-7", &json!({})).await.unwrap();
+    db.pg
+        .execute("DELETE FROM skill_registry.skill_provenance")
+        .await
+        .unwrap();
+    store
+        .record_condition(
+            id,
+            Condition::IndependentReviewer,
+            true,
+            "agent-7",
+            &json!({}),
+        )
+        .await
+        .unwrap();
     let refused = check_promotion(&store.promotion_file(id).await.unwrap()).unwrap_err();
-    assert!(refused.0.iter().any(|(c, _)| *c == Condition::IndependentReviewer));
-    store.record_condition(id, Condition::IndependentReviewer, true, "mason", &json!({})).await.unwrap();
+    assert!(refused
+        .0
+        .iter()
+        .any(|(c, _)| *c == Condition::IndependentReviewer));
+    store
+        .record_condition(
+            id,
+            Condition::IndependentReviewer,
+            true,
+            "mason",
+            &json!({}),
+        )
+        .await
+        .unwrap();
     check_promotion(&store.promotion_file(id).await.unwrap()).expect("all six hold");
 
     // The move is logged with who approved it.
     store.move_scope(id, "global", owner, owner).await.unwrap();
-    let scope: String = sqlx::query("SELECT scope FROM skill_registry.skill WHERE skill_id = $1").bind(id).fetch_one(&db.pg).await.unwrap().get(0);
+    let scope: String = sqlx::query("SELECT scope FROM skill_registry.skill WHERE skill_id = $1")
+        .bind(id)
+        .fetch_one(&db.pg)
+        .await
+        .unwrap()
+        .get(0);
     assert_eq!(scope, "global");
-    let logged: i64 = sqlx::query("SELECT count(*) FROM skill_registry.skill_promotion_log WHERE skill_id = $1").bind(id).fetch_one(&db.pg).await.unwrap().get(0);
+    let logged: i64 =
+        sqlx::query("SELECT count(*) FROM skill_registry.skill_promotion_log WHERE skill_id = $1")
+            .bind(id)
+            .fetch_one(&db.pg)
+            .await
+            .unwrap()
+            .get(0);
     assert_eq!(logged, 1);
     db.drop().await;
 }
@@ -481,14 +841,29 @@ async fn the_default_retrieval_excludes_tainted_entries_and_the_browser_still_se
     mem.put(user, &ok).await.unwrap();
     mem.put(user, &tainted).await.unwrap();
     let default = mem.for_subject(user, "ETH-USD", 10).await.unwrap();
-    assert_eq!(default.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["fnd_ok"]);
-    let all = mem.for_subject_including_tainted(user, "ETH-USD", 10).await.unwrap();
+    assert_eq!(
+        default.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+        vec!["fnd_ok"]
+    );
+    let all = mem
+        .for_subject_including_tainted(user, "ETH-USD", 10)
+        .await
+        .unwrap();
     assert_eq!(all.len(), 2);
     assert!(all.iter().find(|e| e.id == "fnd_tn").unwrap().is_tainted());
     assert!(!all.iter().find(|e| e.id == "fnd_ok").unwrap().is_tainted());
-    let by_kind = mem.by_kind(user, harness::memory::Kind::Finding, 10).await.unwrap();
+    let by_kind = mem
+        .by_kind(user, harness::memory::Kind::Finding, 10)
+        .await
+        .unwrap();
     assert_eq!(by_kind.len(), 1);
-    assert_eq!(mem.by_kind_including_tainted(user, harness::memory::Kind::Finding, 10).await.unwrap().len(), 2);
+    assert_eq!(
+        mem.by_kind_including_tainted(user, harness::memory::Kind::Finding, 10)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
     db.drop().await;
 }
 
@@ -498,13 +873,30 @@ async fn app_role_can_do_what_the_platform_does_and_nothing_that_would_bypass_ad
     let db = Scratch::new().await;
     // The owner admits a skill; app_role then acts on it.
     let store = SkillStore::new(db.pg.clone());
-    let draft = Draft::check(Scope::Global, "research", "granted", bundle("granted", "use when granted", "Steps.\n"), &catalogue()).unwrap();
-    let id = store.admit(&draft, Status::Admitted, None, None, false, None, "admin").await.unwrap();
+    let draft = Draft::check(
+        Scope::Global,
+        "research",
+        "granted",
+        bundle("granted", "use when granted", "Steps.\n"),
+        &catalogue(),
+    )
+    .unwrap();
+    let id = store
+        .admit(&draft, Status::Admitted, None, None, false, None, "admin")
+        .await
+        .unwrap();
 
     let mut tx = db.pg.begin().await.unwrap();
     tx.execute("SET LOCAL ROLE app_role").await.unwrap();
     // The one way in works as app_role (SECURITY DEFINER).
-    let draft2 = Draft::check(Scope::Global, "research", "granted-two", bundle("granted-two", "use when granted two", "Steps.\n"), &catalogue()).unwrap();
+    let draft2 = Draft::check(
+        Scope::Global,
+        "research",
+        "granted-two",
+        bundle("granted-two", "use when granted two", "Steps.\n"),
+        &catalogue(),
+    )
+    .unwrap();
     sqlx::query("SELECT skill_registry.admit($1, 'global', NULL, NULL, 'research', 'admitted', FALSE, $2, NULL, 'use when', 3, 1, $2, 'platform')")
         .bind("granted-two")
         .bind(&draft2.version_hash)
@@ -551,13 +943,20 @@ async fn app_role_can_do_what_the_platform_does_and_nothing_that_would_bypass_ad
         "SELECT count(*) FROM regime_causal.regime_strategy_prior",
         "SELECT count(*) FROM regime_causal.regime_jump_model",
     ] {
-        sqlx::query(sql).fetch_one(&mut *tx).await.unwrap_or_else(|e| panic!("{sql}: {e}"));
+        sqlx::query(sql)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap_or_else(|e| panic!("{sql}: {e}"));
     }
     sqlx::query("INSERT INTO skill_registry.skill_run (skill_id, version_hash, state) SELECT skill_id, current_version, 'exposed' FROM skill_registry.skill WHERE name = 'granted'")
         .execute(&mut *tx)
         .await
         .expect("app_role records an exposure");
-    sqlx::query("SELECT skill_registry.retire($1, 'quarantined', 'because')").bind(id).execute(&mut *tx).await.expect("app_role can quarantine through retire()");
+    sqlx::query("SELECT skill_registry.retire($1, 'quarantined', 'because')")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .expect("app_role can quarantine through retire()");
     tx.rollback().await.unwrap();
     db.drop().await;
 }
@@ -571,9 +970,14 @@ async fn the_move_veto_the_hypothesis_sources_and_the_random_arm_keep_their_reco
     let db = Scratch::new().await;
     let user = Uuid::new_v4();
     let store = api::knowledge_routes::MoveStore::new(db.pg.clone());
-    let m = Move::ChangeExit { mode: ExitMode::Trail };
+    let m = Move::ChangeExit {
+        mode: ExitMode::Trail,
+    };
     for i in 0..5 {
-        store.record(user, "BTC-USD", &m, Outcome::Failed, &format!("camp:{i}")).await.unwrap();
+        store
+            .record(user, "BTC-USD", &m, Outcome::Failed, &format!("camp:{i}"))
+            .await
+            .unwrap();
     }
     let history = store.history(user, &motif(&m)).await.unwrap();
     assert_eq!(history.len(), 5);
@@ -588,23 +992,44 @@ async fn the_move_veto_the_hypothesis_sources_and_the_random_arm_keep_their_reco
         .unwrap();
     assert!(store.overridden(user, &motif(&m)).await.unwrap());
     // Another user's veto is not this user's.
-    assert!(store.history(Uuid::new_v4(), &motif(&m)).await.unwrap().is_empty());
+    assert!(store
+        .history(Uuid::new_v4(), &motif(&m))
+        .await
+        .unwrap()
+        .is_empty());
     // The record is append-only even for the owner.
-    assert!(sqlx::query("UPDATE agent_memory.move_record SET outcome = 'improved'").execute(&db.pg).await.is_err());
+    assert!(
+        sqlx::query("UPDATE agent_memory.move_record SET outcome = 'improved'")
+            .execute(&db.pg)
+            .await
+            .is_err()
+    );
 
     // The arm: created once, with the platform's seed; incomplete arms refuse the gate.
     let arms = api::knowledge_routes::ArmStore::new(db.pg.clone());
     let camp = Uuid::new_v4();
     let seed = arms.create(camp, user, 3).await.unwrap();
     assert_eq!(seed, research::random_arm::arm_seed(&camp.to_string()));
-    assert!(arms.create(camp, user, 3).await.is_err(), "one arm per campaign");
+    assert!(
+        arms.create(camp, user, 3).await.is_err(),
+        "one arm per campaign"
+    );
     assert!(api::knowledge_routes::arm_gate(&db.pg, camp).await.is_err());
-    assert!(api::knowledge_routes::arm_gate(&db.pg, Uuid::new_v4()).await.unwrap_err().contains("no random arm"));
+    assert!(api::knowledge_routes::arm_gate(&db.pg, Uuid::new_v4())
+        .await
+        .unwrap_err()
+        .contains("no random arm"));
     for (seq, s) in [0.1, 0.2, 0.15].into_iter().enumerate() {
-        arms.record_score(camp, "random", i32::try_from(seq).unwrap(), s).await.unwrap();
-        arms.record_score(camp, "agent", i32::try_from(seq).unwrap(), s * 3.0).await.unwrap();
+        arms.record_score(camp, "random", i32::try_from(seq).unwrap(), s)
+            .await
+            .unwrap();
+        arms.record_score(camp, "agent", i32::try_from(seq).unwrap(), s * 3.0)
+            .await
+            .unwrap();
     }
-    api::knowledge_routes::arm_gate(&db.pg, camp).await.expect("a completed arm passes");
+    api::knowledge_routes::arm_gate(&db.pg, camp)
+        .await
+        .expect("a completed arm passes");
     let (arm, agent) = arms.load(camp).await.unwrap().unwrap();
     let c = research::random_arm::compare_to_random(&agent, Some(&arm)).unwrap();
     assert!(c.percentile > 0.9, "{}", c.percentile);
@@ -632,14 +1057,32 @@ async fn the_move_veto_the_hypothesis_sources_and_the_random_arm_keep_their_reco
 
     // The regime prior is a bandit table: a study updates exactly its row.
     let prior = api::knowledge_routes::PriorStore::new(db.pg.clone());
-    prior.update("t", "BTC-USD", "high_vol", "trend", 1.2, true).await.unwrap();
-    prior.update("t", "BTC-USD", "high_vol", "trend", 0.8, true).await.unwrap();
-    prior.update("t", "BTC-USD", "low_vol", "trend", -0.3, false).await.unwrap();
+    prior
+        .update("t", "BTC-USD", "high_vol", "trend", 1.2, true)
+        .await
+        .unwrap();
+    prior
+        .update("t", "BTC-USD", "high_vol", "trend", 0.8, true)
+        .await
+        .unwrap();
+    prior
+        .update("t", "BTC-USD", "low_vol", "trend", -0.3, false)
+        .await
+        .unwrap();
     let cells = prior.cells("t", "BTC-USD", "high_vol").await.unwrap();
     assert_eq!(cells["trend"].n_obs, 2);
     assert!((cells["trend"].mean().unwrap() - 1.0).abs() < 1e-9);
-    assert_eq!(prior.cells("t", "BTC-USD", "low_vol").await.unwrap()["trend"].n_success, 0);
-    assert!(prior.update("t", "BTC-USD", "bubble", "trend", 1.0, true).await.is_err(), "the CHECK refuses an unknown regime");
+    assert_eq!(
+        prior.cells("t", "BTC-USD", "low_vol").await.unwrap()["trend"].n_success,
+        0
+    );
+    assert!(
+        prior
+            .update("t", "BTC-USD", "bubble", "trend", 1.0, true)
+            .await
+            .is_err(),
+        "the CHECK refuses an unknown regime"
+    );
     db.drop().await;
 }
 
@@ -648,15 +1091,46 @@ async fn the_move_veto_the_hypothesis_sources_and_the_random_arm_keep_their_reco
 async fn retirement_and_the_model_guard_act_on_recorded_evidence() {
     let db = Scratch::new().await;
     let store = SkillStore::new(db.pg.clone());
-    let dead = Draft::check(Scope::Global, "research", "never-used", bundle("never-used", "use when never", "Steps.\n"), &catalogue()).unwrap();
-    let useful = Draft::check(Scope::Global, "research", "used-skill", bundle("used-skill", "use when used", "Other steps.\n"), &catalogue()).unwrap();
-    let dead_id = store.admit(&dead, Status::Admitted, None, None, false, None, "a").await.unwrap();
-    let useful_id = store.admit(&useful, Status::Admitted, None, None, false, None, "a").await.unwrap();
+    let dead = Draft::check(
+        Scope::Global,
+        "research",
+        "never-used",
+        bundle("never-used", "use when never", "Steps.\n"),
+        &catalogue(),
+    )
+    .unwrap();
+    let useful = Draft::check(
+        Scope::Global,
+        "research",
+        "used-skill",
+        bundle("used-skill", "use when used", "Other steps.\n"),
+        &catalogue(),
+    )
+    .unwrap();
+    let dead_id = store
+        .admit(&dead, Status::Admitted, None, None, false, None, "a")
+        .await
+        .unwrap();
+    let useful_id = store
+        .admit(&useful, Status::Admitted, None, None, false, None, "a")
+        .await
+        .unwrap();
     for d in [&dead, &useful] {
         for _ in 0..20 {
             let s = Uuid::new_v4();
             store
-                .record_exposures(&[skills::materialiser::ExposureRow { skill: if std::ptr::eq(d, &dead) { "never-used".into() } else { "used-skill".into() }, version: d.version_hash.clone() }], s, None)
+                .record_exposures(
+                    &[skills::materialiser::ExposureRow {
+                        skill: if std::ptr::eq(d, &dead) {
+                            "never-used".into()
+                        } else {
+                            "used-skill".into()
+                        },
+                        version: d.version_hash.clone(),
+                    }],
+                    s,
+                    None,
+                )
                 .await
                 .unwrap();
             if std::ptr::eq(d, &useful) {
@@ -665,14 +1139,38 @@ async fn retirement_and_the_model_guard_act_on_recorded_evidence() {
         }
     }
     let archived = store.sweep_retirements(20).await.unwrap();
-    assert_eq!(archived.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), vec!["never-used"]);
-    assert!(!store.visible(Uuid::new_v4(), None).await.unwrap().iter().any(|s| s.name == "never-used"), "an archived skill is not resident");
+    assert_eq!(
+        archived.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+        vec!["never-used"]
+    );
+    assert!(
+        !store
+            .visible(Uuid::new_v4(), None)
+            .await
+            .unwrap()
+            .iter()
+            .any(|s| s.name == "never-used"),
+        "an archived skill is not resident"
+    );
     let _ = dead_id;
 
     // Leave-one-out contribution of zero retires an activated skill.
     for _ in 0..4 {
         store
-            .record_pair(None, Some(useful_id), "leave_one_out", "m", "v", &Pair { activated: true, with_success: true, without_success: true, with_cost: 1.0, without_cost: 1.0 })
+            .record_pair(
+                None,
+                Some(useful_id),
+                "leave_one_out",
+                "m",
+                "v",
+                &Pair {
+                    activated: true,
+                    with_success: true,
+                    without_success: true,
+                    with_cost: 1.0,
+                    without_cost: 1.0,
+                },
+            )
             .await
             .unwrap();
     }
@@ -681,9 +1179,20 @@ async fn retirement_and_the_model_guard_act_on_recorded_evidence() {
     assert_eq!(archived.len(), 1);
 
     // The model guard: no completed re-evaluation, no trust in the library on that model.
-    assert!(skills::lifecycle::check_model_change("new-model", &store.reevaluations("new-model").await.unwrap()).is_err());
-    store.record_reevaluation("new-model", true, &["used-skill".to_string()]).await.unwrap();
-    let failing = skills::lifecycle::check_model_change("new-model", &store.reevaluations("new-model").await.unwrap()).unwrap();
+    assert!(skills::lifecycle::check_model_change(
+        "new-model",
+        &store.reevaluations("new-model").await.unwrap()
+    )
+    .is_err());
+    store
+        .record_reevaluation("new-model", true, &["used-skill".to_string()])
+        .await
+        .unwrap();
+    let failing = skills::lifecycle::check_model_change(
+        "new-model",
+        &store.reevaluations("new-model").await.unwrap(),
+    )
+    .unwrap();
     assert_eq!(failing, vec!["used-skill".to_string()]);
     db.drop().await;
 }
@@ -693,26 +1202,68 @@ async fn retirement_and_the_model_guard_act_on_recorded_evidence() {
 async fn a_deprecated_skill_resolves_through_alias_of_and_only_a_deprecated_one_can_be_an_alias() {
     let db = Scratch::new().await;
     let store = SkillStore::new(db.pg.clone());
-    let old = Draft::check(Scope::Global, "research", "old-way", bundle("old-way", "use when old", "Old steps.\n"), &catalogue()).unwrap();
-    let new = Draft::check(Scope::Global, "research", "new-way", bundle("new-way", "use when new", "New steps.\n"), &catalogue()).unwrap();
-    let old_id = store.admit(&old, Status::Admitted, None, None, false, None, "a").await.unwrap();
-    let new_id = store.admit(&new, Status::Admitted, None, None, false, None, "a").await.unwrap();
+    let old = Draft::check(
+        Scope::Global,
+        "research",
+        "old-way",
+        bundle("old-way", "use when old", "Old steps.\n"),
+        &catalogue(),
+    )
+    .unwrap();
+    let new = Draft::check(
+        Scope::Global,
+        "research",
+        "new-way",
+        bundle("new-way", "use when new", "New steps.\n"),
+        &catalogue(),
+    )
+    .unwrap();
+    let old_id = store
+        .admit(&old, Status::Admitted, None, None, false, None, "a")
+        .await
+        .unwrap();
+    let new_id = store
+        .admit(&new, Status::Admitted, None, None, false, None, "a")
+        .await
+        .unwrap();
     // A live skill cannot be made an alias: it would vanish from the glossary behind another.
     assert!(store.set_alias(old_id, new_id).await.is_err());
-    store.retire(old_id, "deprecated", "superseded").await.unwrap();
+    store
+        .retire(old_id, "deprecated", "superseded")
+        .await
+        .unwrap();
     store.set_alias(old_id, new_id).await.unwrap();
-    let (rid, name, version) = store.resolve_alias(old_id).await.unwrap().expect("resolves");
+    let (rid, name, version) = store
+        .resolve_alias(old_id)
+        .await
+        .unwrap()
+        .expect("resolves");
     assert_eq!((rid, name.as_str()), (new_id, "new-way"));
     assert_eq!(version, new.version_hash);
     // The live skill resolves to itself; a deprecated skill with no alias resolves to nothing.
-    assert_eq!(store.resolve_alias(new_id).await.unwrap().unwrap().0, new_id);
-    let lone = Draft::check(Scope::Global, "research", "lone-skill", bundle("lone-skill", "use when lone", "Steps.\n"), &catalogue()).unwrap();
-    let lone_id = store.admit(&lone, Status::Admitted, None, None, false, None, "a").await.unwrap();
+    assert_eq!(
+        store.resolve_alias(new_id).await.unwrap().unwrap().0,
+        new_id
+    );
+    let lone = Draft::check(
+        Scope::Global,
+        "research",
+        "lone-skill",
+        bundle("lone-skill", "use when lone", "Steps.\n"),
+        &catalogue(),
+    )
+    .unwrap();
+    let lone_id = store
+        .admit(&lone, Status::Admitted, None, None, false, None, "a")
+        .await
+        .unwrap();
     store.retire(lone_id, "archived", "unused").await.unwrap();
     assert!(store.resolve_alias(lone_id).await.unwrap().is_none());
     // The deprecated skill is not in any glossary.
     let vis = store.visible(Uuid::new_v4(), None).await.unwrap();
-    assert!(vis.iter().all(|s| s.name != "old-way" && s.name != "lone-skill"));
+    assert!(vis
+        .iter()
+        .all(|s| s.name != "old-way" && s.name != "lone-skill"));
     db.drop().await;
 }
 
@@ -732,22 +1283,39 @@ async fn a_stored_vector_names_its_model_and_dimension_and_a_legacy_row_stays_up
         )
         .await
         .unwrap();
-    db.pg.execute(migration("0226_embedding_model_and_dim.sql").as_str()).await.expect("0226 applies");
-    db.pg.execute(migration("0226_embedding_model_and_dim.sql").as_str()).await.expect("and applies twice");
+    db.pg
+        .execute(migration("0226_embedding_model_and_dim.sql").as_str())
+        .await
+        .expect("0226 applies");
+    db.pg
+        .execute(migration("0226_embedding_model_and_dim.sql").as_str())
+        .await
+        .expect("and applies twice");
 
     // A vector with no model, or the wrong width, is refused; with both it is accepted.
-    assert!(sqlx::query("INSERT INTO knowledge.insight (tenant_id, claim, embedding) VALUES ('t', 'a', '\x02')").execute(&db.pg).await.is_err());
+    assert!(sqlx::query(
+        "INSERT INTO knowledge.insight (tenant_id, claim, embedding) VALUES ('t', 'a', '\x02')"
+    )
+    .execute(&db.pg)
+    .await
+    .is_err());
     assert!(sqlx::query("INSERT INTO knowledge.insight (tenant_id, claim, embedding, embedding_model, embedding_dim) VALUES ('t', 'b', '\x02', 'nomic-embed-text', 512)").execute(&db.pg).await.is_err());
     sqlx::query("INSERT INTO knowledge.insight (tenant_id, claim, embedding, embedding_model, embedding_dim) VALUES ('t', 'c', '\x02', 'nomic-embed-text', 768)")
         .execute(&db.pg)
         .await
         .expect("a vector that names its model and width");
     // A row with no vector needs neither.
-    sqlx::query("INSERT INTO knowledge.insight (tenant_id, claim) VALUES ('t', 'd')").execute(&db.pg).await.unwrap();
+    sqlx::query("INSERT INTO knowledge.insight (tenant_id, claim) VALUES ('t', 'd')")
+        .execute(&db.pg)
+        .await
+        .unwrap();
 
     // A legacy row (a vector, no model) can still have other columns updated: the rule fires
     // only when the embedding is written.
-    sqlx::query("UPDATE knowledge.insight SET decay_score = 0.5 WHERE claim = 'legacy'").execute(&db.pg).await.expect("legacy rows stay updatable");
+    sqlx::query("UPDATE knowledge.insight SET decay_score = 0.5 WHERE claim = 'legacy'")
+        .execute(&db.pg)
+        .await
+        .expect("legacy rows stay updatable");
     // It is picked up by the model-change query (NULL differs from every model).
     let n: i64 = sqlx::query("SELECT count(*) FROM knowledge.insight WHERE embedding IS NULL OR embedding_model IS DISTINCT FROM 'nomic-embed-text'")
         .fetch_one(&db.pg)
@@ -774,7 +1342,10 @@ async fn analog_search_over_stored_fingerprints_never_returns_the_same_episode_o
         )
         .await
         .unwrap();
-    db.pg.execute(migration("0184_instrument_fingerprint.sql").as_str()).await.expect("0184 applies");
+    db.pg
+        .execute(migration("0184_instrument_fingerprint.sql").as_str())
+        .await
+        .expect("0184 applies");
     let t0 = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
     let dims = vec!["volatility".to_string(), "mean_return".to_string()];
     let put = |iid: i64, day: i64, v: [f32; 2]| {
@@ -806,22 +1377,55 @@ async fn analog_search_over_stored_fingerprints_never_returns_the_same_episode_o
     let as_of = t0 + Duration::days(120);
     // 110 is after the query's window but inside as_of; the query is the latest fingerprint
     // of instrument 1 known by as_of, i.e. day 110.
-    let out = api::knowledge_routes::analog_search(&db.pg, 1, 1, as_of, 10, "21d@1m").await.unwrap();
-    let ids: Vec<String> = out["analogs"].as_array().unwrap().iter().map(|a| a["id"].as_str().unwrap().to_string()).collect();
+    let out = api::knowledge_routes::analog_search(&db.pg, 1, 1, as_of, 10, "21d@1m")
+        .await
+        .unwrap();
+    let ids: Vec<String> = out["analogs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["id"].as_str().unwrap().to_string())
+        .collect();
     let day = |d: i64| (t0 + Duration::days(d)).timestamp().div_euclid(86_400);
-    assert!(!ids.contains(&format!("1:1:{}", day(110))), "the query itself");
-    assert!(!ids.contains(&format!("1:1:{}", day(100))), "the same instrument 10 days earlier is inside the 21-day zone");
-    assert!(!ids.contains(&format!("1:1:{}", day(250))), "known only after as_of");
+    assert!(
+        !ids.contains(&format!("1:1:{}", day(110))),
+        "the query itself"
+    );
+    assert!(
+        !ids.contains(&format!("1:1:{}", day(100))),
+        "the same instrument 10 days earlier is inside the 21-day zone"
+    );
+    assert!(
+        !ids.contains(&format!("1:1:{}", day(250))),
+        "known only after as_of"
+    );
     assert!(!ids.contains(&format!("1:1:{}", day(400))), "the future");
-    assert!(ids.contains(&format!("2:1:{}", day(100))), "another market at the same time is an analog: {ids:?}");
+    assert!(
+        ids.contains(&format!("2:1:{}", day(100))),
+        "another market at the same time is an analog: {ids:?}"
+    );
     assert_eq!(out["exclusion_zone_days"], 21);
     assert_eq!(out["vector"], "explicit_standardised_fingerprint");
-    assert_eq!(out["dimensions"], serde_json::json!(["volatility", "mean_return"]));
+    assert_eq!(
+        out["dimensions"],
+        serde_json::json!(["volatility", "mean_return"])
+    );
     // With a later as_of the far window of the same instrument appears.
-    let later = api::knowledge_routes::analog_search(&db.pg, 1, 1, t0 + Duration::days(300), 10, "21d@1m").await.unwrap();
-    let later_ids: Vec<String> = later["analogs"].as_array().unwrap().iter().map(|a| a["id"].as_str().unwrap().to_string()).collect();
+    let later =
+        api::knowledge_routes::analog_search(&db.pg, 1, 1, t0 + Duration::days(300), 10, "21d@1m")
+            .await
+            .unwrap();
+    let later_ids: Vec<String> = later["analogs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["id"].as_str().unwrap().to_string())
+        .collect();
     // The query is now day 250; day 100 and 110 are far outside its zone.
-    assert!(later_ids.contains(&format!("1:1:{}", day(110))), "{later_ids:?}");
+    assert!(
+        later_ids.contains(&format!("1:1:{}", day(110))),
+        "{later_ids:?}"
+    );
     assert!(!later_ids.contains(&format!("1:1:{}", day(250))));
     // An instrument with no fingerprint is a typed absence.
     assert!(matches!(

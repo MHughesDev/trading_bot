@@ -177,7 +177,20 @@ pub async fn load_ledger(
         lots: lots
             .into_iter()
             .map(
-                |(id, uid, instrument_id, open_event_id, side, open_qty, remaining, price, rate, at, venue, ac)| {
+                |(
+                    id,
+                    uid,
+                    instrument_id,
+                    open_event_id,
+                    side,
+                    open_qty,
+                    remaining,
+                    price,
+                    rate,
+                    at,
+                    venue,
+                    ac,
+                )| {
                     let parsed = match side.as_deref() {
                         Some("buy") => Some(Side::Buy),
                         Some("sell") => Some(Side::Sell),
@@ -206,17 +219,19 @@ pub async fn load_ledger(
             .collect(),
         closes: closes
             .into_iter()
-            .map(|(id, lot_id, close_event_id, close_qty, close_price, realized_usd, closed_at)| {
-                PnlClose {
-                    id,
-                    lot_id,
-                    close_event_id,
-                    close_qty,
-                    close_price,
-                    realized_usd,
-                    closed_at,
-                }
-            })
+            .map(
+                |(id, lot_id, close_event_id, close_qty, close_price, realized_usd, closed_at)| {
+                    PnlClose {
+                        id,
+                        lot_id,
+                        close_event_id,
+                        close_qty,
+                        close_price,
+                        realized_usd,
+                        closed_at,
+                    }
+                },
+            )
             .collect(),
     })
 }
@@ -411,11 +426,23 @@ mod tests {
     fn another_users_lots_never_count() {
         let me = Uuid::new_v4();
         let ledger = Ledger {
-            lots: vec![lot(Uuid::new_v4(), "BTC-USD", Some(Side::Buy), dec!(1), dec!(100))],
+            lots: vec![lot(
+                Uuid::new_v4(),
+                "BTC-USD",
+                Some(Side::Buy),
+                dec!(1),
+                dec!(100),
+            )],
             closes: vec![],
         };
         let now = Utc::now();
-        let r = build_rollup(me, AccountMode::Live, &ledger, &|_| Some((dec!(200), now)), now);
+        let r = build_rollup(
+            me,
+            AccountMode::Live,
+            &ledger,
+            &|_| Some((dec!(200), now)),
+            now,
+        );
         assert_eq!(r.unrealized_pnl_usd, Decimal::ZERO);
     }
 

@@ -618,7 +618,10 @@ async fn each_user_connects_verifies_and_runs_on_their_own_key() {
         None,
     )
     .await;
-    assert_eq!(provider_row(&status, "openai")["default_model"], "gpt-4o-mini");
+    assert_eq!(
+        provider_row(&status, "openai")["default_model"],
+        "gpt-4o-mini"
+    );
     let (s, _) = call(
         &app,
         &bodies,

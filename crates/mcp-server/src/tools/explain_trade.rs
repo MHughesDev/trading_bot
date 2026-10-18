@@ -9,7 +9,12 @@ use serde_json::{json, Value};
 use crate::ApiClient;
 
 pub async fn explain_trade(api: &ApiClient, params: &Value) -> Value {
-    let Some(run_id) = params.get("run_id").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) else {
+    let Some(run_id) = params
+        .get("run_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
         return crate::tool_error::missing_field("run_id");
     };
     let Some(idx) = params.get("trade_idx").and_then(Value::as_u64) else {

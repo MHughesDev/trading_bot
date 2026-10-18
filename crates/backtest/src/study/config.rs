@@ -158,7 +158,9 @@ pub enum StudyConfigError {
     BadCpcvGroups,
     #[error("timing_jitter needs at least two distinct delays and must include 0 (the baseline)")]
     BadFillDelays,
-    #[error("ablation needs a baseline and at least one variant, each a distinct stored strategy id")]
+    #[error(
+        "ablation needs a baseline and at least one variant, each a distinct stored strategy id"
+    )]
     BadStrategyRefs,
     /// The trial ledger refused to register a member, so it was never
     /// dispatched. Surfaced rather than skipped: a study that silently drops
@@ -229,7 +231,11 @@ impl StudyConfig {
         }
         if let VarySpec::StrategyRefs { refs } = &self.vary {
             let mut seen = std::collections::BTreeSet::new();
-            if refs.len() < 2 || refs.iter().any(|r| r.trim().is_empty() || !seen.insert(r.as_str())) {
+            if refs.len() < 2
+                || refs
+                    .iter()
+                    .any(|r| r.trim().is_empty() || !seen.insert(r.as_str()))
+            {
                 return Err(StudyConfigError::BadStrategyRefs);
             }
         }
@@ -449,13 +455,28 @@ mod tests {
             selection_rule: SelectionRule::None,
         };
         assert!(mk(vec![0, 1, 2]).validate().is_ok());
-        assert_eq!(mk(vec![1, 2]).validate(), Err(StudyConfigError::BadFillDelays), "no baseline");
-        assert_eq!(mk(vec![0]).validate(), Err(StudyConfigError::BadFillDelays), "nothing to compare");
-        assert_eq!(mk(vec![0, 1, 1]).validate(), Err(StudyConfigError::BadFillDelays), "duplicate delay");
+        assert_eq!(
+            mk(vec![1, 2]).validate(),
+            Err(StudyConfigError::BadFillDelays),
+            "no baseline"
+        );
+        assert_eq!(
+            mk(vec![0]).validate(),
+            Err(StudyConfigError::BadFillDelays),
+            "nothing to compare"
+        );
+        assert_eq!(
+            mk(vec![0, 1, 1]).validate(),
+            Err(StudyConfigError::BadFillDelays),
+            "duplicate delay"
+        );
         // A jitter vary under another kind is refused, as for every pairing.
         let mut c = mk(vec![0, 1]);
         c.kind = StudyKind::CostSweep;
-        assert!(matches!(c.validate(), Err(StudyConfigError::KindVaryMismatch { .. })));
+        assert!(matches!(
+            c.validate(),
+            Err(StudyConfigError::KindVaryMismatch { .. })
+        ));
     }
 
     #[test]
@@ -464,7 +485,9 @@ mod tests {
             study_id: "a".into(),
             kind: StudyKind::Ablation,
             base_config: base(),
-            vary: VarySpec::StrategyRefs { refs: refs.into_iter().map(String::from).collect() },
+            vary: VarySpec::StrategyRefs {
+                refs: refs.into_iter().map(String::from).collect(),
+            },
             metric: MetricKind::Sharpe,
             null_ref: None,
             null: None,
@@ -473,8 +496,17 @@ mod tests {
             selection_rule: SelectionRule::None,
         };
         assert!(mk(vec!["s", "s--ablate-0"]).validate().is_ok());
-        assert_eq!(mk(vec!["s"]).validate(), Err(StudyConfigError::BadStrategyRefs));
-        assert_eq!(mk(vec!["s", "s"]).validate(), Err(StudyConfigError::BadStrategyRefs));
-        assert_eq!(mk(vec!["s", " "]).validate(), Err(StudyConfigError::BadStrategyRefs));
+        assert_eq!(
+            mk(vec!["s"]).validate(),
+            Err(StudyConfigError::BadStrategyRefs)
+        );
+        assert_eq!(
+            mk(vec!["s", "s"]).validate(),
+            Err(StudyConfigError::BadStrategyRefs)
+        );
+        assert_eq!(
+            mk(vec!["s", " "]).validate(),
+            Err(StudyConfigError::BadStrategyRefs)
+        );
     }
 }

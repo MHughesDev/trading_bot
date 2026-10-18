@@ -100,7 +100,12 @@ pub fn member_attributes(selection: &Selection, instrument: &str) -> BTreeMap<St
                 .filter_map(|(k, v)| match v {
                     // Through the shortest string that reads back as the same
                     // f64, so the attribute round-trips exactly.
-                    Value::Num(x) => x.get().to_string().parse::<Decimal>().ok().map(|d| (k.clone(), d)),
+                    Value::Num(x) => x
+                        .get()
+                        .to_string()
+                        .parse::<Decimal>()
+                        .ok()
+                        .map(|d| (k.clone(), d)),
                     _ => None,
                 })
                 .collect()

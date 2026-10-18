@@ -53,7 +53,9 @@ impl ReconciliationRequirement {
         let newest = self
             .records
             .iter()
-            .filter(|r| r.layer1_revision == self.layer1_parent && r.layer2_revision == self.layer2_revision)
+            .filter(|r| {
+                r.layer1_revision == self.layer1_parent && r.layer2_revision == self.layer2_revision
+            })
             .max_by_key(|r| r.created_at);
         match newest {
             None => Err(format!(
@@ -72,9 +74,14 @@ impl ReconciliationRequirement {
 
 /// Refuse every gate from 3 on when the requirement is not met. Gates 1 and 2 are untouched.
 #[must_use]
-pub fn apply_to_stack(mut verdict: StackVerdict, req: Option<&ReconciliationRequirement>) -> StackVerdict {
+pub fn apply_to_stack(
+    mut verdict: StackVerdict,
+    req: Option<&ReconciliationRequirement>,
+) -> StackVerdict {
     let Some(req) = req else { return verdict };
-    let Err(reason) = req.satisfied() else { return verdict };
+    let Err(reason) = req.satisfied() else {
+        return verdict;
+    };
     for o in &mut verdict.outcomes {
         if o.gate_no >= 3 {
             let was = std::mem::take(&mut o.detail);
@@ -89,7 +96,11 @@ pub fn apply_to_stack(mut verdict: StackVerdict, req: Option<&ReconciliationRequ
             };
         }
     }
-    verdict.blocked_at = verdict.outcomes.iter().find(|o| !o.passed).map(|o| o.gate_no);
+    verdict.blocked_at = verdict
+        .outcomes
+        .iter()
+        .find(|o| !o.passed)
+        .map(|o| o.gate_no);
     verdict
 }
 
@@ -108,42 +119,75 @@ mod tests {
     }
 
     fn req(records: Vec<ReconRecord>) -> ReconciliationRequirement {
-        ReconciliationRequirement { layer2_revision: "L2".into(), layer1_parent: "L1".into(), records }
+        ReconciliationRequirement {
+            layer2_revision: "L2".into(),
+            layer1_parent: "L1".into(),
+            records,
+        }
     }
 
     #[test]
     fn a_layer_2_version_with_no_reconciliation_is_refused_with_the_reason() {
         let e = req(vec![]).satisfied().unwrap_err();
-        assert!(e.contains("no reconciliation") && e.contains("L1") && e.contains("L2"), "{e}");
+        assert!(
+            e.contains("no reconciliation") && e.contains("L1") && e.contains("L2"),
+            "{e}"
+        );
         // A record for some other pair is not this pair's.
-        assert!(req(vec![rec("L1", "OTHER", true, 0), rec("X", "L2", true, 0)]).satisfied().is_err());
+        assert!(
+            req(vec![rec("L1", "OTHER", true, 0), rec("X", "L2", true, 0)])
+                .satisfied()
+                .is_err()
+        );
     }
 
     #[test]
     fn a_passed_one_proceeds_and_a_failed_one_stays_refused() {
         assert!(req(vec![rec("L1", "L2", true, 0)]).satisfied().is_ok());
-        let e = req(vec![rec("L1", "L2", false, 0)]).satisfied().unwrap_err();
+        let e = req(vec![rec("L1", "L2", false, 0)])
+            .satisfied()
+            .unwrap_err();
         assert!(e.contains("failed"), "{e}");
     }
 
     #[test]
     fn the_newest_record_decides_so_a_candidate_cannot_shop_thresholds_until_one_passes() {
-        assert!(req(vec![rec("L1", "L2", false, 0), rec("L1", "L2", true, 5)]).satisfied().is_ok());
-        assert!(req(vec![rec("L1", "L2", true, 0), rec("L1", "L2", false, 5)]).satisfied().is_err());
+        assert!(
+            req(vec![rec("L1", "L2", false, 0), rec("L1", "L2", true, 5)])
+                .satisfied()
+                .is_ok()
+        );
+        assert!(
+            req(vec![rec("L1", "L2", true, 0), rec("L1", "L2", false, 5)])
+                .satisfied()
+                .is_err()
+        );
     }
 
     fn passing_stack() -> StackVerdict {
-        let outcomes: Vec<GateOutcome> =
-            (1..=16).map(|n| GateOutcome::structural_pass(n, "g", format!("gate {n} ok"))).collect();
-        StackVerdict { blocked_at: None, outcomes }
+        let outcomes: Vec<GateOutcome> = (1..=16)
+            .map(|n| GateOutcome::structural_pass(n, "g", format!("gate {n} ok")))
+            .collect();
+        StackVerdict {
+            blocked_at: None,
+            outcomes,
+        }
     }
 
     #[test]
     fn the_stack_refuses_gate_3_and_every_later_gate_but_not_1_and_2() {
         let v = apply_to_stack(passing_stack(), Some(&req(vec![])));
         assert_eq!(v.blocked_at, Some(3));
-        assert!(v.outcomes.iter().filter(|o| o.gate_no <= 2).all(|o| o.passed));
-        assert!(v.outcomes.iter().filter(|o| o.gate_no >= 3).all(|o| !o.passed && o.detail.starts_with("refused:")));
+        assert!(v
+            .outcomes
+            .iter()
+            .filter(|o| o.gate_no <= 2)
+            .all(|o| o.passed));
+        assert!(v
+            .outcomes
+            .iter()
+            .filter(|o| o.gate_no >= 3)
+            .all(|o| !o.passed && o.detail.starts_with("refused:")));
         assert!(!v.passed());
         assert_eq!(v.outcomes.len(), 16, "the stack is still sixteen long");
     }
@@ -152,6 +196,9 @@ mod tests {
     fn with_a_passed_reconciliation_or_no_requirement_the_stack_is_untouched() {
         let ok = apply_to_stack(passing_stack(), Some(&req(vec![rec("L1", "L2", true, 0)])));
         assert!(ok.passed());
-        assert!(apply_to_stack(passing_stack(), None).passed(), "a revision with no Layer 1 parent owes nothing");
+        assert!(
+            apply_to_stack(passing_stack(), None).passed(),
+            "a revision with no Layer 1 parent owes nothing"
+        );
     }
 }

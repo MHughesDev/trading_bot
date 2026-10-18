@@ -1022,8 +1022,14 @@ mod tests {
         };
         let shown = vec![mk("f_1"), mk("f_2"), mk("q-7")];
         assert_eq!(cited_ids(&shown, "f_1, q-7."), vec!["f_1", "q-7"]);
-        assert!(cited_ids(&shown, "f_12 and xf_1").is_empty(), "prefix is not a cite");
-        assert!(cited_ids(&shown, "f_99").is_empty(), "never shown, never cited");
+        assert!(
+            cited_ids(&shown, "f_12 and xf_1").is_empty(),
+            "prefix is not a cite"
+        );
+        assert!(
+            cited_ids(&shown, "f_99").is_empty(),
+            "never shown, never cited"
+        );
         assert_eq!(cited_ids(&shown, "[f_2] f_2"), vec!["f_2"], "once");
     }
 }

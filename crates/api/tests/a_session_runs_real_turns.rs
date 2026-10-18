@@ -39,9 +39,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 fn url() -> String {
-    std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://postgres:postgres@127.0.0.1:5433/fsession_scratch".into()
-    })
+    std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@127.0.0.1:5433/fsession_scratch".into())
 }
 
 /// What the fake provider saw.
@@ -137,11 +136,12 @@ async fn world(base: &str) -> World {
 
 async fn wait_until_over(pg: &PgPool, run: Uuid) -> String {
     for _ in 0..240 {
-        let (status,): (String,) = sqlx::query_as("SELECT status FROM agent_runs WHERE run_id = $1")
-            .bind(run)
-            .fetch_one(pg)
-            .await
-            .expect("the run row");
+        let (status,): (String,) =
+            sqlx::query_as("SELECT status FROM agent_runs WHERE run_id = $1")
+                .bind(run)
+                .fetch_one(pg)
+                .await
+                .expect("the run row");
         if !api::agent::conversations::ACTIVE_RUN_STATES.contains(&status.as_str()) {
             return status;
         }
@@ -175,7 +175,10 @@ async fn a_bounded_research_run_is_a_session_with_one_item_through_a_real_turn()
         .await
         .expect("the run starts against the fake provider");
     let status = wait_until_over(&w.pg, run).await;
-    assert!(seen.requests.load(Ordering::SeqCst) >= 1, "the model was reached");
+    assert!(
+        seen.requests.load(Ordering::SeqCst) >= 1,
+        "the model was reached"
+    );
     eprintln!("the run ended `{status}`");
 
     // Acceptance 4: a session row, with one item, whose log opens and records
@@ -196,7 +199,11 @@ async fn a_bounded_research_run_is_a_session_with_one_item_through_a_real_turn()
             .fetch_one(&w.pg)
             .await
             .unwrap();
-    assert_eq!(attributed, (Some(session.id), Some(agenda[0].id)), "the run knows its session and item");
+    assert_eq!(
+        attributed,
+        (Some(session.id), Some(agenda[0].id)),
+        "the run knows its session and item"
+    );
 
     // A second turn in the same conversation does not open a second session.
     let again = w
@@ -275,7 +282,9 @@ async fn three_children_run_together_and_their_leases_never_exceed_the_day_in_tr
     // children cannot all be leased 40 - the third is cut to what remains.
     session.budget.trials_total = 400;
     session.budget.max_runs = 10;
-    sessions::create(&w.pg, w.user, &session).await.expect("the session");
+    sessions::create(&w.pg, w.user, &session)
+        .await
+        .expect("the session");
     api::session_day::set_trials_per_day(&w.pg, session.id, 90)
         .await
         .expect("a day budget");
@@ -316,7 +325,10 @@ async fn three_children_run_together_and_their_leases_never_exceed_the_day_in_tr
 
     // S-11.5/6: the children really overlapped in the provider.
     let peak = seen.peak.load(Ordering::SeqCst);
-    assert!(peak >= 2, "children were started one at a time: peak {peak} in flight");
+    assert!(
+        peak >= 2,
+        "children were started one at a time: peak {peak} in flight"
+    );
 
     // §12.4: leases, summed. Every lease was issued in trials, the three
     // together fit the day, and the one that did not fit was cut by the day.
@@ -346,13 +358,26 @@ async fn three_children_run_together_and_their_leases_never_exceed_the_day_in_tr
             .filter(|o| o.3 <= l.3 && o.4.is_none_or(|r| r > l.3))
             .map(|o| o.0)
             .sum();
-        assert!(committed <= 90.0 + 1e-9, "{committed} committed at {}: {leases:?}", l.3);
+        assert!(
+            committed <= 90.0 + 1e-9,
+            "{committed} committed at {}: {leases:?}",
+            l.3
+        );
     }
     let overlapping = leases
         .iter()
-        .filter(|l| leases.iter().filter(|o| o.3 <= l.3 && o.4.is_none_or(|r| r > l.3)).count() >= 2)
+        .filter(|l| {
+            leases
+                .iter()
+                .filter(|o| o.3 <= l.3 && o.4.is_none_or(|r| r > l.3))
+                .count()
+                >= 2
+        })
         .count();
-    assert!(overlapping >= 1, "no two leases were ever committed together: {leases:?}");
+    assert!(
+        overlapping >= 1,
+        "no two leases were ever committed together: {leases:?}"
+    );
 
     // And the log is whole: every child started and finished, nothing anomalous.
     let folded = sessions::state(&w.pg, session.id).await.expect("fold");

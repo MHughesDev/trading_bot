@@ -33,7 +33,12 @@ fn clean() -> IntegrityInputs<'static> {
 }
 
 fn layer1_experiment() -> Experiment {
-    Experiment::new("exp-l1", format!("{}momo", position_leakage::LAYER1_FAMILY_PREFIX), holdout(), "null:block")
+    Experiment::new(
+        "exp-l1",
+        format!("{}momo", position_leakage::LAYER1_FAMILY_PREFIX),
+        holdout(),
+        "null:block",
+    )
 }
 
 fn bars(n: usize) -> Vec<Bar> {
@@ -41,14 +46,22 @@ fn bars(n: usize) -> Vec<Bar> {
         .map(|i| {
             #[allow(clippy::cast_precision_loss)]
             let p = 100.0 + (i as f64 * 0.37).sin() * 3.0 + i as f64 * 0.01;
-            Bar { ts_ns: i64::try_from(i).unwrap() * 3_600_000_000_000, open: p, close: p + 0.1 }
+            Bar {
+                ts_ns: i64::try_from(i).unwrap() * 3_600_000_000_000,
+                open: p,
+                close: p + 0.1,
+            }
         })
         .collect()
 }
 
 fn series_from(bars: &[Bar], f: impl Fn(usize) -> f64) -> PositionSeries {
     PositionSeries {
-        points: bars.iter().enumerate().map(|(i, b)| PositionPoint::new(b.ts_ns, f(i))).collect(),
+        points: bars
+            .iter()
+            .enumerate()
+            .map(|(i, b)| PositionPoint::new(b.ts_ns, f(i)))
+            .collect(),
         position_units: PositionUnits::Fraction,
         allow_short: false,
     }
@@ -56,12 +69,24 @@ fn series_from(bars: &[Bar], f: impl Fn(usize) -> f64) -> PositionSeries {
 
 fn causal(b: &[Bar]) -> PositionSeries {
     // Long when the close is above its previous close: reads only the past.
-    series_from(b, |i| if i > 0 && b[i].close > b[i - 1].close { 1.0 } else { 0.0 })
+    series_from(b, |i| {
+        if i > 0 && b[i].close > b[i - 1].close {
+            1.0
+        } else {
+            0.0
+        }
+    })
 }
 
 fn peeking(b: &[Bar]) -> PositionSeries {
     // Long when the NEXT close is higher: reads the bar after the decision.
-    series_from(b, |i| if i + 1 < b.len() && b[i + 1].close > b[i].close { 1.0 } else { 0.0 })
+    series_from(b, |i| {
+        if i + 1 < b.len() && b[i + 1].close > b[i].close {
+            1.0
+        } else {
+            0.0
+        }
+    })
 }
 
 #[test]
@@ -69,10 +94,23 @@ fn a_layer1_experiment_cannot_pass_gate_0_without_a_truncation_verdict() {
     let mut e = layer1_experiment();
     let mut runner = GateRunner::new(&mut e);
     // The plain call carries no verdict. It must not be a way around the check.
-    assert!(matches!(runner.gate0(&clean()), Err(GateError::IntegrityHardStop)));
-    let v = runner.ledger().verdicts().last().expect("the failure is recorded");
+    assert!(matches!(
+        runner.gate0(&clean()),
+        Err(GateError::IntegrityHardStop)
+    ));
+    let v = runner
+        .ledger()
+        .verdicts()
+        .last()
+        .expect("the failure is recorded");
     assert!(!v.passed);
-    assert!(v.reasons.iter().any(|r| r == position_leakage::NOT_RUN_CODE), "{:?}", v.reasons);
+    assert!(
+        v.reasons
+            .iter()
+            .any(|r| r == position_leakage::NOT_RUN_CODE),
+        "{:?}",
+        v.reasons
+    );
     // And a call that names no verdict is the same refusal, not a skip.
     let mut e = layer1_experiment();
     let mut runner = GateRunner::new(&mut e);
@@ -89,15 +127,20 @@ fn a_passing_verdict_lets_a_layer1_experiment_through_and_a_failing_one_names_wh
     assert!(runner.gate0_position_series(&clean(), Some(&ok)).is_ok());
 
     let leaky = truncation_test(peeking, &b, 7, 8);
-    let TruncationVerdict::Fail(f) = &leaky else { panic!("a peeking function must fail: {leaky:?}") };
+    let TruncationVerdict::Fail(f) = &leaky else {
+        panic!("a peeking function must fail: {leaky:?}")
+    };
     let mut e = layer1_experiment();
     let mut runner = GateRunner::new(&mut e);
-    assert!(runner.gate0_position_series(&clean(), Some(&leaky)).is_err());
+    assert!(runner
+        .gate0_position_series(&clean(), Some(&leaky))
+        .is_err());
     let verdict = runner.ledger().verdicts().last().unwrap();
     assert!(verdict.reasons.iter().any(|r| r == position_leakage::CODE));
     let flag = position_leakage::check(Some(&leaky)).unwrap();
     assert!(
-        flag.detail.contains(&chrono::DateTime::from_timestamp_nanos(f.first_differing_ns).to_rfc3339()),
+        flag.detail
+            .contains(&chrono::DateTime::from_timestamp_nanos(f.first_differing_ns).to_rfc3339()),
         "the flag names the first differing timestamp: {}",
         flag.detail
     );
@@ -107,5 +150,8 @@ fn a_passing_verdict_lets_a_layer1_experiment_through_and_a_failing_one_names_wh
 fn an_ordinary_experiment_is_not_asked_for_a_verdict() {
     let mut e = Experiment::new("exp-plain", "ema-family", holdout(), "null:block");
     let mut runner = GateRunner::new(&mut e);
-    assert!(runner.gate0(&clean()).is_ok(), "the check applies to Layer 1 only");
+    assert!(
+        runner.gate0(&clean()).is_ok(),
+        "the check applies to Layer 1 only"
+    );
 }

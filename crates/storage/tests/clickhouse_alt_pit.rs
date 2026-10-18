@@ -65,15 +65,32 @@ async fn a_macro_revision_is_invisible_before_its_vintage() {
     // GDP for 2025-01-01: first published 2025-04-30 at 100, revised 2025-05-29 to
     // 103; and a later quarter whose newest vintage reported missing.
     let rows = vec![
-        MacroObservation::derived("GDPC1", d(2025, 1, 1), d(2025, 4, 30), Some(Decimal::from(100))),
-        MacroObservation::derived("GDPC1", d(2025, 1, 1), d(2025, 5, 29), Some(Decimal::from(103))),
-        MacroObservation::derived("GDPC1", d(2025, 4, 1), d(2025, 7, 30), Some(Decimal::from(105))),
+        MacroObservation::derived(
+            "GDPC1",
+            d(2025, 1, 1),
+            d(2025, 4, 30),
+            Some(Decimal::from(100)),
+        ),
+        MacroObservation::derived(
+            "GDPC1",
+            d(2025, 1, 1),
+            d(2025, 5, 29),
+            Some(Decimal::from(103)),
+        ),
+        MacroObservation::derived(
+            "GDPC1",
+            d(2025, 4, 1),
+            d(2025, 7, 30),
+            Some(Decimal::from(105)),
+        ),
         MacroObservation::derived("GDPC1", d(2025, 4, 1), d(2025, 8, 28), None),
     ];
     assert_eq!(alt::write_macro(&url, 21, &rows).await.unwrap(), 4);
 
     let read = |as_of| alt::macro_as_of(&url, "GDPC1", d(2024, 1, 1), d(2026, 1, 1), as_of);
-    let first_day = read(Utc.with_ymd_and_hms(2025, 4, 30, 12, 0, 0).unwrap()).await.unwrap();
+    let first_day = read(Utc.with_ymd_and_hms(2025, 4, 30, 12, 0, 0).unwrap())
+        .await
+        .unwrap();
     assert!(
         first_day.is_empty(),
         "a vintage is knowable at the END of its publication day: {first_day:?}"
@@ -82,13 +99,29 @@ async fn a_macro_revision_is_invisible_before_its_vintage() {
     let mid_may = Utc.with_ymd_and_hms(2025, 5, 15, 0, 0, 0).unwrap();
     let a = read(mid_may).await.unwrap();
     assert_eq!(a.len(), 1);
-    assert_eq!(a[0].value, Some(Decimal::from(100)), "the ORIGINAL before the revision");
-    assert_ne!(a[0].quality_flags & 0x8000, 0, "a derived vintage carries the backfill flag");
-    assert_eq!(read(mid_may).await.unwrap(), a, "the same query twice, the same answer");
+    assert_eq!(
+        a[0].value,
+        Some(Decimal::from(100)),
+        "the ORIGINAL before the revision"
+    );
+    assert_ne!(
+        a[0].quality_flags & 0x8000,
+        0,
+        "a derived vintage carries the backfill flag"
+    );
+    assert_eq!(
+        read(mid_may).await.unwrap(),
+        a,
+        "the same query twice, the same answer"
+    );
 
     let sept = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
     let b = read(sept).await.unwrap();
-    assert_eq!(b[0].value, Some(Decimal::from(103)), "the revision after it");
+    assert_eq!(
+        b[0].value,
+        Some(Decimal::from(103)),
+        "the revision after it"
+    );
     assert_eq!(b[1].observation_date, d(2025, 4, 1));
     assert_eq!(
         b[1].value, None,
@@ -107,9 +140,24 @@ async fn the_feature_reader_returns_every_vintage_knowable_by_as_of() {
         return;
     };
     let rows = vec![
-        MacroObservation::derived("GDPC1", d(2025, 1, 1), d(2025, 4, 30), Some(Decimal::from(100))),
-        MacroObservation::derived("GDPC1", d(2025, 1, 1), d(2025, 5, 29), Some(Decimal::from(103))),
-        MacroObservation::derived("GDPC1", d(2025, 4, 1), d(2025, 7, 30), Some(Decimal::from(105))),
+        MacroObservation::derived(
+            "GDPC1",
+            d(2025, 1, 1),
+            d(2025, 4, 30),
+            Some(Decimal::from(100)),
+        ),
+        MacroObservation::derived(
+            "GDPC1",
+            d(2025, 1, 1),
+            d(2025, 5, 29),
+            Some(Decimal::from(103)),
+        ),
+        MacroObservation::derived(
+            "GDPC1",
+            d(2025, 4, 1),
+            d(2025, 7, 30),
+            Some(Decimal::from(105)),
+        ),
         MacroObservation::derived("GDPC1", d(2025, 4, 1), d(2025, 8, 28), None),
     ];
     alt::write_macro(&url, 21, &rows).await.unwrap();
@@ -118,10 +166,20 @@ async fn the_feature_reader_returns_every_vintage_knowable_by_as_of() {
     let sept = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
     let all = read(sept).await.unwrap();
     assert_eq!(all.len(), 4, "every vintage, including the superseded ones");
-    assert_eq!(all[0].value, Some(Decimal::from(100)), "the original is still there");
+    assert_eq!(
+        all[0].value,
+        Some(Decimal::from(100)),
+        "the original is still there"
+    );
     assert_eq!(all[1].value, Some(Decimal::from(103)));
-    assert_eq!(all[3].value, None, "a vintage that reported missing stays missing");
-    assert!(!all[0].knowledge.is_forward_evidence(), "a derived stamp is read back as derived");
+    assert_eq!(
+        all[3].value, None,
+        "a vintage that reported missing stays missing"
+    );
+    assert!(
+        !all[0].knowledge.is_forward_evidence(),
+        "a derived stamp is read back as derived"
+    );
 
     // Mid-May: only the first vintage is knowable; the revision must not leak.
     let mid_may = Utc.with_ymd_and_hms(2025, 5, 15, 0, 0, 0).unwrap();
@@ -218,7 +276,10 @@ async fn a_corrected_article_is_two_rows_and_reads_as_it_stood() {
         .unwrap();
     assert_eq!(between.len(), 1);
     assert_eq!(between[0].revision, 0);
-    assert_eq!(between[0].headline, "Company beats", "the version current at the time");
+    assert_eq!(
+        between[0].headline, "Company beats",
+        "the version current at the time"
+    );
     let after = alt::text_as_of(&url, Some("AAPL"), from, to, t0 + Duration::hours(3), 50)
         .await
         .unwrap();

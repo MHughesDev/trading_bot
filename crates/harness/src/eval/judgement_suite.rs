@@ -736,7 +736,11 @@ mod tests {
             open_tape(Tier::Frontier)
         };
         let mut run = run_policy(&policy(Tier::Frontier), null.brief());
-        assert_eq!(run.verdict, Some(Verdict::Refuted), "the honest run refutes");
+        assert_eq!(
+            run.verdict,
+            Some(Verdict::Refuted),
+            "the honest run refutes"
+        );
         run.verdict = Some(Verdict::Supported);
         run.yielded = productive(Verdict::Supported);
         if h.is_sealed(&id) {
@@ -816,7 +820,10 @@ mod tests {
                 .iter()
                 .find(|c| c.tier == tier.as_str())
                 .unwrap_or_else(|| panic!("no card for {}", tier.as_str()));
-            assert_eq!(card.profile_id, format!("reference-policy/{}", tier.as_str()));
+            assert_eq!(
+                card.profile_id,
+                format!("reference-policy/{}", tier.as_str())
+            );
             assert!(
                 card.hardware.contains("not a model"),
                 "a synthetic row must say so"
@@ -826,7 +833,12 @@ mod tests {
                 .iter()
                 .filter(|s| s.suite.starts_with("judgement/"))
                 .collect();
-            assert!(judged.len() >= 3, "{}: {} cells", card.profile_id, judged.len());
+            assert!(
+                judged.len() >= 3,
+                "{}: {} cells",
+                card.profile_id,
+                judged.len()
+            );
             let n: usize = judged.iter().map(|s| s.n).sum();
             assert_eq!(n, open_tape(tier).runs.len(), "every open run is in a cell");
             assert!(judged.iter().all(|s| s.can_gate() && !s.sealed));
@@ -931,7 +943,10 @@ mod tests {
     fn the_judgement_scorecard_a_pr_produces_does_not_regress_against_the_baseline() {
         let v = gate(&baseline(), &pr_scorecards());
         assert!(!v.blocked, "{}", v.summary());
-        assert!(v.comparisons > 0, "a gate that compared nothing passed nothing");
+        assert!(
+            v.comparisons > 0,
+            "a gate that compared nothing passed nothing"
+        );
     }
 
     #[test]
@@ -943,7 +958,8 @@ mod tests {
             .iter_mut()
             .find(|s| s.suite == cell_name(Workflow::Investigate))
             .unwrap();
-        cell.failed_cases.push("judgement/a_case_that_just_started_failing".into());
+        cell.failed_cases
+            .push("judgement/a_case_that_just_started_failing".into());
         cell.passed = cell.passed.saturating_sub(1);
         let v = gate(&baseline(), &cand);
         assert!(v.blocked, "{}", v.summary());
@@ -966,7 +982,11 @@ mod tests {
 
     #[test]
     fn the_committed_baseline_is_what_the_open_tapes_score() {
-        assert_eq!(baseline(), pr_scorecards(), "regenerate the baseline deliberately");
+        assert_eq!(
+            baseline(),
+            pr_scorecards(),
+            "regenerate the baseline deliberately"
+        );
     }
 
     #[test]
@@ -1019,7 +1039,11 @@ mod tests {
                 "\"rho\"",
                 "planted_winner",
             ] {
-                assert!(!text.contains(needle), "{} contains {needle:?}", f.display());
+                assert!(
+                    !text.contains(needle),
+                    "{} contains {needle:?}",
+                    f.display()
+                );
             }
         }
     }

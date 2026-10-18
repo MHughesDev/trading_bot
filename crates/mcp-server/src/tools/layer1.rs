@@ -25,7 +25,12 @@ fn s(params: &Value, key: &str) -> Option<String> {
 /// The params array `[{name, value}]` as the manifest object.
 fn params_object(params: &Value) -> Result<Value, Value> {
     let mut out = serde_json::Map::new();
-    for item in params.get("params").and_then(Value::as_array).into_iter().flatten() {
+    for item in params
+        .get("params")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         let (Some(name), Some(value)) = (
             item.get("name").and_then(Value::as_str),
             item.get("value").filter(|v| v.is_number()),
@@ -43,7 +48,14 @@ fn params_object(params: &Value) -> Result<Value, Value> {
 
 /// `run_research_strategy`.
 pub async fn run_research_strategy(api: &ApiClient, params: &Value) -> Value {
-    for f in ["experiment_id", "source", "instrument", "timeframe", "start", "end"] {
+    for f in [
+        "experiment_id",
+        "source",
+        "instrument",
+        "timeframe",
+        "start",
+        "end",
+    ] {
         if s(params, f).is_none() {
             return crate::tool_error::missing_field(f);
         }
@@ -166,7 +178,10 @@ mod tests {
 
     #[test]
     fn params_become_the_manifest_object_and_a_malformed_one_is_refused() {
-        let ok = params_object(&json!({"params": [{"name": "lb", "value": 5}, {"name": "k", "value": 1.5}]})).unwrap();
+        let ok = params_object(
+            &json!({"params": [{"name": "lb", "value": 5}, {"name": "k", "value": 1.5}]}),
+        )
+        .unwrap();
         assert_eq!(ok, json!({"lb": 5, "k": 1.5}));
         assert!(params_object(&json!({"params": [{"name": "lb", "value": "five"}]})).is_err());
         assert_eq!(params_object(&json!({})).unwrap(), json!({}));
@@ -175,7 +190,11 @@ mod tests {
     #[test]
     fn a_description_is_inside_the_descriptor_budget() {
         let s = &specs()[0];
-        let bytes = serde_json::to_string(&json!({"name": s.name, "description": s.description, "inputSchema": s.input_schema})).unwrap().len();
+        let bytes = serde_json::to_string(
+            &json!({"name": s.name, "description": s.description, "inputSchema": s.input_schema}),
+        )
+        .unwrap()
+        .len();
         assert!(bytes <= 1_200, "{bytes}");
     }
 }

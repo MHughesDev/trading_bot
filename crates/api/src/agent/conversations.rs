@@ -160,16 +160,18 @@ pub async fn list(
     Ok(rows
         .into_iter()
         .map(
-            |(id, title, provider, model, created, last, active, turns, parent)| ConversationSummary {
-                conversation_id: id,
-                title,
-                provider,
-                model,
-                created_at: created,
-                last_activity_at: last,
-                running: active.unwrap_or(0) > 0,
-                turns: turns.unwrap_or(0),
-                parent_conversation_id: parent,
+            |(id, title, provider, model, created, last, active, turns, parent)| {
+                ConversationSummary {
+                    conversation_id: id,
+                    title,
+                    provider,
+                    model,
+                    created_at: created,
+                    last_activity_at: last,
+                    running: active.unwrap_or(0) > 0,
+                    turns: turns.unwrap_or(0),
+                    parent_conversation_id: parent,
+                }
             },
         )
         .collect())

@@ -51,16 +51,7 @@ pub struct QualityQuery {
 
 /// One aggregated row: strategy, instrument, orders, fills, ordered qty,
 /// filled qty, first-fill latency p50 and p95 in milliseconds.
-type Row = (
-    String,
-    String,
-    i64,
-    i64,
-    f64,
-    f64,
-    Option<f64>,
-    Option<f64>,
-);
+type Row = (String, String, i64, i64, f64, f64, Option<f64>, Option<f64>);
 
 fn measured(value: f64) -> Value {
     json!({ "status": "measured", "value": value })
@@ -161,7 +152,16 @@ mod tests {
     use super::*;
 
     fn row(orders: i64, fills: i64, ordered: f64, filled: f64, p50: Option<f64>) -> Row {
-        ("s".into(), "BTC-USD".into(), orders, fills, ordered, filled, p50, p50)
+        (
+            "s".into(),
+            "BTC-USD".into(),
+            orders,
+            fills,
+            ordered,
+            filled,
+            p50,
+            p50,
+        )
     }
 
     #[test]

@@ -1876,10 +1876,9 @@ fn compact_document() -> (Value, serde_json::Map<String, Value>) {
         defs.insert("filter".into(), filter);
         // A distance is a positive percentage; the sign is the side, not the number.
         if let Some(exit) = defs.get("exit").cloned() {
-            let text = exit.to_string().replace(
-                "^-?[0-9]+(\\\\.[0-9]+)?$",
-                "^[0-9]+(\\\\.[0-9]+)?$",
-            );
+            let text = exit
+                .to_string()
+                .replace("^-?[0-9]+(\\\\.[0-9]+)?$", "^[0-9]+(\\\\.[0-9]+)?$");
             if let Ok(v) = serde_json::from_str(&text) {
                 defs.insert("exit".into(), v);
             }

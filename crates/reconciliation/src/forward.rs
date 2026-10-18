@@ -683,8 +683,7 @@ impl RealisedSeriesBuilder {
             _ => opening_balance.to_f64().unwrap_or(f64::NAN),
         };
         let stored = base * implied;
-        if (rebuilt - stored).abs() > 1e-9 * stored.abs().max(1.0) * (segment_len as f64 + 1.0)
-        {
+        if (rebuilt - stored).abs() > 1e-9 * stored.abs().max(1.0) * (segment_len as f64 + 1.0) {
             return Err(ForwardError::ResumeInconsistent {
                 bar: last,
                 stored,
@@ -1133,9 +1132,11 @@ mod tests {
         b.open(at(sc.marks[0].0), px(sc.marks[0].1)).unwrap();
         let mut closes = Vec::new();
         for &(t, m) in &sc.marks[1..] {
-            for f in sc.fills.iter().filter(|f| {
-                f.filled_at.timestamp() <= t && f.filled_at.timestamp() > t - 60
-            }) {
+            for f in sc
+                .fills
+                .iter()
+                .filter(|f| f.filled_at.timestamp() <= t && f.filled_at.timestamp() > t - 60)
+            {
                 b.on_fill(f.side, f.filled, f.fill_price, f.charge, f.decision_price);
             }
             closes.push(b.close_bar(at(t), px(m)).unwrap());
@@ -1164,9 +1165,11 @@ mod tests {
         .unwrap();
         let mut rest = Vec::new();
         for &(t, m) in &sc.marks[k + 1..] {
-            for f in sc.fills.iter().filter(|f| {
-                f.filled_at.timestamp() <= t && f.filled_at.timestamp() > t - 60
-            }) {
+            for f in sc
+                .fills
+                .iter()
+                .filter(|f| f.filled_at.timestamp() <= t && f.filled_at.timestamp() > t - 60)
+            {
                 b.on_fill(f.side, f.filled, f.fill_price, f.charge, f.decision_price);
             }
             rest.push(b.close_bar(at(t), px(m)).unwrap());
@@ -1191,7 +1194,11 @@ mod tests {
                 whole.realised_series(),
                 "restart after {k} bars changed the series"
             );
-            assert_eq!(rest, closes[k..], "restart after {k} bars changed a later bar's close");
+            assert_eq!(
+                rest,
+                closes[k..],
+                "restart after {k} bars changed a later bar's close"
+            );
             assert_eq!(resumed.position(), whole.position());
         }
     }
@@ -1203,7 +1210,10 @@ mod tests {
         // must land in the bar that closes at 240, exactly as without a restart.
         let (_, closes) = uninterrupted();
         let sc = script();
-        let stored: Vec<_> = closes[..2].iter().map(|c| (c.bar, c.realised_return)).collect();
+        let stored: Vec<_> = closes[..2]
+            .iter()
+            .map(|c| (c.bar, c.realised_return))
+            .collect();
         let mut b = RealisedSeriesBuilder::resume(
             spec(Numeraire::Usd),
             dec("1000"),
@@ -1260,7 +1270,10 @@ mod tests {
         // that were never made (or a different mark) gives a different equity.
         let (_, closes) = uninterrupted();
         let sc = script();
-        let stored: Vec<_> = closes[..2].iter().map(|c| (c.bar, c.realised_return)).collect();
+        let stored: Vec<_> = closes[..2]
+            .iter()
+            .map(|c| (c.bar, c.realised_return))
+            .collect();
         let wrong_mark = RealisedSeriesBuilder::resume(
             spec(Numeraire::Usd),
             dec("1000"),
@@ -1295,7 +1308,10 @@ mod tests {
     fn reanchored() -> RealisedSeriesBuilder {
         let sc = script();
         let (_, closes) = uninterrupted();
-        let stored: Vec<_> = closes[..2].iter().map(|c| (c.bar, c.realised_return)).collect();
+        let stored: Vec<_> = closes[..2]
+            .iter()
+            .map(|c| (c.bar, c.realised_return))
+            .collect();
         let mut b = RealisedSeriesBuilder::resume(
             spec(Numeraire::Usd),
             dec("1000"),
@@ -1321,7 +1337,9 @@ mod tests {
         let mut after = Vec::new();
         for &(t, m) in &sc.marks[4..] {
             for f in sc.fills.iter().filter(|f| {
-                f.filled_at.timestamp() <= t && f.filled_at.timestamp() > t - 60 && f.filled_at.timestamp() > 240
+                f.filled_at.timestamp() <= t
+                    && f.filled_at.timestamp() > t - 60
+                    && f.filled_at.timestamp() > 240
             }) {
                 b.on_fill(f.side, f.filled, f.fill_price, f.charge, f.decision_price);
             }
@@ -1330,15 +1348,27 @@ mod tests {
         // Closes for 300 and 360 are exactly the uninterrupted closes.
         assert_eq!(after, closes[3..]);
         let series = b.realised_series();
-        let times: Vec<i64> = series.series.timestamps.iter().map(|t| t.timestamp()).collect();
-        assert_eq!(times, vec![120, 180, 300, 360], "no bar at 240 (the anchor) and none for the pause");
+        let times: Vec<i64> = series
+            .series
+            .timestamps
+            .iter()
+            .map(|t| t.timestamp())
+            .collect();
+        assert_eq!(
+            times,
+            vec![120, 180, 300, 360],
+            "no bar at 240 (the anchor) and none for the pause"
+        );
         // The recorded bars carry the uninterrupted returns, bar for bar.
         let want: Vec<f64> = [0usize, 1, 3, 4]
             .iter()
             .map(|&i| whole.realised_series().series.returns[i])
             .collect();
         assert_eq!(series.series.returns, want);
-        series.series.validate().expect("still a valid return series");
+        series
+            .series
+            .validate()
+            .expect("still a valid return series");
     }
 
     #[test]
@@ -1362,7 +1392,10 @@ mod tests {
         ));
         // The gap-aware alignment says which bars are missing.
         let g = realised.align_over_gaps(&full).unwrap();
-        assert_eq!(g.missing.iter().map(|t| t.timestamp()).collect::<Vec<_>>(), vec![240, 360]);
+        assert_eq!(
+            g.missing.iter().map(|t| t.timestamp()).collect::<Vec<_>>(),
+            vec![240, 360]
+        );
         assert_eq!(g.aligned.len(), 3);
         assert!(g.aligned.iter().all(|a| a.bar.timestamp() != 240));
         // A realised bar the backtest does not have is a real mismatch.
@@ -1387,14 +1420,20 @@ mod tests {
             b.reanchor(at(270), px("103")).unwrap_err(),
             ForwardError::MisalignedBar { .. }
         ));
-        assert!(matches!(
-            b.reanchor(at(240), px("103")).unwrap_err(),
-            ForwardError::BarOutOfOrder { .. }
-        ), "a duplicate anchor");
-        assert!(matches!(
-            b.reanchor(at(180), px("103")).unwrap_err(),
-            ForwardError::BarOutOfOrder { .. }
-        ), "an earlier anchor");
+        assert!(
+            matches!(
+                b.reanchor(at(240), px("103")).unwrap_err(),
+                ForwardError::BarOutOfOrder { .. }
+            ),
+            "a duplicate anchor"
+        );
+        assert!(
+            matches!(
+                b.reanchor(at(180), px("103")).unwrap_err(),
+                ForwardError::BarOutOfOrder { .. }
+            ),
+            "an earlier anchor"
+        );
         // A refused anchor changes nothing.
         assert_eq!(b.gaps().len(), 1);
         assert!(b.close_bar(at(300), px("102.125")).is_ok());
@@ -1456,7 +1495,14 @@ mod tests {
                 rfill(Side::Buy, "3", "50.5", 200),
                 rfill(Side::Sell, "1", "52", 290),
             ],
-            vec![(60, "50"), (120, "50"), (180, "50"), (240, "51"), (300, "52.5"), (360, "53")],
+            vec![
+                (60, "50"),
+                (120, "50"),
+                (180, "50"),
+                (240, "51"),
+                (300, "52.5"),
+                (360, "53"),
+            ],
         )
     }
 
@@ -1493,9 +1539,16 @@ mod tests {
         let (whole, closes) = flat_uninterrupted();
         let (fills, marks) = flat_script();
         assert_eq!(closes.len(), 4, "bars 120, 240, 300, 360");
-        let stored: Vec<_> = closes[..3].iter().map(|c| (c.bar, c.realised_return)).collect();
+        let stored: Vec<_> = closes[..3]
+            .iter()
+            .map(|c| (c.bar, c.realised_return))
+            .collect();
         // Fills known at the restart: everything up to 300.
-        let known: Vec<ResumeFill> = fills.iter().filter(|f| f.filled_at.timestamp() <= 300).copied().collect();
+        let known: Vec<ResumeFill> = fills
+            .iter()
+            .filter(|f| f.filled_at.timestamp() <= 300)
+            .copied()
+            .collect();
         let mut b = RealisedSeriesBuilder::resume(
             spec(Numeraire::Usd),
             dec("1000"),
@@ -1505,7 +1558,13 @@ mod tests {
             px(marks[4].1),
         )
         .expect("flat anchor: plain resume verifies the last segment");
-        assert_eq!(b.gaps(), &[SeriesGap { after: at(120), anchor: at(180) }]);
+        assert_eq!(
+            b.gaps(),
+            &[SeriesGap {
+                after: at(120),
+                anchor: at(180)
+            }]
+        );
         // Carry on: the fill at 290 was already applied (known), the bar at 360
         // has none.
         let c = b.close_bar(at(360), px(marks[5].1)).unwrap();
@@ -1518,8 +1577,15 @@ mod tests {
     fn a_corrupted_last_segment_is_refused_after_a_gap() {
         let (_, closes) = flat_uninterrupted();
         let (fills, marks) = flat_script();
-        let known: Vec<ResumeFill> = fills.iter().filter(|f| f.filled_at.timestamp() <= 300).copied().collect();
-        let good: Vec<_> = closes[..3].iter().map(|c| (c.bar, c.realised_return)).collect();
+        let known: Vec<ResumeFill> = fills
+            .iter()
+            .filter(|f| f.filled_at.timestamp() <= 300)
+            .copied()
+            .collect();
+        let good: Vec<_> = closes[..3]
+            .iter()
+            .map(|c| (c.bar, c.realised_return))
+            .collect();
         let resume = |stored: Vec<(DateTime<Utc>, f64)>, fills: &[ResumeFill], mark: &str| {
             RealisedSeriesBuilder::resume(
                 spec(Numeraire::Usd),
@@ -1577,9 +1643,15 @@ mod tests {
                 anchor_mark.map(px),
             )
         };
-        assert!(matches!(go(None).unwrap_err(), ForwardError::ResumeAnchorUnverifiable { .. }));
+        assert!(matches!(
+            go(None).unwrap_err(),
+            ForwardError::ResumeAnchorUnverifiable { .. }
+        ));
         assert!(go(Some("103")).is_ok());
-        assert!(matches!(go(Some("90")).unwrap_err(), ForwardError::ResumeInconsistent { .. }));
+        assert!(matches!(
+            go(Some("90")).unwrap_err(),
+            ForwardError::ResumeInconsistent { .. }
+        ));
     }
 
     #[test]

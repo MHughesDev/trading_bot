@@ -2704,10 +2704,9 @@ mod tests {
         .unwrap();
         let (tx, mut rx) = tokio::sync::broadcast::channel(64);
         let reg = Arc::clone(&registry);
-        let task =
-            tokio::spawn(
-                async move { crate::live_deployments::drive(runner, &mut rx, &reg, None).await },
-            );
+        let task = tokio::spawn(async move {
+            crate::live_deployments::drive(runner, &mut rx, &reg, None).await
+        });
         let minute = |i: i64| crate::live_bars::MinuteBar {
             instrument_id: inst.into(),
             bar: backtest::CollectedBar {
@@ -2873,7 +2872,8 @@ mod tests {
     /// DGS10 published ten days before `T0` at `value`.
     fn dgs10(value: Option<rust_decimal::Decimal>) -> strategy_engine::ExternalData {
         let d = |n: i64| {
-            (chrono::DateTime::from_timestamp(T0, 0).unwrap() - chrono::Duration::days(n)).date_naive()
+            (chrono::DateTime::from_timestamp(T0, 0).unwrap() - chrono::Duration::days(n))
+                .date_naive()
         };
         strategy_engine::ExternalData {
             macro_rows: vec![dataplane::vintage::MacroObservation::derived(
@@ -2935,9 +2935,10 @@ mod tests {
             after.extend(r.on_minute_bar(inst, *m).await.unwrap());
         }
         assert!(
-            after
-                .iter()
-                .all(|t| !matches!(t.values.get("rate"), Some(domain::strategy_graph::Value::Num(_)))),
+            after.iter().all(|t| !matches!(
+                t.values.get("rate"),
+                Some(domain::strategy_graph::Value::Num(_))
+            )),
             "revised to missing reads missing"
         );
         assert!(

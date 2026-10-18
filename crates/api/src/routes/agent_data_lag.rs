@@ -99,7 +99,9 @@ pub async fn bar_lag(
     let mut lags: Vec<f64> = Vec::new();
     let mut backfilled = 0usize;
     for b in &bars {
-        if b.quality_flags.contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME) {
+        if b.quality_flags
+            .contains(QualityFlags::BACKFILLED_KNOWLEDGE_TIME)
+        {
             backfilled += 1;
         } else {
             lags.push((b.knowledge_ns - b.ts_ns) as f64 / 1e9);

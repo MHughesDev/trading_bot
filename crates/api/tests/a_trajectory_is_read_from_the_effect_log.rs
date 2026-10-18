@@ -33,7 +33,10 @@ async fn db() -> PgPool {
         .execute("DROP DATABASE IF EXISTS trajectory_test WITH (FORCE)")
         .await
         .unwrap();
-    admin.execute("CREATE DATABASE trajectory_test").await.unwrap();
+    admin
+        .execute("CREATE DATABASE trajectory_test")
+        .await
+        .unwrap();
     let pool = PgPool::connect(&with_db(&base_url(), "trajectory_test"))
         .await
         .unwrap();
@@ -57,7 +60,14 @@ async fn db() -> PgPool {
     pool
 }
 
-async fn log(pool: &PgPool, run: Uuid, seq: i32, direction: &str, kind: &str, payload: serde_json::Value) {
+async fn log(
+    pool: &PgPool,
+    run: Uuid,
+    seq: i32,
+    direction: &str,
+    kind: &str,
+    payload: serde_json::Value,
+) {
     sqlx::query(
         "INSERT INTO agent_effect_log (run_id, seq, direction, kind, payload_json, harness_version) \
          VALUES ($1,$2,$3,$4,$5,'test')",
@@ -89,9 +99,25 @@ async fn the_trajectory_is_the_effect_rows_in_order_with_arguments_intact() {
     let run = a_run(&pool).await;
     // Written out of order on purpose: the ORDER BY seq is what is under test.
     log(&pool, run, 3, "effect", "Note", serde_json::json!({"core_tool": "record_finding", "args": {"finding": "x"}, "detail": "stored"})).await;
-    log(&pool, run, 1, "effect", "CallModel", serde_json::json!({"prompt_bytes": 2048, "step": 1})).await;
+    log(
+        &pool,
+        run,
+        1,
+        "effect",
+        "CallModel",
+        serde_json::json!({"prompt_bytes": 2048, "step": 1}),
+    )
+    .await;
     log(&pool, run, 2, "effect", "ExecuteTool", serde_json::json!({"name": "read_bars", "namespace": "data", "arguments": {"instrument": "BTC-USD"}, "step": 2})).await;
-    log(&pool, run, 4, "input", "ToolResult", serde_json::json!({"output": "x"})).await;
+    log(
+        &pool,
+        run,
+        4,
+        "input",
+        "ToolResult",
+        serde_json::json!({"output": "x"}),
+    )
+    .await;
 
     let spans = trace_from_effects::spans_for_run(&pool, run).await.unwrap();
     assert_eq!(spans.len(), 3, "the input row is not projected");
@@ -99,13 +125,19 @@ async fn the_trajectory_is_the_effect_rows_in_order_with_arguments_intact() {
     match &spans[1].event {
         Event::ToolCall { name, args, .. } => {
             assert_eq!(name, "read_bars");
-            assert_eq!(args["instrument"], "BTC-USD", "arguments survive the round trip");
+            assert_eq!(
+                args["instrument"], "BTC-USD",
+                "arguments survive the round trip"
+            );
         }
         other => panic!("expected a tool call, got {other:?}"),
     }
     assert!(matches!(spans[2].event, Event::CoreTool { .. }));
     assert_eq!(spans[1].step, 2);
-    assert_eq!(spans[2].step, 2, "a row with no step carries the previous one forward");
+    assert_eq!(
+        spans[2].step, 2,
+        "a row with no step carries the previous one forward"
+    );
     assert!(harness::trace::is_replayable(&spans));
 }
 
@@ -114,14 +146,48 @@ async fn the_trajectory_is_the_effect_rows_in_order_with_arguments_intact() {
 async fn the_sampler_counts_replayable_runs_and_names_the_ones_that_are_not() {
     let pool = db().await;
     let good = a_run(&pool).await;
-    log(&pool, good, 1, "effect", "CallModel", serde_json::json!({"prompt_bytes": 10, "step": 1})).await;
-    log(&pool, good, 2, "effect", "ExecuteTool", serde_json::json!({"name": "read_bars", "arguments": {"instrument": "ETH-USD"}})).await;
+    log(
+        &pool,
+        good,
+        1,
+        "effect",
+        "CallModel",
+        serde_json::json!({"prompt_bytes": 10, "step": 1}),
+    )
+    .await;
+    log(
+        &pool,
+        good,
+        2,
+        "effect",
+        "ExecuteTool",
+        serde_json::json!({"name": "read_bars", "arguments": {"instrument": "ETH-USD"}}),
+    )
+    .await;
     // Tool name logged, arguments lost: the shape is_replayable exists to catch.
     let bad = a_run(&pool).await;
-    log(&pool, bad, 1, "effect", "CallModel", serde_json::json!({"prompt_bytes": 10})).await;
-    log(&pool, bad, 2, "effect", "ExecuteTool", serde_json::json!({"name": "read_bars"})).await;
+    log(
+        &pool,
+        bad,
+        1,
+        "effect",
+        "CallModel",
+        serde_json::json!({"prompt_bytes": 10}),
+    )
+    .await;
+    log(
+        &pool,
+        bad,
+        2,
+        "effect",
+        "ExecuteTool",
+        serde_json::json!({"name": "read_bars"}),
+    )
+    .await;
 
-    let sample = trace_from_effects::sample_replayable(&pool, 10).await.unwrap();
+    let sample = trace_from_effects::sample_replayable(&pool, 10)
+        .await
+        .unwrap();
     assert_eq!(sample.sampled, 2);
     assert_eq!(sample.replayable, 1);
     assert_eq!(sample.unreplayable.len(), 1);
@@ -142,7 +208,15 @@ async fn the_sampler_counts_replayable_runs_and_names_the_ones_that_are_not() {
 async fn a_core_tool_note_as_production_writes_it_is_replayable() {
     let pool = db().await;
     let run = a_run(&pool).await;
-    log(&pool, run, 1, "effect", "CallModel", serde_json::json!({"prompt_bytes": 10, "step": 1})).await;
+    log(
+        &pool,
+        run,
+        1,
+        "effect",
+        "CallModel",
+        serde_json::json!({"prompt_bytes": 10, "step": 1}),
+    )
+    .await;
     log(
         &pool,
         run,
@@ -153,7 +227,9 @@ async fn a_core_tool_note_as_production_writes_it_is_replayable() {
                            "args": {"finding": "BTC-USD momentum", "evidence": "exp_1"}}),
     )
     .await;
-    let sample = trace_from_effects::sample_replayable(&pool, 5).await.unwrap();
+    let sample = trace_from_effects::sample_replayable(&pool, 5)
+        .await
+        .unwrap();
     assert_eq!(sample.replayable, 1, "{:?}", sample.unreplayable);
 }
 
@@ -164,9 +240,31 @@ async fn a_core_tool_note_as_production_writes_it_is_replayable() {
 async fn a_legacy_core_tool_note_without_args_is_still_unreplayable() {
     let pool = db().await;
     let run = a_run(&pool).await;
-    log(&pool, run, 1, "effect", "CallModel", serde_json::json!({"prompt_bytes": 10, "step": 1})).await;
-    log(&pool, run, 2, "effect", "Note", serde_json::json!({"core_tool": "record_finding", "detail": "stored"})).await;
-    let sample = trace_from_effects::sample_replayable(&pool, 5).await.unwrap();
+    log(
+        &pool,
+        run,
+        1,
+        "effect",
+        "CallModel",
+        serde_json::json!({"prompt_bytes": 10, "step": 1}),
+    )
+    .await;
+    log(
+        &pool,
+        run,
+        2,
+        "effect",
+        "Note",
+        serde_json::json!({"core_tool": "record_finding", "detail": "stored"}),
+    )
+    .await;
+    let sample = trace_from_effects::sample_replayable(&pool, 5)
+        .await
+        .unwrap();
     assert_eq!(sample.replayable, 0);
-    assert!(sample.unreplayable[0].1.contains("record_finding"), "{:?}", sample.unreplayable);
+    assert!(
+        sample.unreplayable[0].1.contains("record_finding"),
+        "{:?}",
+        sample.unreplayable
+    );
 }

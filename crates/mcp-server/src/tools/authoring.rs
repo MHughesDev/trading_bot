@@ -120,7 +120,10 @@ pub async fn create_strategy(
     if !vr.valid {
         return crate::tool_error::refuse_extra(
             "validation_failed",
-            format!("the definition has {} validation error(s); see `errors`.", vr.errors.len()),
+            format!(
+                "the definition has {} validation error(s); see `errors`.",
+                vr.errors.len()
+            ),
             "fix each entry in `errors`, then call create_strategy again",
             json!({ "errors": vr.errors }),
         );

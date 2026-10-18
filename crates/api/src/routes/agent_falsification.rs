@@ -70,7 +70,9 @@ pub async fn regime_failure(
             .into_response();
     }
     match research::regime_search::search(&result.equity_curve, &windows, min_obs, REGIME_ALPHA) {
-        Ok(r) => Json(json!({"run_id": run_id, "search": r, "spends_trial": false})).into_response(),
+        Ok(r) => {
+            Json(json!({"run_id": run_id, "search": r, "spends_trial": false})).into_response()
+        }
         Err(e) => (
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(json!({"error": "not_searchable", "message": e.to_string()})),
@@ -343,6 +345,9 @@ mod ablation_tests {
     #[test]
     fn a_v3_graph_is_refused_rather_than_guessed_at() {
         let def = json!({"format": "tbot.strategy/3", "nodes": []});
-        assert_eq!(ablation_plan("s", &def).unwrap_err().0, "ablation_not_defined_for_v3");
+        assert_eq!(
+            ablation_plan("s", &def).unwrap_err().0,
+            "ablation_not_defined_for_v3"
+        );
     }
 }

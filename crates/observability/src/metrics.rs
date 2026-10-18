@@ -114,7 +114,13 @@ impl Registry {
         Self::default()
     }
 
-    fn series(&self, name: &str, help: &str, kind: Kind, labels: &[(&str, &str)]) -> Option<Arc<Value>> {
+    fn series(
+        &self,
+        name: &str,
+        help: &str,
+        kind: Kind,
+        labels: &[(&str, &str)],
+    ) -> Option<Arc<Value>> {
         if !valid_name(name) || labels.iter().any(|(k, _)| !valid_name(k)) {
             self.dropped.fetch_add(1, Ordering::Relaxed);
             return None;
@@ -243,7 +249,12 @@ impl Registry {
                         if family.kind == Kind::Counter {
                             let _ = writeln!(out, "{name}{} {v}", render_labels(None));
                         } else {
-                            let _ = writeln!(out, "{name}{} {}", render_labels(None), f64::from_bits(v));
+                            let _ = writeln!(
+                                out,
+                                "{name}{} {}",
+                                render_labels(None),
+                                f64::from_bits(v)
+                            );
                         }
                     }
                     Value::Histogram(h) => {
@@ -274,10 +285,18 @@ impl Registry {
         }
         let _ = writeln!(out, "# HELP metrics_series_overflow_total Recordings folded into an overflow series by the cardinality cap.");
         let _ = writeln!(out, "# TYPE metrics_series_overflow_total counter");
-        let _ = writeln!(out, "metrics_series_overflow_total {}", self.overflow.load(Ordering::Relaxed));
+        let _ = writeln!(
+            out,
+            "metrics_series_overflow_total {}",
+            self.overflow.load(Ordering::Relaxed)
+        );
         let _ = writeln!(out, "# HELP metrics_recordings_dropped_total Recordings refused for an invalid name or a type mismatch.");
         let _ = writeln!(out, "# TYPE metrics_recordings_dropped_total counter");
-        let _ = writeln!(out, "metrics_recordings_dropped_total {}", self.dropped.load(Ordering::Relaxed));
+        let _ = writeln!(
+            out,
+            "metrics_recordings_dropped_total {}",
+            self.dropped.load(Ordering::Relaxed)
+        );
         out
     }
 }
@@ -421,12 +440,24 @@ mod tests {
         r.histogram_observe("save_seconds", "Save time.", &[], 0.02);
         let text = r.render();
         assert!(text.contains("# TYPE orders_total counter"), "{text}");
-        assert!(text.contains("orders_total{outcome=\"filled\"} 3"), "{text}");
+        assert!(
+            text.contains("orders_total{outcome=\"filled\"} 3"),
+            "{text}"
+        );
         assert!(text.contains("lag_ms{lane=\"trades\"} 12.5"), "{text}");
-        assert!(text.contains("save_seconds_bucket{le=\"0.05\"} 1"), "{text}");
-        assert!(text.contains("save_seconds_bucket{le=\"0.01\"} 0"), "{text}");
+        assert!(
+            text.contains("save_seconds_bucket{le=\"0.05\"} 1"),
+            "{text}"
+        );
+        assert!(
+            text.contains("save_seconds_bucket{le=\"0.01\"} 0"),
+            "{text}"
+        );
         assert!(text.contains("save_seconds_count 1"), "{text}");
-        assert_eq!(r.counter_value("orders_total", &[("outcome", "filled")]), Some(3));
+        assert_eq!(
+            r.counter_value("orders_total", &[("outcome", "filled")]),
+            Some(3)
+        );
     }
 
     #[test]
@@ -435,7 +466,10 @@ mod tests {
         for i in 0..(MAX_SERIES_PER_FAMILY + 10) {
             r.counter_add("by_id_total", "x", &[("id", &i.to_string())], 1);
         }
-        assert_eq!(r.counter_value("by_id_total", &[("overflow", "true")]), Some(10));
+        assert_eq!(
+            r.counter_value("by_id_total", &[("overflow", "true")]),
+            Some(10)
+        );
         assert!(r.render().contains("metrics_series_overflow_total 10"));
     }
 

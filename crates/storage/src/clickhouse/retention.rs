@@ -31,9 +31,7 @@
 
 use chrono::{DateTime, Duration, Utc};
 use clickhouse::Row;
-use dataplane::retention::{
-    retention_action, ForwardSeriesSpec, RetentionAction, RetentionPolicy,
-};
+use dataplane::retention::{retention_action, ForwardSeriesSpec, RetentionAction, RetentionPolicy};
 use serde::Deserialize;
 
 use super::{connect, ChError};
@@ -210,7 +208,9 @@ pub async fn downsample_chain_snapshots(
         .map_err(|e| ChError::Client(format!("promote: {e}")))?;
     let fine_after_promote = count(
         &client,
-        &format!("SELECT count() AS n FROM {CHAIN_TABLE} WHERE {scope} AND snapshot_cadence = 'hourly'"),
+        &format!(
+            "SELECT count() AS n FROM {CHAIN_TABLE} WHERE {scope} AND snapshot_cadence = 'hourly'"
+        ),
     )
     .await?;
     let promoted = fine_before_promote.saturating_sub(fine_after_promote);
@@ -228,7 +228,9 @@ pub async fn downsample_chain_snapshots(
     let buckets_after = count(&client, &cells).await?;
     let fine_rows_after = count(
         &client,
-        &format!("SELECT count() AS n FROM {CHAIN_TABLE} WHERE {scope} AND snapshot_cadence = 'hourly'"),
+        &format!(
+            "SELECT count() AS n FROM {CHAIN_TABLE} WHERE {scope} AND snapshot_cadence = 'hourly'"
+        ),
     )
     .await?;
     let report = DownsampleReport {
@@ -257,11 +259,15 @@ pub fn spec_of(r: &observability::silence::RegistryRow) -> Result<ForwardSeriesS
             after_days: r
                 .downsample_after_days
                 .and_then(|d| u32::try_from(d).ok())
-                .ok_or_else(|| ChError::Decode(format!("{}: downsample without after_days", r.series_id)))?,
+                .ok_or_else(|| {
+                    ChError::Decode(format!("{}: downsample without after_days", r.series_id))
+                })?,
             to_secs: r
                 .downsample_to_secs
                 .and_then(|d| u32::try_from(d).ok())
-                .ok_or_else(|| ChError::Decode(format!("{}: downsample without to_secs", r.series_id)))?,
+                .ok_or_else(|| {
+                    ChError::Decode(format!("{}: downsample without to_secs", r.series_id))
+                })?,
         },
         other => {
             return Err(ChError::Decode(format!(
@@ -361,7 +367,11 @@ pub async fn retention_pass(
 mod tests {
     use super::*;
 
-    fn row(policy: &str, after: Option<i32>, to: Option<i32>) -> observability::silence::RegistryRow {
+    fn row(
+        policy: &str,
+        after: Option<i32>,
+        to: Option<i32>,
+    ) -> observability::silence::RegistryRow {
         observability::silence::RegistryRow {
             series_id: "equity.option_chains".into(),
             store_table: CHAIN_TABLE.into(),
@@ -399,7 +409,10 @@ mod tests {
         let out = apply("http://127.0.0.1:1/none", &spec, 990, Utc::now())
             .await
             .unwrap();
-        assert!(matches!(out, SeriesOutcome::NeedsDecision { .. }), "{out:?}");
+        assert!(
+            matches!(out, SeriesOutcome::NeedsDecision { .. }),
+            "{out:?}"
+        );
         let out = apply("http://127.0.0.1:1/none", &spec, 10, Utc::now())
             .await
             .unwrap();

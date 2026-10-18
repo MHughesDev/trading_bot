@@ -129,7 +129,10 @@ pub enum StopCheck {
     Continue,
     /// Not enough comparisons in the window to say anything. Named so a reader
     /// can tell "the rule looked and abstained" from "the rule did not look".
-    NotEnoughEvidence { in_window: usize, needed: usize },
+    NotEnoughEvidence {
+        in_window: usize,
+        needed: usize,
+    },
     End(CampaignPhase, String),
 }
 
@@ -140,7 +143,11 @@ pub enum StopCheck {
 /// `history` is oldest first. Returns `(predictive_probability,
 /// comparisons_in_window)`.
 #[must_use]
-#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 pub fn exceed_posterior(history: &[CompareRecord]) -> (f64, usize) {
     let lookback = ((history.len() as f64) * DR_WINDOW_FRACTION).ceil() as usize;
     let take = lookback.max(DR_MIN_COMPARISONS).min(history.len());
@@ -555,7 +562,9 @@ impl Worker for CompareWorker {
                             &cancel,
                         )
                         .await
-                        .map_err(|e| JobError::infrastructure(format!("candidate replicates: {e}")))?;
+                        .map_err(|e| {
+                            JobError::infrastructure(format!("candidate replicates: {e}"))
+                        })?;
                     slices = Some((windows.clone(), cand.clone()));
                     let inc = self
                         .evaluator
@@ -575,12 +584,13 @@ impl Worker for CompareWorker {
                             &cancel,
                         )
                         .await
-                        .map_err(|e| JobError::infrastructure(format!("incumbent replicates: {e}")))?;
+                        .map_err(|e| {
+                            JobError::infrastructure(format!("incumbent replicates: {e}"))
+                        })?;
                     let (a, b, dropped) = pair_measurements(&cand, &inc, seed);
-                    let scale = RopeScale::new(
-                        spec.rope_scale.unwrap_or(DEFAULT_SCALE_MULTIPLE * delta),
-                    )
-                    .map_err(|e| logic("bad_rope_scale", e.to_string()))?;
+                    let scale =
+                        RopeScale::new(spec.rope_scale.unwrap_or(DEFAULT_SCALE_MULTIPLE * delta))
+                            .map_err(|e| logic("bad_rope_scale", e.to_string()))?;
                     let n_eff = ledger::pg::PgTrialLedger::new(self.pg.clone())
                         .n_eff_async(&tenant)
                         .await
@@ -674,9 +684,17 @@ impl Worker for CompareWorker {
         // score into the regime-conditional prior (RB-4.5). Advisory, so a failure is logged
         // and does not fail a comparison that has already been recorded.
         if let Some((windows, values)) = slices {
-            match super::study_worker::fold_regime_prior(&self.pg, &tenant, &spec, &windows, &values).await {
-                Ok(n) => tracing::info!(campaign = %campaign_id, windows = n, "regime prior updated"),
-                Err(e) => tracing::warn!(campaign = %campaign_id, error = %e, "the regime prior was not updated"),
+            match super::study_worker::fold_regime_prior(
+                &self.pg, &tenant, &spec, &windows, &values,
+            )
+            .await
+            {
+                Ok(n) => {
+                    tracing::info!(campaign = %campaign_id, windows = n, "regime prior updated")
+                }
+                Err(e) => {
+                    tracing::warn!(campaign = %campaign_id, error = %e, "the regime prior was not updated")
+                }
             }
         }
 

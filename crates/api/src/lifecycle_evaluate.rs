@@ -616,8 +616,16 @@ mod tests {
         ms.insert(
             "sharpe".to_string(),
             vec![
-                Measurement { value: 0.9, ticket_id: "t-pass".into(), se: None },
-                Measurement { value: -0.2, ticket_id: "t-fail".into(), se: None },
+                Measurement {
+                    value: 0.9,
+                    ticket_id: "t-pass".into(),
+                    se: None,
+                },
+                Measurement {
+                    value: -0.2,
+                    ticket_id: "t-fail".into(),
+                    se: None,
+                },
             ],
         );
         let evidence = Evidence {

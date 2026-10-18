@@ -44,7 +44,10 @@ impl CostModelRef {
         if instrument.is_empty() {
             return Err(bad());
         }
-        Ok(Self { instrument: instrument.to_string(), dated: date.parse().map_err(|_| bad())? })
+        Ok(Self {
+            instrument: instrument.to_string(),
+            dated: date.parse().map_err(|_| bad())?,
+        })
     }
 }
 
@@ -68,7 +71,10 @@ pub enum VenueClass {
 #[must_use]
 pub const fn latency_for(class: VenueClass) -> u32 {
     match class {
-        VenueClass::CryptoSpot | VenueClass::CryptoPerp | VenueClass::EquityBroker | VenueClass::Synthetic => 0,
+        VenueClass::CryptoSpot
+        | VenueClass::CryptoPerp
+        | VenueClass::EquityBroker
+        | VenueClass::Synthetic => 0,
         VenueClass::PredictionMarket => 1,
     }
 }
@@ -95,7 +101,10 @@ pub enum CostModelError {
     #[error("`{0}` is not cost:<instrument>@<yyyy-mm-dd>")]
     BadRef(String),
     #[error("the cost model is dated {dated}, after the window it prices starts ({window_start}): a point-in-time violation")]
-    DatedAfterWindow { dated: NaiveDate, window_start: NaiveDate },
+    DatedAfterWindow {
+        dated: NaiveDate,
+        window_start: NaiveDate,
+    },
     #[error("an `edge` spread needs an instrument-profile row (and the window it was measured over); none was supplied")]
     NoProfileRow,
     #[error("a `quoted` spread needs quote history, and none exists for this instrument; this does not fall back to EDGE")]
@@ -131,10 +140,16 @@ pub struct FeeLeg {
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SpreadLeg {
     /// Estimated from bars (EDGE); the half-spread cites a profile row and its window.
-    Edge { half_spread_bps: Measured },
+    Edge {
+        half_spread_bps: Measured,
+    },
     /// Read from quote history.
-    Quoted { half_spread_bps: Measured },
-    Fixed { half_spread_bps: f64 },
+    Quoted {
+        half_spread_bps: Measured,
+    },
+    Fixed {
+        half_spread_bps: f64,
+    },
 }
 
 impl SpreadLeg {
@@ -143,7 +158,9 @@ impl SpreadLeg {
     /// # Errors
     /// No profile row.
     pub fn edge(profile_row: Option<Measured>) -> Result<Self, CostModelError> {
-        profile_row.map(|m| Self::Edge { half_spread_bps: m }).ok_or(CostModelError::NoProfileRow)
+        profile_row
+            .map(|m| Self::Edge { half_spread_bps: m })
+            .ok_or(CostModelError::NoProfileRow)
     }
 
     /// A quoted leg. With no quotes it refuses, and says it will not become EDGE (M-3.4).
@@ -151,13 +168,17 @@ impl SpreadLeg {
     /// # Errors
     /// No quote history.
     pub fn quoted(quotes: Option<Measured>) -> Result<Self, CostModelError> {
-        quotes.map(|m| Self::Quoted { half_spread_bps: m }).ok_or(CostModelError::NoQuotes)
+        quotes
+            .map(|m| Self::Quoted { half_spread_bps: m })
+            .ok_or(CostModelError::NoQuotes)
     }
 
     #[must_use]
     pub fn half_spread_bps(&self) -> f64 {
         match self {
-            Self::Edge { half_spread_bps } | Self::Quoted { half_spread_bps } => half_spread_bps.value,
+            Self::Edge { half_spread_bps } | Self::Quoted { half_spread_bps } => {
+                half_spread_bps.value
+            }
             Self::Fixed { half_spread_bps } => *half_spread_bps,
         }
     }
@@ -204,7 +225,12 @@ pub struct CostModelBuilder {
 impl CostModelBuilder {
     #[must_use]
     pub fn new(instrument: impl Into<String>, dated: NaiveDate, venue: impl Into<String>) -> Self {
-        Self { instrument: Some(instrument.into()), dated: Some(dated), venue: Some(venue.into()), ..Self::default() }
+        Self {
+            instrument: Some(instrument.into()),
+            dated: Some(dated),
+            venue: Some(venue.into()),
+            ..Self::default()
+        }
     }
     #[must_use]
     pub fn fee(mut self, f: FeeLeg) -> Self {
@@ -236,13 +262,17 @@ impl CostModelBuilder {
     /// # Errors
     /// The first missing leg, an unclassed venue, or a non-finite or negative number.
     pub fn build(self) -> Result<CostModel, CostModelError> {
-        let instrument = self.instrument.ok_or(CostModelError::MissingLeg("instrument"))?;
+        let instrument = self
+            .instrument
+            .ok_or(CostModelError::MissingLeg("instrument"))?;
         let dated = self.dated.ok_or(CostModelError::MissingLeg("date"))?;
         let class = venue_class(&self.venue.ok_or(CostModelError::MissingLeg("venue"))?)?;
         let fee = self.fee.ok_or(CostModelError::MissingLeg("fee"))?;
         let spread = self.spread.ok_or(CostModelError::MissingLeg("spread"))?;
         let impact = self.impact.ok_or(CostModelError::MissingLeg("impact"))?;
-        let borrow = self.borrow_bps_per_day.ok_or(CostModelError::MissingLeg("borrow"))?;
+        let borrow = self
+            .borrow_bps_per_day
+            .ok_or(CostModelError::MissingLeg("borrow"))?;
         let ok = |x: f64| x.is_finite() && x >= 0.0;
         for (name, x) in [
             ("fee.taker_bps", fee.taker_bps),
@@ -273,7 +303,11 @@ impl CostModelBuilder {
 impl CostModel {
     #[must_use]
     pub fn reference(&self) -> String {
-        CostModelRef { instrument: self.instrument.clone(), dated: self.dated }.format()
+        CostModelRef {
+            instrument: self.instrument.clone(),
+            dated: self.dated,
+        }
+        .format()
     }
 
     /// A model may price only a window that starts on or after its date.
@@ -282,7 +316,10 @@ impl CostModel {
     /// A model dated after the window's start.
     pub fn check_point_in_time(&self, window_start: NaiveDate) -> Result<(), CostModelError> {
         if self.dated > window_start {
-            return Err(CostModelError::DatedAfterWindow { dated: self.dated, window_start });
+            return Err(CostModelError::DatedAfterWindow {
+                dated: self.dated,
+                window_start,
+            });
         }
         Ok(())
     }
@@ -292,8 +329,15 @@ impl CostModel {
     #[must_use]
     pub fn to_eval(&self) -> (Costs, SqrtImpact) {
         (
-            Costs { fee_bps: self.fee.taker_bps, half_spread_bps: self.spread.half_spread_bps() },
-            SqrtImpact { y: self.impact.y, sigma: self.impact.sigma.value, volume_usd: self.impact.volume_usd.value },
+            Costs {
+                fee_bps: self.fee.taker_bps,
+                half_spread_bps: self.spread.half_spread_bps(),
+            },
+            SqrtImpact {
+                y: self.impact.y,
+                sigma: self.impact.sigma.value,
+                volume_usd: self.impact.volume_usd.value,
+            },
         )
     }
 
@@ -307,21 +351,37 @@ impl CostModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::position_series::{evaluate_with_impact, Bar, EvalConfig, PositionPoint, PositionSeries, PositionUnits};
+    use crate::position_series::{
+        evaluate_with_impact, Bar, EvalConfig, PositionPoint, PositionSeries, PositionUnits,
+    };
 
     fn d(y: i32, m: u32, day: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(y, m, day).unwrap()
     }
 
     fn measured(v: f64, src: &str) -> Measured {
-        Measured { value: v, source: src.into(), window_start: d(2025, 1, 1), window_end: d(2025, 6, 1) }
+        Measured {
+            value: v,
+            source: src.into(),
+            window_start: d(2025, 1, 1),
+            window_end: d(2025, 6, 1),
+        }
     }
 
     fn builder() -> CostModelBuilder {
         CostModelBuilder::new("BTC-USD", d(2025, 6, 1), "coinbase")
-            .fee(FeeLeg { taker_bps: 10.0, maker_bps: 5.0, source: "feebook:coinbase:2025-06".into() })
+            .fee(FeeLeg {
+                taker_bps: 10.0,
+                maker_bps: 5.0,
+                source: "feebook:coinbase:2025-06".into(),
+            })
             .spread(SpreadLeg::edge(Some(measured(2.0, "profile:btc:7"))).unwrap())
-            .impact(ImpactLeg { y: 1.0, y_source: "spec default".into(), sigma: measured(0.01, "profile:btc:7"), volume_usd: measured(5e6, "profile:btc:7") })
+            .impact(ImpactLeg {
+                y: 1.0,
+                y_source: "spec default".into(),
+                sigma: measured(0.01, "profile:btc:7"),
+                volume_usd: measured(5e6, "profile:btc:7"),
+            })
             .borrow_bps_per_day(0.0)
     }
 
@@ -338,24 +398,45 @@ mod tests {
         assert_eq!(b.build().unwrap_err(), CostModelError::MissingLeg("fee"));
         let mut b = builder();
         b.borrow_bps_per_day = None;
-        assert_eq!(b.build().unwrap_err(), CostModelError::MissingLeg("borrow"), "zero is a statement, absence is not");
+        assert_eq!(
+            b.build().unwrap_err(),
+            CostModelError::MissingLeg("borrow"),
+            "zero is a statement, absence is not"
+        );
     }
 
     #[test]
     fn a_model_dated_after_the_window_is_refused() {
         let m = builder().build().unwrap();
         assert!(m.check_point_in_time(d(2025, 6, 1)).is_ok());
-        assert!(m.check_point_in_time(d(2026, 1, 1)).is_ok(), "a model older than the window is fine");
-        assert!(matches!(m.check_point_in_time(d(2025, 1, 1)), Err(CostModelError::DatedAfterWindow { .. })));
+        assert!(
+            m.check_point_in_time(d(2026, 1, 1)).is_ok(),
+            "a model older than the window is fine"
+        );
+        assert!(matches!(
+            m.check_point_in_time(d(2025, 1, 1)),
+            Err(CostModelError::DatedAfterWindow { .. })
+        ));
     }
 
     #[test]
     fn an_edge_spread_with_no_profile_row_and_quotes_with_no_history_refuse() {
-        assert_eq!(SpreadLeg::edge(None).unwrap_err(), CostModelError::NoProfileRow);
-        assert_eq!(SpreadLeg::quoted(None).unwrap_err(), CostModelError::NoQuotes);
+        assert_eq!(
+            SpreadLeg::edge(None).unwrap_err(),
+            CostModelError::NoProfileRow
+        );
+        assert_eq!(
+            SpreadLeg::quoted(None).unwrap_err(),
+            CostModelError::NoQuotes
+        );
         let leg = SpreadLeg::edge(Some(measured(2.0, "profile:btc:7"))).unwrap();
-        let SpreadLeg::Edge { half_spread_bps } = leg else { panic!() };
-        assert_eq!(half_spread_bps.source, "profile:btc:7", "the leg cites its row and window");
+        let SpreadLeg::Edge { half_spread_bps } = leg else {
+            panic!()
+        };
+        assert_eq!(
+            half_spread_bps.source, "profile:btc:7",
+            "the leg cites its row and window"
+        );
     }
 
     #[test]
@@ -364,17 +445,32 @@ mod tests {
             assert_eq!(latency_for(venue_class(v).unwrap()), 0, "{v}");
         }
         assert_eq!(latency_for(venue_class("kalshi").unwrap()), 1);
-        assert_eq!(venue_class("somewhere").unwrap_err(), CostModelError::UnclassedVenue("somewhere".into()));
+        assert_eq!(
+            venue_class("somewhere").unwrap_err(),
+            CostModelError::UnclassedVenue("somewhere".into())
+        );
         let unclassed = CostModelBuilder::new("X", d(2025, 1, 1), "somewhere");
-        assert!(matches!(unclassed.build(), Err(CostModelError::UnclassedVenue(_))));
+        assert!(matches!(
+            unclassed.build(),
+            Err(CostModelError::UnclassedVenue(_))
+        ));
     }
 
     #[test]
     fn the_reference_round_trips() {
         let m = builder().build().unwrap();
         let r = CostModelRef::parse(&m.reference()).unwrap();
-        assert_eq!(r, CostModelRef { instrument: "BTC-USD".into(), dated: d(2025, 6, 1) });
-        assert!(CostModelRef::parse("cost:BTC-USD").is_err() && CostModelRef::parse("x:A@2025-01-01").is_err());
+        assert_eq!(
+            r,
+            CostModelRef {
+                instrument: "BTC-USD".into(),
+                dated: d(2025, 6, 1)
+            }
+        );
+        assert!(
+            CostModelRef::parse("cost:BTC-USD").is_err()
+                && CostModelRef::parse("x:A@2025-01-01").is_err()
+        );
     }
 
     fn series_and_bars() -> (PositionSeries, Vec<Bar>) {
@@ -382,19 +478,43 @@ mod tests {
             .map(|i| {
                 #[allow(clippy::cast_precision_loss)]
                 let p = 100.0 + (f64::from(i) * 0.4).sin() * 3.0;
-                Bar { ts_ns: (i64::from(i) + 1) * 60_000_000_000, open: p, close: p + 0.2 }
+                Bar {
+                    ts_ns: (i64::from(i) + 1) * 60_000_000_000,
+                    open: p,
+                    close: p + 0.2,
+                }
             })
             .collect();
-        let points = bars.iter().enumerate().map(|(i, b)| PositionPoint::new(b.ts_ns, if (i / 10) % 2 == 0 { 0.8 } else { 0.0 })).collect();
-        (PositionSeries { points, position_units: PositionUnits::Fraction, allow_short: false }, bars)
+        let points = bars
+            .iter()
+            .enumerate()
+            .map(|(i, b)| PositionPoint::new(b.ts_ns, if (i / 10) % 2 == 0 { 0.8 } else { 0.0 }))
+            .collect();
+        (
+            PositionSeries {
+                points,
+                position_units: PositionUnits::Fraction,
+                allow_short: false,
+            },
+            bars,
+        )
     }
 
     fn final_equity(model: &CostModel) -> f64 {
         let (series, bars) = series_and_bars();
         let (costs, impact) = model.to_eval();
-        evaluate_with_impact(&series, &bars, &EvalConfig { initial_equity: 1_000_000.0, costs, lot_size: None }, Some(impact))
-            .unwrap()
-            .final_equity
+        evaluate_with_impact(
+            &series,
+            &bars,
+            &EvalConfig {
+                initial_equity: 1_000_000.0,
+                costs,
+                lot_size: None,
+            },
+            Some(impact),
+        )
+        .unwrap()
+        .final_equity
     }
 
     #[test]
@@ -406,7 +526,10 @@ mod tests {
         assert!(final_equity(&hi) < final_equity(&lo));
         let mut zero = lo.clone();
         zero.impact.y = 0.0;
-        assert!(final_equity(&lo) < final_equity(&zero), "impact is charged at all");
+        assert!(
+            final_equity(&lo) < final_equity(&zero),
+            "impact is charged at all"
+        );
     }
 
     #[test]
@@ -417,7 +540,9 @@ mod tests {
         assert!((m.borrow_cost(1_000_000.0, 2.0) - 0.0).abs() < 1e-12);
         let mut b = builder().borrow_bps_per_day(3.0).build().unwrap();
         assert!((b.borrow_cost(-1_000_000.0, 2.0) - 600.0).abs() < 1e-9);
-        b.spread = SpreadLeg::Fixed { half_spread_bps: 8.0 };
+        b.spread = SpreadLeg::Fixed {
+            half_spread_bps: 8.0,
+        };
         assert!(final_equity(&b) < final_equity(&m));
     }
 }

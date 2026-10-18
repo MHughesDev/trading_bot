@@ -23,8 +23,9 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::scoring_v2::{
-    clark_west, complexity_vs_baseline, es_backtest_gaussian, expanding_mean_benchmark, judge_binding,
-    oos_r2, qlike, vol_timed_momentum, BindingVerdict, Complexity, Evidence, ForecastUse, RuleVerdict,
+    clark_west, complexity_vs_baseline, es_backtest_gaussian, expanding_mean_benchmark,
+    judge_binding, oos_r2, qlike, vol_timed_momentum, BindingVerdict, Complexity, Evidence,
+    ForecastUse, RuleVerdict,
 };
 
 /// Rows kept out of the benchmark's warm-up: the expanding mean needs this many
@@ -60,7 +61,11 @@ impl<'a> BaselinedMetrics<'a> {
 pub fn require_baselines(metrics: &Value) -> Result<BaselinedMetrics<'_>, VerdictError> {
     // A row the trainer marked `refused` or `unavailable` measured nothing, so it is not
     // a baseline the candidate was scored beside.
-    let measured = |r: &Value| r.get("status").and_then(Value::as_str).is_none_or(|s| s == "ok");
+    let measured = |r: &Value| {
+        r.get("status")
+            .and_then(Value::as_str)
+            .is_none_or(|s| s == "ok")
+    };
     match metrics.get("family_baselines").and_then(Value::as_array) {
         Some(rows) if rows.iter().any(measured) => Ok(BaselinedMetrics(metrics)),
         _ => Err(VerdictError::NoBaselines),
@@ -133,7 +138,10 @@ pub fn uses_for_definition(
         .unwrap_or("")
         .to_ascii_lowercase();
     let target = declaration
-        .and_then(|d| d.pointer("/target/kind").or_else(|| d.pointer("/target/type")))
+        .and_then(|d| {
+            d.pointer("/target/kind")
+                .or_else(|| d.pointer("/target/type"))
+        })
         .and_then(Value::as_str)
         .unwrap_or("");
     if framework == "garch" || family == Some("vol") || target == "realized_vol" {
@@ -155,7 +163,9 @@ pub fn parse_uses(s: &str) -> Result<Vec<ForecastUse>, String> {
             "return" | "direction" => Ok(ForecastUse::Return),
             "vol" | "volatility" => Ok(ForecastUse::Vol),
             "tail_risk" | "var_95" | "es_95" => Ok(ForecastUse::TailRisk),
-            other => Err(format!("`{other}` is not a forecast use (return, vol, tail_risk)")),
+            other => Err(format!(
+                "`{other}` is not a forecast use (return, vol, tail_risk)"
+            )),
         })
         .collect()
 }
@@ -188,7 +198,12 @@ pub fn evidence_from_metrics(metrics: &Value, uses: &[ForecastUse]) -> (Evidence
     m.n = Some(series.realized.len());
 
     if uses.contains(&ForecastUse::Return) {
-        match expanding_mean_benchmark(&series.realized, MIN_TRAIN.min(series.realized.len().saturating_sub(1)).max(1)) {
+        match expanding_mean_benchmark(
+            &series.realized,
+            MIN_TRAIN
+                .min(series.realized.len().saturating_sub(1))
+                .max(1),
+        ) {
             Ok((start, bench)) => {
                 let actual = &series.realized[start..];
                 let model = &series.point[start..];
@@ -215,7 +230,9 @@ pub fn evidence_from_metrics(metrics: &Value, uses: &[ForecastUse]) -> (Evidence
         let harq = baseline_rows(metrics).into_iter().find(|b| {
             (b.get("variant").and_then(Value::as_str) == Some("harq")
                 || b.get("name").and_then(Value::as_str) == Some("harq"))
-                && b.get("status").and_then(Value::as_str).is_none_or(|s| s == "ok")
+                && b.get("status")
+                    .and_then(Value::as_str)
+                    .is_none_or(|s| s == "ok")
         });
         // A baseline's series is null outside the folds it was scored on; compare on the
         // rows where the model, HARQ and the realised value all exist.
@@ -226,7 +243,9 @@ pub fn evidence_from_metrics(metrics: &Value, uses: &[ForecastUse]) -> (Evidence
             .map(|a| a.iter().map(Value::as_f64).collect());
         let realized_var: Vec<f64> = series.realized.iter().map(|x| x * x).collect();
         match (series.sigma.as_ref(), harq_sigma) {
-            (Some(sigma), Some(h)) if h.len() == sigma.len() && sigma.len() == realized_var.len() => {
+            (Some(sigma), Some(h))
+                if h.len() == sigma.len() && sigma.len() == realized_var.len() =>
+            {
                 let mut rv = Vec::new();
                 let (mut mv, mut hv) = (Vec::new(), Vec::new());
                 for i in 0..sigma.len() {
@@ -346,7 +365,8 @@ fn complexity(metrics: &Value) -> Option<Value> {
         .collect();
     let sd = {
         let m = s.realized.iter().sum::<f64>() / s.realized.len() as f64;
-        (s.realized.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (s.realized.len() as f64 - 1.0)).sqrt()
+        (s.realized.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (s.realized.len() as f64 - 1.0))
+            .sqrt()
     };
     let baseline = vol_timed_momentum(&s.realized, 5, 20, sd.max(1e-12), 3.0).ok()?;
     // Align the model's returns to the baseline's (which start later).
@@ -461,10 +481,17 @@ mod tests {
 
     #[test]
     fn a_missing_series_is_not_computable_and_blocks() {
-        let r = judge_metrics(&json!({"family_baselines": [{"name": "mean"}]}), &[ForecastUse::Return]);
+        let r = judge_metrics(
+            &json!({"family_baselines": [{"name": "mean"}]}),
+            &[ForecastUse::Return],
+        );
         assert!(!r.allowed);
         assert_eq!(r.rules[0].status, "not_computable");
-        assert!(r.rules[0].reason.contains("no `series`"), "{}", r.rules[0].reason);
+        assert!(
+            r.rules[0].reason.contains("no `series`"),
+            "{}",
+            r.rules[0].reason
+        );
     }
 
     #[test]
@@ -542,7 +569,10 @@ mod tests {
         assert!(require_baselines(&json!({"family_baselines": []})).is_err());
         assert!(require_baselines(&json!({"family_baselines": [{"name": "mean"}]})).is_ok());
         // A refused or unavailable row measured nothing.
-        assert!(require_baselines(&json!({"family_baselines": [{"name": "harq", "status": "refused"}]})).is_err());
+        assert!(require_baselines(
+            &json!({"family_baselines": [{"name": "harq", "status": "refused"}]})
+        )
+        .is_err());
     }
 
     #[test]
@@ -552,10 +582,17 @@ mod tests {
             vec![ForecastUse::Vol]
         );
         assert_eq!(
-            uses_for_definition(&json!({}), None, Some(&json!({"target": {"kind": "realized_vol"}}))),
+            uses_for_definition(
+                &json!({}),
+                None,
+                Some(&json!({"target": {"kind": "realized_vol"}}))
+            ),
             vec![ForecastUse::Vol]
         );
-        assert_eq!(uses_for_definition(&json!({}), Some("vol"), None), vec![ForecastUse::Vol]);
+        assert_eq!(
+            uses_for_definition(&json!({}), Some("vol"), None),
+            vec![ForecastUse::Vol]
+        );
         assert_eq!(
             uses_for_definition(&json!({"framework": "lightgbm"}), Some("gbm"), None),
             vec![ForecastUse::Return]

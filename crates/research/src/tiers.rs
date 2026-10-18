@@ -56,7 +56,14 @@ pub enum Model {
 }
 
 impl Model {
-    pub const ALL: [Model; 6] = [Model::M3, Model::M4, Model::M5, Model::M8, Model::M9, Model::M13];
+    pub const ALL: [Model; 6] = [
+        Model::M3,
+        Model::M4,
+        Model::M5,
+        Model::M8,
+        Model::M9,
+        Model::M13,
+    ];
 
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -145,7 +152,11 @@ pub fn decide(model: Model, c: &LedgerCounts) -> Decision {
     }
     Decision {
         model,
-        decision_tier: if s.is_empty() { Tier::LearnedShadow } else { Tier::Rule },
+        decision_tier: if s.is_empty() {
+            Tier::LearnedShadow
+        } else {
+            Tier::Rule
+        },
         rule_tier: model.rule_tier(),
         shortfalls: s,
     }
@@ -164,7 +175,11 @@ pub fn ladder(c: &LedgerCounts) -> Vec<Decision> {
 ///
 /// # Errors
 /// The recall found, when it is below `min_recall`.
-pub fn screener_recall(rejected_by_screener: &[bool], passed_by_gate: &[bool], min_recall: f64) -> Result<f64, f64> {
+pub fn screener_recall(
+    rejected_by_screener: &[bool],
+    passed_by_gate: &[bool],
+    min_recall: f64,
+) -> Result<f64, f64> {
     let passes: Vec<bool> = rejected_by_screener
         .iter()
         .zip(passed_by_gate)
@@ -205,14 +220,24 @@ mod tests {
         for d in ladder(&LedgerCounts::default()) {
             assert_eq!(d.decision_tier, Tier::Rule, "{:?}", d.model);
             assert!(!d.shortfalls.is_empty());
-            assert!(d.shortfalls.iter().all(|s| s.contains("not measured")), "{:?}", d.shortfalls);
+            assert!(
+                d.shortfalls.iter().all(|s| s.contains("not measured")),
+                "{:?}",
+                d.shortfalls
+            );
         }
     }
 
     #[test]
     fn at_exactly_the_stated_counts_every_trigger_holds() {
         for d in ladder(&full()) {
-            assert_eq!(d.decision_tier, Tier::LearnedShadow, "{:?}: {:?}", d.model, d.shortfalls);
+            assert_eq!(
+                d.decision_tier,
+                Tier::LearnedShadow,
+                "{:?}: {:?}",
+                d.model,
+                d.shortfalls
+            );
         }
     }
 
@@ -230,7 +255,11 @@ mod tests {
         assert_eq!(decide(Model::M4, &c).decision_tier, Tier::Rule);
         c.tasks = Some(30);
         assert_eq!(decide(Model::M4, &c).decision_tier, Tier::LearnedShadow);
-        assert_eq!(decide(Model::M8, &c).decision_tier, Tier::Rule, "M8 needs 100 tasks, not 30");
+        assert_eq!(
+            decide(Model::M8, &c).decision_tier,
+            Tier::Rule,
+            "M8 needs 100 tasks, not 30"
+        );
         c.tasks = Some(99);
         assert_eq!(decide(Model::M8, &c).decision_tier, Tier::Rule);
     }
@@ -250,6 +279,9 @@ mod tests {
         assert!(screener_recall(&rejected, &passed, 0.99).is_ok());
         rejected[4] = true;
         assert_eq!(screener_recall(&rejected, &passed, 0.99), Err(0.98));
-        assert!(screener_recall(&[true], &[false], 0.99).is_err(), "no passes to measure against is not met");
+        assert!(
+            screener_recall(&[true], &[false], 0.99).is_err(),
+            "no passes to measure against is not met"
+        );
     }
 }

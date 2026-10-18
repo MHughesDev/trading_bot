@@ -89,7 +89,10 @@ impl TradierAccountSource {
         if let Ok(v) = header::HeaderValue::from_str(&format!("Bearer {token}")) {
             h.insert(header::AUTHORIZATION, v);
         }
-        h.insert(header::ACCEPT, header::HeaderValue::from_static("application/json"));
+        h.insert(
+            header::ACCEPT,
+            header::HeaderValue::from_static("application/json"),
+        );
         h
     }
 
@@ -172,12 +175,7 @@ pub(crate) fn parse_balances(body: &Value) -> Result<Vec<Balance>, AccountSource
 
 /// An OCC option symbol is root + 6-digit date + C/P + 8-digit strike.
 fn is_option_symbol(symbol: &str) -> bool {
-    symbol.len() >= 15
-        && symbol
-            .chars()
-            .rev()
-            .take(8)
-            .all(|c| c.is_ascii_digit())
+    symbol.len() >= 15 && symbol.chars().rev().take(8).all(|c| c.is_ascii_digit())
 }
 
 /// `GET /accounts/{id}/positions` → positions.
@@ -235,15 +233,12 @@ pub(crate) fn parse_history(body: &Value) -> Result<Vec<VenueTransaction>, Accou
         let date = e["date"].as_str().ok_or_else(|| {
             AccountSourceError::Parse(format!("tradier {kind} event has no date"))
         })?;
-        let occurred_at = date.parse::<DateTime<Utc>>().map_err(|e| {
-            AccountSourceError::Parse(format!("tradier event date {date:?}: {e}"))
-        })?;
+        let occurred_at = date
+            .parse::<DateTime<Utc>>()
+            .map_err(|e| AccountSourceError::Parse(format!("tradier event date {date:?}: {e}")))?;
         let detail = &e[kind];
         let symbol = detail["symbol"].as_str().map(str::to_owned);
-        let key = format!(
-            "{date}|{kind}|{amount}|{}",
-            symbol.as_deref().unwrap_or("")
-        );
+        let key = format!("{date}|{kind}|{amount}|{}", symbol.as_deref().unwrap_or(""));
         let n = seen.entry(key.clone()).or_insert(0);
         let id = format!("{key}|{n}");
         *n += 1;
@@ -342,14 +337,22 @@ mod tests {
         assert_eq!(b[0].asset, "USD");
         assert_eq!(b[0].available.inner(), Decimal::from_str("800.5").unwrap());
         assert_eq!(b[0].locked.inner(), Decimal::from(200));
-        assert_eq!(b[0].usd_value.unwrap().inner(), Decimal::from_str("2500.25").unwrap());
-        assert!(parse_balances(&json!({"balances": {}})).is_err(), "no figure is not zero");
+        assert_eq!(
+            b[0].usd_value.unwrap().inner(),
+            Decimal::from_str("2500.25").unwrap()
+        );
+        assert!(
+            parse_balances(&json!({"balances": {}})).is_err(),
+            "no figure is not zero"
+        );
         assert!(parse_balances(&json!({})).is_err());
     }
 
     #[test]
     fn positions_handle_the_null_string_the_single_object_and_option_multipliers() {
-        assert!(parse_positions(&json!({"positions": "null"})).unwrap().is_empty());
+        assert!(parse_positions(&json!({"positions": "null"}))
+            .unwrap()
+            .is_empty());
         let one = json!({"positions": {"position": {
             "symbol": "AAPL", "quantity": 10, "cost_basis": 1500.0
         }}});
@@ -362,9 +365,17 @@ mod tests {
         ]}});
         let p = parse_positions(&many).unwrap();
         assert_eq!(p.len(), 2, "the zero-quantity row is skipped");
-        assert_eq!(p[0].avg_entry_price.inner(), Decimal::from(3), "600 / (2 x 100)");
+        assert_eq!(
+            p[0].avg_entry_price.inner(),
+            Decimal::from(3),
+            "600 / (2 x 100)"
+        );
         assert_eq!(p[1].quantity, Decimal::from(-5));
-        assert_eq!(p[1].avg_entry_price.inner(), Decimal::from(200), "short cost is a magnitude");
+        assert_eq!(
+            p[1].avg_entry_price.inner(),
+            Decimal::from(200),
+            "short cost is a magnitude"
+        );
         assert!(
             parse_positions(&json!({"positions": {"position": {"symbol": "X", "quantity": 1}}}))
                 .is_err(),
@@ -389,6 +400,8 @@ mod tests {
         assert_eq!(a[0].id, b[0].id, "ids are stable across calls");
         assert_eq!(a[2].transaction_type, "dividend");
         assert_eq!(a[0].instrument_id.as_deref(), Some("AAPL"));
-        assert!(parse_history(&json!({"history": "null"})).unwrap().is_empty());
+        assert!(parse_history(&json!({"history": "null"}))
+            .unwrap()
+            .is_empty());
     }
 }

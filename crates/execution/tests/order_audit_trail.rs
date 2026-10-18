@@ -125,7 +125,9 @@ async fn a_venue_rejection_is_in_the_trail_with_its_reason() {
         _ => None,
     });
     assert!(
-        rejected.flatten().is_some_and(|r| r.contains("mock rejection")),
+        rejected
+            .flatten()
+            .is_some_and(|r| r.contains("mock rejection")),
         "a rejection must be recorded with the venue's reason: {trail:#?}"
     );
 }
@@ -165,12 +167,7 @@ async fn the_trail_is_written_to_order_audit_and_cannot_be_edited() {
     pg.record_audit(&[
         AuditEntry::state_transition(key, None, OrderState::Accepted, None),
         AuditEntry::broker_submit(key, "b-1".into()),
-        AuditEntry::state_transition(
-            key,
-            Some(OrderState::Accepted),
-            OrderState::Submitted,
-            None,
-        ),
+        AuditEntry::state_transition(key, Some(OrderState::Accepted), OrderState::Submitted, None),
     ])
     .await
     .expect("recorded");

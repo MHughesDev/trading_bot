@@ -1196,7 +1196,10 @@ mod tests {
         assert!(c.over_estimate_rate >= 0.95, "{c:?}");
         assert_eq!(c.sample_n, 50);
         let median_bpt = {
-            let mut v: Vec<f64> = pairs.iter().map(|(e, a)| 4.0 * *e as f64 / *a as f64).collect();
+            let mut v: Vec<f64> = pairs
+                .iter()
+                .map(|(e, a)| 4.0 * *e as f64 / *a as f64)
+                .collect();
             v.sort_by(|a, b| a.partial_cmp(b).unwrap());
             v[v.len() / 2]
         };

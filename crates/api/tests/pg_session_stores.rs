@@ -29,9 +29,8 @@ use sqlx::{Executor, PgPool};
 use uuid::Uuid;
 
 fn url() -> String {
-    std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://postgres:postgres@127.0.0.1:5433/fsession_scratch".into()
-    })
+    std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@127.0.0.1:5433/fsession_scratch".into())
 }
 
 async fn owner() -> PgPool {
@@ -166,16 +165,31 @@ async fn a_day_budget_in_trials_is_set_read_and_amended_by_the_platform_role() {
         None,
         "a session with no row is `nobody said`, not a default"
     );
-    session_day::set_trials_per_day(&pg, f.session, 120).await.unwrap();
-    assert_eq!(session_day::trials_per_day(&pg, f.session).await.unwrap(), Some(120));
-    session_day::set_trials_per_day(&pg, f.session, 30).await.unwrap();
-    assert_eq!(session_day::trials_per_day(&pg, f.session).await.unwrap(), Some(30));
-    assert!(session_day::set_trials_per_day(&pg, f.session, 0).await.is_err());
+    session_day::set_trials_per_day(&pg, f.session, 120)
+        .await
+        .unwrap();
+    assert_eq!(
+        session_day::trials_per_day(&pg, f.session).await.unwrap(),
+        Some(120)
+    );
+    session_day::set_trials_per_day(&pg, f.session, 30)
+        .await
+        .unwrap();
+    assert_eq!(
+        session_day::trials_per_day(&pg, f.session).await.unwrap(),
+        Some(30)
+    );
+    assert!(session_day::set_trials_per_day(&pg, f.session, 0)
+        .await
+        .is_err());
     let delete = sqlx::query("DELETE FROM session_day_budget WHERE session_id = $1")
         .bind(f.session)
         .execute(&pg)
         .await;
-    assert!(delete.is_err(), "the platform may not delete a budget: it was granted no DELETE");
+    assert!(
+        delete.is_err(),
+        "the platform may not delete a budget: it was granted no DELETE"
+    );
 }
 
 // ── contradiction pairs ─────────────────────────────────────────────────────
@@ -192,7 +206,12 @@ async fn finding(pg: &PgPool, user: Uuid, id: &str, claim: &str, conflicts: &[&s
     .bind(id)
     .bind(user)
     .bind(claim)
-    .bind(conflicts.iter().map(|s| (*s).to_string()).collect::<Vec<_>>())
+    .bind(
+        conflicts
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect::<Vec<_>>(),
+    )
     .execute(pg)
     .await
     .expect("a finding");
@@ -200,20 +219,29 @@ async fn finding(pg: &PgPool, user: Uuid, id: &str, claim: &str, conflicts: &[&s
 
 #[tokio::test]
 #[ignore = "needs DATABASE_URL migrated through 0164"]
-async fn a_conflict_becomes_one_pair_whichever_entry_lists_the_other_and_resolves_when_one_leaves() {
+async fn a_conflict_becomes_one_pair_whichever_entry_lists_the_other_and_resolves_when_one_leaves()
+{
     let (own, pg) = (owner().await, app().await);
     let f = fixture(&own).await;
-    let (a, b) = (format!("f_{}", Uuid::new_v4()), format!("f_{}", Uuid::new_v4()));
+    let (a, b) = (
+        format!("f_{}", Uuid::new_v4()),
+        format!("f_{}", Uuid::new_v4()),
+    );
     // Both list the other: one pair, not two.
     finding(&own, f.user, &a, "momentum pays on BTC", &[&b]).await;
     finding(&own, f.user, &b, "momentum does not pay on BTC", &[&a]).await;
 
     let first = session_contradictions::refresh(&pg, f.user).await.unwrap();
-    assert_eq!(first.found, 1, "two entries listing each other are one pair");
+    assert_eq!(
+        first.found, 1,
+        "two entries listing each other are one pair"
+    );
     let again = session_contradictions::refresh(&pg, f.user).await.unwrap();
     assert_eq!(again.found, 0, "refreshing twice finds nothing new");
 
-    let open = session_contradictions::open_pairs(&pg, f.user).await.unwrap();
+    let open = session_contradictions::open_pairs(&pg, f.user)
+        .await
+        .unwrap();
     assert_eq!(open.len(), 1);
     assert!(open[0].question.contains("momentum pays on BTC"));
     assert!(open[0].key().contains(&a) && open[0].key().contains(&b));
@@ -226,7 +254,10 @@ async fn a_conflict_becomes_one_pair_whichever_entry_lists_the_other_and_resolve
         .unwrap();
     let resolved = session_contradictions::refresh(&pg, f.user).await.unwrap();
     assert_eq!(resolved.resolved, 1);
-    assert!(session_contradictions::open_pairs(&pg, f.user).await.unwrap().is_empty());
+    assert!(session_contradictions::open_pairs(&pg, f.user)
+        .await
+        .unwrap()
+        .is_empty());
 
     // And a resolved pair stays recorded, for "found/resolved" and for the desk.
     let all = session_contradictions::list(&pg, f.user).await.unwrap();
@@ -234,18 +265,21 @@ async fn a_conflict_becomes_one_pair_whichever_entry_lists_the_other_and_resolve
     assert!(all[0].resolved_at.is_some() && all[0].resolved_why.is_some());
 
     // It cannot be rewritten or deleted by the platform.
-    assert!(sqlx::query("DELETE FROM session_contradictions WHERE user_id = $1")
-        .bind(f.user)
-        .execute(&pg)
-        .await
-        .is_err());
+    assert!(
+        sqlx::query("DELETE FROM session_contradictions WHERE user_id = $1")
+            .bind(f.user)
+            .execute(&pg)
+            .await
+            .is_err()
+    );
 }
 
 // ── a survey's proposals ────────────────────────────────────────────────────
 
 #[tokio::test]
 #[ignore = "needs DATABASE_URL migrated through 0164"]
-async fn a_surveys_proposals_are_stored_with_their_estimates_and_a_deduped_survey_is_an_explicit_zero() {
+async fn a_surveys_proposals_are_stored_with_their_estimates_and_a_deduped_survey_is_an_explicit_zero(
+) {
     let (own, pg) = (owner().await, app().await);
     let f = fixture(&own).await;
     let survey_item = AgendaItem::new(f.session, "survey the charter", "", Source::Replenish)
@@ -286,35 +320,58 @@ async fn a_surveys_proposals_are_stored_with_their_estimates_and_a_deduped_surve
     .unwrap();
     assert_eq!(stored.len(), 2, "written once, not twice");
     assert_eq!(stored[0].1, Some(1.0));
-    assert_eq!(stored[1].1, None, "an unlabelled proposal has no estimate - never 0");
+    assert_eq!(
+        stored[1].1, None,
+        "an unlabelled proposal has no estimate - never 0"
+    );
 
     // Absorb against an agenda that already holds both questions: every proposal
     // is a duplicate, and the absorption says zero *explicitly*.
     let charter = charter();
     let report: SurveyReport = session_survey::report(f.session, survey_item.id, run, &rows);
     let mut live = vec![
-        AgendaItem::new(f.session, &rows[0].question, "SOL-USD", Source::OpenQuestion),
-        AgendaItem::new(f.session, &rows[1].question, "SOL-USD", Source::OpenQuestion),
+        AgendaItem::new(
+            f.session,
+            &rows[0].question,
+            "SOL-USD",
+            Source::OpenQuestion,
+        ),
+        AgendaItem::new(
+            f.session,
+            &rows[1].question,
+            "SOL-USD",
+            Source::OpenQuestion,
+        ),
     ];
     let r = absorb(&charter, &report, &mut live);
     let counts = session_survey::Counts::of(rows.len(), &r);
     assert_eq!(counts.new_questions, 0, "{counts:?}");
-    assert!(session_survey::new_questions(&pg, run).await.unwrap().is_none());
-    assert!(session_survey::record_absorption(&pg, f.session, survey_item.id, run, counts)
+    assert!(session_survey::new_questions(&pg, run)
         .await
-        .unwrap());
+        .unwrap()
+        .is_none());
+    assert!(
+        session_survey::record_absorption(&pg, f.session, survey_item.id, run, counts)
+            .await
+            .unwrap()
+    );
     assert!(
         !session_survey::record_absorption(&pg, f.session, survey_item.id, run, counts)
             .await
             .unwrap(),
         "an absorption is written once"
     );
-    assert_eq!(session_survey::new_questions(&pg, run).await.unwrap(), Some(0));
-    assert!(sqlx::query("UPDATE session_survey_absorptions SET new_questions = 9 WHERE run_id = $1")
-        .bind(run)
-        .execute(&pg)
-        .await
-        .is_err());
+    assert_eq!(
+        session_survey::new_questions(&pg, run).await.unwrap(),
+        Some(0)
+    );
+    assert!(sqlx::query(
+        "UPDATE session_survey_absorptions SET new_questions = 9 WHERE run_id = $1"
+    )
+    .bind(run)
+    .execute(&pg)
+    .await
+    .is_err());
 }
 
 // ── a profile's standing ────────────────────────────────────────────────────
@@ -339,15 +396,23 @@ fn scorecard(health: &str, rate: f64) -> session_profile::ScorecardInput {
 async fn a_recorded_scorecard_is_read_back_and_a_later_degraded_one_wins() {
     let pg = app().await;
     let profile = format!("profile-{}", Uuid::new_v4());
-    assert!(session_profile::latest_standing(&pg, &profile).await.unwrap().is_none());
+    assert!(session_profile::latest_standing(&pg, &profile)
+        .await
+        .unwrap()
+        .is_none());
 
     session_profile::record_scorecard(&pg, &profile, &scorecard("measured", 0.95), "test")
         .await
         .unwrap();
-    let s = session_profile::latest_standing(&pg, &profile).await.unwrap().unwrap();
+    let s = session_profile::latest_standing(&pg, &profile)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(s.health, ProfileHealth::Measured);
     assert_eq!(s.autonomous_threshold, Some(0.9));
-    let j = session_profile::latest_judgement(&pg, &profile).await.unwrap();
+    let j = session_profile::latest_judgement(&pg, &profile)
+        .await
+        .unwrap();
     assert_eq!(j.len(), 1);
     assert!(j[0].verdict().passed());
 
@@ -356,22 +421,33 @@ async fn a_recorded_scorecard_is_read_back_and_a_later_degraded_one_wins() {
     session_profile::record_scorecard(&pg, &profile, &scorecard("degraded", 0.5), "test")
         .await
         .unwrap();
-    let s = session_profile::latest_standing(&pg, &profile).await.unwrap().unwrap();
+    let s = session_profile::latest_standing(&pg, &profile)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(s.health, ProfileHealth::Degraded);
     let (health, why) = session_profile::health_from(ProfileHealth::Measured, None, Some(&s));
     assert_eq!(health, ProfileHealth::Degraded);
     assert!(why.unwrap().contains("degraded"));
-    let j = session_profile::latest_judgement(&pg, &profile).await.unwrap();
-    assert!(!j[0].verdict().passed(), "the latest rate is the one that counts");
+    let j = session_profile::latest_judgement(&pg, &profile)
+        .await
+        .unwrap();
+    assert!(
+        !j[0].verdict().passed(),
+        "the latest rate is the one that counts"
+    );
 
     // Append-only against the platform role.
-    assert!(sqlx::query("UPDATE profile_standing SET health = 'measured' WHERE profile_id = $1")
-        .bind(&profile)
-        .execute(&pg)
-        .await
-        .is_err());
+    assert!(
+        sqlx::query("UPDATE profile_standing SET health = 'measured' WHERE profile_id = $1")
+            .bind(&profile)
+            .execute(&pg)
+            .await
+            .is_err()
+    );
     // A malformed scorecard is refused with a sentence, and nothing is written.
-    let bad = session_profile::record_scorecard(&pg, &profile, &scorecard("fine", 0.5), "test").await;
+    let bad =
+        session_profile::record_scorecard(&pg, &profile, &scorecard("fine", 0.5), "test").await;
     assert!(bad.is_err());
 }
 
@@ -396,7 +472,10 @@ async fn two_sessions_with_one_question_produce_one_item_with_two_sources() {
     let placed = session_dedupe::offer(&pg, f.user, &second).await.unwrap();
     assert_eq!(
         placed,
-        session_dedupe::Offered::Elsewhere { item: first.id, owner: f.session },
+        session_dedupe::Offered::Elsewhere {
+            item: first.id,
+            owner: f.session
+        },
         "merged onto the first session's item"
     );
     let live_in_second: (i64,) =
@@ -405,17 +484,36 @@ async fn two_sessions_with_one_question_produce_one_item_with_two_sources() {
             .fetch_one(&own)
             .await
             .unwrap();
-    assert_eq!(live_in_second.0, 0, "the second session holds no copy: the question runs once");
+    assert_eq!(
+        live_in_second.0, 0,
+        "the second session holds no copy: the question runs once"
+    );
     let (sources,): (serde_json::Value,) =
         sqlx::query_as("SELECT sources FROM agenda_items WHERE item_id = $1")
             .bind(first.id)
             .fetch_one(&own)
             .await
             .unwrap();
-    assert_eq!(sources, json!(["open_question", "retry_condition_met"]), "one item, two sources");
-    assert_eq!(session_dedupe::untold_sponsors(&pg, first.id).await.unwrap(), vec![other]);
-    assert!(session_dedupe::mark_told(&pg, first.id, other).await.unwrap());
-    assert!(!session_dedupe::mark_told(&pg, first.id, other).await.unwrap(), "told once");
+    assert_eq!(
+        sources,
+        json!(["open_question", "retry_condition_met"]),
+        "one item, two sources"
+    );
+    assert_eq!(
+        session_dedupe::untold_sponsors(&pg, first.id)
+            .await
+            .unwrap(),
+        vec![other]
+    );
+    assert!(session_dedupe::mark_told(&pg, first.id, other)
+        .await
+        .unwrap());
+    assert!(
+        !session_dedupe::mark_told(&pg, first.id, other)
+            .await
+            .unwrap(),
+        "told once"
+    );
 
     // A human's own question in the second session is never rerouted.
     let asked = AgendaItem::new(other, q, "ETH-USD", Source::User);
@@ -479,7 +577,12 @@ async fn a_regime_flip_has_one_identity_across_three_reads() {
     } else {
         format!("{{{}}}", vec!["0"; 16].join(","))
     };
-    for (days_ago, label) in [(4, "low_vol"), (3, "low_vol"), (2, "high_vol"), (1, "high_vol")] {
+    for (days_ago, label) in [
+        (4, "low_vol"),
+        (3, "low_vol"),
+        (2, "high_vol"),
+        (1, "high_vol"),
+    ] {
         sqlx::query(&format!(
             "INSERT INTO regime_causal.regime_state
                  (market_scope, event_time, model_version, p_filtered, regime_vec, knowledge_time, label)
@@ -503,7 +606,11 @@ async fn a_regime_flip_has_one_identity_across_three_reads() {
     assert_eq!(one.len(), 1, "low_vol -> high_vol is one flip: {one:?}");
     assert_eq!(one, two);
     assert_eq!(two, three);
-    assert!(one[0].fingerprint().contains("low_vol->high_vol"), "{}", one[0].fingerprint());
+    assert!(
+        one[0].fingerprint().contains("low_vol->high_vol"),
+        "{}",
+        one[0].fingerprint()
+    );
 }
 
 // ── pushed, not polled ──────────────────────────────────────────────────────
@@ -513,10 +620,17 @@ async fn a_regime_flip_has_one_identity_across_three_reads() {
 async fn a_monitor_notification_wakes_a_session_within_one_event_and_the_heartbeat_does_not() {
     let (own, pg) = (owner().await, app().await);
     let mut wake = api::session_wake::Wake::open(&pg).await;
-    assert!(wake.is_listening(), "the platform role can LISTEN: {:?}", wake.degraded());
+    assert!(
+        wake.is_listening(),
+        "the platform role can LISTEN: {:?}",
+        wake.degraded()
+    );
 
     // The heartbeat is not a change: the sleep runs to its ceiling.
-    sqlx::query("SELECT pg_notify('monitor_lease', 'beat')").execute(&own).await.unwrap();
+    sqlx::query("SELECT pg_notify('monitor_lease', 'beat')")
+        .execute(&own)
+        .await
+        .unwrap();
     let started = std::time::Instant::now();
     assert_eq!(
         wake.sleep(std::time::Duration::from_millis(400)).await,
@@ -535,8 +649,15 @@ async fn a_monitor_notification_wakes_a_session_within_one_event_and_the_heartbe
             .unwrap();
     });
     let woke = wake.sleep(std::time::Duration::from_secs(30)).await;
-    assert_eq!(woke, api::session_wake::Woke::Event("monitor_kill_switch".into()));
-    assert!(started.elapsed() < std::time::Duration::from_secs(5), "{:?}", started.elapsed());
+    assert_eq!(
+        woke,
+        api::session_wake::Woke::Event("monitor_kill_switch".into())
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 #[tokio::test]
@@ -547,9 +668,14 @@ async fn every_session_event_publishes_its_session_id_for_the_stream_to_wake_on(
     let mut listener = sqlx::postgres::PgListener::connect_with(&pg).await.unwrap();
     listener.listen("session_events").await.unwrap();
     // As the platform role, through the driver's own writer.
-    api::sessions::append(&pg, f.session, research_session::EventKind::Note, json!({"x": 1}))
-        .await
-        .unwrap();
+    api::sessions::append(
+        &pg,
+        f.session,
+        research_session::EventKind::Note,
+        json!({"x": 1}),
+    )
+    .await
+    .unwrap();
     let n = tokio::time::timeout(std::time::Duration::from_secs(5), listener.recv())
         .await
         .expect("a notification within one event")

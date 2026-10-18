@@ -111,7 +111,9 @@ pub fn parse_price_response(
         ));
     }
     let amount = |k: &str| -> Result<Decimal, BrokerError> {
-        let raw = body[k].as_str().ok_or_else(|| bad(&format!("missing {k}")))?;
+        let raw = body[k]
+            .as_str()
+            .ok_or_else(|| bad(&format!("missing {k}")))?;
         Decimal::from_str(raw).map_err(|_| bad(&format!("{k} is not a number")))
     };
     let buy = amount("buyAmount")? / pow10(buy_decimals)?;
@@ -127,7 +129,9 @@ pub fn parse_price_response(
         Some(f) => f,
         None => {
             let gas = body["gas"].as_str().and_then(|s| Decimal::from_str(s).ok());
-            let price = body["gasPrice"].as_str().and_then(|s| Decimal::from_str(s).ok());
+            let price = body["gasPrice"]
+                .as_str()
+                .and_then(|s| Decimal::from_str(s).ok());
             match (gas, price) {
                 (Some(g), Some(p)) => g * p,
                 _ => return Err(bad("no network fee (totalNetworkFee, or gas and gasPrice)")),

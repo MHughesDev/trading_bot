@@ -54,12 +54,13 @@ impl DatasetBuilder for RegistryDatasetBuilder {
         let manager = DatasetManager::new(self.pg.clone());
         let plan = manager.plan(&m.tenant, req).await.map_err(classify)?;
         let rec = manager.materialize(&plan).await.map_err(classify)?;
-        let (leakage,): (Option<serde_json::Value>,) =
-            sqlx::query_as("SELECT leakage_report FROM dataset_versions WHERE dataset_version_id = $1")
-                .bind(rec.dataset_version_id)
-                .fetch_one(&self.pg)
-                .await
-                .map_err(|e| BuildFailure::Other(e.into()))?;
+        let (leakage,): (Option<serde_json::Value>,) = sqlx::query_as(
+            "SELECT leakage_report FROM dataset_versions WHERE dataset_version_id = $1",
+        )
+        .bind(rec.dataset_version_id)
+        .fetch_one(&self.pg)
+        .await
+        .map_err(|e| BuildFailure::Other(e.into()))?;
         Ok(DatasetBuildOutcome {
             dataset_id: rec.dataset_id,
             row_count: rec.row_count,

@@ -331,7 +331,8 @@ pub(crate) fn apply_funding(
                 total += cf;
                 priced += 1;
                 carry_terms.push(-pos.signum() * r);
-                cashflows.push(json!({"t": p.t, "position_usd": pos, "rate": r, "cashflow_usd": cf}));
+                cashflows
+                    .push(json!({"t": p.t, "position_usd": pos, "rate": r, "cashflow_usd": cf}));
             }
             None => unrated += 1,
         }
@@ -347,7 +348,11 @@ pub(crate) fn apply_funding(
     } else {
         (unrated + positioned_grid) as f64 / held_total as f64 * 100.0
     };
-    let confidence = if unpriced_pct > FUNDING_GAP_DOWNGRADE_PCT { "low" } else { "ok" };
+    let confidence = if unpriced_pct > FUNDING_GAP_DOWNGRADE_PCT {
+        "low"
+    } else {
+        "ok"
+    };
     let annualized = (!carry_terms.is_empty())
         .then(|| carry_terms.iter().sum::<f64>() / carry_terms.len() as f64 * ppy * 1e4);
     let tail: Vec<Value> = cashflows
@@ -392,7 +397,11 @@ pub(crate) fn apply_funding(
 /// `apply_funding_costs` -- price a position path against realised funding.
 pub async fn apply_funding_costs(api: &ApiClient, params: &Value) -> Value {
     for f in ["instrument", "venue", "start", "end"] {
-        if params.get(f).and_then(Value::as_str).is_none_or(str::is_empty) {
+        if params
+            .get(f)
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        {
             return crate::tool_error::missing_field(f);
         }
     }
@@ -455,7 +464,11 @@ pub async fn apply_funding_costs(api: &ApiClient, params: &Value) -> Value {
         Ok(v) => v,
         Err(e) => return e.to_tool_error(),
     };
-    apply_funding(&resp, &positions, params.get("interval_hours").and_then(Value::as_f64))
+    apply_funding(
+        &resp,
+        &positions,
+        params.get("interval_hours").and_then(Value::as_f64),
+    )
 }
 
 /// `attribute_divergence` -- where a deployed strategy's return left its backtest's.
@@ -537,7 +550,11 @@ mod funding_tests {
 
     #[test]
     fn an_absent_series_is_refused_not_costed_at_zero() {
-        let out = apply_funding(&json!({"manifest": {}, "funding": null}), &[(T0, 1.0)], Some(1.0));
+        let out = apply_funding(
+            &json!({"manifest": {}, "funding": null}),
+            &[(T0, 1.0)],
+            Some(1.0),
+        );
         assert_eq!(out["error"]["code"], "funding_unmeasured");
     }
 }

@@ -27,16 +27,20 @@ async fn pool() -> sqlx::PgPool {
 async fn app_role_can_read_write_and_update_the_inbox_but_never_delete_from_it() {
     let pg = pool().await;
     // As the owner: the migration under test, exactly as shipped.
-    sqlx::raw_sql(include_str!("../../../migrations/0158_alert_inbox_state.sql"))
-        .execute(&pg)
-        .await
-        .expect("0158 applies (and applies twice)");
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/0158_alert_inbox_state.sql"
+    ))
+    .execute(&pg)
+    .await
+    .expect("0158 applies (and applies twice)");
     // 0158 alone leaves DELETE granted, by 0044's default privileges; 0167 is
     // what takes it away, and this test is what found that it had to.
-    sqlx::raw_sql(include_str!("../../../migrations/0167_alert_inbox_no_delete.sql"))
-        .execute(&pg)
-        .await
-        .expect("0167 applies");
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/0167_alert_inbox_no_delete.sql"
+    ))
+    .execute(&pg)
+    .await
+    .expect("0167 applies");
 
     let user = Uuid::new_v4();
     let mut tx = pg.begin().await.expect("tx");
@@ -84,7 +88,10 @@ async fn app_role_can_read_write_and_update_the_inbox_but_never_delete_from_it()
 
     // The CHECKs are the schema's, not the route's: a state outside the two
     // admitted is refused whoever asks.
-    sqlx::query("SAVEPOINT bad_state").execute(&mut *tx).await.expect("sp");
+    sqlx::query("SAVEPOINT bad_state")
+        .execute(&mut *tx)
+        .await
+        .expect("sp");
     assert!(
         sqlx::query(
             "INSERT INTO alert_inbox_state (user_id, source, item_id, state)
@@ -96,11 +103,17 @@ async fn app_role_can_read_write_and_update_the_inbox_but_never_delete_from_it()
         .is_err(),
         "a state the CHECK does not admit was stored"
     );
-    sqlx::query("ROLLBACK TO SAVEPOINT bad_state").execute(&mut *tx).await.expect("rb");
+    sqlx::query("ROLLBACK TO SAVEPOINT bad_state")
+        .execute(&mut *tx)
+        .await
+        .expect("rb");
 
     // And what it must not do. A dismissal is a record of what a user did; a
     // platform that could delete it could un-dismiss or erase one.
-    sqlx::query("SAVEPOINT no_delete").execute(&mut *tx).await.expect("sp");
+    sqlx::query("SAVEPOINT no_delete")
+        .execute(&mut *tx)
+        .await
+        .expect("sp");
     let denied = sqlx::query("DELETE FROM alert_inbox_state WHERE user_id = $1")
         .bind(user)
         .execute(&mut *tx)
@@ -110,8 +123,14 @@ async fn app_role_can_read_write_and_update_the_inbox_but_never_delete_from_it()
         "app_role could DELETE from alert_inbox_state; 0158 grants SELECT, INSERT, UPDATE only"
     );
     let msg = denied.unwrap_err().to_string();
-    assert!(msg.contains("permission denied"), "refused for the wrong reason: {msg}");
-    sqlx::query("ROLLBACK TO SAVEPOINT no_delete").execute(&mut *tx).await.expect("rb");
+    assert!(
+        msg.contains("permission denied"),
+        "refused for the wrong reason: {msg}"
+    );
+    sqlx::query("ROLLBACK TO SAVEPOINT no_delete")
+        .execute(&mut *tx)
+        .await
+        .expect("rb");
 
     tx.rollback().await.expect("rollback leaves nothing behind");
 }
@@ -139,7 +158,10 @@ async fn calibration_is_an_admitted_source_and_delete_is_still_revoked() {
         .execute(&mut *tx)
         .await
         .expect("a user");
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.expect("assume app_role");
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .expect("assume app_role");
 
     sqlx::query(
         "INSERT INTO alert_inbox_state (user_id, source, item_id, state)
@@ -150,7 +172,10 @@ async fn calibration_is_an_admitted_source_and_delete_is_still_revoked() {
     .await
     .expect("app_role can record a calibration item's state");
 
-    sqlx::query("SAVEPOINT bad_source").execute(&mut *tx).await.expect("sp");
+    sqlx::query("SAVEPOINT bad_source")
+        .execute(&mut *tx)
+        .await
+        .expect("sp");
     assert!(
         sqlx::query(
             "INSERT INTO alert_inbox_state (user_id, source, item_id, state)
@@ -162,15 +187,30 @@ async fn calibration_is_an_admitted_source_and_delete_is_still_revoked() {
         .is_err(),
         "a source outside monitor, price and calibration was stored"
     );
-    sqlx::query("ROLLBACK TO SAVEPOINT bad_source").execute(&mut *tx).await.expect("rb");
+    sqlx::query("ROLLBACK TO SAVEPOINT bad_source")
+        .execute(&mut *tx)
+        .await
+        .expect("rb");
 
-    sqlx::query("SAVEPOINT no_delete").execute(&mut *tx).await.expect("sp");
+    sqlx::query("SAVEPOINT no_delete")
+        .execute(&mut *tx)
+        .await
+        .expect("sp");
     let denied = sqlx::query("DELETE FROM alert_inbox_state WHERE user_id = $1")
         .bind(user)
         .execute(&mut *tx)
         .await;
-    assert!(denied.is_err(), "0245 must not give DELETE back to app_role");
-    assert!(denied.unwrap_err().to_string().contains("permission denied"));
-    sqlx::query("ROLLBACK TO SAVEPOINT no_delete").execute(&mut *tx).await.expect("rb");
+    assert!(
+        denied.is_err(),
+        "0245 must not give DELETE back to app_role"
+    );
+    assert!(denied
+        .unwrap_err()
+        .to_string()
+        .contains("permission denied"));
+    sqlx::query("ROLLBACK TO SAVEPOINT no_delete")
+        .execute(&mut *tx)
+        .await
+        .expect("rb");
     tx.rollback().await.expect("rollback");
 }

@@ -328,8 +328,8 @@ mod tests {
           "decide": {"rules": [{"when":"up","then":{"kind":"close"}}]}
         }))
         .unwrap();
-        let space =
-            SearchSpace::from_definition(&parameter_carrier(&g).unwrap(), &BTreeMap::new()).unwrap();
+        let space = SearchSpace::from_definition(&parameter_carrier(&g).unwrap(), &BTreeMap::new())
+            .unwrap();
         assert_eq!(space.n_dims(), 2);
         let mut ok = ParamMap::new();
         ok.insert("fast".into(), Value::from(5));

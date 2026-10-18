@@ -57,7 +57,10 @@ async fn a_finding_that_names_a_brief_entry_cites_it() {
         .execute(format!("DROP DATABASE IF EXISTS {DB} WITH (FORCE)").as_str())
         .await
         .unwrap();
-    admin.execute(format!("CREATE DATABASE {DB}").as_str()).await.unwrap();
+    admin
+        .execute(format!("CREATE DATABASE {DB}").as_str())
+        .await
+        .unwrap();
     let pool = PgPool::connect(&with_db(&base_url(), DB)).await.unwrap();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -68,13 +71,28 @@ async fn a_finding_that_names_a_brief_entry_cites_it() {
 
     let run_id = Uuid::new_v4();
     let run = run_id.to_string();
-    let retrievals = vec![shown(&run, "f_1", 1), shown(&run, "f_2", 2), shown(&run, "q_7", 1)];
+    let retrievals = vec![
+        shown(&run, "f_1", 1),
+        shown(&run, "f_2", 2),
+        shown(&run, "q_7", 1),
+    ];
     let store = RetrievalStore::new(pool.clone());
     store.log(&retrievals).await.unwrap();
-    assert_eq!(store.recall(&run).await.unwrap(), Some(0.0), "nothing is cited yet");
+    assert_eq!(
+        store.recall(&run).await.unwrap(),
+        Some(0.0),
+        "nothing is cited yet"
+    );
 
     // A tool that carries no evidence is not a citation, whatever it names.
-    record_citations(&pool, run_id, &retrievals, "search_tools", &json!({"evidence": "f_1"})).await;
+    record_citations(
+        &pool,
+        run_id,
+        &retrievals,
+        "search_tools",
+        &json!({"evidence": "f_1"}),
+    )
+    .await;
     assert_eq!(store.recall(&run).await.unwrap(), Some(0.0));
 
     // A finding naming one shown id, one that was never shown, and a longer id

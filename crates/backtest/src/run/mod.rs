@@ -304,7 +304,12 @@ impl<S: RunStore, E: RunExecutor, L: TrialLedger> Backtest<S, E, L> {
         }
         let ticket = self.ledger.begin_reproduction(tenant_id, run_id.as_str())?;
         let rerun = self.executor.execute(&prov.cfg, &ticket);
-        let report = compare_rerun(&stored, &rerun, prov.receipt.as_ref(), self.executor.receipt(&prov.cfg));
+        let report = compare_rerun(
+            &stored,
+            &rerun,
+            prov.receipt.as_ref(),
+            self.executor.receipt(&prov.cfg),
+        );
         let record = report.record(run_id.as_str(), reproduced_by);
         self.ledger.record_reproduction(ticket, &record)?;
         Ok(report)
@@ -357,7 +362,11 @@ pub struct ReproduceReport {
 impl ReproduceReport {
     /// The row `mlops.reproduction` appends.
     #[must_use]
-    pub fn record(&self, run_id: &str, reproduced_by: &str) -> ledger::reproduction::ReproductionRecord {
+    pub fn record(
+        &self,
+        run_id: &str,
+        reproduced_by: &str,
+    ) -> ledger::reproduction::ReproductionRecord {
         use crate::receipt::Reproduction as R;
         let (differences, was, now) = match &self.reproduction {
             R::BitIdentical => (serde_json::json!([]), None, None),

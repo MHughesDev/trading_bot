@@ -5,7 +5,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use backtest::receipt::{Reproduction, ReproSpec};
+use backtest::receipt::{ReproSpec, Reproduction};
 use backtest::run::executor::{daily_curve, map_sim_result};
 use backtest::run::{
     Backtest, ComputeCost, DataSlice, EvalResolution, InMemoryRunStore, RunConfig,
@@ -120,9 +120,21 @@ fn a_recorded_run_reproduces_bit_identical_and_spends_no_trial() {
 
     assert_eq!(report.reproduction, Reproduction::BitIdentical);
     assert!(!report.receipt_missing);
-    assert_eq!(r.reproduced.load(Ordering::SeqCst), 1, "the executor ran, under a reproduction ticket");
-    assert_eq!(r.ledger.trial_count("tenant-a"), trials, "a reproduction is not a look");
-    assert_eq!(r.ledger.rows("tenant-a"), rows, "the hash chain did not move");
+    assert_eq!(
+        r.reproduced.load(Ordering::SeqCst),
+        1,
+        "the executor ran, under a reproduction ticket"
+    );
+    assert_eq!(
+        r.ledger.trial_count("tenant-a"),
+        trials,
+        "a reproduction is not a look"
+    );
+    assert_eq!(
+        r.ledger.rows("tenant-a"),
+        rows,
+        "the hash chain did not move"
+    );
     let recorded = r.ledger.reproductions("tenant-a");
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].1.outcome, "bit_identical");
@@ -146,7 +158,10 @@ fn a_deliberate_calendar_bump_is_a_named_difference_and_not_a_defect() {
         other => panic!("expected a changed receipt, got {other:?}"),
     }
     assert!(!report.reproduction.is_platform_defect());
-    assert_eq!(r.ledger.reproductions("tenant-a")[0].1.outcome, "receipt_changed");
+    assert_eq!(
+        r.ledger.reproductions("tenant-a")[0].1.outcome,
+        "receipt_changed"
+    );
 }
 
 #[test]
@@ -158,7 +173,10 @@ fn a_changed_number_under_an_unchanged_receipt_is_drift_and_a_defect() {
     let report = r.bt.reproduce("tenant-a", &c.run_id, "tester").unwrap();
 
     assert!(
-        matches!(report.reproduction, Reproduction::DriftedUnderTheSameReceipt { .. }),
+        matches!(
+            report.reproduction,
+            Reproduction::DriftedUnderTheSameReceipt { .. }
+        ),
         "{:?}",
         report.reproduction
     );
@@ -173,7 +191,10 @@ fn an_original_with_no_receipt_is_reported_as_such_and_not_as_agreement() {
     let r = rig(false);
     let c = record(&r);
     let report = r.bt.reproduce("tenant-a", &c.run_id, "tester").unwrap();
-    assert!(report.receipt_missing, "the outcome rests on the number alone and says so");
+    assert!(
+        report.receipt_missing,
+        "the outcome rests on the number alone and says so"
+    );
     assert!(r.ledger.reproductions("tenant-a")[0].1.receipt_missing());
 }
 

@@ -180,12 +180,18 @@ mod tests {
         let ok = BindingOutcome::judge(&[bind("good", &[ModelUse::Vol])], &Allow(&["good"])).await;
         assert!(ok.satisfied().is_ok());
         let both = BindingOutcome::judge(
-            &[bind("good", &[ModelUse::Vol]), bind("bad", &[ModelUse::Vol])],
+            &[
+                bind("good", &[ModelUse::Vol]),
+                bind("bad", &[ModelUse::Vol]),
+            ],
             &Allow(&["good"]),
         )
         .await;
         let e = both.satisfied().unwrap_err();
-        assert!(e.contains("bad@3") && e.contains("HARQ") && !e.contains("good@3"), "{e}");
+        assert!(
+            e.contains("bad@3") && e.contains("HARQ") && !e.contains("good@3"),
+            "{e}"
+        );
     }
 
     #[tokio::test]
@@ -203,12 +209,14 @@ mod tests {
 
     #[tokio::test]
     async fn the_gate_runner_refuses_significance_and_the_vault_for_a_refused_binding() {
-        let refused =
-            BindingOutcome::judge(&[bind("bad", &[ModelUse::Vol])], &Allow(&[])).await;
+        let refused = BindingOutcome::judge(&[bind("bad", &[ModelUse::Vol])], &Allow(&[])).await;
         let mut e = experiment();
         let runner = GateRunner::new(&mut e).with_model_bindings(refused);
         let err = runner.enter(Gate::Significance).unwrap_err();
-        assert!(matches!(err, GateError::ModelBindingRefused(ref m) if m.contains("bad@3")), "{err}");
+        assert!(
+            matches!(err, GateError::ModelBindingRefused(ref m) if m.contains("bad@3")),
+            "{err}"
+        );
         assert!(matches!(
             runner.enter(Gate::Vault).unwrap_err(),
             GateError::ModelBindingRefused(_)
@@ -219,7 +227,8 @@ mod tests {
 
     #[tokio::test]
     async fn the_gate_runner_lets_an_allowed_binding_reach_the_prerequisite_check() {
-        let ok = BindingOutcome::judge(&[bind("good", &[ModelUse::Return])], &Allow(&["good"])).await;
+        let ok =
+            BindingOutcome::judge(&[bind("good", &[ModelUse::Return])], &Allow(&["good"])).await;
         let mut e = experiment();
         let runner = GateRunner::new(&mut e).with_model_bindings(ok);
         // Not refused by the binding: it falls through to "Robustness has not passed".

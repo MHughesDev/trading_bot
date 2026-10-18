@@ -68,7 +68,9 @@ pub enum PaperTradeError {
     ReduceOnlyWouldIncrease { instrument_id: String },
     /// The account's lock was poisoned by a panic; its state may be
     /// half-updated, so it takes no new orders until reset (Set E #8).
-    #[error("paper account {asset_class:?} is unavailable after an internal panic; reset it to resume")]
+    #[error(
+        "paper account {asset_class:?} is unavailable after an internal panic; reset it to resume"
+    )]
     AccountUnavailable { asset_class: AssetClass },
 }
 

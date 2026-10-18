@@ -112,7 +112,12 @@ fn nw_se(x: &[f64]) -> f64 {
     let mut total = e.iter().map(|v| v * v).sum::<f64>() / n as f64;
     for l in 1..=lags {
         let w = 1.0 - l as f64 / (lags as f64 + 1.0);
-        let g = e[l..].iter().zip(&e[..n - l]).map(|(a, b)| a * b).sum::<f64>() / n as f64;
+        let g = e[l..]
+            .iter()
+            .zip(&e[..n - l])
+            .map(|(a, b)| a * b)
+            .sum::<f64>()
+            / n as f64;
         total += 2.0 * w * g;
     }
     (total.max(0.0) / n as f64).sqrt()
@@ -201,16 +206,24 @@ pub fn search(
         .iter()
         .filter(|r| r.tested)
         .min_by(|a, b| a.mean.total_cmp(&b.mean));
-    let failure_found = worst
-        .is_some_and(|w| w.mean < 0.0 && w.adjusted_p.is_some_and(|p| p <= alpha));
+    let failure_found =
+        worst.is_some_and(|w| w.mean < 0.0 && w.adjusted_p.is_some_and(|p| p <= alpha));
     Ok(RegimeSearch {
         worst: worst.map(|w| w.label.clone()),
         failure_found,
         alpha,
         n_tested: idx.len(),
         min_obs,
-        untested: rows.iter().filter(|r| !r.tested).map(|r| r.label.clone()).collect(),
-        unlabelled_share: if n_periods == 0 { 0.0 } else { unlabelled as f64 / n_periods as f64 },
+        untested: rows
+            .iter()
+            .filter(|r| !r.tested)
+            .map(|r| r.label.clone())
+            .collect(),
+        unlabelled_share: if n_periods == 0 {
+            0.0
+        } else {
+            unlabelled as f64 / n_periods as f64
+        },
         n_periods,
         regimes: rows,
     })
@@ -242,8 +255,16 @@ mod tests {
             v.push((t(i as i64), e));
         }
         let w = vec![
-            RegimeWindow { start: t(0), end: t(300), label: "calm".into() },
-            RegimeWindow { start: t(300), end: t(601), label: "crash".into() },
+            RegimeWindow {
+                start: t(0),
+                end: t(300),
+                label: "calm".into(),
+            },
+            RegimeWindow {
+                start: t(300),
+                end: t(601),
+                label: "crash".into(),
+            },
         ];
         (v, w)
     }
@@ -272,7 +293,11 @@ mod tests {
     #[test]
     fn a_thin_regime_is_untested_not_survived() {
         let (e, mut w) = curve(0.0005, -0.001);
-        w[1] = RegimeWindow { start: t(300), end: t(340), label: "crash".into() };
+        w[1] = RegimeWindow {
+            start: t(300),
+            end: t(340),
+            label: "crash".into(),
+        };
         let r = search(&e, &w, 250, 0.05).unwrap();
         assert_eq!(r.untested, vec!["crash".to_string()]);
         assert!(r.unlabelled_share > 0.4);
@@ -282,7 +307,10 @@ mod tests {
     #[test]
     fn no_windows_is_an_error_not_a_clean_bill() {
         let (e, _) = curve(0.0, 0.0);
-        assert_eq!(search(&e, &[], 250, 0.05), Err(RegimeSearchError::NoWindows));
+        assert_eq!(
+            search(&e, &[], 250, 0.05),
+            Err(RegimeSearchError::NoWindows)
+        );
     }
 
     #[test]

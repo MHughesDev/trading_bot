@@ -14,12 +14,15 @@ use domain::{
 use execution::broker::{Broker, BrokerError, BrokerOrderState};
 use execution::coinbase::{CoinbaseBroker, CoinbaseCredentials};
 use ring::rand::SystemRandom;
-use ring::signature::{EcdsaKeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED, ECDSA_P256_SHA256_FIXED_SIGNING};
+use ring::signature::{
+    EcdsaKeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED, ECDSA_P256_SHA256_FIXED_SIGNING,
+};
 use rust_decimal::Decimal;
 
 fn creds() -> CoinbaseCredentials {
     let pkcs8 =
-        EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &SystemRandom::new()).unwrap();
+        EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &SystemRandom::new())
+            .unwrap();
     let pem = format!(
         "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n",
         STANDARD.encode(pkcs8.as_ref())
@@ -78,19 +81,32 @@ async fn submit_builds_and_signs_the_request_and_never_sends_it() {
     assert_eq!(prepared.method, "POST");
     let host = mock.base.trim_start_matches("http://");
     let claims = claims_of(prepared.bearer().expect("bearer"), &public);
-    assert_eq!(claims["uri"], format!("POST {host}/api/v3/brokerage/orders"));
+    assert_eq!(
+        claims["uri"],
+        format!("POST {host}/api/v3/brokerage/orders")
+    );
     let body: serde_json::Value = serde_json::from_str(prepared.body.as_deref().unwrap()).unwrap();
-    assert_eq!(body["client_order_id"], order.intent.idempotency_key.to_string());
-    assert_eq!(body["order_configuration"]["market_market_ioc"]["base_size"], "0.01");
+    assert_eq!(
+        body["client_order_id"],
+        order.intent.idempotency_key.to_string()
+    );
+    assert_eq!(
+        body["order_configuration"]["market_market_ioc"]["base_size"],
+        "0.01"
+    );
 
     // ...and submit refuses, having sent nothing.
     match broker.submit(&order).await {
         Err(BrokerError::Rejected(m)) => assert!(m.contains("BLOCKED:HUMAN"), "{m}"),
         other => panic!("submit must refuse, got {other:?}"),
     }
-    assert!(matches!(broker.cancel("abc").await, Err(BrokerError::Rejected(_))));
+    assert!(matches!(
+        broker.cancel("abc").await,
+        Err(BrokerError::Rejected(_))
+    ));
     assert_eq!(
-        mock.hits("POST /api/v3/brokerage/orders") + mock.hits("POST /api/v3/brokerage/orders/batch_cancel"),
+        mock.hits("POST /api/v3/brokerage/orders")
+            + mock.hits("POST /api/v3/brokerage/orders/batch_cancel"),
         0,
         "no order or cancel request may reach the venue"
     );
@@ -118,7 +134,10 @@ async fn query_order_sends_a_verifiable_token_for_exactly_that_endpoint() {
     let head = mock.head_containing("GET /api/v3/brokerage/orders/historical/abc");
     let token = head
         .split(" | ")
-        .find_map(|h| h.strip_prefix("authorization: Bearer ").or_else(|| h.strip_prefix("Authorization: Bearer ")))
+        .find_map(|h| {
+            h.strip_prefix("authorization: Bearer ")
+                .or_else(|| h.strip_prefix("Authorization: Bearer "))
+        })
         .expect("a bearer header was sent")
         .to_owned();
     let host = mock.base.trim_start_matches("http://");

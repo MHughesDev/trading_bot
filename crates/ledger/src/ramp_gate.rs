@@ -212,7 +212,10 @@ fn step_up(inputs: &StepInputs, ev: &PeriodEvidence) -> (bool, Option<String>) {
     let Some(rung) = inputs.current_rung else {
         return (
             false,
-            Some(format!("`{}` is not on the capital ladder", inputs.profile_id)),
+            Some(format!(
+                "`{}` is not on the capital ladder",
+                inputs.profile_id
+            )),
         );
     };
     if rung == AllowedFraction::Full {

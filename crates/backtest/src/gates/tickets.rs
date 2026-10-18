@@ -474,7 +474,11 @@ mod tests {
             // Declaration order: `leakage_audit` is gate 2's first requirement.
             // `precapital_battery` joined on 2026-10-04, when its timing-jitter step became a
             // `run_study` call and the battery became runnable (S-8.5, ADR-S8-10).
-            vec!["leakage_audit", "selection_bias_verdict", "precapital_battery"],
+            vec![
+                "leakage_audit",
+                "selection_bias_verdict",
+                "precapital_battery"
+            ],
             "the enforced set changed; `crates/invariants` holds it equal to which batteries \
              are runnable, and phase-8-integration.md records why"
         );

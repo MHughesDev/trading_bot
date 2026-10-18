@@ -75,7 +75,10 @@ pub async fn active(
         })
         .collect();
     for d in durable {
-        if !out.iter().any(|(h, _)| h.halt_id == d.halt_id || h.strategy_id == d.strategy_id) {
+        if !out
+            .iter()
+            .any(|(h, _)| h.halt_id == d.halt_id || h.strategy_id == d.strategy_id)
+        {
             // Durable and not yet in force in this process: rehydrate it now
             // rather than show a halt the gate is not enforcing.
             registry.rehydrate(d.clone());

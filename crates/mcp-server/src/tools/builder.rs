@@ -368,15 +368,13 @@ pub fn get_draft_summary(ctx: &McpContext, params: &Value) -> Value {
     // Return the full typed definition so the agent can inspect it.
     let def = draft_to_definition(draft);
     match def {
-        Ok(d) => {
-            serde_json::to_value(&d).unwrap_or_else(|_| {
-                crate::tool_error::refuse(
-                    "serialization_error",
-                    "the finished draft could not be serialised.",
-                    "call get_draft_summary and fix the node it reports as incomplete",
-                )
-            })
-        }
+        Ok(d) => serde_json::to_value(&d).unwrap_or_else(|_| {
+            crate::tool_error::refuse(
+                "serialization_error",
+                "the finished draft could not be serialised.",
+                "call get_draft_summary and fix the node it reports as incomplete",
+            )
+        }),
         Err(msg) => json!({ "draft_id": draft_id.to_string(), "incomplete": true, "reason": msg }),
     }
 }

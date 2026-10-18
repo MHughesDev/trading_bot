@@ -146,9 +146,8 @@ fn the_resolver_reads_the_sessions_table_and_checks_expiry() {
     // And the one resolver is the hashed, expiry-checked lookup (Set E 1.1).
     let session = src("auth/session.rs");
     assert!(
-        session.contains(
-            "FROM sessions WHERE token = session_token_hash($1) AND expires_at > now()"
-        ),
+        session
+            .contains("FROM sessions WHERE token = session_token_hash($1) AND expires_at > now()"),
         "`auth::session::resolve` no longer selects from `sessions` by the token's digest \
          with an expiry check"
     );

@@ -97,7 +97,9 @@ impl QualityMonitor {
     /// # Errors
     /// A Postgres failure.
     pub async fn realise_now(&self) -> anyhow::Result<crate::forecast_realisation::Realised> {
-        let url = std::env::var("CLICKHOUSE_URL").ok().filter(|u| !u.is_empty());
+        let url = std::env::var("CLICKHOUSE_URL")
+            .ok()
+            .filter(|u| !u.is_empty());
         let bars: Box<dyn crate::forecast_realisation::ClosedBars> = match url {
             Some(u) => Box::new(crate::forecast_realisation::StoreBars(
                 backtest::store::BarStore::connect(&u),
@@ -167,17 +169,27 @@ impl QualityMonitor {
         // Pinball loss at tau = 0.5 (MAD-style CRPS proxy), over rows that have a median.
         let medians: Vec<(f64, f64)> = rows.iter().filter_map(|r| r.2.map(|q| (q, r.6))).collect();
         let crps: Option<f64> = (!medians.is_empty()).then(|| {
-            medians.iter().map(|(q50, r)| 0.5 * (r - q50).abs()).sum::<f64>() / medians.len() as f64
+            medians
+                .iter()
+                .map(|(q50, r)| 0.5 * (r - q50).abs())
+                .sum::<f64>()
+                / medians.len() as f64
         });
 
         // Coverage of the central 50% interval (q25..q75) and the central 90% (q05..q95).
-        let cov = |lo: fn(&Row) -> Option<f64>, hi: fn(&Row) -> Option<f64>| -> Option<(f64, Vec<bool>)> {
+        let cov = |lo: fn(&Row) -> Option<f64>,
+                   hi: fn(&Row) -> Option<f64>|
+         -> Option<(f64, Vec<bool>)> {
             let hits: Vec<bool> = rows
                 .iter()
                 .filter_map(|r| lo(r).zip(hi(r)).map(|(l, h)| r.6 >= l && r.6 <= h))
                 .collect();
-            (!hits.is_empty())
-                .then(|| (hits.iter().filter(|h| **h).count() as f64 / hits.len() as f64, hits))
+            (!hits.is_empty()).then(|| {
+                (
+                    hits.iter().filter(|h| **h).count() as f64 / hits.len() as f64,
+                    hits,
+                )
+            })
         };
         let cov50 = cov(|r| r.1, |r| r.3).map(|(c, _)| c);
         let cov90_series = cov(|r| r.0, |r| r.4);
@@ -234,7 +246,8 @@ impl QualityMonitor {
 
         // I-5.10: check calibration drift (only when a 90% interval was reported).
         if let Some(c90) = cov90 {
-            self.check_calibration_drift(model_id, c90, cov50.unwrap_or(f64::NAN)).await?;
+            self.check_calibration_drift(model_id, c90, cov50.unwrap_or(f64::NAN))
+                .await?;
         }
 
         // I-5.10: check staleness.

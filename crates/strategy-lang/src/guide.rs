@@ -238,9 +238,10 @@ pub fn generated() -> String {
 /// absent the file is returned unchanged with the generated half appended.
 #[must_use]
 pub fn with_generated(file: &str) -> String {
-    let head = file
-        .find(GENERATED_BEGIN)
-        .map_or_else(|| file.trim_end().to_string(), |i| file[..i].trim_end().to_string());
+    let head = file.find(GENERATED_BEGIN).map_or_else(
+        || file.trim_end().to_string(),
+        |i| file[..i].trim_end().to_string(),
+    );
     format!("{head}\n\n{GENERATED_BEGIN}\n\n{}", generated())
 }
 

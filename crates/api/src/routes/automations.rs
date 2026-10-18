@@ -322,8 +322,16 @@ pub async fn arm_by_id(state: &AppState, id: Uuid) -> Result<serde_json::Value, 
     // A strategy on the one engine arms as a recorded deployment (Set U
     // U-8.3), never on hot-path stage 3.
     if backtest::runner::is_v3(&def_json) {
-        return arm_v3(state, &row, id, instrument_id, asset_class, execution_strategy_id, def_json)
-            .await;
+        return arm_v3(
+            state,
+            &row,
+            id,
+            instrument_id,
+            asset_class,
+            execution_strategy_id,
+            def_json,
+        )
+        .await;
     }
 
     let definition: domain::strategy_def::StrategyDefinition = serde_json::from_value(def_json)
@@ -455,11 +463,21 @@ async fn arm_v3(
         })),
         // Running but not believed armed: stopped, so the two cannot disagree.
         Ok(false) => {
-            super::deployments::stop_started_by(&state.pg, &started_by, "automation vanished while arming").await;
+            super::deployments::stop_started_by(
+                &state.pg,
+                &started_by,
+                "automation vanished while arming",
+            )
+            .await;
             Err(ArmError::NotFound)
         }
         Err(e) => {
-            super::deployments::stop_started_by(&state.pg, &started_by, "automation not marked armed").await;
+            super::deployments::stop_started_by(
+                &state.pg,
+                &started_by,
+                "automation not marked armed",
+            )
+            .await;
             Err(ArmError::Storage(e.to_string()))
         }
     }

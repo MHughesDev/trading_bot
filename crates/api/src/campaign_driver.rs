@@ -106,7 +106,8 @@ pub fn hypothesize_job_before(children: &[(CampaignPhase, i64, String)], seq: i6
 /// The typed move in a HYPOTHESIZE child's result, if it holds one that parses.
 #[must_use]
 pub fn proposed_move(result: &Value) -> Option<research::propose::Move> {
-    let p: research::propose::Proposal = serde_json::from_value(result.get("proposal")?.clone()).ok()?;
+    let p: research::propose::Proposal =
+        serde_json::from_value(result.get("proposal")?.clone()).ok()?;
     Some(p.r#move)
 }
 
@@ -133,7 +134,9 @@ pub fn move_run_ref(campaign_id: Uuid, compare_seq: i64) -> String {
 
 fn veto_text(v: &research::move_memory::Veto) -> String {
     match v {
-        research::move_memory::Veto::Block { why, cites, .. } => format!("{why}; cited: {}.", cites.join(", ")),
+        research::move_memory::Veto::Block { why, cites, .. } => {
+            format!("{why}; cited: {}.", cites.join(", "))
+        }
         other => format!("{other:?}"),
     }
 }
@@ -323,7 +326,8 @@ impl CampaignWorker {
     /// The database.
     pub async fn ensure_arm(&self, user: Uuid, campaign_id: Uuid) -> Result<Option<i32>, JobError> {
         let tenant = user.to_string();
-        let (_, _, search_space) = study_worker::campaign_delta_and_profile(&self.pg, &tenant, campaign_id).await?;
+        let (_, _, search_space) =
+            study_worker::campaign_delta_and_profile(&self.pg, &tenant, campaign_id).await?;
         let Ok(spec) = study_worker::EvaluationSpec::from_search_space(&search_space) else {
             return Ok(None);
         };
@@ -334,7 +338,9 @@ impl CampaignWorker {
         {
             Ok(_) => Ok(Some(budget)),
             Err(sqlx::Error::Database(d)) if d.is_unique_violation() => Ok(None),
-            Err(e) => Err(JobError::infrastructure(format!("creating the random arm: {e}"))),
+            Err(e) => Err(JobError::infrastructure(format!(
+                "creating the random arm: {e}"
+            ))),
         }
     }
 
@@ -380,12 +386,15 @@ impl CampaignWorker {
             .history(user, &key)
             .await
             .map_err(|e| JobError::infrastructure(format!("reading move memory: {e}")))?;
-        let verdict = research::move_memory::veto_move(&mv, &records, &research::move_memory::VetoPolicy::default());
+        let verdict = research::move_memory::veto_move(
+            &mv,
+            &records,
+            &research::move_memory::VetoPolicy::default(),
+        );
         let overridden = verdict.blocks()
-            && store
-                .overridden(user, &key)
-                .await
-                .map_err(|e| JobError::infrastructure(format!("reading the veto overrides: {e}")))?;
+            && store.overridden(user, &key).await.map_err(|e| {
+                JobError::infrastructure(format!("reading the veto overrides: {e}"))
+            })?;
         if verdict.blocks() && !overridden {
             return Err(JobError::logic(
                 ledger::TerminalReason::IntegrityRejected,
@@ -397,7 +406,9 @@ impl CampaignWorker {
                 ),
             ));
         }
-        Ok(Some(json!({ "motif": key, "veto": verdict, "overridden": overridden })))
+        Ok(Some(
+            json!({ "motif": key, "veto": verdict, "overridden": overridden }),
+        ))
     }
 
     /// Record what each judged generation's move did (RB-1.3): one `agent_memory.move_record`
@@ -416,7 +427,8 @@ impl CampaignWorker {
         state: &CampaignState,
     ) -> Result<usize, JobError> {
         let tenant = user.to_string();
-        let (_, _, search_space) = study_worker::campaign_delta_and_profile(&self.pg, &tenant, campaign_id).await?;
+        let (_, _, search_space) =
+            study_worker::campaign_delta_and_profile(&self.pg, &tenant, campaign_id).await?;
         let Ok(spec) = study_worker::EvaluationSpec::from_search_space(&search_space) else {
             return Ok(0);
         };
@@ -452,7 +464,9 @@ impl CampaignWorker {
             store
                 .record(user, &spec.universe_ref, &mv, outcome, &run_ref)
                 .await
-                .map_err(|e| JobError::infrastructure(format!("recording the move's outcome: {e}")))?;
+                .map_err(|e| {
+                    JobError::infrastructure(format!("recording the move's outcome: {e}"))
+                })?;
             written += 1;
         }
         Ok(written)
@@ -502,7 +516,10 @@ impl CampaignWorker {
             // generation proposed is checked against what happened when its shape was tried
             // before. A block nobody overrode stops here and appends nothing.
             if phase == CampaignPhase::Experiment {
-                if let Some(v) = self.consult_veto(parent.user_id, campaign_id, state).await? {
+                if let Some(v) = self
+                    .consult_veto(parent.user_id, campaign_id, state)
+                    .await?
+                {
                     detail["move_veto"] = v;
                 }
             }
@@ -969,24 +986,47 @@ mod tests {
         ];
         assert_eq!(hypothesize_job_before(&kids, 5), Some("h1"));
         assert_eq!(hypothesize_job_before(&kids, 10), Some("h2"));
-        assert_eq!(hypothesize_job_before(&kids, 3), None, "nothing before the first");
+        assert_eq!(
+            hypothesize_job_before(&kids, 3),
+            None,
+            "nothing before the first"
+        );
     }
 
     #[test]
     fn a_comparison_says_what_the_move_did_and_only_a_rejection_is_a_failure() {
         use research::move_memory::Outcome;
-        assert_eq!(move_outcome(&json!({ "promoted": true, "verdict": "promote" })), Outcome::Improved);
-        assert_eq!(move_outcome(&json!({ "promoted": false, "verdict": "reject" })), Outcome::Failed);
+        assert_eq!(
+            move_outcome(&json!({ "promoted": true, "verdict": "promote" })),
+            Outcome::Improved
+        );
+        assert_eq!(
+            move_outcome(&json!({ "promoted": false, "verdict": "reject" })),
+            Outcome::Failed
+        );
         for v in ["equivalent", "undecided", "no_candidate"] {
-            assert_eq!(move_outcome(&json!({ "promoted": false, "verdict": v })), Outcome::Neutral, "{v}");
+            assert_eq!(
+                move_outcome(&json!({ "promoted": false, "verdict": v })),
+                Outcome::Neutral,
+                "{v}"
+            );
         }
-        assert_eq!(move_outcome(&Value::Null), Outcome::Neutral, "no result is no evidence");
+        assert_eq!(
+            move_outcome(&Value::Null),
+            Outcome::Neutral,
+            "no result is no evidence"
+        );
     }
 
     #[test]
     fn a_proposal_is_read_as_a_typed_move_or_not_at_all() {
         let good = json!({ "proposal": { "move": "change_exit", "mode": "trail", "hypothesis": "h", "ranges": [] } });
-        assert_eq!(proposed_move(&good), Some(research::propose::Move::ChangeExit { mode: research::propose::ExitMode::Trail }));
+        assert_eq!(
+            proposed_move(&good),
+            Some(research::propose::Move::ChangeExit {
+                mode: research::propose::ExitMode::Trail
+            })
+        );
         assert!(proposed_move(&json!({ "proposal": { "move": "invent_a_move" } })).is_none());
         assert!(proposed_move(&json!({ "proposal": null })).is_none());
     }
@@ -999,7 +1039,8 @@ mod tests {
             "research": { "start": "2024-01-01T00:00:00Z", "end": "2024-09-01T00:00:00Z" },
             "holdout":  { "start": "2024-09-01T00:00:00Z", "end": "2024-12-01T00:00:00Z" },
             "objective": { "primary": "sharpe" }, "max_runs": 17
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(arm_budget(&spec), 17);
     }
 
@@ -1009,12 +1050,27 @@ mod tests {
     fn advance_consults_the_veto_before_dispatch_and_records_the_outcome_after_compare() {
         let src = include_str!("campaign_driver.rs");
         let advance = &src[src.find("async fn advance(").unwrap()..];
-        let veto = advance.find("self.consult_veto(").expect("the veto is consulted");
-        let submit = advance.find("Submission::new(kind").expect("the child is submitted");
-        assert!(veto < submit, "the veto must run before the child is created");
-        let record = advance.find("self.record_move_outcomes(").expect("the outcome is recorded");
-        assert!(record > advance.find("child job {} for phase").unwrap(), "recorded only after the child succeeded");
-        assert!(src.contains("self.ensure_arm("), "the arm is created with the campaign");
+        let veto = advance
+            .find("self.consult_veto(")
+            .expect("the veto is consulted");
+        let submit = advance
+            .find("Submission::new(kind")
+            .expect("the child is submitted");
+        assert!(
+            veto < submit,
+            "the veto must run before the child is created"
+        );
+        let record = advance
+            .find("self.record_move_outcomes(")
+            .expect("the outcome is recorded");
+        assert!(
+            record > advance.find("child job {} for phase").unwrap(),
+            "recorded only after the child succeeded"
+        );
+        assert!(
+            src.contains("self.ensure_arm("),
+            "the arm is created with the campaign"
+        );
     }
 
     #[test]

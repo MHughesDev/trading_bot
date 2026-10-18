@@ -63,8 +63,15 @@ fn tool_use(id: &str, name: &str, input: Value) -> Value {
 /// A provider that calls `tool` until the transcript holds a tool result, then
 /// answers with `final_text`. Keyed on the request rather than on its position,
 /// because the run makes other requests (a canary) that would consume a script.
-async fn adaptive_provider(tool: &'static str, final_text: &'static str, delay_ms: u64) -> (String, Arc<Provider>) {
-    let seen = Arc::new(Provider { requests: AtomicUsize::new(0), bodies: Mutex::new(vec![]) });
+async fn adaptive_provider(
+    tool: &'static str,
+    final_text: &'static str,
+    delay_ms: u64,
+) -> (String, Arc<Provider>) {
+    let seen = Arc::new(Provider {
+        requests: AtomicUsize::new(0),
+        bodies: Mutex::new(vec![]),
+    });
     let handler = Arc::clone(&seen);
     let app = Router::new().route(
         "/v1/messages",
@@ -73,17 +80,32 @@ async fn adaptive_provider(tool: &'static str, final_text: &'static str, delay_m
             async move {
                 seen.requests.fetch_add(1, Ordering::SeqCst);
                 let raw = body.to_string();
-                let has_tools = body.get("tools").and_then(Value::as_array).is_some_and(|t| !t.is_empty());
+                let has_tools = body
+                    .get("tools")
+                    .and_then(Value::as_array)
+                    .is_some_and(|t| !t.is_empty());
                 let answered = raw.contains("tool_result");
                 seen.bodies.lock().unwrap().push(body);
                 if delay_ms > 0 {
                     tokio::time::sleep(Duration::from_millis(delay_ms)).await;
                 }
-                Json(if has_tools && !answered { tool_use("toolu_1", tool, json!({})) } else if has_tools { tool_use("toolu_2", "finish_task", json!({ "result": final_text, "evidence": "list_instruments" })) } else { text(final_text) })
+                Json(if has_tools && !answered {
+                    tool_use("toolu_1", tool, json!({}))
+                } else if has_tools {
+                    tool_use(
+                        "toolu_2",
+                        "finish_task",
+                        json!({ "result": final_text, "evidence": "list_instruments" }),
+                    )
+                } else {
+                    text(final_text)
+                })
             }
         }),
     );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
     let base = format!("http://{}", listener.local_addr().expect("addr"));
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
@@ -117,7 +139,9 @@ async fn slow_provider(script: Script, delay_ms: u64) -> (String, Arc<Provider>)
             }
         }),
     );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
     let base = format!("http://{}", listener.local_addr().expect("addr"));
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
@@ -133,7 +157,9 @@ struct World {
 }
 
 async fn world(base: &str) -> World {
-    let pg = PgPool::connect(&url()).await.expect("the scratch database is up");
+    let pg = PgPool::connect(&url())
+        .await
+        .expect("the scratch database is up");
     let user = Uuid::new_v4();
     sqlx::query("INSERT INTO users (user_id, email) VALUES ($1, $2)")
         .bind(user)
@@ -154,19 +180,29 @@ async fn world(base: &str) -> World {
         .expect("the shipped profiles load"),
     );
     let manager = Arc::new(
-        AgentManager::new(pg.clone(), "http://127.0.0.1:9".into(), cfg::model::AgentConfig::default())
-            .with_profiles(profiles),
+        AgentManager::new(
+            pg.clone(),
+            "http://127.0.0.1:9".into(),
+            cfg::model::AgentConfig::default(),
+        )
+        .with_profiles(profiles),
     );
-    World { pg, user, manager, creds }
+    World {
+        pg,
+        user,
+        manager,
+        creds,
+    }
 }
 
 async fn over(pg: &PgPool, run: Uuid) -> String {
     for _ in 0..240 {
-        let (status,): (String,) = sqlx::query_as("SELECT status FROM agent_runs WHERE run_id = $1")
-            .bind(run)
-            .fetch_one(pg)
-            .await
-            .expect("the run row");
+        let (status,): (String,) =
+            sqlx::query_as("SELECT status FROM agent_runs WHERE run_id = $1")
+                .bind(run)
+                .fetch_one(pg)
+                .await
+                .expect("the run row");
         if !api::agent::conversations::ACTIVE_RUN_STATES.contains(&status.as_str()) {
             return status;
         }
@@ -194,14 +230,18 @@ async fn chat_turn(w: &World, convo: Uuid, q: &str) -> Uuid {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs DATABASE_URL: a scratch database migrated through the latest migration"]
 async fn a_real_turn_leaves_a_log_that_replays_and_telemetry_that_reads_back() {
-    let (base, seen) = adaptive_provider("list_instruments", "Two instruments are initialised.", 0).await;
+    let (base, seen) =
+        adaptive_provider("list_instruments", "Two instruments are initialised.", 0).await;
     let w = world(&base).await;
     let convo = api::agent::conversations::create(&w.pg, w.user, "anthropic", "claude-sonnet-5")
         .await
         .expect("a conversation");
     let run = chat_turn(&w, convo, "Which instruments do we have?").await;
     let status = over(&w.pg, run).await;
-    eprintln!("ended {status}; requests {}", seen.requests.load(Ordering::SeqCst));
+    eprintln!(
+        "ended {status}; requests {}",
+        seen.requests.load(Ordering::SeqCst)
+    );
     let rows: Vec<(i32, String, String, Value)> = sqlx::query_as(
         "SELECT seq, direction, kind, payload_json FROM agent_effect_log WHERE run_id = $1 ORDER BY seq",
     )
@@ -210,20 +250,33 @@ async fn a_real_turn_leaves_a_log_that_replays_and_telemetry_that_reads_back() {
     .await
     .unwrap();
     for (s, d, k, p) in &rows {
-        eprintln!("{s} {d} {k} {}", p.to_string().chars().take(160).collect::<String>());
+        eprintln!(
+            "{s} {d} {k} {}",
+            p.to_string().chars().take(160).collect::<String>()
+        );
     }
     assert_ne!(status, "fenced", "the run was fenced instead of finishing");
 
     // S-2.5: the log of a real run projects to a trajectory that can replay.
-    let spans = api::trace_from_effects::spans_for_run(&w.pg, run).await.unwrap();
-    assert!(harness::trace::is_replayable(&spans), "{:?}", harness::trace::unreplayable_reason(&spans));
+    let spans = api::trace_from_effects::spans_for_run(&w.pg, run)
+        .await
+        .unwrap();
+    assert!(
+        harness::trace::is_replayable(&spans),
+        "{:?}",
+        harness::trace::unreplayable_reason(&spans)
+    );
     assert!(
         spans.iter().any(|s| matches!(&s.event, harness::trace::Event::ToolCall { name, args, .. } if name == "list_instruments" && !args.is_null())),
         "the tool call is in the trajectory with its arguments"
     );
     // The effect is logged before its answer (S-2.5 ordering).
-    let seq_of = |dir: &str, kind: &str| rows.iter().find(|r| r.1 == dir && r.2 == kind).map(|r| r.0);
-    assert!(seq_of("effect", "ExecuteTool") < seq_of("input", "ToolResult").or(seq_of("input", "ToolError")));
+    let seq_of =
+        |dir: &str, kind: &str| rows.iter().find(|r| r.1 == dir && r.2 == kind).map(|r| r.0);
+    assert!(
+        seq_of("effect", "ExecuteTool")
+            < seq_of("input", "ToolResult").or(seq_of("input", "ToolError"))
+    );
 
     // S-2.8: all ten telemetry columns are populated by the driver.
     let t = sqlx::query(
@@ -236,7 +289,13 @@ async fn a_real_turn_leaves_a_log_that_replays_and_telemetry_that_reads_back() {
     .await
     .unwrap();
     use sqlx::Row;
-    for col in ["harness_version", "profile_name", "adapter", "transport", "outcome"] {
+    for col in [
+        "harness_version",
+        "profile_name",
+        "adapter",
+        "transport",
+        "outcome",
+    ] {
         let v: Option<String> = t.get(col);
         assert!(v.is_some_and(|v| !v.is_empty()), "{col} was not written");
     }
@@ -245,13 +304,19 @@ async fn a_real_turn_leaves_a_log_that_replays_and_telemetry_that_reads_back() {
         assert!(v.is_some(), "{col} was not written");
     }
     let trials: Option<i32> = t.get("trials_spent");
-    assert_eq!(trials, Some(0), "a read spends no trial, and says zero rather than null");
+    assert_eq!(
+        trials,
+        Some(0),
+        "a read spends no trial, and says zero rather than null"
+    );
     let n_eff: Option<f64> = t.try_get("n_eff_after").unwrap_or(None);
     eprintln!("n_eff_after = {n_eff:?} (null is allowed when the ledger cannot be read)");
     let prompt: i64 = t.get("prompt_tokens");
     let billed: i64 = t.get("tokens_in");
-    assert!(prompt >= billed, "prompt_tokens counts the cached part tokens_in does not: {prompt} vs {billed}");
-
+    assert!(
+        prompt >= billed,
+        "prompt_tokens counts the cached part tokens_in does not: {prompt} vs {billed}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -264,7 +329,10 @@ async fn a_drain_opens_a_window_the_monitor_reads_and_honours() {
     assert_eq!(left, 0, "an idle manager drains at once");
 
     let store = monitor::store::MonitorStore::new(w.pg.clone());
-    let windows = store.open_windows().await.expect("the monitor reads its windows");
+    let windows = store
+        .open_windows()
+        .await
+        .expect("the monitor reads its windows");
     let now = chrono::Utc::now();
     assert!(
         windows
@@ -276,7 +344,10 @@ async fn a_drain_opens_a_window_the_monitor_reads_and_honours() {
     // quiet - which is what a rolling deploy looks like.
     let beats = [ComponentBeat::new("tbot-platform", "old-instance", true)];
     assert!(
-        matches!(assess(&beats, &windows, now), PlatformVerdict::Suppressed { .. }),
+        matches!(
+            assess(&beats, &windows, now),
+            PlatformVerdict::Suppressed { .. }
+        ),
         "the deploy window did not suppress the platform trip"
     );
     assert!(
@@ -299,10 +370,19 @@ async fn a_second_turn_names_the_live_run_and_a_steer_reaches_it() {
     // A plain second turn is refused, and the refusal names the run.
     let refused = w
         .manager
-        .send_turn(w.user, convo, "and what about ETH?", &w.creds, Default::default())
+        .send_turn(
+            w.user,
+            convo,
+            "and what about ETH?",
+            &w.creds,
+            Default::default(),
+        )
         .await
         .expect_err("two live turns in one conversation");
-    assert!(format!("{refused:?}").contains(&run.to_string()), "{refused:?}");
+    assert!(
+        format!("{refused:?}").contains(&run.to_string()),
+        "{refused:?}"
+    );
 
     // A steer is accepted, queued on the live run, and recorded.
     let steered = w
@@ -319,7 +399,10 @@ async fn a_second_turn_names_the_live_run_and_a_steer_reaches_it() {
         )
         .await
         .expect("a steer reaches the live run");
-    assert_eq!(steered, run, "the steer went to the live run, not a new one");
+    assert_eq!(
+        steered, run,
+        "the steer went to the live run, not a new one"
+    );
     over(&w.pg, run).await;
     let kinds: Vec<String> = sqlx::query_scalar(
         "SELECT kind FROM agent_effect_log WHERE run_id = $1 AND direction = 'input' ORDER BY seq",

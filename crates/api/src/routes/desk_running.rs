@@ -266,7 +266,10 @@ pub async fn brief(
         }
     };
 
-    let ids: Vec<String> = rows.iter().map(|r| r.get::<String, _>("entry_id")).collect();
+    let ids: Vec<String> = rows
+        .iter()
+        .map(|r| r.get::<String, _>("entry_id"))
+        .collect();
     // The entries, best-effort. `None` is "could not be read", kept apart from
     // an entry that is simply absent from the store.
     let entries: Option<std::collections::HashMap<String, Value>> = if ids.is_empty() {
@@ -689,14 +692,19 @@ mod tests {
             "user_preference",
             "open_question",
         ];
-        let buckets: std::collections::BTreeSet<_> =
-            kinds.iter().map(|k| bucket_for(k).expect("every kind has a bucket")).collect();
+        let buckets: std::collections::BTreeSet<_> = kinds
+            .iter()
+            .map(|k| bucket_for(k).expect("every kind has a bucket"))
+            .collect();
         assert_eq!(buckets.len(), kinds.len(), "two kinds share a bucket");
         assert!(bucket_for("playbook").is_none());
         // And each bucket is one `/api/memory/{bucket}` answers.
         let memory = include_str!("memory.rs");
         for b in &buckets {
-            assert!(memory.contains(&format!("\"{b}\" =>")), "{b} is not a bucket memory.rs serves");
+            assert!(
+                memory.contains(&format!("\"{b}\" =>")),
+                "{b} is not a bucket memory.rs serves"
+            );
         }
     }
 }

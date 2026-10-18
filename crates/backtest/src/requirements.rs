@@ -245,19 +245,28 @@ mod tests {
         let kinds: Vec<FeatureKind> = req.features.iter().map(|f| f.kind).collect();
         assert!(kinds.contains(&FeatureKind::Sma) && kinds.contains(&FeatureKind::Atr));
         let atr_lookback = u64::from(features::runtime::lookback_bars("atr_14").unwrap());
-        assert!(req.warmup_bars >= atr_lookback, "{} < {atr_lookback}", req.warmup_bars);
+        assert!(
+            req.warmup_bars >= atr_lookback,
+            "{} < {atr_lookback}",
+            req.warmup_bars
+        );
     }
 
     #[test]
     fn sma_and_atr_periods_outside_the_registry_bounds_are_refused() {
         for bad in ["sma_0", "atr_1", "atr_0", "sma_x", "sma"] {
-            let d = def(&format!(r#"{{
+            let d = def(&format!(
+                r#"{{
                 "strategy_id": "s", "definition_version": "1.0",
                 "asset_class": "crypto_spot_cex", "inputs": [],
                 "nodes": [{{ "id": "n1", "type": "condition", "expr": "feature('{bad}') > 1" }}],
                 "actions": []
-            }}"#));
-            assert!(derive_requirements(&d, Timeframe::Minutes1).is_err(), "{bad}");
+            }}"#
+            ));
+            assert!(
+                derive_requirements(&d, Timeframe::Minutes1).is_err(),
+                "{bad}"
+            );
         }
     }
 
@@ -265,16 +274,22 @@ mod tests {
     fn every_family_in_the_registry_is_derivable_with_the_runtimes_warmup() {
         for f in features::registry::families() {
             let name = f.example();
-            let d = def(&format!(r#"{{
+            let d = def(&format!(
+                r#"{{
                 "strategy_id": "s", "definition_version": "1.0",
                 "asset_class": "crypto_spot_cex", "inputs": [],
                 "nodes": [{{ "id": "n1", "type": "condition", "expr": "feature('{name}') > 1" }}],
                 "actions": []
-            }}"#));
+            }}"#
+            ));
             let req = derive_requirements(&d, Timeframe::Minutes1)
                 .unwrap_or_else(|e| panic!("`{name}`: {e}"));
             let lookback = u64::from(features::runtime::lookback_bars(&name).unwrap());
-            assert!(req.warmup_bars >= lookback, "{name}: {} < {lookback}", req.warmup_bars);
+            assert!(
+                req.warmup_bars >= lookback,
+                "{name}: {} < {lookback}",
+                req.warmup_bars
+            );
         }
     }
 

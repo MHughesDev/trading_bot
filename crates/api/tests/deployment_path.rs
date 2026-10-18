@@ -137,7 +137,11 @@ fn draft(revision: &str, instrument: &str, capital: &str) -> ProposalDraft {
         profile_id: "paper_v1".to_owned(),
         verdict_revision_hash: revision.to_owned(),
         verdict: (1..=16)
-            .map(|n| GateVerdictEntry { gate_no: n, passed: true, detail: None })
+            .map(|n| GateVerdictEntry {
+                gate_no: n,
+                passed: true,
+                detail: None,
+            })
             .collect(),
         thresholds: DivergenceThresholds {
             max_abs_return_divergence: 0.02,
@@ -151,11 +155,13 @@ fn draft(revision: &str, instrument: &str, capital: &str) -> ProposalDraft {
 }
 
 async fn arm(pg: &PgPool, name: &str) {
-    sqlx::query("INSERT INTO deployment_gate_switch (name, armed_by, note) VALUES ($1, 'test', 'test')")
-        .bind(name)
-        .execute(pg)
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO deployment_gate_switch (name, armed_by, note) VALUES ($1, 'test', 'test')",
+    )
+    .bind(name)
+    .execute(pg)
+    .await
+    .unwrap();
 }
 
 async fn declare_ceilings(pg: &PgPool, concurrent: &str, aggregate: &str, instrument: &str) {
@@ -234,9 +240,10 @@ async fn raw_measured_deployment(
 
 /// A proposal, approved by a person.
 async fn approved(pg: &PgPool, user: &str, d: ProposalDraft) -> Uuid {
-    let id = deployment_gate::create_proposal(pg, user, "agent:run-1", ProposerKind::Agent, d, None)
-        .await
-        .unwrap();
+    let id =
+        deployment_gate::create_proposal(pg, user, "agent:run-1", ProposerKind::Agent, d, None)
+            .await
+            .unwrap();
     deployment_gate::decide_proposal(pg, &human(), "human:test", id, true, "ok", None)
         .await
         .unwrap();
@@ -289,9 +296,10 @@ async fn a_deployment_exists_only_with_a_decided_proposal_behind_it() {
 
     // It cannot be spent by somebody else's session.
     let pid2 = approved(pg, "alice", draft(&rev('b'), "ETH", "1000")).await;
-    let other = deployment_gate::authorise_deployment(pg, &human(), "mallory", Uuid::new_v4(), pid2)
-        .await
-        .unwrap_err();
+    let other =
+        deployment_gate::authorise_deployment(pg, &human(), "mallory", Uuid::new_v4(), pid2)
+            .await
+            .unwrap_err();
     assert!(matches!(other, GateError::WrongOwner), "{other}");
 
     // And what it authorises is what it said: one revision, one owner, at most
@@ -301,8 +309,20 @@ async fn a_deployment_exists_only_with_a_decided_proposal_behind_it() {
         .await
         .unwrap();
     for (who, revision, instrument, capital, needle) in [
-        ("alice", rev('c'), "ETH", "1000", "approved proposal is for revision"),
-        ("mallory", rev('b'), "ETH", "1000", "belongs to another user"),
+        (
+            "alice",
+            rev('c'),
+            "ETH",
+            "1000",
+            "approved proposal is for revision",
+        ),
+        (
+            "mallory",
+            rev('b'),
+            "ETH",
+            "1000",
+            "belongs to another user",
+        ),
         ("alice", rev('b'), "ETH", "5000", "exceeds the approved"),
         ("alice", rev('b'), "SOL", "1000", "approved proposal is for"),
     ] {
@@ -315,7 +335,12 @@ async fn a_deployment_exists_only_with_a_decided_proposal_behind_it() {
     // A rejected decision authorises nothing: the composite foreign key names
     // an APPROVED decision or none.
     let rejected = deployment_gate::create_proposal(
-        pg, "alice", "alice", ProposerKind::Human, draft(&rev('d'), "ADA", "10"), None,
+        pg,
+        "alice",
+        "alice",
+        ProposerKind::Human,
+        draft(&rev('d'), "ADA", "10"),
+        None,
     )
     .await
     .unwrap();
@@ -369,9 +394,17 @@ async fn without_the_trigger_the_door_is_open() {
         .execute(&s.pg)
         .await
         .unwrap();
-    raw_deployment(&s.pg, Uuid::new_v4(), &rev('a'), "alice", "BTC", "1", Utc::now())
-        .await
-        .expect("the mutation: nothing refuses it");
+    raw_deployment(
+        &s.pg,
+        Uuid::new_v4(),
+        &rev('a'),
+        "alice",
+        "BTC",
+        "1",
+        Utc::now(),
+    )
+    .await
+    .expect("the mutation: nothing refuses it");
     s.drop_db().await;
 }
 
@@ -383,14 +416,29 @@ async fn no_scope_an_agent_can_hold_decides_or_authorises_a_deployment() {
     let s = Scratch::new().await;
     let pg = &s.pg;
     let pid = deployment_gate::create_proposal(
-        pg, "alice", "agent:run", ProposerKind::Agent, draft(&rev('a'), "BTC", "10"), None,
+        pg,
+        "alice",
+        "agent:run",
+        ProposerKind::Agent,
+        draft(&rev('a'), "BTC", "10"),
+        None,
     )
     .await
     .unwrap();
     let mut scopes: Vec<&str> = vec![
-        "research:data.read", "research:features", "research:jobs", "research:artifacts",
-        "research:memory", "research:report", "llm:proxy", "monitor.control",
-        "orders.place", "automations.arm", "models.promote", "skills.admit", "web",
+        "research:data.read",
+        "research:features",
+        "research:jobs",
+        "research:artifacts",
+        "research:memory",
+        "research:report",
+        "llm:proxy",
+        "monitor.control",
+        "orders.place",
+        "automations.arm",
+        "models.promote",
+        "skills.admit",
+        "web",
         "web:full:impostor",
     ];
     scopes.sort_unstable();
@@ -483,18 +531,29 @@ async fn a_stale_verdict_is_refused() {
 
     // Created fresh, but the head moved before the human decided.
     let pid = deployment_gate::create_proposal(
-        pg, "alice", "agent:r", ProposerKind::Agent, draft(&rev('a'), "BTC", "10"), Some(&rev('a')),
+        pg,
+        "alice",
+        "agent:r",
+        ProposerKind::Agent,
+        draft(&rev('a'), "BTC", "10"),
+        Some(&rev('a')),
     )
     .await
     .unwrap();
-    let e = deployment_gate::decide_proposal(pg, &human(), "human:t", pid, true, "", Some(&rev('b')))
-        .await
-        .unwrap_err();
+    let e =
+        deployment_gate::decide_proposal(pg, &human(), "human:t", pid, true, "", Some(&rev('b')))
+            .await
+            .unwrap_err();
     assert_eq!(e.http().1, "stale_verdict", "{e}");
 
     // And created against a head that has already moved.
     let e = deployment_gate::create_proposal(
-        pg, "alice", "agent:r", ProposerKind::Agent, draft(&rev('a'), "ETH", "10"), Some(&rev('c')),
+        pg,
+        "alice",
+        "agent:r",
+        ProposerKind::Agent,
+        draft(&rev('a'), "ETH", "10"),
+        Some(&rev('c')),
     )
     .await
     .unwrap_err();
@@ -529,7 +588,10 @@ async fn paper_v1_cannot_authorise_capital_in_the_schema() {
     let r = sqlx::query("UPDATE deployment_proposal SET venue_class = 'live'")
         .execute(pg)
         .await;
-    assert!(r.is_err(), "a proposal is immutable, and `live` is not a venue class");
+    assert!(
+        r.is_err(),
+        "a proposal is immutable, and `live` is not a venue class"
+    );
     let capital = sqlx::query(
         "INSERT INTO deployment_authorisation (deployment_id, proposal_id, venue_class) VALUES ($1,$2,'capital')",
     )
@@ -537,12 +599,23 @@ async fn paper_v1_cannot_authorise_capital_in_the_schema() {
     .bind(Uuid::new_v4())
     .execute(pg)
     .await;
-    assert!(err_text(&capital.unwrap_err()).contains("venue_class"), "the CHECK names it");
+    assert!(
+        err_text(&capital.unwrap_err()).contains("venue_class"),
+        "the CHECK names it"
+    );
     // The ramp: a paper_v1 step-up is refused by the review trigger.
     let dep = Uuid::new_v4();
-    raw_deployment(pg, dep, &rev('a'), "alice", "BTC", "10", Utc::now() - Duration::days(40))
-        .await
-        .unwrap();
+    raw_deployment(
+        pg,
+        dep,
+        &rev('a'),
+        "alice",
+        "BTC",
+        "10",
+        Utc::now() - Duration::days(40),
+    )
+    .await
+    .unwrap();
     let t0 = Utc::now() - Duration::days(30);
     sqlx::query("INSERT INTO ramp_period (deployment_id, period_no, starts_at, ends_at) VALUES ($1,1,$2,$3)")
         .bind(dep)
@@ -557,7 +630,9 @@ async fn paper_v1_cannot_authorise_capital_in_the_schema() {
         "a paper_v1 period is evidence, not a rung"
     );
     // strict_v1 may.
-    review_row(pg, dep, 1, "strict_v1", "step_up", true, 0, 0).await.unwrap();
+    review_row(pg, dep, 1, "strict_v1", "step_up", true, 0, 0)
+        .await
+        .unwrap();
     let _ = pid;
     s.drop_db().await;
 }
@@ -600,7 +675,12 @@ async fn deploying_past_a_ceiling_is_refused_and_names_which_one_bound() {
     let s = Scratch::new().await;
     let pg = &s.pg;
     let p1 = deployment_gate::create_proposal(
-        pg, "alice", "alice", ProposerKind::Human, draft(&rev('a'), "BTC", "15000"), None,
+        pg,
+        "alice",
+        "alice",
+        ProposerKind::Human,
+        draft(&rev('a'), "BTC", "15000"),
+        None,
     )
     .await
     .unwrap();
@@ -609,7 +689,10 @@ async fn deploying_past_a_ceiling_is_refused_and_names_which_one_bound() {
     // half of the rule - that an undeclared ceiling refuses rather than permits -
     // start from the state before anybody declared them. The owner connection can
     // truncate; the platform's role cannot.
-    sqlx::query("TRUNCATE deployment_ceiling").execute(pg).await.unwrap();
+    sqlx::query("TRUNCATE deployment_ceiling")
+        .execute(pg)
+        .await
+        .unwrap();
 
     // Nothing declared: refused, naming the first undeclared ceiling. No default
     // permits everything.
@@ -627,7 +710,12 @@ async fn deploying_past_a_ceiling_is_refused_and_names_which_one_bound() {
     // The same revision on the same instrument: 15k + 15k = 30k > 20k, though
     // each is under it alone. Aggregated across instances, not per instance.
     let p2 = deployment_gate::create_proposal(
-        pg, "alice", "alice", ProposerKind::Human, draft(&rev('a'), "BTC", "15000"), None,
+        pg,
+        "alice",
+        "alice",
+        ProposerKind::Human,
+        draft(&rev('a'), "BTC", "15000"),
+        None,
     )
     .await
     .unwrap();
@@ -641,7 +729,12 @@ async fn deploying_past_a_ceiling_is_refused_and_names_which_one_bound() {
 
     // Aggregate capital: another revision, 30k, total would be 45k > 40k.
     let p3 = deployment_gate::create_proposal(
-        pg, "alice", "alice", ProposerKind::Human, draft(&rev('b'), "ETH", "30000"), None,
+        pg,
+        "alice",
+        "alice",
+        ProposerKind::Human,
+        draft(&rev('b'), "ETH", "30000"),
+        None,
     )
     .await
     .unwrap();
@@ -649,7 +742,12 @@ async fn deploying_past_a_ceiling_is_refused_and_names_which_one_bound() {
     // proposals under it to isolate the aggregate.)
     let _ = p3;
     let p4 = deployment_gate::create_proposal(
-        pg, "alice", "alice", ProposerKind::Human, draft(&rev('b'), "ETH", "20000"), None,
+        pg,
+        "alice",
+        "alice",
+        ProposerKind::Human,
+        draft(&rev('b'), "ETH", "20000"),
+        None,
     )
     .await
     .unwrap();
@@ -657,7 +755,12 @@ async fn deploying_past_a_ceiling_is_refused_and_names_which_one_bound() {
         .await
         .expect("35k of 40k");
     let p5 = deployment_gate::create_proposal(
-        pg, "alice", "alice", ProposerKind::Human, draft(&rev('c'), "SOL", "10000"), None,
+        pg,
+        "alice",
+        "alice",
+        ProposerKind::Human,
+        draft(&rev('c'), "SOL", "10000"),
+        None,
     )
     .await
     .unwrap();
@@ -672,10 +775,11 @@ async fn deploying_past_a_ceiling_is_refused_and_names_which_one_bound() {
         other => panic!("{other}"),
     }
     // A refusal recorded nothing.
-    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM deployment_decision WHERE decision = 'approved'")
-        .fetch_one(pg)
-        .await
-        .unwrap();
+    let n: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM deployment_decision WHERE decision = 'approved'")
+            .fetch_one(pg)
+            .await
+            .unwrap();
     assert_eq!(n, 2);
     // Rejecting is never refused by a ceiling.
     deployment_gate::decide_proposal(pg, &human(), "human:t", p5, false, "full", None)
@@ -695,33 +799,55 @@ async fn everything_running_carries_the_legacy_marker_and_no_gate_can_read_it() 
 
     // Running before the path existed: a straggler the sweep finds.
     let old = Uuid::new_v4();
-    raw_deployment(pg, old, &rev('a'), "alice", "OLD", "100", Utc::now()).await.unwrap();
+    raw_deployment(pg, old, &rev('a'), "alice", "OLD", "100", Utc::now())
+        .await
+        .unwrap();
     let stopped = Uuid::new_v4();
-    raw_deployment(pg, stopped, &rev('a'), "alice", "GONE", "100", Utc::now()).await.unwrap();
+    raw_deployment(pg, stopped, &rev('a'), "alice", "GONE", "100", Utc::now())
+        .await
+        .unwrap();
     sqlx::query("UPDATE strategy_deployment SET stopped_at = now(), stop_reason = 'x' WHERE deployment_id = $1")
         .bind(stopped)
         .execute(pg)
         .await
         .unwrap();
-    assert_eq!(legacy_marker::mark_unmarked(pg).await.unwrap(), 1, "the running one, not the stopped one");
-    assert_eq!(legacy_marker::mark_unmarked(pg).await.unwrap(), 0, "idempotent");
+    assert_eq!(
+        legacy_marker::mark_unmarked(pg).await.unwrap(),
+        1,
+        "the running one, not the stopped one"
+    );
+    assert_eq!(
+        legacy_marker::mark_unmarked(pg).await.unwrap(),
+        0,
+        "idempotent"
+    );
 
     // One with authority is not legacy, and the marker would lie about it.
     arm(pg, "deployments_require_a_proposal").await;
     let pid = approved(pg, "alice", draft(&rev('a'), "NEW", "100")).await;
     let new = Uuid::new_v4();
-    deployment_gate::authorise_deployment(pg, &human(), "alice", new, pid).await.unwrap();
-    raw_deployment(pg, new, &rev('a'), "alice", "NEW", "100", Utc::now()).await.unwrap();
+    deployment_gate::authorise_deployment(pg, &human(), "alice", new, pid)
+        .await
+        .unwrap();
+    raw_deployment(pg, new, &rev('a'), "alice", "NEW", "100", Utc::now())
+        .await
+        .unwrap();
     assert_eq!(legacy_marker::mark_unmarked(pg).await.unwrap(), 0);
-    let lie = sqlx::query("INSERT INTO deployment_legacy_marker (deployment_id, basis) VALUES ($1,'x')")
-        .bind(new)
-        .execute(pg)
-        .await;
+    let lie =
+        sqlx::query("INSERT INTO deployment_legacy_marker (deployment_id, basis) VALUES ($1,'x')")
+            .bind(new)
+            .execute(pg)
+            .await;
     assert!(err_text(&lie.unwrap_err()).contains("is not legacy_ungated"));
 
     // The surface shows the marker beside the numbers.
     let rows = deployment_gate::overview(pg, "alice").await.unwrap();
-    let find = |id: Uuid| rows.iter().find(|r| r["deployment_id"] == id.to_string()).unwrap().clone();
+    let find = |id: Uuid| {
+        rows.iter()
+            .find(|r| r["deployment_id"] == id.to_string())
+            .unwrap()
+            .clone()
+    };
     assert_eq!(find(old)["legacy_ungated"], true);
     assert_eq!(find(new)["legacy_ungated"], false);
     assert_eq!(find(new)["profile_id"], "paper_v1");
@@ -731,15 +857,20 @@ async fn everything_running_carries_the_legacy_marker_and_no_gate_can_read_it() 
     // The marker is a fact, never an input: nothing that evaluates a strategy
     // holds a grant on it. (As the platform's role it reads and writes.)
     for role in ["agent_role", "backtest_role", "internal_ml_role"] {
-        let can: bool = sqlx::query_scalar("SELECT has_table_privilege($1, 'deployment_legacy_marker', 'SELECT')")
-            .bind(role)
-            .fetch_one(pg)
-            .await
-            .unwrap();
+        let can: bool = sqlx::query_scalar(
+            "SELECT has_table_privilege($1, 'deployment_legacy_marker', 'SELECT')",
+        )
+        .bind(role)
+        .fetch_one(pg)
+        .await
+        .unwrap();
         assert!(!can, "{role} can read legacy markers");
     }
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     let n: i64 = sqlx::query_scalar("SELECT count(*) FROM deployment_legacy_marker")
         .fetch_one(&mut *tx)
         .await
@@ -761,7 +892,9 @@ async fn everything_running_carries_the_legacy_marker_and_no_gate_can_read_it() 
 #[test]
 fn no_gate_or_evaluator_source_names_the_legacy_marker() {
     fn scan(dir: &std::path::Path, needle: &str, hits: &mut Vec<String>) {
-        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
         for e in rd.flatten() {
             let p = e.path();
             if p.is_dir() {
@@ -787,7 +920,10 @@ fn no_gate_or_evaluator_source_names_the_legacy_marker() {
     ] {
         scan(&root.join(d), "deployment_legacy_marker", &mut table);
     }
-    assert!(table.is_empty(), "a gate or evaluator reads the marker table: {table:?}");
+    assert!(
+        table.is_empty(),
+        "a gate or evaluator reads the marker table: {table:?}"
+    );
 
     let mut word = Vec::new();
     for d in [
@@ -800,7 +936,8 @@ fn no_gate_or_evaluator_source_names_the_legacy_marker() {
         scan(&root.join(d), "legacy_ungated", &mut word);
     }
     assert!(
-        word.iter().all(|p| p.ends_with("crates/backtest/src/stats/compare.rs")),
+        word.iter()
+            .all(|p| p.ends_with("crates/backtest/src/stats/compare.rs")),
         "`legacy_ungated` appears outside the one display qualifier: {word:?}"
     );
 }
@@ -834,17 +971,30 @@ async fn once_armed_no_new_trial_registers_as_legacy_unlogged_and_history_stays(
 
     arm(&s.pg, "legacy_unlogged_retired").await;
     let s2 = subject(2);
-    let e = l.register_async(&Registration::unlogged(&ctx, &s2)).await.unwrap_err();
+    let e = l
+        .register_async(&Registration::unlogged(&ctx, &s2))
+        .await
+        .unwrap_err();
     assert!(e.to_string().contains("legacy_unlogged is retired"), "{e}");
 
-    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM mlops.trial WHERE policy_id = 'legacy_unlogged'")
-        .fetch_one(&s.pg)
-        .await
-        .unwrap();
-    assert_eq!(n, 1, "the existing row is untouched, and nothing new was written");
+    let n: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM mlops.trial WHERE policy_id = 'legacy_unlogged'")
+            .fetch_one(&s.pg)
+            .await
+            .unwrap();
+    assert_eq!(
+        n, 1,
+        "the existing row is untouched, and nothing new was written"
+    );
     // The switch cannot be turned back off, by anyone.
-    assert!(sqlx::query("DELETE FROM deployment_gate_switch").execute(&s.pg).await.is_err());
-    assert!(sqlx::query("UPDATE deployment_gate_switch SET note = 'x'").execute(&s.pg).await.is_err());
+    assert!(sqlx::query("DELETE FROM deployment_gate_switch")
+        .execute(&s.pg)
+        .await
+        .is_err());
+    assert!(sqlx::query("UPDATE deployment_gate_switch SET note = 'x'")
+        .execute(&s.pg)
+        .await
+        .is_err());
     s.drop_db().await;
 }
 
@@ -856,11 +1006,21 @@ async fn the_platforms_role_can_use_the_path_and_cannot_arm_itself() {
     let s = Scratch::new().await;
     let pg = &s.pg;
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     for table in [
-        "deployment_proposal", "deployment_decision", "deployment_authorisation",
-        "deployment_legacy_marker", "deployment_gate_switch", "deployment_ceiling",
-        "current_deployment_ceiling", "ramp_period", "ramp_review", "deployment_size",
+        "deployment_proposal",
+        "deployment_decision",
+        "deployment_authorisation",
+        "deployment_legacy_marker",
+        "deployment_gate_switch",
+        "deployment_ceiling",
+        "current_deployment_ceiling",
+        "ramp_period",
+        "ramp_review",
+        "deployment_size",
     ] {
         sqlx::query(&format!("SELECT count(*) FROM {table}"))
             .fetch_one(&mut *tx)
@@ -882,10 +1042,19 @@ async fn the_platforms_role_can_use_the_path_and_cannot_arm_itself() {
     tx.rollback().await.unwrap();
     // The research agent reads proposals and nothing it could use to decide one.
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE agent_role").execute(&mut *tx).await.unwrap();
-    assert!(sqlx::query("SELECT count(*) FROM deployment_proposal").fetch_one(&mut *tx).await.is_ok());
+    sqlx::query("SET LOCAL ROLE agent_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    assert!(sqlx::query("SELECT count(*) FROM deployment_proposal")
+        .fetch_one(&mut *tx)
+        .await
+        .is_ok());
     sqlx::query("SAVEPOINT p").execute(&mut *tx).await.unwrap();
-    assert!(sqlx::query("SELECT count(*) FROM deployment_decision").fetch_one(&mut *tx).await.is_err());
+    assert!(sqlx::query("SELECT count(*) FROM deployment_decision")
+        .fetch_one(&mut *tx)
+        .await
+        .is_err());
     tx.rollback().await.unwrap();
     s.drop_db().await;
 }
@@ -901,31 +1070,56 @@ async fn stop_all_is_the_kill_switch_action_and_stopping_one_halts_its_scope() {
     let store = monitor::store::MonitorStore::new(pg.clone());
 
     let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
-    raw_deployment(pg, a, &rev('a'), "alice", "AAA", "1", Utc::now()).await.unwrap();
-    raw_deployment(pg, b, &rev('a'), "alice", "BBB", "1", Utc::now()).await.unwrap();
+    raw_deployment(pg, a, &rev('a'), "alice", "AAA", "1", Utc::now())
+        .await
+        .unwrap();
+    raw_deployment(pg, b, &rev('a'), "alice", "BBB", "1", Utc::now())
+        .await
+        .unwrap();
 
     // One: its own scope halts at the gate now, and the record closes.
-    let r = deployment_gate::revoke_one(pg, &kill, a, "human:t", "test stop").await.unwrap();
+    let r = deployment_gate::revoke_one(pg, &kill, a, "human:t", "test stop")
+        .await
+        .unwrap();
     assert!(r.closed);
-    assert!(kill.refuses(None, Some(&a.to_string())), "the gate refuses its orders before the next tick");
-    assert!(!kill.refuses(None, Some(&b.to_string())), "and only its own");
-    assert!(store.halted_scopes().await.unwrap().contains(&risk::Scope::strategy(a.to_string())));
+    assert!(
+        kill.refuses(None, Some(&a.to_string())),
+        "the gate refuses its orders before the next tick"
+    );
+    assert!(
+        !kill.refuses(None, Some(&b.to_string())),
+        "and only its own"
+    );
+    assert!(store
+        .halted_scopes()
+        .await
+        .unwrap()
+        .contains(&risk::Scope::strategy(a.to_string())));
 
     // All: the kill switch's own action — the global scope, in the monitor's
     // table and in the gate's mirror — and every record closed.
-    let stopped = deployment_gate::revoke_all(pg, &kill, "human:t", "test stop all").await.unwrap();
+    let stopped = deployment_gate::revoke_all(pg, &kill, "human:t", "test stop all")
+        .await
+        .unwrap();
     assert_eq!(stopped, vec![b]);
     assert!(kill.is_active(), "the global kill switch is tripped");
     assert!(kill.refuses(Some("any"), Some("anything")));
-    assert!(store.halted_scopes().await.unwrap().contains(&risk::Scope::Global));
-    let open: i64 = sqlx::query_scalar("SELECT count(*) FROM strategy_deployment WHERE stopped_at IS NULL")
-        .fetch_one(pg)
+    assert!(store
+        .halted_scopes()
         .await
-        .unwrap();
+        .unwrap()
+        .contains(&risk::Scope::Global));
+    let open: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM strategy_deployment WHERE stopped_at IS NULL")
+            .fetch_one(pg)
+            .await
+            .unwrap();
     assert_eq!(open, 0);
 
     // An agent is not an actor the monitor accepts.
-    let e = deployment_gate::revoke_one(pg, &kill, a, "agent:run", "x").await.unwrap_err();
+    let e = deployment_gate::revoke_one(pg, &kill, a, "agent:run", "x")
+        .await
+        .unwrap_err();
     assert!(matches!(e, GateError::Monitor(_)), "{e}");
     s.drop_db().await;
 }
@@ -978,22 +1172,38 @@ async fn a_failing_deployment_is_halved_each_period_and_reaches_zero() {
 
     // 30 days old, 14-day periods: periods 1 and 2 have ended, 3 has not.
     let dep = Uuid::new_v4();
-    raw_measured_deployment(pg, dep, &rev('a'), "alice", "AAA", "100", now - Duration::days(30)).await;
-    sqlx::query("INSERT INTO deployment_legacy_marker (deployment_id, basis, marked_at) VALUES ($1,'t',$2)")
-        .bind(dep)
-        .bind(now - Duration::days(30))
-        .execute(pg)
+    raw_measured_deployment(
+        pg,
+        dep,
+        &rev('a'),
+        "alice",
+        "AAA",
+        "100",
+        now - Duration::days(30),
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO deployment_legacy_marker (deployment_id, basis, marked_at) VALUES ($1,'t',$2)",
+    )
+    .bind(dep)
+    .bind(now - Duration::days(30))
+    .execute(pg)
+    .await
+    .unwrap();
+
+    let report = ramp_worker::run_pass(pg, now, &policy(), &rec)
         .await
         .unwrap();
-
-    let report = ramp_worker::run_pass(pg, now, &policy(), &rec).await.unwrap();
     assert!(report.errors.is_empty(), "{:?}", report.errors);
     assert_eq!(
         halvings(pg, dep).await,
         vec![(1, "halve".into(), 1), (2, "halve".into(), 2)],
         "a recorder with nothing observed in the period: not computable, which steps down like a failure"
     );
-    assert_eq!(rec.0.lock().unwrap().last(), Some(&(dep, Size::from_halvings(2).unwrap())));
+    assert_eq!(
+        rec.0.lock().unwrap().last(),
+        Some(&(dep, Size::from_halvings(2).unwrap()))
+    );
     let periods: Vec<(i32, DateTime<Utc>, DateTime<Utc>)> = sqlx::query_as(
         "SELECT period_no, starts_at, ends_at FROM ramp_period WHERE deployment_id = $1 ORDER BY period_no",
     )
@@ -1002,12 +1212,20 @@ async fn a_failing_deployment_is_halved_each_period_and_reaches_zero() {
     .await
     .unwrap();
     assert_eq!(periods.len(), 3);
-    assert_eq!(periods[1].1, periods[0].2, "each period starts where the last one ended");
+    assert_eq!(
+        periods[1].1, periods[0].2,
+        "each period starts where the last one ended"
+    );
     assert_eq!(periods[2].1, periods[1].2);
-    assert!(periods[2].2 > now, "the third has not ended and is not reviewed");
+    assert!(
+        periods[2].2 > now,
+        "the third has not ended and is not reviewed"
+    );
 
     // Idempotent: a second pass at the same moment changes no record.
-    let again = ramp_worker::run_pass(pg, now, &policy(), &rec).await.unwrap();
+    let again = ramp_worker::run_pass(pg, now, &policy(), &rec)
+        .await
+        .unwrap();
     assert!(again.reviewed.is_empty());
     assert_eq!(halvings(pg, dep).await.len(), 2);
     // A deployment neglected for 70 days (five 14-day periods; the first four
@@ -1015,27 +1233,44 @@ async fn a_failing_deployment_is_halved_each_period_and_reaches_zero() {
     // and the fourth failing one takes it to zero. The schedule chains from the
     // recorded ends, not from when the worker ran.
     let old = Uuid::new_v4();
-    raw_measured_deployment(pg, old, &rev('b'), "alice", "OLD", "100", now - Duration::days(70)).await;
-    sqlx::query("INSERT INTO deployment_legacy_marker (deployment_id, basis, marked_at) VALUES ($1,'t',$2)")
-        .bind(old)
-        .bind(now - Duration::days(70))
-        .execute(pg)
+    raw_measured_deployment(
+        pg,
+        old,
+        &rev('b'),
+        "alice",
+        "OLD",
+        "100",
+        now - Duration::days(70),
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO deployment_legacy_marker (deployment_id, basis, marked_at) VALUES ($1,'t',$2)",
+    )
+    .bind(old)
+    .bind(now - Duration::days(70))
+    .execute(pg)
+    .await
+    .unwrap();
+    let late = ramp_worker::run_pass(pg, now, &policy(), &rec)
         .await
         .unwrap();
-    let late = ramp_worker::run_pass(pg, now, &policy(), &rec).await.unwrap();
     assert!(late.errors.is_empty(), "{:?}", late.errors);
     let h = halvings(pg, old).await;
     assert_eq!(
         h.iter().map(|r| (r.1.as_str(), r.2)).collect::<Vec<_>>(),
         vec![("halve", 1), ("halve", 2), ("halve", 3), ("zero", 4)]
     );
-    assert!(late.reviewed.iter().any(|(id, o)| *id == old && *o == Outcome::Zero));
+    assert!(late
+        .reviewed
+        .iter()
+        .any(|(id, o)| *id == old && *o == Outcome::Zero));
     assert!(rec.0.lock().unwrap().contains(&(old, Size::ZERO)));
-    let after_zero: i64 = sqlx::query_scalar("SELECT count(*) FROM ramp_period WHERE deployment_id = $1")
-        .bind(old)
-        .fetch_one(pg)
-        .await
-        .unwrap();
+    let after_zero: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM ramp_period WHERE deployment_id = $1")
+            .bind(old)
+            .fetch_one(pg)
+            .await
+            .unwrap();
     assert_eq!(after_zero, 4, "no period opens after zero");
     // The reviews carry their stored evidence, and it re-hashes to its hash.
     let (ev, hash): (serde_json::Value, String) =
@@ -1044,11 +1279,17 @@ async fn a_failing_deployment_is_halved_each_period_and_reaches_zero() {
             .fetch_one(pg)
             .await
             .unwrap();
-    let inputs: ledger::ramp_gate::StepInputs = serde_json::from_value(ev["inputs"].clone()).unwrap();
-    let evidence: ledger::ramp_gate::PeriodEvidence = serde_json::from_value(ev["evidence"].clone()).unwrap();
+    let inputs: ledger::ramp_gate::StepInputs =
+        serde_json::from_value(ev["inputs"].clone()).unwrap();
+    let evidence: ledger::ramp_gate::PeriodEvidence =
+        serde_json::from_value(ev["evidence"].clone()).unwrap();
     assert_eq!(ledger::ramp_gate::evidence_hash(&inputs, &evidence), hash);
     let rejudged = ledger::ramp_gate::judge(&inputs, &evidence);
-    assert_eq!(serde_json::to_value(&rejudged).unwrap(), ev["judgement"], "the verdict reproduces from its evidence");
+    assert_eq!(
+        serde_json::to_value(&rejudged).unwrap(),
+        ev["judgement"],
+        "the verdict reproduces from its evidence"
+    );
     assert!(rejudged.not_computable_reason().is_some());
     // The first dep is untouched by the second's catch-up.
     assert_eq!(halvings(pg, dep).await.len(), 2);
@@ -1067,29 +1308,63 @@ async fn an_unmeasured_deployment_is_flagged_and_not_halved() {
     let now = Utc::now();
 
     let unmeasured = Uuid::new_v4();
-    raw_deployment(pg, unmeasured, &rev('a'), "alice", "UNM", "100", now - Duration::days(60)).await.unwrap();
+    raw_deployment(
+        pg,
+        unmeasured,
+        &rev('a'),
+        "alice",
+        "UNM",
+        "100",
+        now - Duration::days(60),
+    )
+    .await
+    .unwrap();
     let measured = Uuid::new_v4();
-    raw_measured_deployment(pg, measured, &rev('b'), "alice", "MEA", "100", now - Duration::days(20)).await;
+    raw_measured_deployment(
+        pg,
+        measured,
+        &rev('b'),
+        "alice",
+        "MEA",
+        "100",
+        now - Duration::days(20),
+    )
+    .await;
 
-    let report = ramp_worker::run_pass(pg, now, &policy(), &rec).await.unwrap();
-    assert!(report.errors.is_empty(), "{:?}", report.errors);
-    assert_eq!(report.unmeasured, vec![unmeasured], "flagged, by id");
-    let periods: i64 = sqlx::query_scalar("SELECT count(*) FROM ramp_period WHERE deployment_id = $1")
-        .bind(unmeasured)
-        .fetch_one(pg)
+    let report = ramp_worker::run_pass(pg, now, &policy(), &rec)
         .await
         .unwrap();
-    assert_eq!(periods, 0, "no period is opened for a deployment nothing can measure");
-    assert!(halvings(pg, unmeasured).await.is_empty(), "and none is halved");
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    assert_eq!(report.unmeasured, vec![unmeasured], "flagged, by id");
+    let periods: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM ramp_period WHERE deployment_id = $1")
+            .bind(unmeasured)
+            .fetch_one(pg)
+            .await
+            .unwrap();
+    assert_eq!(
+        periods, 0,
+        "no period is opened for a deployment nothing can measure"
+    );
     assert!(
-        !rec.0.lock().unwrap().iter().any(|(id, _)| *id == unmeasured),
+        halvings(pg, unmeasured).await.is_empty(),
+        "and none is halved"
+    );
+    assert!(
+        !rec.0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(id, _)| *id == unmeasured),
         "no size is applied to it"
     );
     // The measured one is reviewed as before: a 20-day-old deployment has one
     // ended 14-day period with nothing observed.
     assert_eq!(halvings(pg, measured).await, vec![(1, "halve".into(), 1)]);
     // Flagged again on the next pass: the flag does not expire.
-    let again = ramp_worker::run_pass(pg, now, &policy(), &rec).await.unwrap();
+    let again = ramp_worker::run_pass(pg, now, &policy(), &rec)
+        .await
+        .unwrap();
     assert_eq!(again.unmeasured, vec![unmeasured]);
     s.drop_db().await;
 }
@@ -1101,15 +1376,22 @@ async fn an_unmeasured_deployment_is_flagged_and_not_halved() {
 async fn the_ramp_policy_is_a_row_the_platform_reads_and_cannot_write() {
     let s = Scratch::new().await;
     let pg = &s.pg;
-    let policy = ramp_worker::RampPolicy::load(pg, &backtest::gates::profile::GateProfile::paper_v1())
-        .await
-        .expect("a policy row exists");
+    let policy =
+        ramp_worker::RampPolicy::load(pg, &backtest::gates::profile::GateProfile::paper_v1())
+            .await
+            .expect("a policy row exists");
     assert_eq!(policy.legacy_review_period_days, 14);
     assert_eq!(policy.thresholds.min_observed_bars, 20);
 
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
-    assert!(sqlx::query("SELECT count(*) FROM current_ramp_policy").fetch_one(&mut *tx).await.is_ok());
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    assert!(sqlx::query("SELECT count(*) FROM current_ramp_policy")
+        .fetch_one(&mut *tx)
+        .await
+        .is_ok());
     for sql in [
         "INSERT INTO ramp_policy (legacy_review_period_days, min_observed_bars, decided_by, basis) VALUES (1, 1, 't', 't')",
         "UPDATE ramp_policy SET min_observed_bars = 1",
@@ -1131,8 +1413,17 @@ async fn the_ramp_policy_is_a_row_the_platform_reads_and_cannot_write() {
     let p2 = ramp_worker::RampPolicy::load(pg, &backtest::gates::profile::GateProfile::paper_v1())
         .await
         .unwrap();
-    assert_eq!((p2.legacy_review_period_days, p2.thresholds.min_observed_bars), (7, 10));
-    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM ramp_policy").fetch_one(pg).await.unwrap();
+    assert_eq!(
+        (
+            p2.legacy_review_period_days,
+            p2.thresholds.min_observed_bars
+        ),
+        (7, 10)
+    );
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM ramp_policy")
+        .fetch_one(pg)
+        .await
+        .unwrap();
     assert_eq!(n, 2);
     s.drop_db().await;
 }
@@ -1162,7 +1453,17 @@ async fn no_configuration_skips_a_step_down() {
     let s = Scratch::new().await;
     let pg = &s.pg;
     let dep = Uuid::new_v4();
-    raw_deployment(pg, dep, &rev('a'), "alice", "AAA", "1", Utc::now() - Duration::days(60)).await.unwrap();
+    raw_deployment(
+        pg,
+        dep,
+        &rev('a'),
+        "alice",
+        "AAA",
+        "1",
+        Utc::now() - Duration::days(60),
+    )
+    .await
+    .unwrap();
     let t0 = Utc::now() - Duration::days(50);
     let period = |no: i32, start: DateTime<Utc>, end: DateTime<Utc>| {
         let pg = pg.clone();
@@ -1180,47 +1481,89 @@ async fn no_configuration_skips_a_step_down() {
     period(1, t0, t0 + Duration::days(14)).await.unwrap();
 
     // A gap: period 3 before 2.
-    assert!(err_text(&period(3, t0, t0 + Duration::days(14)).await.unwrap_err()).contains("cannot open before"));
+    assert!(
+        err_text(&period(3, t0, t0 + Duration::days(14)).await.unwrap_err())
+            .contains("cannot open before")
+    );
     // Period 2 before period 1 was reviewed.
-    assert!(err_text(&period(2, t0 + Duration::days(14), t0 + Duration::days(28)).await.unwrap_err())
-        .contains("has not been reviewed"));
+    assert!(err_text(
+        &period(2, t0 + Duration::days(14), t0 + Duration::days(28))
+            .await
+            .unwrap_err()
+    )
+    .contains("has not been reviewed"));
 
     // A failing period cannot hold, or step up; a passing one cannot halve.
-    for (outcome, passed, after) in [("hold", false, 0), ("step_up", false, 0), ("halve", true, 1)] {
+    for (outcome, passed, after) in [
+        ("hold", false, 0),
+        ("step_up", false, 0),
+        ("halve", true, 1),
+    ] {
         assert!(
-            review_row(pg, dep, 1, "paper_v1", outcome, passed, 0, after).await.is_err(),
+            review_row(pg, dep, 1, "paper_v1", outcome, passed, 0, after)
+                .await
+                .is_err(),
             "{outcome} passed={passed}"
         );
     }
     // The arithmetic: a halve that does not halve, a zero from full size.
-    assert!(review_row(pg, dep, 1, "paper_v1", "halve", false, 0, 2).await.is_err());
-    assert!(review_row(pg, dep, 1, "paper_v1", "zero", false, 0, 4).await.is_err());
-    review_row(pg, dep, 1, "paper_v1", "halve", false, 0, 1).await.unwrap();
+    assert!(review_row(pg, dep, 1, "paper_v1", "halve", false, 0, 2)
+        .await
+        .is_err());
+    assert!(review_row(pg, dep, 1, "paper_v1", "zero", false, 0, 4)
+        .await
+        .is_err());
+    review_row(pg, dep, 1, "paper_v1", "halve", false, 0, 1)
+        .await
+        .unwrap();
 
     // The next period must start where the last ended.
-    assert!(err_text(&period(2, t0 + Duration::days(15), t0 + Duration::days(29)).await.unwrap_err())
-        .contains("must start where period 1 ended"));
-    period(2, t0 + Duration::days(14), t0 + Duration::days(28)).await.unwrap();
+    assert!(err_text(
+        &period(2, t0 + Duration::days(15), t0 + Duration::days(29))
+            .await
+            .unwrap_err()
+    )
+    .contains("must start where period 1 ended"));
+    period(2, t0 + Duration::days(14), t0 + Duration::days(28))
+        .await
+        .unwrap();
 
     // A review of a period that has not ended.
     let future = Uuid::new_v4();
-    raw_deployment(pg, future, &rev('a'), "alice", "BBB", "1", Utc::now()).await.unwrap();
+    raw_deployment(pg, future, &rev('a'), "alice", "BBB", "1", Utc::now())
+        .await
+        .unwrap();
     sqlx::query("INSERT INTO ramp_period (deployment_id, period_no, starts_at, ends_at) VALUES ($1,1,now(),now() + interval '14 days')")
         .bind(future)
         .execute(pg)
         .await
         .unwrap();
-    let e = review_row(pg, future, 1, "paper_v1", "halve", false, 0, 1).await.unwrap_err();
-    assert!(err_text(&e).contains("not reviewed before it has ended"), "{e}");
+    let e = review_row(pg, future, 1, "paper_v1", "halve", false, 0, 1)
+        .await
+        .unwrap_err();
+    assert!(
+        err_text(&e).contains("not reviewed before it has ended"),
+        "{e}"
+    );
 
     // The ladder is continuous: period 2 starts from period 1's halvings.
-    let e = review_row(pg, dep, 2, "paper_v1", "halve", false, 0, 1).await.unwrap_err();
+    let e = review_row(pg, dep, 2, "paper_v1", "halve", false, 0, 1)
+        .await
+        .unwrap_err();
     assert!(err_text(&e).contains("is at 1 halvings"), "{e}");
-    review_row(pg, dep, 2, "paper_v1", "halve", false, 1, 2).await.unwrap();
+    review_row(pg, dep, 2, "paper_v1", "halve", false, 1, 2)
+        .await
+        .unwrap();
 
     // Immutable, both.
-    assert!(sqlx::query("DELETE FROM ramp_review").execute(pg).await.is_err());
-    assert!(sqlx::query("UPDATE ramp_period SET ends_at = now()").execute(pg).await.is_err());
+    assert!(sqlx::query("DELETE FROM ramp_review")
+        .execute(pg)
+        .await
+        .is_err());
+    assert!(sqlx::query("UPDATE ramp_period SET ends_at = now()")
+        .execute(pg)
+        .await
+        .is_err());
     s.drop_db().await;
 }
 
@@ -1232,7 +1575,17 @@ async fn a_capital_raise_needs_a_passed_review_and_spends_it_once() {
     let s = Scratch::new().await;
     let pg = &s.pg;
     let dep = Uuid::new_v4();
-    raw_deployment(pg, dep, &rev('a'), "alice", "AAA", "1", Utc::now() - Duration::days(60)).await.unwrap();
+    raw_deployment(
+        pg,
+        dep,
+        &rev('a'),
+        "alice",
+        "AAA",
+        "1",
+        Utc::now() - Duration::days(60),
+    )
+    .await
+    .unwrap();
     let t0 = Utc::now() - Duration::days(50);
     sqlx::query("INSERT INTO ramp_period (deployment_id, period_no, starts_at, ends_at) VALUES ($1,1,$2,$3)")
         .bind(dep)
@@ -1260,17 +1613,30 @@ async fn a_capital_raise_needs_a_passed_review_and_spends_it_once() {
     // Without a review.
     assert!(err_text(&raise(None).await.unwrap_err()).contains("names none"));
     // With one that is not a step_up: a failed period.
-    review_row(pg, dep, 1, "strict_v1", "halve", false, 0, 1).await.unwrap();
-    let failed: Uuid = sqlx::query_scalar("SELECT review_id FROM ramp_review WHERE deployment_id = $1")
-        .bind(dep)
-        .fetch_one(pg)
+    review_row(pg, dep, 1, "strict_v1", "halve", false, 0, 1)
         .await
         .unwrap();
+    let failed: Uuid =
+        sqlx::query_scalar("SELECT review_id FROM ramp_review WHERE deployment_id = $1")
+            .bind(dep)
+            .fetch_one(pg)
+            .await
+            .unwrap();
     assert!(err_text(&raise(Some(failed)).await.unwrap_err()).contains("not a passed step_up"));
 
     // A passed step_up on a fresh deployment, spent once.
     let dep2 = Uuid::new_v4();
-    raw_deployment(pg, dep2, &rev('a'), "alice", "BBB", "1", Utc::now() - Duration::days(60)).await.unwrap();
+    raw_deployment(
+        pg,
+        dep2,
+        &rev('a'),
+        "alice",
+        "BBB",
+        "1",
+        Utc::now() - Duration::days(60),
+    )
+    .await
+    .unwrap();
     sqlx::query("INSERT INTO ramp_period (deployment_id, period_no, starts_at, ends_at) VALUES ($1,1,$2,$3)")
         .bind(dep2)
         .bind(t0)
@@ -1278,12 +1644,15 @@ async fn a_capital_raise_needs_a_passed_review_and_spends_it_once() {
         .execute(pg)
         .await
         .unwrap();
-    review_row(pg, dep2, 1, "strict_v1", "step_up", true, 0, 0).await.unwrap();
-    let good: Uuid = sqlx::query_scalar("SELECT review_id FROM ramp_review WHERE deployment_id = $1")
-        .bind(dep2)
-        .fetch_one(pg)
+    review_row(pg, dep2, 1, "strict_v1", "step_up", true, 0, 0)
         .await
         .unwrap();
+    let good: Uuid =
+        sqlx::query_scalar("SELECT review_id FROM ramp_review WHERE deployment_id = $1")
+            .bind(dep2)
+            .fetch_one(pg)
+            .await
+            .unwrap();
     // For another deployment's subject it is refused.
     assert!(err_text(&raise(Some(good)).await.unwrap_err()).contains("another deployment"));
     sqlx::query(
@@ -1446,9 +1815,21 @@ async fn a_period_is_judged_on_the_forward_rows_inside_it() {
     // Healthy: 29 observed bars inside, one exactly at the period end (counted), one
     // exactly at the start and one after the end (neither counted).
     let mut healthy_rows = rows_in(started, 29, "observed", |_| true);
-    healthy_rows.push(Obs { bar: end, source: "observed", matched: true });
-    healthy_rows.push(Obs { bar: started, source: "observed", matched: false });
-    healthy_rows.push(Obs { bar: end + Duration::hours(1), source: "observed", matched: false });
+    healthy_rows.push(Obs {
+        bar: end,
+        source: "observed",
+        matched: true,
+    });
+    healthy_rows.push(Obs {
+        bar: started,
+        source: "observed",
+        matched: false,
+    });
+    healthy_rows.push(Obs {
+        bar: end + Duration::hours(1),
+        source: "observed",
+        matched: false,
+    });
     let healthy =
         deployment_with_forward_rows(pg, &rev('a'), "HEA", started, &healthy_rows, &[]).await;
 
@@ -1490,7 +1871,9 @@ async fn a_period_is_judged_on_the_forward_rows_inside_it() {
     )
     .await;
 
-    let report = ramp_worker::run_pass(pg, now, &policy(), &rec).await.unwrap();
+    let report = ramp_worker::run_pass(pg, now, &policy(), &rec)
+        .await
+        .unwrap();
     assert!(report.errors.is_empty(), "{:?}", report.errors);
     assert!(report.unmeasured.is_empty());
 
@@ -1520,13 +1903,22 @@ async fn a_period_is_judged_on_the_forward_rows_inside_it() {
     let half = Size::from_halvings(1).unwrap();
     for (dep, why) in [(mismatch, "signal match"), (halted, "divergence halt")] {
         let (outcome, passed, nc, ev) = review(pg, dep).await;
-        assert_eq!((outcome.as_str(), passed, nc), ("halve", false, None), "{why}");
+        assert_eq!(
+            (outcome.as_str(), passed, nc),
+            ("halve", false, None),
+            "{why}"
+        );
         assert!(
             ev["judgement"].to_string().contains(why),
             "the stored judgement names why: {why} in {}",
             ev["judgement"]
         );
-        assert!(rec.0.lock().unwrap().iter().any(|(id, sz)| *id == dep && *sz == half));
+        assert!(rec
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(id, sz)| *id == dep && *sz == half));
     }
 
     // Not computable steps down too, and says why. Backfill rows count for nothing.

@@ -810,7 +810,10 @@ mod tests {
         f.calibrated_spread_90 = Some(raw * 3.0 + 0.5);
         let out = InferenceGateway::forecast_to_output(&f);
         assert!((out.spread_90.unwrap() - (raw * 3.0 + 0.5)).abs() < 1e-12);
-        assert!(raw > 0.0, "the raw width exists, so the override is observable");
+        assert!(
+            raw > 0.0,
+            "the raw width exists, so the override is observable"
+        );
     }
 
     fn result_with_dist() -> ForecastResult {

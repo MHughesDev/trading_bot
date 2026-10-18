@@ -254,14 +254,12 @@ pub async fn train_model(
     {
         Ok(v) => match v.get("run_id").and_then(Value::as_str) {
             Some(r) => r.to_string(),
-            None => {
-                return crate::tool_error::refuse_extra(
-                    "start_train_failed",
-                    "the registry accepted the training request but returned no run_id.",
-                    "call train_model again with the same slug; if it repeats, report a registry fault",
-                    json!({ "model_id": model_id, "response": v }),
-                )
-            }
+            None => return crate::tool_error::refuse_extra(
+                "start_train_failed",
+                "the registry accepted the training request but returned no run_id.",
+                "call train_model again with the same slug; if it repeats, report a registry fault",
+                json!({ "model_id": model_id, "response": v }),
+            ),
         },
         Err(e) => return e.to_tool_error(),
     };
@@ -572,19 +570,28 @@ mod promotion_tests {
         assert!(!path.ends_with("/promote"));
         assert_eq!(body["environment"], "paper");
         assert_eq!(body["rationale"], "beats HARQ on QLIKE");
-        assert!(body.get("alias").is_none(), "a proposal does not choose an alias");
+        assert!(
+            body.get("alias").is_none(),
+            "a proposal does not choose an alias"
+        );
     }
 
     #[test]
     fn a_proposal_without_a_rationale_or_a_version_is_refused_before_any_call() {
         assert!(promotion_proposal_request(&json!({"model_id": "m", "version": "1"})).is_err());
-        assert!(promotion_proposal_request(&json!({"model_id": "m", "version": "1", "rationale": "  "})).is_err());
+        assert!(promotion_proposal_request(
+            &json!({"model_id": "m", "version": "1", "rationale": "  "})
+        )
+        .is_err());
         assert!(promotion_proposal_request(&json!({"model_id": "m", "rationale": "x"})).is_err());
     }
 
     #[test]
     fn the_descriptor_says_it_proposes() {
-        let spec = specs().into_iter().find(|s| s.name == "promote_model_version").unwrap();
+        let spec = specs()
+            .into_iter()
+            .find(|s| s.name == "promote_model_version")
+            .unwrap();
         assert!(spec.description.contains("PROPOSE") && spec.description.contains("human"));
         assert!(spec.description.len() + spec.input_schema.to_string().len() <= 1200);
     }

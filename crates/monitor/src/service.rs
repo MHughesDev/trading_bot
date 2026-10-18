@@ -655,7 +655,9 @@ impl MonitorService {
                         tracing::warn!(strategy_id = %id,
                             "a return baseline is declared for a strategy with no deployment record — P&L unobserved");
                     }
-                    Err(e) => tracing::error!(strategy_id = %id, error = %e, "P&L inputs unreadable"),
+                    Err(e) => {
+                        tracing::error!(strategy_id = %id, error = %e, "P&L inputs unreadable")
+                    }
                 }
             }
 

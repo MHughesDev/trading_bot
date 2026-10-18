@@ -21,7 +21,11 @@ use sqlx::Row;
 use crate::{auth::BearerToken, state::AppState};
 
 /// Every gate verdict recorded for an experiment, oldest first.
-async fn rows(state: &AppState, tenant: &str, experiment_id: &str) -> Result<Vec<GateRow>, sqlx::Error> {
+async fn rows(
+    state: &AppState,
+    tenant: &str,
+    experiment_id: &str,
+) -> Result<Vec<GateRow>, sqlx::Error> {
     let mut tx = ledger::pg::tenant_tx(&state.pg, tenant).await?;
     let rows = sqlx::query(
         "SELECT gate_no, gate_name, profile_id, passed, statistic, detail, decided_at \

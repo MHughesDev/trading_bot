@@ -199,7 +199,12 @@ fn divergence(a: &Value, b: &Value) -> u64 {
     };
     let mut names = std::collections::BTreeSet::new();
     for v in [a, b] {
-        for s in v.get("signals").and_then(Value::as_array).into_iter().flatten() {
+        for s in v
+            .get("signals")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             if let Some(n) = s.get("signal").and_then(Value::as_str) {
                 names.insert(n.to_string());
             }
@@ -217,7 +222,10 @@ fn divergence(a: &Value, b: &Value) -> u64 {
                 e.iter()
                     .map(|x| {
                         (
-                            x.get("signal").and_then(Value::as_str).unwrap_or("").to_string(),
+                            x.get("signal")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string(),
                             x.get("bar").and_then(Value::as_i64).unwrap_or(-1),
                         )
                     })
@@ -281,7 +289,11 @@ pub fn assess_perturbations(base: &Value, probes: &[ColumnProbe], shift_bars: i6
         }
         let shift_div = divergence(base, &p.shifted);
         let mask_blank = never_fires_code(&p.masked) == Some("perturbed_column_has_no_value");
-        let mask_div = if mask_blank { entries.max(1) } else { divergence(base, &p.masked) };
+        let mask_div = if mask_blank {
+            entries.max(1)
+        } else {
+            divergence(base, &p.masked)
+        };
         max_div = max_div.max(shift_div);
         let class = if mask_div == 0 {
             inconclusive += 1;
@@ -352,7 +364,10 @@ pub fn feature_leakage_scan(params: &Value) -> Value {
     if source.len() > 200_000 {
         return crate::tool_error::refuse_extra(
             "source_too_large",
-            format!("`source` is {} bytes; the scan takes 200000 at most.", source.len()),
+            format!(
+                "`source` is {} bytes; the scan takes 200000 at most.",
+                source.len()
+            ),
             "scan one cell or file at a time (200000 bytes at most)",
             json!({ "got_bytes": source.len() }),
         );
@@ -406,7 +421,10 @@ pub async fn future_perturbation_test(api: &ApiClient, params: &Value) -> Value 
             return missing(field);
         }
     }
-    let shift = params.get("shift_bars").and_then(Value::as_i64).unwrap_or(1);
+    let shift = params
+        .get("shift_bars")
+        .and_then(Value::as_i64)
+        .unwrap_or(1);
     if !(1..=20).contains(&shift) {
         return crate::tool_error::refuse_extra(
             "invalid_shift_bars",
@@ -476,7 +494,11 @@ pub async fn future_perturbation_test(api: &ApiClient, params: &Value) -> Value 
                  platform is not applying perturbations",
             );
         }
-        probes.push(ColumnProbe { column: c, shifted, masked });
+        probes.push(ColumnProbe {
+            column: c,
+            shifted,
+            masked,
+        });
     }
     assess_perturbations(&base, &probes, shift)
 }
@@ -495,7 +517,11 @@ mod perturbation_tests {
     }
 
     fn probe(column: &str, shifted: Value, masked: Value) -> ColumnProbe {
-        ColumnProbe { column: column.into(), shifted, masked }
+        ColumnProbe {
+            column: column.into(),
+            shifted,
+            masked,
+        }
     }
 
     /// A decisive column that does not respond to a time shift is the seeded
@@ -530,7 +556,10 @@ mod perturbation_tests {
         let base = preview(5, 40, 5);
         let out = assess_perturbations(&base, &[probe("rsi_14", base.clone(), base.clone())], 1);
         assert_eq!(out["detail"]["verdict"], "inconclusive");
-        assert_eq!(out["detail"]["columns"][0]["classification"], "not_decisive");
+        assert_eq!(
+            out["detail"]["columns"][0]["classification"],
+            "not_decisive"
+        );
     }
 
     /// No entries, no test: the negative would be about the window.
@@ -843,11 +872,26 @@ mod tests {
         }));
         assert_eq!(leaky["summary_fields"]["verdict"], "blocking_findings");
         assert_eq!(leaky["detail"]["findings"][0]["line"], 2);
-        assert_eq!(leaky["detail"]["findings"][0]["rule"], "full_window_statistic");
+        assert_eq!(
+            leaky["detail"]["findings"][0]["rule"],
+            "full_window_statistic"
+        );
         let quiet = feature_leakage_scan(&json!({"source": "z = close.rolling(50).mean()\n"}));
-        assert_eq!(quiet["summary_fields"]["verdict"], "no_findings_not_a_clean_bill");
-        assert!(quiet["detail"]["limits"].as_str().unwrap().contains("no findings is not no leak"));
-        assert_eq!(feature_leakage_scan(&json!({"source": "  "}))["error"]["code"], "empty_source");
-        assert_eq!(feature_leakage_scan(&json!({}))["error"]["code"], "missing_field");
+        assert_eq!(
+            quiet["summary_fields"]["verdict"],
+            "no_findings_not_a_clean_bill"
+        );
+        assert!(quiet["detail"]["limits"]
+            .as_str()
+            .unwrap()
+            .contains("no findings is not no leak"));
+        assert_eq!(
+            feature_leakage_scan(&json!({"source": "  "}))["error"]["code"],
+            "empty_source"
+        );
+        assert_eq!(
+            feature_leakage_scan(&json!({}))["error"]["code"],
+            "missing_field"
+        );
     }
 }

@@ -316,12 +316,18 @@ async fn an_answer_given_in_turn_one_is_in_turn_twos_brief_at_the_top() {
     // Turn 1: the agent asked "which venue?", the user answered, and the answer
     // is recorded as a preference exactly as POST /api/memory/preferences does.
     store
-        .put(user, &preference("pref_venue", "BTC-USD", "use Kraken, never Coinbase", user))
+        .put(
+            user,
+            &preference("pref_venue", "BTC-USD", "use Kraken, never Coinbase", user),
+        )
         .await
         .unwrap();
 
     // Turn 2: a new run, a new brief.
-    let entries = store.by_kind(user, Kind::UserPreference, 200).await.unwrap();
+    let entries = store
+        .by_kind(user, Kind::UserPreference, 200)
+        .await
+        .unwrap();
     let brief = harness::memory::assemble_brief(
         &Uuid::new_v4().to_string(),
         "research BTC-USD funding",
@@ -332,9 +338,19 @@ async fn an_answer_given_in_turn_one_is_in_turn_twos_brief_at_the_top() {
         &[],
         &[],
     );
-    assert!(rendered(&brief).contains("Kraken"), "turn two does not carry turn one's answer");
-    let first = brief.retrievals.iter().min_by_key(|r| r.rank).expect("something retrieved");
-    assert_eq!(first.entry_id, "pref_venue", "the user's own answer ranks first");
+    assert!(
+        rendered(&brief).contains("Kraken"),
+        "turn two does not carry turn one's answer"
+    );
+    let first = brief
+        .retrievals
+        .iter()
+        .min_by_key(|r| r.rank)
+        .expect("something retrieved");
+    assert_eq!(
+        first.entry_id, "pref_venue",
+        "the user's own answer ranks first"
+    );
 }
 
 /// S-10.12: a question opened in one conversation appears in the next run's brief
@@ -348,9 +364,18 @@ async fn an_open_question_reaches_the_next_brief_and_a_citing_finding_closes_it(
     let user = Uuid::new_v4();
     let today = chrono::Utc::now().date_naive().to_string();
 
-    store.put(user, &question_entry("q_curious", "BTC-USD", false)).await.unwrap();
-    store.put(user, &question_entry("q_blocking", "BTC-USD", true)).await.unwrap();
-    store.put(user, &question_entry("q_other", "DOGE-USD", true)).await.unwrap();
+    store
+        .put(user, &question_entry("q_curious", "BTC-USD", false))
+        .await
+        .unwrap();
+    store
+        .put(user, &question_entry("q_blocking", "BTC-USD", true))
+        .await
+        .unwrap();
+    store
+        .put(user, &question_entry("q_other", "DOGE-USD", true))
+        .await
+        .unwrap();
 
     let brief_for = |entries: &[Entry]| {
         harness::memory::assemble_brief(
@@ -366,11 +391,24 @@ async fn an_open_question_reaches_the_next_brief_and_a_citing_finding_closes_it(
     };
     let entries = store.by_kind(user, Kind::OpenQuestion, 200).await.unwrap();
     let brief = brief_for(&entries);
-    let ids: Vec<&str> = brief.retrievals.iter().map(|r| r.entry_id.as_str()).collect();
-    assert!(ids.contains(&"q_blocking") && ids.contains(&"q_curious"), "{ids:?}");
-    assert!(!ids.contains(&"q_other"), "a question about another subject is not shown: {ids:?}");
+    let ids: Vec<&str> = brief
+        .retrievals
+        .iter()
+        .map(|r| r.entry_id.as_str())
+        .collect();
+    assert!(
+        ids.contains(&"q_blocking") && ids.contains(&"q_curious"),
+        "{ids:?}"
+    );
+    assert!(
+        !ids.contains(&"q_other"),
+        "a question about another subject is not shown: {ids:?}"
+    );
     let pos = |id: &str| ids.iter().position(|x| *x == id).unwrap();
-    assert!(pos("q_blocking") < pos("q_curious"), "blocking leads: {ids:?}");
+    assert!(
+        pos("q_blocking") < pos("q_curious"),
+        "blocking leads: {ids:?}"
+    );
 
     // The run cites it from a finding; the sweep closes it.
     let retrievals = api::retrieval_store::RetrievalStore::new(pool.clone());
@@ -382,8 +420,12 @@ async fn an_open_question_reaches_the_next_brief_and_a_citing_finding_closes_it(
         DataWindow::new(today.clone(), today.clone()),
         Provenance::new("run_next", "record_finding", "1", "h"),
     );
-    finding.evidence_ids.insert("question_id".into(), "q_blocking".into());
-    let closed = api::questions::close_cited(&pool, user, &finding).await.unwrap();
+    finding
+        .evidence_ids
+        .insert("question_id".into(), "q_blocking".into());
+    let closed = api::questions::close_cited(&pool, user, &finding)
+        .await
+        .unwrap();
     assert_eq!(closed, vec!["q_blocking".to_string()]);
     let q = store.get(user, "q_blocking").await.unwrap().unwrap();
     assert_eq!(q.extra["status"]["closed"]["how"], "answered");
@@ -391,7 +433,13 @@ async fn an_open_question_reaches_the_next_brief_and_a_citing_finding_closes_it(
 
     // Citing marks the retrieval cited.
     let run = brief.retrievals[0].run_id.clone();
-    assert_eq!(retrievals.mark_cited(&run, &["q_blocking".into()]).await.unwrap(), 1);
+    assert_eq!(
+        retrievals
+            .mark_cited(&run, &["q_blocking".into()])
+            .await
+            .unwrap(),
+        1
+    );
 }
 
 /// S-4.16: the monthly report is an artefact. One row per (user, month), written by the
@@ -403,15 +451,25 @@ async fn the_monthly_report_is_written_once_per_user_and_month_and_is_immutable(
     let pool = db().await;
     let store = api::memory_store::MemoryStore::new(pool.clone());
     let user = Uuid::new_v4();
-    store.put(user, &question_entry("q_report_1", "BTC-USD", false)).await.unwrap();
+    store
+        .put(user, &question_entry("q_report_1", "BTC-USD", false))
+        .await
+        .unwrap();
 
-    assert_eq!(store.publish_monthly_reports("2026-10-15").await.unwrap(), 1);
+    assert_eq!(
+        store.publish_monthly_reports("2026-10-15").await.unwrap(),
+        1
+    );
     assert_eq!(
         store.publish_monthly_reports("2026-10-28").await.unwrap(),
         0,
         "the month is already reported"
     );
-    assert_eq!(store.publish_monthly_reports("2026-11-02").await.unwrap(), 1, "a new month");
+    assert_eq!(
+        store.publish_monthly_reports("2026-11-02").await.unwrap(),
+        1,
+        "a new month"
+    );
 
     let total: i64 = sqlx::query_scalar(
         "SELECT (report->>'total')::bigint FROM agent_memory.monthly_report
@@ -425,7 +483,10 @@ async fn the_monthly_report_is_written_once_per_user_and_month_and_is_immutable(
 
     // As the platform's role: it can read and append, and cannot edit.
     let mut tx = pool.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     let n: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_memory.monthly_report")
         .fetch_one(&mut *tx)
         .await

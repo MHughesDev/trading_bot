@@ -28,7 +28,12 @@ pub struct Close {
 /// The realised simple return of a forecast issued at `t0_ns`, or `None` while it is not
 /// knowable. `bars` must be ascending by `ts_ns`.
 #[must_use]
-pub fn realised_return(bars: &[Close], t0_ns: i64, horizon_ns: i64, period_ns: i64) -> Option<(f64, i64)> {
+pub fn realised_return(
+    bars: &[Close],
+    t0_ns: i64,
+    horizon_ns: i64,
+    period_ns: i64,
+) -> Option<(f64, i64)> {
     if horizon_ns <= 0 || period_ns <= 0 {
         return None;
     }
@@ -75,7 +80,12 @@ impl ClosedBars for StoreBars {
         let bars = self.0.load_bars(instrument, tf, from, to).await?;
         Ok(bars
             .iter()
-            .filter_map(|b| b.close.to_f64().map(|c| Close { ts_ns: b.ts_ns, close: c }))
+            .filter_map(|b| {
+                b.close.to_f64().map(|c| Close {
+                    ts_ns: b.ts_ns,
+                    close: c,
+                })
+            })
             .collect())
     }
 }
@@ -85,7 +95,13 @@ pub struct NoBars;
 
 #[async_trait::async_trait]
 impl ClosedBars for NoBars {
-    async fn closes(&self, _: &str, _: Timeframe, _: DateTime<Utc>, _: DateTime<Utc>) -> anyhow::Result<Vec<Close>> {
+    async fn closes(
+        &self,
+        _: &str,
+        _: Timeframe,
+        _: DateTime<Utc>,
+        _: DateTime<Utc>,
+    ) -> anyhow::Result<Vec<Close>> {
         anyhow::bail!("no bar store is configured")
     }
 }
@@ -137,8 +153,10 @@ pub async fn realise_pending(
     .fetch_all(pg)
     .await?;
 
-    let mut groups: std::collections::BTreeMap<(String, String), Vec<(uuid::Uuid, i32, DateTime<Utc>)>> =
-        std::collections::BTreeMap::new();
+    let mut groups: std::collections::BTreeMap<
+        (String, String),
+        Vec<(uuid::Uuid, i32, DateTime<Utc>)>,
+    > = std::collections::BTreeMap::new();
     for (id, inst, h, tf, at) in due {
         groups.entry((inst, tf)).or_default().push((id, h, at));
     }

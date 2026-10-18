@@ -61,7 +61,9 @@ async fn scratch() -> Option<(PgPool, String)> {
         .execute(format!("CREATE DATABASE {name}").as_str())
         .await
         .expect("CREATE DATABASE");
-    let pg = PgPool::connect(&with_db(&base_url(), &name)).await.expect("scratch connect");
+    let pg = PgPool::connect(&with_db(&base_url(), &name))
+        .await
+        .expect("scratch connect");
     // 0044 revokes on sqlx's bookkeeping table, so it needs one; without it 0044 fails and is
     // rolled back below, and every table made after it arrives with no grant to `app_role`.
     pg.execute("CREATE TABLE IF NOT EXISTS public._sqlx_migrations (version BIGINT PRIMARY KEY)")
@@ -209,7 +211,10 @@ async fn a_vetoed_item_is_not_claimed_and_the_digest_says_it_was_vetoed() {
     }
     let vetoed = Uuid::new_v4();
     let kept = Uuid::new_v4();
-    for (id, q) in [(vetoed, "the question to veto"), (kept, "the question to keep")] {
+    for (id, q) in [
+        (vetoed, "the question to veto"),
+        (kept, "the question to keep"),
+    ] {
         sqlx::query(
             "INSERT INTO agenda_items (item_id, session_id, question, subject, workflow, dedupe_key, status) \
              VALUES ($1, $2, $3, 'BTC-USD', 'investigate', $4, 'queued')",
@@ -239,7 +244,9 @@ async fn a_vetoed_item_is_not_claimed_and_the_digest_says_it_was_vetoed() {
         .await
         .unwrap();
     let status = resp.status();
-    let said = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    let said = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
     assert_eq!(
         status,
         StatusCode::OK,
@@ -266,7 +273,11 @@ async fn a_vetoed_item_is_not_claimed_and_the_digest_says_it_was_vetoed() {
         .iter()
         .map(|i| i.id)
         .collect();
-    assert_eq!(live, vec![kept], "a vetoed item is never offered to a claim");
+    assert_eq!(
+        live,
+        vec![kept],
+        "a vetoed item is never offered to a claim"
+    );
 
     // The log is the authority, not the row: put the row back to `queued`, as a
     // stale projection or a second writer would, and the driver still refuses.
@@ -300,11 +311,12 @@ async fn a_vetoed_item_is_not_claimed_and_the_digest_says_it_was_vetoed() {
             .expect("a digest"),
         "a digest is written for a period that has a veto in it"
     );
-    let rows: Vec<(Value,)> = sqlx::query_as("SELECT body FROM session_digests WHERE session_id = $1")
-        .bind(session_id)
-        .fetch_all(&app)
-        .await
-        .unwrap();
+    let rows: Vec<(Value,)> =
+        sqlx::query_as("SELECT body FROM session_digests WHERE session_id = $1")
+            .bind(session_id)
+            .fetch_all(&app)
+            .await
+            .unwrap();
     assert_eq!(rows.len(), 1);
     let body = rows[0].0.to_string();
     assert!(
@@ -324,11 +336,12 @@ async fn a_vetoed_item_is_not_claimed_and_the_digest_says_it_was_vetoed() {
     assert!(paused.lines.iter().any(|l| l.text.contains("vetoed")));
     // S-11.12's unit trap: the budget line beside a dollar bar says what it is
     // counted in, in the sentence and on the row.
-    let unit: (String,) = sqlx::query_as("SELECT spend_unit FROM session_digests WHERE session_id = $1")
-        .bind(session_id)
-        .fetch_one(&app)
-        .await
-        .unwrap();
+    let unit: (String,) =
+        sqlx::query_as("SELECT spend_unit FROM session_digests WHERE session_id = $1")
+            .bind(session_id)
+            .fetch_one(&app)
+            .await
+            .unwrap();
     assert_eq!(unit.0, "trials");
     let budget = digest
         .section(research_session::digest::Heading::Budget)
@@ -343,11 +356,15 @@ async fn a_vetoed_item_is_not_claimed_and_the_digest_says_it_was_vetoed() {
         .section(research_session::digest::Heading::NextUp)
         .expect("the kept item is next up");
     assert!(
-        next.lines.iter().any(|l| l.text.contains("the question to keep")),
+        next.lines
+            .iter()
+            .any(|l| l.text.contains("the question to keep")),
         "{next:?}"
     );
     assert!(
-        next.lines.iter().all(|l| !l.text.contains("the question to veto")),
+        next.lines
+            .iter()
+            .all(|l| !l.text.contains("the question to veto")),
         "the vetoed question is not offered as upcoming: {next:?}"
     );
 

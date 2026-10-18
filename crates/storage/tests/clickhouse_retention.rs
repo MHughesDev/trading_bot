@@ -62,8 +62,12 @@ async fn a_chain_table_past_its_budget_is_downsampled_not_deleted() {
     // Two contracts, three days of hourly snapshots 100 days ago (in scope for a
     // 90-day rule), two days 10 days ago (out of scope), and one other venue.
     let now = Utc::now();
-    let old_day0 = (now - Duration::days(100)).duration_trunc(Duration::days(1)).unwrap();
-    let new_day0 = (now - Duration::days(10)).duration_trunc(Duration::days(1)).unwrap();
+    let old_day0 = (now - Duration::days(100))
+        .duration_trunc(Duration::days(1))
+        .unwrap();
+    let new_day0 = (now - Duration::days(10))
+        .duration_trunc(Duration::days(1))
+        .unwrap();
     let mut values = Vec::new();
     let mut push = |venue: &str, strike: u32, t: chrono::DateTime<Utc>, iv: f64| {
         values.push(format!(
@@ -83,7 +87,12 @@ async fn a_chain_table_past_its_budget_is_downsampled_not_deleted() {
         }
         for d in 0..2 {
             for h in 0..24 {
-                push("tradier", strike, new_day0 + Duration::days(d) + Duration::hours(h), 0.2);
+                push(
+                    "tradier",
+                    strike,
+                    new_day0 + Duration::days(d) + Duration::hours(h),
+                    0.2,
+                );
             }
         }
     }
@@ -123,7 +132,9 @@ async fn a_chain_table_past_its_budget_is_downsampled_not_deleted() {
         },
         enabled: true,
     };
-    let out = retention::apply(&url, &spec, used, now).await.expect("pass");
+    let out = retention::apply(&url, &spec, used, now)
+        .await
+        .expect("pass");
     let retention::SeriesOutcome::Downsampled { report, .. } = out else {
         panic!("over budget with a downsample rule must downsample: {out:?}");
     };
@@ -137,7 +148,14 @@ async fn a_chain_table_past_its_budget_is_downsampled_not_deleted() {
     assert_eq!(report.buckets_before, 6);
     assert!(report.continuity_held(), "{report:?}");
     assert_eq!(report.fine_rows_after, 0);
-    assert_eq!(n(&c, &format!("SELECT count() AS n FROM option_chain_snapshots FINAL WHERE {scope}")).await, 6);
+    assert_eq!(
+        n(
+            &c,
+            &format!("SELECT count() AS n FROM option_chain_snapshots FINAL WHERE {scope}")
+        )
+        .await,
+        6
+    );
     assert_eq!(
         n(&c, &format!("SELECT count() AS n FROM option_chain_snapshots FINAL WHERE {scope} AND snapshot_cadence = 'daily'")).await,
         6
@@ -153,14 +171,19 @@ async fn a_chain_table_past_its_budget_is_downsampled_not_deleted() {
         96
     );
     assert_eq!(
-        n(&c, "SELECT count() AS n FROM option_chain_snapshots FINAL WHERE venue = 'other_venue'").await,
+        n(
+            &c,
+            "SELECT count() AS n FROM option_chain_snapshots FINAL WHERE venue = 'other_venue'"
+        )
+        .await,
         24
     );
 
     // Idempotent: a second pass over the coarsened table changes nothing.
-    let again = retention::downsample_chain_snapshots(&url, "tradier", now - Duration::days(90), 86_400)
-        .await
-        .unwrap();
+    let again =
+        retention::downsample_chain_snapshots(&url, "tradier", now - Duration::days(90), 86_400)
+            .await
+            .unwrap();
     assert_eq!(again.fine_rows_before, 0);
     assert_eq!(again.buckets_after, 6);
 

@@ -162,7 +162,11 @@ impl LlmClient {
     /// One chat completion (non-streaming).
     pub async fn chat(&self, req: &ChatRequest) -> Result<ChatResponse, LlmError> {
         if !self.model_allowed(&req.model) {
-            let allowed = self.allowed_models.as_deref().unwrap_or_default().join(", ");
+            let allowed = self
+                .allowed_models
+                .as_deref()
+                .unwrap_or_default()
+                .join(", ");
             return Err(LlmError::InvalidRequest(format!(
                 "model `{}` is not enabled on this platform; enabled for {}: {allowed}",
                 req.model,

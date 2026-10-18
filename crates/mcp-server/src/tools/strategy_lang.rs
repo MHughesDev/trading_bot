@@ -250,7 +250,10 @@ pub async fn create_strategy(api: &ApiClient, params: &Value, definition_json: &
                 Err(ds) => {
                     return crate::tool_error::refuse_extra(
                         "validation_failed",
-                        format!("the SLv2 text has {} diagnostic(s); see `errors`.", ds.len()),
+                        format!(
+                            "the SLv2 text has {} diagnostic(s); see `errors`.",
+                            ds.len()
+                        ),
                         "apply the `fix` on each entry in `errors`, then call again",
                         json!({ "errors": diagnostics_as_errors(&ds) }),
                     )
@@ -259,10 +262,16 @@ pub async fn create_strategy(api: &ApiClient, params: &Value, definition_json: &
             let materialised = domain::strategy_def::params::materialize(&def, &BTreeMap::new())
                 .unwrap_or_else(|_| def.clone());
             if let Err(es) = strategy_validator::validate(&materialised) {
-                let errors = es.into_iter().map(ValidationErrorItem::from).collect::<Vec<_>>();
+                let errors = es
+                    .into_iter()
+                    .map(ValidationErrorItem::from)
+                    .collect::<Vec<_>>();
                 return crate::tool_error::refuse_extra(
                     "validation_failed",
-                    format!("the definition has {} validation error(s); see `errors`.", errors.len()),
+                    format!(
+                        "the definition has {} validation error(s); see `errors`.",
+                        errors.len()
+                    ),
                     "fix each entry in `errors`, then call again",
                     json!({ "errors": errors }),
                 );
@@ -418,8 +427,7 @@ fn warm_up_at_defaults(params: &Value, out: &mut Value) {
     if def.parameters.is_empty() {
         return;
     }
-    let Ok(materialised) = domain::strategy_def::params::materialize(&def, &BTreeMap::new())
-    else {
+    let Ok(materialised) = domain::strategy_def::params::materialize(&def, &BTreeMap::new()) else {
         return;
     };
     let facts = facts(&materialised);
@@ -432,10 +440,12 @@ fn warm_up_at_defaults(params: &Value, out: &mut Value) {
         .unwrap_or_default()
         .iter()
         .filter_map(Value::as_str)
-        .map(|name| json!({
-            "feature": name,
-            "warmup_bars": features::runtime::lookback_bars(name),
-        }))
+        .map(|name| {
+            json!({
+                "feature": name,
+                "warmup_bars": features::runtime::lookback_bars(name),
+            })
+        })
         .collect();
     if let Some(d) = out.get_mut("detail").and_then(Value::as_object_mut) {
         d.insert("inputs".into(), json!(inputs));
@@ -557,7 +567,10 @@ pub fn compile_strategy_form(params: &Value) -> Value {
         }),
         Err(ds) => crate::tool_error::refuse_extra(
             "compile_failed",
-            format!("the form compiles to SLv2 with {} diagnostic(s); see `diagnostics`.", ds.len()),
+            format!(
+                "the form compiles to SLv2 with {} diagnostic(s); see `diagnostics`.",
+                ds.len()
+            ),
             "apply the `fix` on each entry in `diagnostics`, then call again",
             json!({
                 "fills": fills,
@@ -612,7 +625,9 @@ pub fn strategy_skeleton(params: &Value) -> Value {
         Err(d) => crate::tool_error::refuse_extra(
             "not_writable_yet",
             d.message.as_str(),
-            d.fix.as_deref().unwrap_or(crate::tool_error::DIAGNOSTIC_FIX),
+            d.fix
+                .as_deref()
+                .unwrap_or(crate::tool_error::DIAGNOSTIC_FIX),
             json!({ "hypothesis_family": name, "see": d.see }),
         ),
         Ok(s) => {
@@ -749,7 +764,9 @@ where
         crate::tool_error::refuse(
             "not_expressible_in_slv2",
             d.message.as_str(),
-            d.fix.as_deref().unwrap_or(crate::tool_error::DIAGNOSTIC_FIX),
+            d.fix
+                .as_deref()
+                .unwrap_or(crate::tool_error::DIAGNOSTIC_FIX),
         )
     })?;
     let total: usize = sets.iter().map(|s| s.probes().len()).sum();
@@ -763,7 +780,9 @@ where
     if total > MAX_PREVIEWS {
         return Err(crate::tool_error::refuse(
             "too_many_probes",
-            format!("measuring this strategy would take {total} previews; the limit is {MAX_PREVIEWS}"),
+            format!(
+                "measuring this strategy would take {total} previews; the limit is {MAX_PREVIEWS}"
+            ),
             "split the entry conditions, or profile the version with fewer clauses",
         ));
     }
@@ -785,13 +804,26 @@ where
             }
             answers.push(a.bars_true.get(&probe.signal).copied().unwrap_or(0));
         }
-        let tally = set
-            .counts(evaluated.unwrap_or(0), &answers)
-            .map_err(|d| crate::tool_error::from_diagnostic(d.code.as_str(), &d.message, d.fix.as_deref().unwrap_or(crate::tool_error::DIAGNOSTIC_FIX)))?;
+        let tally = set.counts(evaluated.unwrap_or(0), &answers).map_err(|d| {
+            crate::tool_error::from_diagnostic(
+                d.code.as_str(),
+                &d.message,
+                d.fix
+                    .as_deref()
+                    .unwrap_or(crate::tool_error::DIAGNOSTIC_FIX),
+            )
+        })?;
         tallies.push(tally);
     }
-    strategy_lang::blocking_profile(def, &tallies)
-        .map_err(|d| crate::tool_error::from_diagnostic(d.code.as_str(), &d.message, d.fix.as_deref().unwrap_or(crate::tool_error::DIAGNOSTIC_FIX)))
+    strategy_lang::blocking_profile(def, &tallies).map_err(|d| {
+        crate::tool_error::from_diagnostic(
+            d.code.as_str(),
+            &d.message,
+            d.fix
+                .as_deref()
+                .unwrap_or(crate::tool_error::DIAGNOSTIC_FIX),
+        )
+    })
 }
 
 /// A probe's definition as the JSON the preview route takes: parameters at
@@ -801,14 +833,13 @@ where
 ///
 /// A tool error when the defaults do not materialise.
 pub fn materialised_json(def: &StrategyDefinition) -> Result<Value, Value> {
-    let m = domain::strategy_def::params::materialize(def, &BTreeMap::new())
-        .map_err(|e| {
-            crate::tool_error::refuse(
-                "params_do_not_materialise",
-                format!("the parameter defaults do not materialise: {e}"),
-                "give every parameter a default inside its declared range",
-            )
-        })?;
+    let m = domain::strategy_def::params::materialize(def, &BTreeMap::new()).map_err(|e| {
+        crate::tool_error::refuse(
+            "params_do_not_materialise",
+            format!("the parameter defaults do not materialise: {e}"),
+            "give every parameter a default inside its declared range",
+        )
+    })?;
     serde_json::to_value(m).map_err(|e| {
         crate::tool_error::refuse(
             "serialization_error",
@@ -877,7 +908,10 @@ fn definition_of(params: &Value) -> Result<StrategyDefinition, Value> {
             strategy_lang::text_to_definition(t).map_err(|ds| {
                 crate::tool_error::refuse_extra(
                     "compile_failed",
-                    format!("the SLv2 text has {} diagnostic(s); see `errors`.", ds.len()),
+                    format!(
+                        "the SLv2 text has {} diagnostic(s); see `errors`.",
+                        ds.len()
+                    ),
                     "apply the `fix` on each entry in `errors`, then call again",
                     json!({ "errors": diagnostics_as_errors(&ds) }),
                 )
@@ -1043,7 +1077,9 @@ fn proposal_json(p: &strategy_lang::suggest::Proposal) -> Value {
         Proposal::WidenParamRange { param, direction } => json!({
             "edit": "widen_param_range", "param": param.as_str(), "direction": direction.as_str(),
         }),
-        Proposal::DropClause { clause } => json!({ "edit": "drop_clause", "clause": clause.as_str() }),
+        Proposal::DropClause { clause } => {
+            json!({ "edit": "drop_clause", "clause": clause.as_str() })
+        }
         Proposal::AddPredicate { predicate } => json!({
             "edit": "add_predicate", "predicate": predicate.text().as_str(),
         }),
@@ -1076,11 +1112,12 @@ fn caller_findings(params: &Value) -> Result<strategy_lang::Findings, Value> {
                 "send each as {reason: \"stop_loss\"|\"take_profit\"|\"max_holding_bars\"|…, share: 0..1, trades: n}",
             ));
         };
-        f.exit_reasons.push(strategy_lang::suggest::ExitReasonShare {
-            reason: reason.to_string(),
-            share,
-            trades,
-        });
+        f.exit_reasons
+            .push(strategy_lang::suggest::ExitReasonShare {
+                reason: reason.to_string(),
+                share,
+                trades,
+            });
     }
     for r in params
         .get("regimes")
@@ -1128,7 +1165,8 @@ fn caller_findings(params: &Value) -> Result<strategy_lang::Findings, Value> {
                 let (Some(family), Some(nums), Some(bound)) = (
                     g.get("family").and_then(Value::as_str),
                     nums,
-                    g.get("bound").map(|b| b.as_str().map_or_else(|| b.to_string(), str::to_string)),
+                    g.get("bound")
+                        .map(|b| b.as_str().map_or_else(|| b.to_string(), str::to_string)),
                 ) else {
                     return Err(crate::tool_error::refuse(
                         "unreadable_regimes",
@@ -1144,7 +1182,15 @@ fn caller_findings(params: &Value) -> Result<strategy_lang::Findings, Value> {
                         &bound,
                         &strategy_lang::Catalogue::engine(),
                     )
-                    .map_err(|d| crate::tool_error::from_diagnostic(d.code.as_str(), &d.message, d.fix.as_deref().unwrap_or(crate::tool_error::DIAGNOSTIC_FIX)))?,
+                    .map_err(|d| {
+                        crate::tool_error::from_diagnostic(
+                            d.code.as_str(),
+                            &d.message,
+                            d.fix
+                                .as_deref()
+                                .unwrap_or(crate::tool_error::DIAGNOSTIC_FIX),
+                        )
+                    })?,
                 )
             }
         };
@@ -1161,15 +1207,14 @@ fn caller_findings(params: &Value) -> Result<strategy_lang::Findings, Value> {
 /// Turn findings into the tool's answer. Separate from the I/O so it is tested
 /// without a server.
 #[must_use]
-pub fn suggestions_json(
-    def: &StrategyDefinition,
-    findings: &strategy_lang::Findings,
-) -> Value {
+pub fn suggestions_json(def: &StrategyDefinition, findings: &strategy_lang::Findings) -> Value {
     match strategy_lang::suggest_moves(def, findings) {
         Err(d) => crate::tool_error::refuse(
             "not_expressible_in_slv2",
             d.message.as_str(),
-            d.fix.as_deref().unwrap_or(crate::tool_error::DIAGNOSTIC_FIX),
+            d.fix
+                .as_deref()
+                .unwrap_or(crate::tool_error::DIAGNOSTIC_FIX),
         ),
         Ok(s) => json!({
             "summary_fields": { "n_moves": s.moves.len(), "n_withheld": s.withheld.len() },
@@ -1230,7 +1275,8 @@ pub async fn suggest_moves(api: &ApiClient, params: &Value) -> Value {
                         Some(rows) => match caller_findings(&json!({ "exit_reasons": rows })) {
                             Ok(f) => {
                                 findings.exit_reasons = f.exit_reasons;
-                                exit_reasons_from = json!({ "run_id": run_id, "read": "the run's stored result" });
+                                exit_reasons_from =
+                                    json!({ "run_id": run_id, "read": "the run's stored result" });
                             }
                             Err(e) => return e,
                         },
@@ -1281,8 +1327,14 @@ fn window_properties() -> Value {
 pub fn specs() -> Vec<ToolSpec> {
     let mut blocking_props = window_properties();
     if let Some(o) = blocking_props.as_object_mut() {
-        o.insert("text".into(), json!({"type": "string", "description": "SLv2 — exactly one of this or `definition`"}));
-        o.insert("definition".into(), json!({"type": "object", "description": "a stored definition object"}));
+        o.insert(
+            "text".into(),
+            json!({"type": "string", "description": "SLv2 — exactly one of this or `definition`"}),
+        );
+        o.insert(
+            "definition".into(),
+            json!({"type": "object", "description": "a stored definition object"}),
+        );
     }
     let mut suggest_props = blocking_props.clone();
     if let Some(o) = suggest_props.as_object_mut() {
@@ -1294,14 +1346,17 @@ pub fn specs() -> Vec<ToolSpec> {
             }}
         }));
         o.insert("run_id".into(), json!({"type": "string"}));
-        o.insert("regimes".into(), json!({
-            "type": "array",
-            "description": "optional: regimes lost in",
-            "items": {"type": "object", "properties": {
-                "label": {"type": "string"}, "objective": {"type": "number"},
-                "share_of_window": {"type": "number"}, "gate": {"type": "object"}
-            }}
-        }));
+        o.insert(
+            "regimes".into(),
+            json!({
+                "type": "array",
+                "description": "optional: regimes lost in",
+                "items": {"type": "object", "properties": {
+                    "label": {"type": "string"}, "objective": {"type": "number"},
+                    "share_of_window": {"type": "number"}, "gate": {"type": "object"}
+                }}
+            }),
+        );
     }
     crate::result_shape::declared(vec![
         ToolSpec::new(
@@ -1393,7 +1448,11 @@ exit time 24 bars
                 .probes()
                 .iter()
                 .find(|p| {
-                    p.definition.nodes.iter().zip(&probe.nodes).all(|(a, b)| a == b)
+                    p.definition
+                        .nodes
+                        .iter()
+                        .zip(&probe.nodes)
+                        .all(|(a, b)| a == b)
                 })
                 .map(|p| p.measures)
                 .expect("the probe handed to `run` is one of the set's");
@@ -1438,7 +1497,10 @@ exit time 24 bars
         for m in moves {
             assert!(m["why"]["diagnostic"].is_string(), "{m:#}");
             assert!(m["why"]["measured"].is_object(), "{m:#}");
-            assert!(m["why"]["says"].as_str().is_some_and(|s| !s.is_empty()), "{m:#}");
+            assert!(
+                m["why"]["says"].as_str().is_some_and(|s| !s.is_empty()),
+                "{m:#}"
+            );
         }
         assert_eq!(moves[0]["kind"], "change_threshold");
         assert_eq!(moves[0]["why"]["diagnostic"], "sole_blocker");
@@ -1481,9 +1543,11 @@ exit time 24 bars
         // Written as separate inputs would trip the 120-character rule, so the
         // clauses are short and the conjunction is long.
         let d = def(&text);
-        let err = measure(&d, |_p| std::future::ready(Err(json!({"error": "must_not_run"}))))
-            .await
-            .unwrap_err();
+        let err = measure(&d, |_p| {
+            std::future::ready(Err(json!({"error": "must_not_run"})))
+        })
+        .await
+        .unwrap_err();
         assert_eq!(err["error"]["code"], "too_many_probes");
     }
 
@@ -1515,7 +1579,10 @@ exit time 24 bars
         );
         assert_eq!(bad["valid"], false);
         let e = &bad["errors"][0];
-        assert!(e["code"].is_string() && e["fix"].is_string() && e["path"].is_string(), "{bad:#}");
+        assert!(
+            e["code"].is_string() && e["fix"].is_string() && e["path"].is_string(),
+            "{bad:#}"
+        );
     }
 
     #[test]
@@ -1551,7 +1618,10 @@ exit time 24 bars
         // Inputs: both averages and the filter, each with a warm-up.
         let inputs = d["inputs"].as_array().expect("inputs");
         assert!(inputs.len() >= 3, "{out:#}");
-        assert!(inputs.iter().all(|i| i["warmup_bars"].is_number()), "{out:#}");
+        assert!(
+            inputs.iter().all(|i| i["warmup_bars"].is_number()),
+            "{out:#}"
+        );
         // Entries, clause by clause.
         assert_eq!(d["entries"][0]["clauses"].as_array().unwrap().len(), 2);
         // Exits and the size rule, as written.
@@ -1596,7 +1666,8 @@ exit time 24 bars
                         let parent = st.heads.get(&slug).cloned();
                         let hash = format!("rev{}", st.posts.len() + 1);
                         st.heads.insert(slug.clone(), hash.clone());
-                        st.posts.push((slug.clone(), q.get("parent_strategy_id").cloned()));
+                        st.posts
+                            .push((slug.clone(), q.get("parent_strategy_id").cloned()));
                         (
                             StatusCode::CREATED,
                             Json(json!({
@@ -1619,7 +1690,11 @@ exit time 24 bars
 
         let first = create_strategy(&api, &json!({ "text": SIGN_ERROR }), "").await;
         assert_eq!(first["created"], true, "{first:#}");
-        assert_eq!(first["parent_revision"], Value::Null, "a first version has no parent");
+        assert_eq!(
+            first["parent_revision"],
+            Value::Null,
+            "a first version has no parent"
+        );
 
         // One edit, then the same header again: that is how an author iterates.
         let edited = SIGN_ERROR.replace("rsi(close, 14) < 0", "rsi(close, 14) < 30");
@@ -1633,7 +1708,10 @@ exit time 24 bars
 
         let posts = &state.lock().unwrap().posts;
         assert_eq!(posts.len(), 2);
-        assert!(posts.iter().all(|(slug, _)| slug == "sign_error"), "{posts:?}");
+        assert!(
+            posts.iter().all(|(slug, _)| slug == "sign_error"),
+            "{posts:?}"
+        );
         assert!(
             posts.iter().all(|(_, parent)| parent.is_none()),
             "the tool invented a parent_strategy_id: {posts:?}"
@@ -1665,10 +1743,14 @@ exit none
     fn a_swept_draft_is_previewed_at_its_defaults_and_nothing_else_is_touched() {
         let trend = strategy_skeleton(&json!({"hypothesis_family": "trend"}));
         let swept = compile_to_json(trend["detail"]["text"].as_str().unwrap());
-        let params = json!({"definition": swept, "instrument_id": "BTC-USD", "start": "a", "end": "b"});
+        let params =
+            json!({"definition": swept, "instrument_id": "BTC-USD", "start": "a", "end": "b"});
         let out = with_materialised_draft(&params);
         let sent = out["definition"].to_string();
-        assert!(!sent.contains("{{"), "a parameter reached the preview: {sent}");
+        assert!(
+            !sent.contains("{{"),
+            "a parameter reached the preview: {sent}"
+        );
         assert!(sent.contains("ema_7") && sent.contains("ema_21"), "{sent}");
         // The rest of the request is untouched.
         assert_eq!(out["instrument_id"], "BTC-USD");
@@ -1694,7 +1776,10 @@ exit none
         let grammar = get_slv2_guide(&json!({"section": "form.schema"}));
         let schema = grammar["schema"].to_string();
         assert!(!schema.contains("$ref"), "a reference survived inlining");
-        assert!(schema.contains("\"rsi\""), "the engine's families are in the schema");
+        assert!(
+            schema.contains("\"rsi\""),
+            "the engine's families are in the schema"
+        );
         // A tool's schema is listed to every client: the per-family form would be
         // ~270 KB, the compact one is a few.
         assert!(schema.len() < 40_000, "{} bytes", schema.len());
@@ -1719,11 +1804,17 @@ exit none
         assert_eq!(v["valid"], true, "{v:#}");
         let out = compile_strategy_form(&form);
         assert_eq!(out["detail"]["fills"], 5, "{out:#}");
-        assert!(out["detail"]["text"].as_str().unwrap().contains("rsi(close, 14) < 30"));
+        assert!(out["detail"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("rsi(close, 14) < 30"));
         assert_eq!(out["summary_fields"]["strategy_id"], "form_demo");
 
         // The form says it cannot be read, by name, when it is not a form.
-        assert_eq!(compile_strategy_form(&json!({"header": 1}))["error"]["code"], "unreadable_form");
+        assert_eq!(
+            compile_strategy_form(&json!({"header": 1}))["error"]["code"],
+            "unreadable_form"
+        );
         // And a fill the language refuses comes back with the language's own reason.
         let mut bad = form;
         bad["entries"][0]["filters"][0]["lhs"]["family"] = json!("not_a_family");
@@ -1812,7 +1903,10 @@ exit time 24 bars
             .iter()
             .find(|c| c["clause"] == "entry.long[0]")
             .unwrap_or_else(|| panic!("{out:#}"));
-        assert!(entry["says"][0].as_str().unwrap().starts_with("60 rather than 70"));
+        assert!(entry["says"][0]
+            .as_str()
+            .unwrap()
+            .starts_with("60 rather than 70"));
         // The base answer is untouched: it still names the entry clauses.
         assert_eq!(out["detail"]["entries"][0]["path"], "entry.long[0]");
 
@@ -1820,14 +1914,19 @@ exit time 24 bars
         let stored = def(text);
         let out = explain_strategy(&json!({ "definition": stored }));
         assert_eq!(out["detail"]["comments"], json!([]));
-        assert!(out["detail"]["comments_are_not_stored"].is_string(), "{out:#}");
+        assert!(
+            out["detail"]["comments_are_not_stored"].is_string(),
+            "{out:#}"
+        );
     }
 
     #[test]
     fn a_skeleton_is_served_and_a_missing_family_is_refused_by_name() {
         let s = strategy_skeleton(&json!({"hypothesis_family": "trend"}));
         assert!(s["detail"]["text"].as_str().unwrap().contains("entry long"));
-        assert!(s["detail"]["params"].as_object().is_some_and(|p| p.contains_key("fast")));
+        assert!(s["detail"]["params"]
+            .as_object()
+            .is_some_and(|p| p.contains_key("fast")));
         let carry = strategy_skeleton(&json!({"hypothesis_family": "carry"}));
         assert_eq!(carry["error"]["code"], "not_writable_yet");
         let unknown = strategy_skeleton(&json!({"hypothesis_family": "astrology"}));
@@ -1841,7 +1940,10 @@ exit time 24 bars
         assert!(index["sections"].as_array().unwrap().len() >= 10);
         let one = get_slv2_guide(&json!({"section": "guide#exits.units"}));
         assert!(one["text"].as_str().unwrap().contains("atr"), "{one:#}");
-        assert_eq!(get_slv2_guide(&json!({"section": "nope"}))["error"]["code"], "unknown_section");
+        assert_eq!(
+            get_slv2_guide(&json!({"section": "nope"}))["error"]["code"],
+            "unknown_section"
+        );
     }
 
     #[test]

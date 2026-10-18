@@ -97,18 +97,28 @@ async fn a_due_forecast_is_realised_from_the_bars_and_a_pending_or_legacy_one_is
     // logged before 0227: no horizon or timeframe
     let legacy = forecast(&pg, &m, t0, None, None).await;
 
-    let r = realise_pending(&pg, &Minutes(start, 180), now, 100).await.unwrap();
+    let r = realise_pending(&pg, &Minutes(start, 180), now, 100)
+        .await
+        .unwrap();
     assert!(r.filled >= 1);
 
     // entry = close of minute 10 (110), exit = first close at/after 15.5 min = minute 16 (116)
     let got = realized(&pg, due).await.expect("realised");
     assert!((got - (116.0 / 110.0 - 1.0)).abs() < 1e-12, "{got}");
-    assert!(realized(&pg, pending).await.is_none(), "the horizon has not passed");
-    assert!(realized(&pg, legacy).await.is_none(), "a legacy row is never guessed at");
+    assert!(
+        realized(&pg, pending).await.is_none(),
+        "the horizon has not passed"
+    );
+    assert!(
+        realized(&pg, legacy).await.is_none(),
+        "a legacy row is never guessed at"
+    );
     assert!(r.unresolvable >= 1);
 
     // idempotent: a second pass does not rewrite or double-count it
-    let again = realise_pending(&pg, &Minutes(start, 180), now, 100).await.unwrap();
+    let again = realise_pending(&pg, &Minutes(start, 180), now, 100)
+        .await
+        .unwrap();
     assert_eq!(realized(&pg, due).await, Some(got));
     assert!(again.filled <= r.filled);
 }
@@ -118,8 +128,17 @@ async fn a_due_forecast_is_realised_from_the_bars_and_a_pending_or_legacy_one_is
 async fn with_no_bar_store_every_due_forecast_waits_and_nothing_is_invented() {
     let pg = pool().await;
     let m = model(&pg).await;
-    let id = forecast(&pg, &m, Utc::now() - Duration::hours(2), Some(5), Some("1m")).await;
-    let r = realise_pending(&pg, &NoBars, Utc::now(), 100).await.unwrap();
+    let id = forecast(
+        &pg,
+        &m,
+        Utc::now() - Duration::hours(2),
+        Some(5),
+        Some("1m"),
+    )
+    .await;
+    let r = realise_pending(&pg, &NoBars, Utc::now(), 100)
+        .await
+        .unwrap();
     assert!(r.waiting_for_bars >= 1);
     assert!(realized(&pg, id).await.is_none());
 }
@@ -131,7 +150,10 @@ async fn the_platform_role_can_write_the_realised_value_and_the_new_column() {
     let m = model(&pg).await;
     let id = forecast(&pg, &m, Utc::now(), Some(5), Some("1m")).await;
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     sqlx::query("UPDATE model_forecasts SET realized = 0.02, realized_at = now(), timeframe = '5m' WHERE forecast_id = $1")
         .bind(id)
         .execute(&mut *tx)

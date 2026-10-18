@@ -134,7 +134,9 @@ async fn serve(document: Value) -> String {
             }
         }),
     );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
     let addr = listener.local_addr().expect("addr");
     tokio::spawn(async move {
         axum::serve(listener, app).await.expect("serve");
@@ -192,7 +194,11 @@ async fn a_simulated_run_reaches_both_tools_with_the_arithmetic_intact() {
     let api = ApiClient::new(url, "test-token");
 
     // cost_shock_curve: the break-even multiple is gross over costs, exactly.
-    let curve = cost_shock_curve(&api, &json!({ "run_id": "00000000-0000-0000-0000-000000000001" })).await;
+    let curve = cost_shock_curve(
+        &api,
+        &json!({ "run_id": "00000000-0000-0000-0000-000000000001" }),
+    )
+    .await;
     assert!(curve.get("error").is_none(), "{curve}");
     let breakeven = curve["breakeven_multiplier"].as_f64().expect("a multiple");
     let expected = (net + costs) / costs;
@@ -203,7 +209,10 @@ async fn a_simulated_run_reaches_both_tools_with_the_arithmetic_intact() {
     assert_eq!(curve["baseline"]["n_trades"], rows.len());
     // Re-priced at 1x it is the run's own net.
     let at_one = curve["curve"][0]["net_pnl"].as_f64().unwrap();
-    assert!((at_one - net).abs() < 1e-6, "1x is the run itself: {at_one} vs {net}");
+    assert!(
+        (at_one - net).abs() < 1e-6,
+        "1x is the run itself: {at_one} vs {net}"
+    );
 
     // trade_reshuffle_bootstrap: mode named, the same seed repeats, and a
     // reshuffle cannot be reported as a worst case.

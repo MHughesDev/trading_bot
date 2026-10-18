@@ -66,8 +66,11 @@ pub fn daily_returns(inputs: &PnlInputs, last_complete_day: NaiveDate) -> Vec<Da
     if inputs.starting_capital <= 0.0 || !inputs.starting_capital.is_finite() {
         return out;
     }
-    let instruments: std::collections::BTreeSet<&str> =
-        inputs.fills.iter().map(|f| f.instrument_id.as_str()).collect();
+    let instruments: std::collections::BTreeSet<&str> = inputs
+        .fills
+        .iter()
+        .map(|f| f.instrument_id.as_str())
+        .collect();
     if instruments.len() > 1 {
         return out;
     }
@@ -81,11 +84,7 @@ pub fn daily_returns(inputs: &PnlInputs, last_complete_day: NaiveDate) -> Vec<Da
     let mut next_fill = 0usize;
     let mut day = inputs.started_at.date_naive();
     while day <= last_complete_day {
-        let day_end = day
-            .and_hms_opt(0, 0, 0)
-            .expect("midnight")
-            .and_utc()
-            + Duration::days(1);
+        let day_end = day.and_hms_opt(0, 0, 0).expect("midnight").and_utc() + Duration::days(1);
         while next_fill < fills.len() && fills[next_fill].filled_at < day_end {
             let f = &fills[next_fill];
             cash -= f.signed_qty * f.price + f.commission;
@@ -314,7 +313,11 @@ mod tests {
             marks: BTreeMap::new(),
         };
         let r = daily_returns(&inputs, d(4));
-        assert_eq!(r.len(), 1, "day 1 is flat and priced; day 2 holds an unpriced position");
+        assert_eq!(
+            r.len(),
+            1,
+            "day 1 is flat and priced; day 2 holds an unpriced position"
+        );
     }
 
     #[test]

@@ -601,7 +601,11 @@ pub async fn record_arms(
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> Result<ArmStatus, String> {
     let store = ArmStore::new(pg.clone());
-    let Some((arm, agent_scores)) = store.load(campaign_id).await.map_err(|e| format!("reading the arm: {e}"))? else {
+    let Some((arm, agent_scores)) = store
+        .load(campaign_id)
+        .await
+        .map_err(|e| format!("reading the arm: {e}"))?
+    else {
         return Ok(ArmStatus::NoArm);
     };
     if !agent_scores.is_empty() && arm.complete() {
@@ -611,7 +615,11 @@ pub async fn record_arms(
     // side was written but the random sweep failed finds it there and does not rewrite it.
     if agent_scores.is_empty() {
         store
-            .record_scores(campaign_id, "agent", &matched_scores(&agent.sample_scores, arm.budget))
+            .record_scores(
+                campaign_id,
+                "agent",
+                &matched_scores(&agent.sample_scores, arm.budget),
+            )
             .await
             .map_err(|e| format!("recording the agent arm: {e}"))?;
     }
@@ -624,7 +632,9 @@ pub async fn record_arms(
                     narrowing: BTreeMap::new(),
                     base_params: base_params.clone(),
                     seed: arm.seed,
-                    question: format!("campaign {campaign_id}: the matched random-search arm (EV-09)"),
+                    question: format!(
+                        "campaign {campaign_id}: the matched random-search arm (EV-09)"
+                    ),
                     sampler: SamplerKind::Random,
                     max_runs: u32::try_from(arm.budget).unwrap_or(u32::MAX),
                 },
@@ -633,7 +643,11 @@ pub async fn record_arms(
             .await
             .map_err(|e| format!("the random arm's sweep: {e}"))?;
         store
-            .record_scores(campaign_id, "random", &matched_scores(&random.sample_scores, arm.budget))
+            .record_scores(
+                campaign_id,
+                "random",
+                &matched_scores(&random.sample_scores, arm.budget),
+            )
             .await
             .map_err(|e| format!("recording the random arm: {e}"))?;
     }
@@ -657,13 +671,20 @@ pub struct RegimeObservation {
 /// whose run failed contributes nothing (an unlabelled window is dropped, never given the
 /// nearest label: nearest in that direction is the future).
 #[must_use]
-pub fn regime_observations(labels: &[Option<RegimeLabel>], values: &[Option<f64>]) -> Vec<RegimeObservation> {
+pub fn regime_observations(
+    labels: &[Option<RegimeLabel>],
+    values: &[Option<f64>],
+) -> Vec<RegimeObservation> {
     labels
         .iter()
         .zip(values)
         .filter_map(|(l, v)| {
             let (regime, score) = ((*l)?, (*v)?);
-            score.is_finite().then_some(RegimeObservation { regime, score, success: score > 0.0 })
+            score.is_finite().then_some(RegimeObservation {
+                regime,
+                score,
+                success: score > 0.0,
+            })
         })
         .collect()
 }
@@ -686,17 +707,24 @@ pub async fn fold_regime_prior(
     values: &[Option<f64>],
 ) -> Result<usize, String> {
     use crate::knowledge::{
-        labels_as_of, RegimeScopeStore, RegimeStore, ScopeResolution, LABEL_LOOKBEHIND_DAYS, RULE_MODEL_VERSION,
+        labels_as_of, RegimeScopeStore, RegimeStore, ScopeResolution, LABEL_LOOKBEHIND_DAYS,
+        RULE_MODEL_VERSION,
     };
-    let (Some(first), Some(last)) = (windows.iter().map(|w| w.0).min(), windows.iter().map(|w| w.1).max()) else {
+    let (Some(first), Some(last)) = (
+        windows.iter().map(|w| w.0).min(),
+        windows.iter().map(|w| w.1).max(),
+    ) else {
         return Ok(0);
     };
-    let asset_class: Option<(String,)> = sqlx::query_as("SELECT asset_class FROM asset_lifecycle WHERE symbol = $1")
-        .bind(&spec.universe_ref)
-        .fetch_optional(pg)
-        .await
-        .map_err(|e| e.to_string())?;
-    let Some((asset_class,)) = asset_class else { return Ok(0) };
+    let asset_class: Option<(String,)> =
+        sqlx::query_as("SELECT asset_class FROM asset_lifecycle WHERE symbol = $1")
+            .bind(&spec.universe_ref)
+            .fetch_optional(pg)
+            .await
+            .map_err(|e| e.to_string())?;
+    let Some((asset_class,)) = asset_class else {
+        return Ok(0);
+    };
     let scope = match RegimeScopeStore::new(pg.clone())
         .resolve(&asset_class, Some(&spec.universe_ref))
         .await
@@ -706,7 +734,12 @@ pub async fn fold_regime_prior(
         ScopeResolution::Ambiguous(_) | ScopeResolution::Unconfigured => return Ok(0),
     };
     let history = RegimeStore::new(pg.clone())
-        .history(&scope.market_scope, RULE_MODEL_VERSION, first - chrono::Duration::days(LABEL_LOOKBEHIND_DAYS), last)
+        .history(
+            &scope.market_scope,
+            RULE_MODEL_VERSION,
+            first - chrono::Duration::days(LABEL_LOOKBEHIND_DAYS),
+            last,
+        )
         .await
         .map_err(|e| e.to_string())?;
     let starts: Vec<DateTime<Utc>> = windows.iter().map(|w| w.0).collect();
@@ -714,7 +747,14 @@ pub async fn fold_regime_prior(
     let store = PriorStore::new(pg.clone());
     for o in &obs {
         store
-            .update(tenant, &spec.universe_ref, o.regime.as_str(), &spec.strategy_type, o.score, o.success)
+            .update(
+                tenant,
+                &spec.universe_ref,
+                o.regime.as_str(),
+                &spec.strategy_type,
+                o.score,
+                o.success,
+            )
             .await
             .map_err(|e| e.to_string())?;
     }
@@ -870,9 +910,18 @@ impl Worker for StudyWorker {
 
         // EV-09: the first generation also records the two matched arms, so a campaign
         // always has the random-search baseline its Gate 3 asks for.
-        let arms = record_arms(&self.pg, self.evaluator.as_ref(), user, campaign_id, experiment, &incumbent, &outcome, &cancel)
-            .await
-            .map_err(|e| JobError::infrastructure(format!("the random arm: {e}")))?;
+        let arms = record_arms(
+            &self.pg,
+            self.evaluator.as_ref(),
+            user,
+            campaign_id,
+            experiment,
+            &incumbent,
+            &outcome,
+            &cancel,
+        )
+        .await
+        .map_err(|e| JobError::infrastructure(format!("the random arm: {e}")))?;
 
         Ok(JobOutput {
             summary: Some(format!(
@@ -1021,7 +1070,10 @@ mod tests {
         assert_eq!(spec.max_runs, 24);
         assert_eq!(spec.replicates, 29);
         assert!(spec.incumbent_params.is_empty());
-        assert_eq!(spec.research.start, Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap());
+        assert_eq!(
+            spec.research.start,
+            Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap()
+        );
     }
 
     /// The holdout is sealed: a research window that reaches into it is refused
@@ -1038,13 +1090,19 @@ mod tests {
     fn bad_declarations_are_named() {
         let mut v = good();
         v["evaluation"]["max_runs"] = json!(0);
-        assert!(EvaluationSpec::from_search_space(&v).unwrap_err().contains("max_runs"));
+        assert!(EvaluationSpec::from_search_space(&v)
+            .unwrap_err()
+            .contains("max_runs"));
         let mut v = good();
         v["evaluation"]["rope_scale"] = json!(-1.0);
-        assert!(EvaluationSpec::from_search_space(&v).unwrap_err().contains("rope_scale"));
+        assert!(EvaluationSpec::from_search_space(&v)
+            .unwrap_err()
+            .contains("rope_scale"));
         let mut v = good();
         v["evaluation"]["research"]["end"] = json!("2023-01-01T00:00:00Z");
-        assert!(EvaluationSpec::from_search_space(&v).unwrap_err().contains("research"));
+        assert!(EvaluationSpec::from_search_space(&v)
+            .unwrap_err()
+            .contains("research"));
     }
 
     /// The seed is a function of position alone, and it moves with the position.
@@ -1066,20 +1124,35 @@ mod tests {
     /// Both arms are always the same length, whatever the sampler could draw.
     #[test]
     fn an_arm_is_exactly_its_budget_long_with_undrawn_trials_scored_as_failures() {
-        assert_eq!(matched_scores(&[1.0, 2.0], 4), vec![1.0, 2.0, f64::NEG_INFINITY, f64::NEG_INFINITY]);
-        assert_eq!(matched_scores(&[1.0, 2.0, 3.0], 2), vec![1.0, 2.0], "extra draws are not scored");
+        assert_eq!(
+            matched_scores(&[1.0, 2.0], 4),
+            vec![1.0, 2.0, f64::NEG_INFINITY, f64::NEG_INFINITY]
+        );
+        assert_eq!(
+            matched_scores(&[1.0, 2.0, 3.0], 2),
+            vec![1.0, 2.0],
+            "extra draws are not scored"
+        );
         assert_eq!(matched_scores(&[], 3).len(), 3);
     }
 
     /// An unlabelled window or a failed run adds nothing to the prior.
     #[test]
     fn only_a_labelled_window_with_a_finite_score_reaches_the_prior() {
-        let labels = [Some(RegimeLabel::LowVol), None, Some(RegimeLabel::HighVol), Some(RegimeLabel::HighVol)];
+        let labels = [
+            Some(RegimeLabel::LowVol),
+            None,
+            Some(RegimeLabel::HighVol),
+            Some(RegimeLabel::HighVol),
+        ];
         let values = [Some(0.4), Some(9.0), None, Some(-0.1)];
         let obs = regime_observations(&labels, &values);
         assert_eq!(obs.len(), 2);
         assert_eq!((obs[0].regime, obs[0].success), (RegimeLabel::LowVol, true));
-        assert_eq!((obs[1].regime, obs[1].success), (RegimeLabel::HighVol, false));
+        assert_eq!(
+            (obs[1].regime, obs[1].success),
+            (RegimeLabel::HighVol, false)
+        );
         assert!(regime_observations(&[Some(RegimeLabel::MidVol)], &[Some(f64::NAN)]).is_empty());
     }
 
@@ -1098,10 +1171,15 @@ mod tests {
         assert_eq!(n["fast"].min, Some(5.0));
         assert_eq!(n["fast"].max, Some(20.0));
         assert_eq!(n["thresh"].max, Some(0.9));
-        assert_eq!(n["mode"].choices.as_deref(), Some(&["a".to_string(), "b".to_string()][..]));
+        assert_eq!(
+            n["mode"].choices.as_deref(),
+            Some(&["a".to_string(), "b".to_string()][..])
+        );
         // No proposal, or one without ranges, searches the declared space.
         assert!(narrowing_from_proposal(&Value::Null).unwrap().is_empty());
-        assert!(narrowing_from_proposal(&json!({ "move": "simplify" })).unwrap().is_empty());
+        assert!(narrowing_from_proposal(&json!({ "move": "simplify" }))
+            .unwrap()
+            .is_empty());
         // A malformed range is an error, not a skipped dimension.
         assert!(narrowing_from_proposal(&json!({ "ranges": [{ "name": "x" }] })).is_err());
     }

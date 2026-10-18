@@ -33,7 +33,10 @@ async fn db() -> PgPool {
         .execute("DROP DATABASE IF EXISTS eval_state_test WITH (FORCE)")
         .await
         .unwrap();
-    admin.execute("CREATE DATABASE eval_state_test").await.unwrap();
+    admin
+        .execute("CREATE DATABASE eval_state_test")
+        .await
+        .unwrap();
     // The role is cluster-wide; the platform's migrations create it, a scratch
     // cluster may not have it.
     let _ = admin
@@ -93,7 +96,10 @@ async fn a_row_exists_per_model_with_ten_runs_and_none_below() {
     // An unseen model keeps the prior.
     assert!((eval_store::bytes_per_token(&pool, "model-b").await.unwrap() - 4.0).abs() < 1e-9);
     // The budget suite's number.
-    let rate = eval_store::worst_over_estimate_rate(&pool).await.unwrap().unwrap();
+    let rate = eval_store::worst_over_estimate_rate(&pool)
+        .await
+        .unwrap()
+        .unwrap();
     assert!(rate >= 0.95, "over-estimate rate {rate}");
 }
 
@@ -102,7 +108,9 @@ async fn a_row_exists_per_model_with_ten_runs_and_none_below() {
 async fn a_redraw_is_recorded_with_its_requester_and_refused_before_growth() {
     let pool = db().await;
     let h = cases::standard_holdout();
-    eval_store::record_holdout_draw(&pool, &h, "harness-test").await.unwrap();
+    eval_store::record_holdout_draw(&pool, &h, "harness-test")
+        .await
+        .unwrap();
 
     let (requested_by, version, n): (String, String, i32) = sqlx::query_as(
         "SELECT requested_by, harness_version, array_length(sealed_ids,1) FROM eval_holdout_draw",
@@ -120,7 +128,10 @@ async fn a_redraw_is_recorded_with_its_requester_and_refused_before_growth() {
     let err = eval_store::record_holdout_draw(&pool, &again, "harness-test-2")
         .await
         .expect_err("no growth, no re-draw");
-    assert!(matches!(err, eval_store::EvalStoreError::RedrawRefused(_)), "{err}");
+    assert!(
+        matches!(err, eval_store::EvalStoreError::RedrawRefused(_)),
+        "{err}"
+    );
 
     // The record cannot be edited.
     let e = sqlx::query("UPDATE eval_holdout_draw SET requested_by = 'someone else'")
@@ -144,7 +155,9 @@ async fn a_losing_policy_is_recorded_with_its_weights_and_corpus_and_cannot_be_e
         refused: vec!["qwen2.5-7b-instruct lost utility: 60% -> 40%".into()],
         report: vec!["x".into()],
     };
-    eval_store::record_promotion(&pool, &rec, "harness-test").await.unwrap();
+    eval_store::record_promotion(&pool, &rec, "harness-test")
+        .await
+        .unwrap();
     let (promoted, w): (bool, serde_json::Value) =
         sqlx::query_as("SELECT promoted, weights_json FROM context_policy_promotion")
             .fetch_one(&pool)
@@ -155,7 +168,9 @@ async fn a_losing_policy_is_recorded_with_its_weights_and_corpus_and_cannot_be_e
     // A refusal that claims to be a promotion is refused by the schema.
     let mut lie = rec.clone();
     lie.promoted = true;
-    assert!(eval_store::record_promotion(&pool, &lie, "harness-test").await.is_err());
+    assert!(eval_store::record_promotion(&pool, &lie, "harness-test")
+        .await
+        .is_err());
     let e = sqlx::query("DELETE FROM context_policy_promotion")
         .execute(&pool)
         .await
@@ -169,7 +184,10 @@ async fn a_losing_policy_is_recorded_with_its_weights_and_corpus_and_cannot_be_e
 async fn the_platform_role_can_use_both_tables() {
     let pool = db().await;
     let mut tx = pool.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     sqlx::query(
         "INSERT INTO agent_token_calibration (model, bytes_per_token, sample_n, over_estimate_rate) \
          VALUES ('m', 3.5, 10, 0.97)",
@@ -208,8 +226,14 @@ async fn the_platform_role_can_use_both_tables() {
 #[ignore = "requires live Postgres"]
 async fn the_standing_draw_is_recorded_once_and_asking_again_changes_nothing() {
     let pool = db().await;
-    assert!(eval_store::record_standing_draw(&pool).await.unwrap(), "first call writes");
-    assert!(!eval_store::record_standing_draw(&pool).await.unwrap(), "second call is a no-op");
+    assert!(
+        eval_store::record_standing_draw(&pool).await.unwrap(),
+        "first call writes"
+    );
+    assert!(
+        !eval_store::record_standing_draw(&pool).await.unwrap(),
+        "second call is a no-op"
+    );
     let n: i64 = sqlx::query_scalar("SELECT count(*) FROM eval_holdout_draw")
         .fetch_one(&pool)
         .await

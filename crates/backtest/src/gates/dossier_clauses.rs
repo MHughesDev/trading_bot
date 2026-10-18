@@ -51,7 +51,11 @@ pub struct ExpectedHaircut {
 /// The haircut prior for an idea source.
 #[must_use]
 pub fn expected_haircut(source: IdeaSource) -> ExpectedHaircut {
-    let pct = if source == IdeaSource::Published { POST_PUBLICATION_PCT } else { OUT_OF_SAMPLE_PCT };
+    let pct = if source == IdeaSource::Published {
+        POST_PUBLICATION_PCT
+    } else {
+        OUT_OF_SAMPLE_PCT
+    };
     ExpectedHaircut {
         pct,
         source,
@@ -88,7 +92,11 @@ pub fn validate(ev: &DossierEvidence) -> Vec<Violation> {
             fix: "state how many specifications were tried (the platform trial count for the experiment); zero is not a count of a search that ran",
         });
     }
-    if ev.exploration_ledger_ref.as_deref().is_none_or(|s| s.trim().is_empty()) {
+    if ev
+        .exploration_ledger_ref
+        .as_deref()
+        .is_none_or(|s| s.trim().is_empty())
+    {
         v.push(Violation {
             field: "exploration_ledger_ref",
             rule: "missing_exploration_ledger",
@@ -135,10 +143,19 @@ mod tests {
     fn a_dossier_that_omits_any_one_quantity_is_refused_naming_it() {
         assert!(validate(&complete()).is_empty());
         let cases: [(&str, Box<dyn Fn(&mut DossierEvidence)>); 4] = [
-            ("missing_specification_count", Box::new(|e| e.specification_count = None)),
-            ("missing_exploration_ledger", Box::new(|e| e.exploration_ledger_ref = None)),
+            (
+                "missing_specification_count",
+                Box::new(|e| e.specification_count = None),
+            ),
+            (
+                "missing_exploration_ledger",
+                Box::new(|e| e.exploration_ledger_ref = None),
+            ),
             ("missing_post_hoc", Box::new(|e| e.post_hoc = None)),
-            ("missing_expected_haircut", Box::new(|e| e.expected_haircut = None)),
+            (
+                "missing_expected_haircut",
+                Box::new(|e| e.expected_haircut = None),
+            ),
         ];
         for (rule, strip) in cases {
             let mut e = complete();
@@ -156,10 +173,16 @@ mod tests {
         e.specification_count = Some(0);
         e.exploration_ledger_ref = Some("  ".into());
         let rules: Vec<_> = validate(&e).iter().map(|v| v.rule).collect();
-        assert_eq!(rules, vec!["missing_specification_count", "missing_exploration_ledger"]);
+        assert_eq!(
+            rules,
+            vec!["missing_specification_count", "missing_exploration_ledger"]
+        );
         let mut e = complete();
         e.post_hoc = Some(true);
-        assert!(validate(&e).is_empty(), "post_hoc = true is a stated answer, and is reported as such");
+        assert!(
+            validate(&e).is_empty(),
+            "post_hoc = true is a stated answer, and is reported as such"
+        );
     }
 
     #[allow(clippy::float_cmp)] // exact constants
@@ -182,7 +205,8 @@ mod tests {
 
     #[test]
     fn the_haircuts_agree_with_the_template() {
-        let src = include_str!("../../../../apps/skill-runner/templates/attribution/expected_decay.py");
+        let src =
+            include_str!("../../../../apps/skill-runner/templates/attribution/expected_decay.py");
         assert!(src.contains("OOS = 26.0") && src.contains("POST_PUBLICATION = 58.0"));
         assert!(src.contains(CITATION));
     }

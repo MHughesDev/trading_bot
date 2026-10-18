@@ -3227,7 +3227,11 @@ mod tests {
         let log = AXIS_LOG.lock().unwrap().clone();
         assert!(log.len() > 20, "the funnel ran {} Runs", log.len());
         for cfg in &log {
-            assert!(!cfg.params.contains_key("fast"), "the legacy axis leaked: {:?}", cfg.params);
+            assert!(
+                !cfg.params.contains_key("fast"),
+                "the legacy axis leaked: {:?}",
+                cfg.params
+            );
             assert_eq!(
                 cfg.params.get("threshold"),
                 Some(&json!(0.5)),
@@ -3268,9 +3272,21 @@ mod tests {
         let u = Uuid::new_v4();
         let id = m.create_experiment(u, spec("exp-bad-axis")).unwrap().id;
         for bad in [
-            SweepAxis { param: String::new(), center: 1.0, step: 1.0 },
-            SweepAxis { param: "p".into(), center: f64::NAN, step: 1.0 },
-            SweepAxis { param: "p".into(), center: 1.0, step: 0.0 },
+            SweepAxis {
+                param: String::new(),
+                center: 1.0,
+                step: 1.0,
+            },
+            SweepAxis {
+                param: "p".into(),
+                center: f64::NAN,
+                step: 1.0,
+            },
+            SweepAxis {
+                param: "p".into(),
+                center: 1.0,
+                step: 0.0,
+            },
         ] {
             assert!(m.set_incumbent(u, id, ParamMap::new(), Some(bad)).is_err());
         }

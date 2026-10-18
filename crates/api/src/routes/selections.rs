@@ -167,7 +167,9 @@ pub async fn watch(
     if !token.permits(scopes::DATA_READ) {
         return (
             StatusCode::FORBIDDEN,
-            Json(json!({"error": "forbidden", "message": "watching a selection reads market data"})),
+            Json(
+                json!({"error": "forbidden", "message": "watching a selection reads market data"}),
+            ),
         )
             .into_response();
     }
@@ -179,7 +181,10 @@ pub async fn watch(
                 SelectionRunError::NotFound(_) => StatusCode::NOT_FOUND,
                 _ => StatusCode::UNPROCESSABLE_ENTITY,
             };
-            (status, Json(json!({"error": "invalid_selection", "message": e.to_string()})))
+            (
+                status,
+                Json(json!({"error": "invalid_selection", "message": e.to_string()})),
+            )
                 .into_response()
         }
         Err(e @ selection_run::WatchError::NoSchedule(_)) => (
@@ -219,10 +224,16 @@ pub async fn unwatch(
     Path(id): Path<uuid::Uuid>,
 ) -> impl IntoResponse {
     match selection_run::stop_watch(&state.pg, &token.user_id().to_string(), id).await {
-        Ok(true) => (StatusCode::OK, Json(json!({"watch_id": id, "stopped": true}))).into_response(),
+        Ok(true) => (
+            StatusCode::OK,
+            Json(json!({"watch_id": id, "stopped": true})),
+        )
+            .into_response(),
         Ok(false) => (
             StatusCode::NOT_FOUND,
-            Json(json!({"error": "not_found", "message": "no running watch of yours with that id"})),
+            Json(
+                json!({"error": "not_found", "message": "no running watch of yours with that id"}),
+            ),
         )
             .into_response(),
         Err(e) => (

@@ -191,7 +191,11 @@ fn a_shadow_fed_bar_by_bar_is_the_backtest_over_the_same_bars() {
             .expect("a primary bar is a step");
         let (at, equity) = outcome.equity[i];
         assert_eq!(step.bar, at, "bar {i}");
-        assert_eq!(shadow.equity().to_f64().unwrap(), equity, "equity at bar {i}");
+        assert_eq!(
+            shadow.equity().to_f64().unwrap(),
+            equity,
+            "equity at bar {i}"
+        );
         // The expected return is the backtest's own equity chain.
         assert!(
             (step.expected_return - (equity / previous - 1.0)).abs() < 1e-15,
@@ -201,7 +205,9 @@ fn a_shadow_fed_bar_by_bar_is_the_backtest_over_the_same_bars() {
         decided.extend(step.decided);
     }
     let digests = |t: &[strategy_engine::DecisionTrace]| -> Vec<String> {
-        t.iter().map(strategy_engine::DecisionTrace::digest).collect()
+        t.iter()
+            .map(strategy_engine::DecisionTrace::digest)
+            .collect()
     };
     assert_eq!(digests(&decided), digests(&outcome.traces));
 }

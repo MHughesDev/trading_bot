@@ -26,8 +26,8 @@ use jobs::store::{JobStore, PgTrialCounter, Submission};
 use jobs::types::WorkerClass;
 use jobs::{JobKind, WorkerPool};
 use ledger::campaign::{Budget, CampaignDefinition, ExplorationFloor};
-use ledger::phase::{CampaignEvent, CampaignPhase};
 use ledger::pg::PgTrialLedger;
+use ledger::phase::{CampaignEvent, CampaignPhase};
 use serde_json::{json, Value};
 use sqlx::{Executor, PgPool};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -85,8 +85,7 @@ async fn recorded_ollama(replies: Vec<String>) -> Recorded {
                     }
                     buf.extend_from_slice(&chunk[..n]);
                 }
-                let body: Value =
-                    serde_json::from_slice(&buf[header_end..]).unwrap_or(Value::Null);
+                let body: Value = serde_json::from_slice(&buf[header_end..]).unwrap_or(Value::Null);
                 seen.lock().unwrap().push(body);
                 let content = replies.lock().unwrap().next().unwrap_or_default();
                 let reply = json!({
@@ -186,13 +185,21 @@ async fn world(base_url: &str) -> World {
         .expect("define");
     let campaign_id = handle.campaign_id();
     let store = Arc::new(JobStore::new(pg.clone(), Arc::new(PgTrialCounter)));
-    let mut driver = Submission::new(JobKind::Campaign, user, json!({ "campaign_id": campaign_id }));
+    let mut driver = Submission::new(
+        JobKind::Campaign,
+        user,
+        json!({ "campaign_id": campaign_id }),
+    );
     driver.project_id = Some(Uuid::new_v4());
     let driver_job = store.submit(driver).await.expect("driver job").job_id;
     for phase in [CampaignPhase::Baseline, CampaignPhase::Diagnose] {
-        led.append_campaign_event_async(&tenant, campaign_id, &CampaignEvent::new(phase, json!({})))
-            .await
-            .expect("append");
+        led.append_campaign_event_async(
+            &tenant,
+            campaign_id,
+            &CampaignEvent::new(phase, json!({})),
+        )
+        .await
+        .expect("append");
     }
 
     // The campaign's row, written the way `record_campaign` writes it, with the
@@ -200,7 +207,9 @@ async fn world(base_url: &str) -> World {
     // is under test, and its columns are another migration's business).
     let digest = subrun::digest(BRIEF);
     let mut c = pg.acquire().await.unwrap();
-    c.execute("SET session_replication_role = replica").await.unwrap();
+    c.execute("SET session_replication_role = replica")
+        .await
+        .unwrap();
     sqlx::query(
         "INSERT INTO agent_lifecycle.campaign_run
              (campaign_id, run_id, tenant_id, prereg_id, prereg_hash, job_id,
@@ -222,9 +231,18 @@ async fn world(base_url: &str) -> World {
         .await
         .unwrap()
         .expect("the pinned brief");
-    let claim = subrun::claim(&pg, campaign_id, parent, &tenant, "hypothesize", 3, &brief, 4)
-        .await
-        .expect("claimed");
+    let claim = subrun::claim(
+        &pg,
+        campaign_id,
+        parent,
+        &tenant,
+        "hypothesize",
+        3,
+        &brief,
+        4,
+    )
+    .await
+    .expect("claimed");
 
     World {
         pg,
@@ -238,8 +256,10 @@ async fn world(base_url: &str) -> World {
 
 async fn run_hypothesize(w: &World) -> (String, Value) {
     let profiles = Arc::new(
-        harness::ProfileSet::load_dir(&std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/profiles"))
-            .expect("profiles load"),
+        harness::ProfileSet::load_dir(
+            &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/profiles"),
+        )
+        .expect("profiles load"),
     );
     let worker = Arc::new(ResearchRunWorker::new(
         Arc::clone(&w.store),
@@ -304,8 +324,14 @@ async fn a_campaign_hypothesizes_through_the_worker_sub_run() {
     assert_eq!(result["proposal"]["move"], "simplify");
     assert_eq!(result["role"], "worker");
     assert_eq!(result["projection"], "worker");
-    assert_eq!(result["propensity"], 1.0, "temperature pinned to zero, so the propensity is knowable");
-    assert!(result["candidate_set"].as_array().unwrap().len() >= 8, "every move the vocabulary offered");
+    assert_eq!(
+        result["propensity"], 1.0,
+        "temperature pinned to zero, so the propensity is knowable"
+    );
+    assert!(
+        result["candidate_set"].as_array().unwrap().len() >= 8,
+        "every move the vocabulary offered"
+    );
 
     // Exactly one call went out, at temperature zero, under the grammar, and the
     // message **starts with the pinned brief byte for byte**: that prefix is what
@@ -327,13 +353,12 @@ async fn a_campaign_hypothesizes_through_the_worker_sub_run() {
     );
 
     // The sub-run's row records the outcome, so the claim cannot be taken twice.
-    let outcome: Option<Value> = sqlx::query_scalar(
-        "SELECT outcome FROM agent_lifecycle.sub_run WHERE sub_run_id = $1",
-    )
-    .bind(w.sub_run_id)
-    .fetch_one(&w.pg)
-    .await
-    .unwrap();
+    let outcome: Option<Value> =
+        sqlx::query_scalar("SELECT outcome FROM agent_lifecycle.sub_run WHERE sub_run_id = $1")
+            .bind(w.sub_run_id)
+            .fetch_one(&w.pg)
+            .await
+            .unwrap();
     assert_eq!(outcome.expect("settled")["proposal"]["move"], "simplify");
 }
 
@@ -369,7 +394,10 @@ async fn a_refused_proposal_gets_one_retry_carrying_the_validators_reason() {
         .as_str()
         .unwrap()
         .to_string();
-    assert!(second.starts_with(BRIEF), "the brief is still the prefix on the retry");
+    assert!(
+        second.starts_with(BRIEF),
+        "the brief is still the prefix on the retry"
+    );
     assert!(
         second.contains("YOUR LAST ANSWER WAS REFUSED"),
         "the retry names why, after the shared prefix"
@@ -383,5 +411,9 @@ async fn two_refusals_end_the_generation_with_a_typed_reason_and_no_third_call()
     let w = world(&server.base_url).await;
     let (state, result) = run_hypothesize(&w).await;
     assert_eq!(state, "failed", "{result}");
-    assert_eq!(server.requests.lock().unwrap().len(), 2, "two attempts, never a third");
+    assert_eq!(
+        server.requests.lock().unwrap().len(),
+        2,
+        "two attempts, never a third"
+    );
 }

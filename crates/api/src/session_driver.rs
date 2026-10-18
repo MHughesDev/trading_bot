@@ -458,18 +458,17 @@ impl SessionWorker {
     /// item with this key? If so the offer merges onto it — one item, two sources
     /// — and **both** sessions' logs say so, which is what lets the sponsor's
     /// digest account for a question it never ran.
-    async fn place(
-        &self,
-        user_id: Uuid,
-        item: &AgendaItem,
-    ) -> Result<Placed, JobError> {
+    async fn place(&self, user_id: Uuid, item: &AgendaItem) -> Result<Placed, JobError> {
         match crate::session_dedupe::offer(&self.pg, user_id, item)
             .await
             .map_err(|e| Self::infra("offering a question to the agenda", e))?
         {
             crate::session_dedupe::Offered::Here(Some(id)) => Ok(Placed::Added(id)),
             crate::session_dedupe::Offered::Here(None) => Ok(Placed::MergedHere),
-            crate::session_dedupe::Offered::Elsewhere { item: owner_item, owner } => {
+            crate::session_dedupe::Offered::Elsewhere {
+                item: owner_item,
+                owner,
+            } => {
                 sessions::append(
                     &self.pg,
                     item.session_id,
@@ -510,7 +509,11 @@ impl SessionWorker {
     /// offering the same seed twice merges into the item that is already there,
     /// so a driver that restarts mid-ingest does not need to know how far it
     /// got.
-    async fn ingest_seeds(&self, session: &ResearchSession, user_id: Uuid) -> Result<u32, JobError> {
+    async fn ingest_seeds(
+        &self,
+        session: &ResearchSession,
+        user_id: Uuid,
+    ) -> Result<u32, JobError> {
         let Some(charter) = session.charter.as_ref() else {
             return Ok(0);
         };
@@ -1543,18 +1546,24 @@ impl SessionWorker {
                 .bind(session.id)
                 .fetch_optional(&self.pg)
                 .await
-                .map_err(|e| format!("the session's owner (`research_sessions` did not answer: {e})"))?;
+                .map_err(|e| {
+                    format!("the session's owner (`research_sessions` did not answer: {e})")
+                })?;
         let withdrawn = match user {
             Some((user_id,)) => {
                 session_profile::credential_withdrawn(&self.pg, user_id, session.conversation_id)
                     .await
-                    .map_err(|e| format!("the provider credential (`llm_credentials` did not answer: {e})"))?
+                    .map_err(|e| {
+                        format!("the provider credential (`llm_credentials` did not answer: {e})")
+                    })?
             }
             None => None,
         };
         let standing = session_profile::latest_standing(&self.pg, &session.tier)
             .await
-            .map_err(|e| format!("the profile's standing (`profile_standing` did not answer: {e})"))?;
+            .map_err(|e| {
+                format!("the profile's standing (`profile_standing` did not answer: {e})")
+            })?;
         Ok((withdrawn, standing))
     }
 
@@ -1659,7 +1668,8 @@ impl SessionWorker {
     /// this is the boundary.
     async fn spent(&self, session: &ResearchSession, today_only: bool) -> Observed<Meter> {
         let since = if today_only {
-            let hours = OpenHours::parse(&session.schedule).unwrap_or_else(|_| OpenHours::always_open());
+            let hours =
+                OpenHours::parse(&session.schedule).unwrap_or_else(|_| OpenHours::always_open());
             Some(hours.day_start(Utc::now()).0)
         } else {
             None
@@ -2319,7 +2329,9 @@ impl SessionWorker {
                     // `Promotion` still suspends - a caller in the loop. A kind
                     // that is none of the three is owed a human all the same
                     // (P6), so the unmapped answer is also `true`.
-                    let rule = research_session::charter::AlwaysAsks::for_proposal_kind(&awaiting.proposal().kind);
+                    let rule = research_session::charter::AlwaysAsks::for_proposal_kind(
+                        &awaiting.proposal().kind,
+                    );
                     let human_asked = rule.is_none_or(|r| r.asks(autonomy));
                     sessions::append(
                         &self.pg,
@@ -2430,7 +2442,12 @@ impl SessionWorker {
         let added: Vec<String> = absorbed.added().map(|i| i.question.clone()).collect();
         let skipped: Vec<String> = rows
             .iter()
-            .filter(|r| absorbed.skipped.iter().any(|s| s.what.starts_with(&r.question)))
+            .filter(|r| {
+                absorbed
+                    .skipped
+                    .iter()
+                    .any(|s| s.what.starts_with(&r.question))
+            })
             .map(|r| r.question.clone())
             .collect();
         let merged: Vec<String> = rows
@@ -2713,8 +2730,8 @@ impl SessionWorker {
         // run rather than one recomputed for the card.
         // A veto is read off the log, not the row (`claimable` does the same), so
         // a row that still says `queued` cannot put a vetoed question on the card.
-        let vetoed = research_session::fold(&log.iter().map(|e| e.event.clone()).collect::<Vec<_>>())
-            .vetoed;
+        let vetoed =
+            research_session::fold(&log.iter().map(|e| e.event.clone()).collect::<Vec<_>>()).vetoed;
         let mut upcoming: Vec<&AgendaItem> = agenda
             .iter()
             .filter(|i| i.status.is_claimable() && !vetoed.contains(&i.id))
@@ -3153,7 +3170,10 @@ impl SessionWorker {
         // because the one before it changed both, and sizes its lease against the
         // leases already committed - which is what makes "three concurrent children
         // cannot together exceed the day budget" a sum rather than a hope.
-        let wanted = slots.unwrap_or(1).clamp(1, usize::from(research_session::charter::MAX_CONCURRENT_RUNS.unsigned_abs()));
+        let wanted = slots.unwrap_or(1).clamp(
+            1,
+            usize::from(research_session::charter::MAX_CONCURRENT_RUNS.unsigned_abs()),
+        );
         let mut children: Vec<(AgendaItem, Uuid)> = Vec::new();
         let mut live_now = live.clone();
         let (mut agenda_cur, mut folded_cur) = (agenda, folded);
@@ -3385,7 +3405,13 @@ impl SessionWorker {
             };
             best = Some(match best.take() {
                 None => step,
-                Some(prev) => if step.outranks(&prev) { step } else { prev },
+                Some(prev) => {
+                    if step.outranks(&prev) {
+                        step
+                    } else {
+                        prev
+                    }
+                }
             });
         }
         Ok(best.unwrap_or_else(|| Step::Idle("no child was started".into())))
@@ -3585,8 +3611,16 @@ impl SessionWorker {
         .await
         .map_err(|e| Self::infra("recording the finish", e))?;
 
-        self.apply_after_run(session_id, user_id, session.autonomy, item, run_id, &verdict, &plan)
-            .await?;
+        self.apply_after_run(
+            session_id,
+            user_id,
+            session.autonomy,
+            item,
+            run_id,
+            &verdict,
+            &plan,
+        )
+        .await?;
 
         // §7.1, after every finished run, and §2.4's "also written on stall".
         let agenda = sessions::agenda(&self.pg, session_id)
@@ -3821,12 +3855,14 @@ impl SessionWorker {
                 // sentence says the profile is `degraded`; this says who said so.
                 let tier_detail = if reasons.iter().any(|r| r.word() == "tier") {
                     match self.profile_standing(session).await {
-                        Ok((withdrawn, standing)) => session_profile::health_from(
-                            ProfileHealth::Measured,
-                            withdrawn.as_deref(),
-                            standing.as_ref(),
-                        )
-                        .1,
+                        Ok((withdrawn, standing)) => {
+                            session_profile::health_from(
+                                ProfileHealth::Measured,
+                                withdrawn.as_deref(),
+                                standing.as_ref(),
+                            )
+                            .1
+                        }
                         Err(_) => None,
                     }
                 } else {
@@ -5061,7 +5097,10 @@ fn is_stale_claim(item: &AgendaItem, folded: &Folded) -> bool {
 /// What starting one child came to.
 #[allow(clippy::large_enum_variant)] // one value per started child, never held in bulk
 enum Started {
-    Child { item: AgendaItem, run_id: Uuid },
+    Child {
+        item: AgendaItem,
+        run_id: Uuid,
+    },
     /// Nothing was started, and why. The log already says which.
     Idle(String),
 }
@@ -5589,14 +5628,23 @@ mod tests {
     }
 
     #[test]
-    fn an_absorbed_survey_is_never_left_out_for_having_no_trials_and_its_yield_is_the_explicit_count() {
-        let item = item(Uuid::from_u128(1), "survey the charter", Source::Replenish, ItemStatus::Queued);
+    fn an_absorbed_survey_is_never_left_out_for_having_no_trials_and_its_yield_is_the_explicit_count(
+    ) {
+        let item = item(
+            Uuid::from_u128(1),
+            "survey the charter",
+            Source::Replenish,
+            ItemStatus::Queued,
+        );
         // A survey cannot spend a trial: no `trials_spent` is a fact (zero).
         let mut barren = run_row(Uuid::from_u128(7), item.id, 5);
         barren.trials_spent = None;
         barren.survey_new_questions = Some(0);
         let r = finished_run(&barren, &item).expect("an absorbed survey is in the window");
-        assert_eq!(r.knowledge_units, 0, "a fully-deduped survey is barren, whatever the yield columns say");
+        assert_eq!(
+            r.knowledge_units, 0,
+            "a fully-deduped survey is barren, whatever the yield columns say"
+        );
         assert!((r.cost - 0.0).abs() < f64::EPSILON);
         let mut fruitful = barren;
         fruitful.survey_new_questions = Some(3);

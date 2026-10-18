@@ -1154,10 +1154,18 @@ mod tests {
         input.contradictions_found = vec![Entry::new("pair-1", "A momentum pays, B it does not")];
         input.contradictions_resolved = vec![Entry::new("pair-0", "f_03 superseded f_02")];
         let d = write(&input);
-        let section = d.section(Heading::Contradictions).expect("a contradictions section");
+        let section = d
+            .section(Heading::Contradictions)
+            .expect("a contradictions section");
         let texts: Vec<&str> = section.lines.iter().map(|l| l.text.as_str()).collect();
-        assert!(texts.iter().any(|t| t.starts_with("found: A momentum")), "{texts:?}");
-        assert!(texts.iter().any(|t| t.starts_with("resolved: f_03")), "{texts:?}");
+        assert!(
+            texts.iter().any(|t| t.starts_with("found: A momentum")),
+            "{texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t.starts_with("resolved: f_03")),
+            "{texts:?}"
+        );
         assert!(d.unresolvable().is_empty(), "every id resolves");
     }
 

@@ -50,7 +50,10 @@ impl Wake {
     /// Open the listener. A failure is recorded and the [`Wake`] still works — as
     /// a timer.
     pub async fn open(pg: &PgPool) -> Self {
-        match monitor::store::MonitorStore::new(pg.clone()).listener().await {
+        match monitor::store::MonitorStore::new(pg.clone())
+            .listener()
+            .await
+        {
             Ok(l) => Self {
                 listener: Some(l),
                 degraded: None,
@@ -145,7 +148,10 @@ mod tests {
         // driver sleeps through.
         for c in monitor::store::NOTIFY_CHANNELS {
             let known = is_a_change(c) || c == "monitor_lease";
-            assert!(known, "`{c}` is published by the monitor and this module has no opinion");
+            assert!(
+                known,
+                "`{c}` is published by the monitor and this module has no opinion"
+            );
         }
     }
 

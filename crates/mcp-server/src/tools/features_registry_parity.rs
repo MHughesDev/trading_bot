@@ -82,7 +82,10 @@ fn the_engine_and_the_registry_accept_the_same_names() {
         // resolves. A range is part of a name's meaning.
         for (i, p) in f.params.iter().enumerate() {
             let mut base = f.example_params();
-            for bad in [p.min.checked_sub(1), p.max.checked_add(1)].into_iter().flatten() {
+            for bad in [p.min.checked_sub(1), p.max.checked_add(1)]
+                .into_iter()
+                .flatten()
+            {
                 base[i] = bad;
                 let name = f.name_for(&base);
                 assert!(
@@ -181,6 +184,9 @@ fn paging_reaches_every_family_exactly_once() {
             None => break,
         }
     }
-    let want: Vec<String> = features::registry::families().iter().map(|f| f.name.to_string()).collect();
+    let want: Vec<String> = features::registry::families()
+        .iter()
+        .map(|f| f.name.to_string())
+        .collect();
     assert_eq!(seen, want);
 }

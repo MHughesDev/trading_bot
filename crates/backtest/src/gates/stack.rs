@@ -664,13 +664,20 @@ mod tests {
     }
 
     fn outcome(verdict: &StackVerdict, gate: i32) -> &GateOutcome {
-        verdict.outcomes.iter().find(|o| o.gate_no == gate).expect("gate present")
+        verdict
+            .outcomes
+            .iter()
+            .find(|o| o.gate_no == gate)
+            .expect("gate present")
     }
 
     #[test]
     fn q_2_1_a_posterior_interval_that_includes_zero_fails_gate_8_with_that_reason() {
         let checks = ["causal_access"];
-        let noise = family_of(&[0.0001, 0.0, -0.0001, 0.00005, 0.0, -0.00005, 0.00002, 0.0], 300);
+        let noise = family_of(
+            &[0.0001, 0.0, -0.0001, 0.00005, 0.0, -0.00005, 0.00002, 0.0],
+            300,
+        );
         let mut evidence = empty_evidence(&checks);
         evidence.dsr = Some(0.97); // clears strict_v1's 0.95 on its own
         evidence.family = &noise;
@@ -679,7 +686,11 @@ mod tests {
         let g8 = outcome(&v, 8);
         assert!(!g8.passed, "{}", g8.detail);
         assert!(g8.detail.contains("includes zero"), "{}", g8.detail);
-        assert!(g8.detail.contains("0.9700"), "the DSR reading is still there: {}", g8.detail);
+        assert!(
+            g8.detail.contains("0.9700"),
+            "the DSR reading is still there: {}",
+            g8.detail
+        );
     }
 
     #[test]
@@ -691,7 +702,9 @@ mod tests {
         evidence.pbo = Some(0.1);
         let v = evaluate_stack(&GateProfile::strict_v1(), &evidence, Utc::now());
         assert!(outcome(&v, 8).passed, "{}", outcome(&v, 8).detail);
-        assert!(outcome(&v, 8).detail.contains("theme posterior not applied"));
+        assert!(outcome(&v, 8)
+            .detail
+            .contains("theme posterior not applied"));
         assert!(outcome(&v, 7).passed, "PBO has no posterior clause");
         // And a DSR below the bar still fails whatever the posterior says.
         evidence.dsr = Some(0.5);
@@ -716,14 +729,25 @@ mod tests {
         evidence.candidate_index = 0;
         let v = evaluate_stack(&GateProfile::strict_v1(), &evidence, Utc::now());
         let winner = outcome(&v, 14);
-        assert!(winner.passed, "the planted edge survives the family test: {}", winner.detail);
+        assert!(
+            winner.passed,
+            "the planted edge survives the family test: {}",
+            winner.detail
+        );
 
         evidence.candidate_index = 3;
         let v = evaluate_stack(&GateProfile::strict_v1(), &evidence, Utc::now());
         let loser = outcome(&v, 14);
         assert!(!loser.passed && !loser.inconclusive, "{}", loser.detail);
-        assert!(loser.detail.contains("stepdown-adjusted p"), "{}", loser.detail);
-        assert!(loser.statistic.is_some(), "the adjusted p is the statistic that decided it");
+        assert!(
+            loser.detail.contains("stepdown-adjusted p"),
+            "{}",
+            loser.detail
+        );
+        assert!(
+            loser.statistic.is_some(),
+            "the adjusted p is the statistic that decided it"
+        );
     }
 
     #[test]
@@ -734,7 +758,11 @@ mod tests {
         evidence.family = &solo;
         let v = evaluate_stack(&GateProfile::strict_v1(), &evidence, Utc::now());
         let g14 = outcome(&v, 14);
-        assert!(g14.inconclusive && !g14.passed, "a hole is reported as a hole, not a failure: {}", g14.detail);
+        assert!(
+            g14.inconclusive && !g14.passed,
+            "a hole is reported as a hole, not a failure: {}",
+            g14.detail
+        );
         assert!(g14.detail.contains("whole candidate family"));
         // ...and the theme clause is not applicable either, so Gate 8 reads its DSR alone.
         assert!(outcome(&v, 8).detail.contains("not applied"));

@@ -69,7 +69,9 @@ async fn scratch() -> Option<(PgPool, String)> {
         .execute(format!("CREATE DATABASE {name}").as_str())
         .await
         .expect("CREATE DATABASE");
-    let pg = PgPool::connect(&with_db(&base_url(), &name)).await.expect("scratch connect");
+    let pg = PgPool::connect(&with_db(&base_url(), &name))
+        .await
+        .expect("scratch connect");
     let mut skipped = Vec::new();
     for mig in sqlx::migrate!("../../migrations").iter() {
         if mig.migration_type.is_down_migration() {
@@ -399,9 +401,17 @@ async fn an_agent_token_is_refused_by_every_session_write_and_may_read() {
         ("POST", item("approve"), None),
         ("POST", item("veto"), None),
         ("POST", item("prioritise"), None),
-        ("POST", item("redirect"), Some(json!({"question": "steered"}))),
+        (
+            "POST",
+            item("redirect"),
+            Some(json!({"question": "steered"})),
+        ),
         ("PUT", format!("{s}/charter"), Some(charter_json())),
-        ("PUT", format!("{s}/day-budget"), Some(json!({"trials_per_day": 9}))),
+        (
+            "PUT",
+            format!("{s}/day-budget"),
+            Some(json!({"trials_per_day": 9})),
+        ),
         (
             "POST",
             "/api/research/profiles/some-profile/scorecard".into(),
@@ -492,13 +502,16 @@ async fn an_agent_token_is_refused_by_every_session_write_and_may_read() {
     assert_eq!(refs.len(), 5, "{body}");
     if memory_up {
         assert_eq!(refs[0]["found"], true);
-    assert_eq!(refs[0]["kind"], "memory_entry");
-    assert_eq!(refs[0]["open"]["route"], "/api/memory/findings");
-    assert_eq!(refs[0]["open"]["id"], "f_ref1");
+        assert_eq!(refs[0]["kind"], "memory_entry");
+        assert_eq!(refs[0]["open"]["route"], "/api/memory/findings");
+        assert_eq!(refs[0]["open"]["id"], "f_ref1");
     } else {
         assert_eq!(refs[0]["found"], false, "{body}");
     }
-    assert_eq!(refs[1]["found"], false, "an entry that is not there says so: {body}");
+    assert_eq!(
+        refs[1]["found"], false,
+        "an entry that is not there says so: {body}"
+    );
     assert_eq!(refs[2]["kind"], "survey_run");
     assert_eq!(refs[2]["found"], false);
     assert_eq!(refs[3]["kind"], "regime_flip");
@@ -508,7 +521,12 @@ async fn an_agent_token_is_refused_by_every_session_write_and_may_read() {
     // The day budget route counts spend the way the driver's day gate does:
     // finished runs' trials today, an unmeasured run beside the sum and not in
     // it as a zero, a live child named because its spend is not in yet.
-    for (spent, finished) in [(Some(3), true), (Some(4), true), (None, true), (None, false)] {
+    for (spent, finished) in [
+        (Some(3), true),
+        (Some(4), true),
+        (None, true),
+        (None, false),
+    ] {
         sqlx::query(
             "INSERT INTO agent_runs (run_id, user_id, goal, status, provider, model, session_id, trials_spent, finished_at) \
              VALUES ($1, $2, 'g', $3, 'test-fixture', 'test-fixture', $4, $5, CASE WHEN $6 THEN now() END)",
@@ -528,7 +546,10 @@ async fn an_agent_token_is_refused_by_every_session_write_and_may_read() {
     assert_eq!(day["unit"], "trials");
     assert_eq!(day["spent_today"]["trials"], 7);
     assert_eq!(day["spent_today"]["runs_finished"], 3);
-    assert_eq!(day["spent_today"]["unmeasured_runs"], 1, "not recorded is not zero: {day}");
+    assert_eq!(
+        day["spent_today"]["unmeasured_runs"], 1,
+        "not recorded is not zero: {day}"
+    );
     assert_eq!(day["live_children"], 1);
     assert_eq!(day["is_floor"], true);
     assert!(day["usd_spent"].is_null(), "no dollars are recorded: {day}");
@@ -550,7 +571,14 @@ async fn an_agent_token_is_refused_by_every_session_write_and_may_read() {
     .execute(&pg)
     .await
     .unwrap();
-    let (status, _, _) = call(&app, "GET", &format!("{s}/agenda/{reffed}/refs"), &other, None).await;
+    let (status, _, _) = call(
+        &app,
+        "GET",
+        &format!("{s}/agenda/{reffed}/refs"),
+        &other,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     let (status, _, _) = call(&app, "GET", &format!("{s}/day-budget"), &other, None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);

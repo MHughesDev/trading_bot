@@ -50,7 +50,10 @@ async fn a_deployment_is_recorded_declared_and_stopped_by_who_started_it() {
     let first = record(&user, "RD-BTC-USD", &automation);
     record_and_declare(&pg, &first, graph()).await.unwrap();
     let registry = strategy_runtime::live::global();
-    assert!(registry.is_v3_declared(first.deployment_id), "declared live");
+    assert!(
+        registry.is_v3_declared(first.deployment_id),
+        "declared live"
+    );
     assert!(deployments::running(&pg)
         .await
         .unwrap()
@@ -68,11 +71,21 @@ async fn a_deployment_is_recorded_declared_and_stopped_by_who_started_it() {
     // A deployment someone else started is untouched by stopping this one's.
     let other = record(&user, "RD-ETH-USD", "someone-else");
     record_and_declare(&pg, &other, graph()).await.unwrap();
-    assert_eq!(stop_started_by(&pg, &automation, "automation disarmed").await, 1);
+    assert_eq!(
+        stop_started_by(&pg, &automation, "automation disarmed").await,
+        1
+    );
     assert!(!registry.is_v3_declared(first.deployment_id), "withdrawn");
     assert!(registry.is_v3_declared(other.deployment_id));
-    let row = deployments::get(&pg, first.deployment_id).await.unwrap().unwrap();
+    let row = deployments::get(&pg, first.deployment_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(row.stop_reason.as_deref(), Some("automation disarmed"));
-    assert_eq!(stop_started_by(&pg, &automation, "again").await, 0, "stopped once");
+    assert_eq!(
+        stop_started_by(&pg, &automation, "again").await,
+        0,
+        "stopped once"
+    );
     stop_started_by(&pg, "someone-else", "test cleanup").await;
 }

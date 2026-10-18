@@ -29,7 +29,10 @@ async fn one_minute_bars_resample_to_the_venues_own_hour() {
         .unwrap();
     assert!(minutes.len() > 1_400, "a backfilled day: {}", minutes.len());
     assert_eq!(hours.len(), 24);
-    assert!(minutes.iter().all(|b| b.source_id > 0), "provenance is carried");
+    assert!(
+        minutes.iter().all(|b| b.source_id > 0),
+        "provenance is carried"
+    );
 
     let prov: Vec<SourceProvenance> = minutes
         .iter()
@@ -51,7 +54,10 @@ async fn one_minute_bars_resample_to_the_venues_own_hour() {
             mismatched.push((d.event_time, d.open, v.open, d.close, v.close));
         }
     }
-    assert!(mismatched.is_empty(), "derived hours disagree with the venue's: {mismatched:?}");
+    assert!(
+        mismatched.is_empty(),
+        "derived hours disagree with the venue's: {mismatched:?}"
+    );
 
     // As of a moment before the backfill ran, none of it is visible.
     let before = Utc.with_ymd_and_hms(2026, 9, 1, 0, 0, 0).unwrap();

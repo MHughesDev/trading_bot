@@ -73,9 +73,16 @@ fn run_one<L: TrialLedger + Clone>(
     verdict: &TruncationVerdict,
 ) -> Result<RunResult, LedgerError> {
     let a = Arc::new(artifact);
-    let cfg = a.run_config().map_err(|e| LedgerError::Backend(e.to_string()))?;
-    let bt = Backtest::new(InMemoryRunStore::new(), PositionRunExecutor::new(a, Some(verdict.clone())), ledger.clone());
-    bt.run_traced(&RunDispatch::new(ctx, &cfg, 1.0)).map(|(r, _)| r)
+    let cfg = a
+        .run_config()
+        .map_err(|e| LedgerError::Backend(e.to_string()))?;
+    let bt = Backtest::new(
+        InMemoryRunStore::new(),
+        PositionRunExecutor::new(a, Some(verdict.clone())),
+        ledger.clone(),
+    );
+    bt.run_traced(&RunDispatch::new(ctx, &cfg, 1.0))
+        .map(|(r, _)| r)
 }
 
 /// Run every member over **one** load of the bars.
@@ -91,7 +98,10 @@ pub fn run_batch<L: TrialLedger + Clone, S: BarSource>(
     verdict: &TruncationVerdict,
 ) -> Result<Vec<RunResult>, LedgerError> {
     let bars = source.load();
-    members.iter().map(|m| run_one(ledger, ctx, artifact_for(base, &bars, m), verdict)).collect()
+    members
+        .iter()
+        .map(|m| run_one(ledger, ctx, artifact_for(base, &bars, m), verdict))
+        .collect()
 }
 
 /// The same members as N independent runs, each loading its own bars: the baseline a batch is
@@ -130,7 +140,11 @@ mod tests {
                 .map(|i| {
                     #[allow(clippy::cast_precision_loss)]
                     let p = 100.0 + (f64::from(i) * 0.25).sin() * 5.0;
-                    ArtifactBar { ts_ns: (i64::from(i) + 1) * 3_600_000_000_000, open: p, close: p + 0.1 }
+                    ArtifactBar {
+                        ts_ns: (i64::from(i) + 1) * 3_600_000_000_000,
+                        open: p,
+                        close: p + 0.1,
+                    }
                 })
                 .collect()
         }
@@ -158,15 +172,29 @@ mod tests {
                 let points = bars
                     .iter()
                     .enumerate()
-                    .map(|(i, b)| PositionPoint::new(b.ts_ns, if (i + k) % (6 + k % 5) < 3 { 1.0 } else { 0.0 }))
+                    .map(|(i, b)| {
+                        PositionPoint::new(
+                            b.ts_ns,
+                            if (i + k) % (6 + k % 5) < 3 { 1.0 } else { 0.0 },
+                        )
+                    })
                     .collect();
-                BatchMember { params, series: PositionSeries { points, position_units: PositionUnits::Fraction, allow_short: false } }
+                BatchMember {
+                    params,
+                    series: PositionSeries {
+                        points,
+                        position_units: PositionUnits::Fraction,
+                        allow_short: false,
+                    },
+                }
             })
             .collect()
     }
 
     fn setup(n: usize) -> (Source, Vec<BatchMember>) {
-        let source = Source { loads: AtomicUsize::new(0) };
+        let source = Source {
+            loads: AtomicUsize::new(0),
+        };
         let ms = members(n, &source.load());
         source.loads.store(0, Ordering::SeqCst);
         (source, ms)
@@ -183,22 +211,59 @@ mod tests {
     #[test]
     fn a_batch_loads_the_bars_once_and_singles_load_them_once_per_member() {
         let (source, ms) = setup(40);
-        run_batch(&std::sync::Arc::new(InMemoryLedger::new()), &ctx(), &source, &base(), &ms, &pass()).unwrap();
+        run_batch(
+            &std::sync::Arc::new(InMemoryLedger::new()),
+            &ctx(),
+            &source,
+            &base(),
+            &ms,
+            &pass(),
+        )
+        .unwrap();
         assert_eq!(source.loads.load(Ordering::SeqCst), 1);
         source.loads.store(0, Ordering::SeqCst);
-        run_singly(&std::sync::Arc::new(InMemoryLedger::new()), &ctx(), &source, &base(), &ms, &pass()).unwrap();
+        run_singly(
+            &std::sync::Arc::new(InMemoryLedger::new()),
+            &ctx(),
+            &source,
+            &base(),
+            &ms,
+            &pass(),
+        )
+        .unwrap();
         assert_eq!(source.loads.load(Ordering::SeqCst), 40);
     }
 
     #[test]
     fn member_results_equal_their_single_run_results_bit_for_bit() {
         let (source, ms) = setup(25);
-        let batch = run_batch(&std::sync::Arc::new(InMemoryLedger::new()), &ctx(), &source, &base(), &ms, &pass()).unwrap();
-        let single = run_singly(&std::sync::Arc::new(InMemoryLedger::new()), &ctx(), &source, &base(), &ms, &pass()).unwrap();
+        let batch = run_batch(
+            &std::sync::Arc::new(InMemoryLedger::new()),
+            &ctx(),
+            &source,
+            &base(),
+            &ms,
+            &pass(),
+        )
+        .unwrap();
+        let single = run_singly(
+            &std::sync::Arc::new(InMemoryLedger::new()),
+            &ctx(),
+            &source,
+            &base(),
+            &ms,
+            &pass(),
+        )
+        .unwrap();
         assert_eq!(batch.len(), single.len());
         for (b, s) in batch.iter().zip(&single) {
             assert_eq!(b.run_id, s.run_id);
-            let bits = |r: &RunResult| r.equity_curve.iter().map(|(t, e)| (*t, e.to_bits())).collect::<Vec<_>>();
+            let bits = |r: &RunResult| {
+                r.equity_curve
+                    .iter()
+                    .map(|(t, e)| (*t, e.to_bits()))
+                    .collect::<Vec<_>>()
+            };
             assert_eq!(bits(b), bits(s));
             assert_eq!(b.trades, s.trades);
         }
@@ -209,8 +274,13 @@ mod tests {
         let (source, ms) = setup(30);
         let ledger = std::sync::Arc::new(InMemoryLedger::new());
         let out = run_batch(&ledger, &ctx(), &source, &base(), &ms, &pass()).unwrap();
-        let ids: std::collections::BTreeSet<_> = out.iter().map(|r| r.run_id.as_str().to_string()).collect();
+        let ids: std::collections::BTreeSet<_> =
+            out.iter().map(|r| r.run_id.as_str().to_string()).collect();
         assert_eq!(ids.len(), 30, "30 members, 30 distinct configs");
-        assert_eq!(ledger.trial_count("tenant"), 30, "a batch of 30 adds exactly 30 trials (INV-1)");
+        assert_eq!(
+            ledger.trial_count("tenant"),
+            30,
+            "a batch of 30 adds exactly 30 trials (INV-1)"
+        );
     }
 }

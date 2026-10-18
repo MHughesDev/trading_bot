@@ -211,14 +211,12 @@ pub(crate) fn funding_grid(
     points.sort_by(|a, b| a.t.total_cmp(&b.t));
     let cadence_s = match interval_hours {
         Some(h) if h > 0.0 => h * 3600.0,
-        Some(h) => {
-            return Err(crate::tool_error::refuse_extra(
-                "invalid_interval_hours",
-                format!("interval_hours {h} is not a positive spacing."),
-                "set interval_hours to the venue's settlement spacing in hours, above zero (e.g. 8)",
-                json!({ "got": h }),
-            ))
-        }
+        Some(h) => return Err(crate::tool_error::refuse_extra(
+            "invalid_interval_hours",
+            format!("interval_hours {h} is not a positive spacing."),
+            "set interval_hours to the venue's settlement spacing in hours, above zero (e.g. 8)",
+            json!({ "got": h }),
+        )),
         None => {
             if points.len() < 3 {
                 return Err(crate::tool_error::refuse(
@@ -234,7 +232,13 @@ pub(crate) fn funding_grid(
         }
     };
     if points.is_empty() {
-        return Ok(FundingGrid { points, cadence_s, expected: 0, missing: 0, missing_times: vec![] });
+        return Ok(FundingGrid {
+            points,
+            cadence_s,
+            expected: 0,
+            missing: 0,
+            missing_times: vec![],
+        });
     }
     // The grid is phased on the first observed settlement and extended both ways.
     let t0 = points[0].t;
@@ -307,8 +311,19 @@ pub(crate) fn funding_history_result(resp: &Value, interval_hours: Option<f64>) 
         Some(with_rate.iter().sum::<f64>() / with_rate.len() as f64 * periods_per_year * 1e4)
     };
     let gap = grid.gap_pct();
-    let confidence = if n == 0 || gap > FUNDING_GAP_DOWNGRADE_PCT { "low" } else { "ok" };
-    let tail: Vec<&Value> = rows.iter().rev().take(24).collect::<Vec<_>>().into_iter().rev().collect();
+    let confidence = if n == 0 || gap > FUNDING_GAP_DOWNGRADE_PCT {
+        "low"
+    } else {
+        "ok"
+    };
+    let tail: Vec<&Value> = rows
+        .iter()
+        .rev()
+        .take(24)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     json!({
         "summary_fields": {
             "measured": true,
@@ -345,7 +360,11 @@ pub(crate) fn funding_history_result(resp: &Value, interval_hours: Option<f64>) 
 /// `get_funding_history` -- realised funding for one perpetual, with its own gaps.
 pub async fn get_funding_history(api: &ApiClient, params: &Value) -> Value {
     for f in ["instrument", "venue", "start", "end"] {
-        if params.get(f).and_then(Value::as_str).is_none_or(str::is_empty) {
+        if params
+            .get(f)
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        {
             return crate::tool_error::missing_field(f);
         }
     }
@@ -399,8 +418,10 @@ pub(crate) fn pit_diff(early: &[Value], late: &[Value], as_of_ns: i64) -> Value 
             .map(|k| b.get(*k).and_then(Value::as_str).unwrap_or("").to_string())
             .collect::<Vec<_>>()
     };
-    let late_by: std::collections::BTreeMap<i64, Vec<String>> =
-        late.iter().filter_map(|b| Some((key(b)?, sig(b)))).collect();
+    let late_by: std::collections::BTreeMap<i64, Vec<String>> = late
+        .iter()
+        .filter_map(|b| Some((key(b)?, sig(b))))
+        .collect();
     let early_keys: std::collections::BTreeSet<i64> = early.iter().filter_map(key).collect();
 
     let violations: Vec<i64> = early
@@ -481,11 +502,18 @@ pub(crate) fn apply_lag(detail: &mut Value, lag: &Value) {
 /// against the latest read, rather than inspecting a schema.
 pub async fn probe_pit_provenance(api: &ApiClient, params: &Value) -> Value {
     for f in ["instrument_id", "start", "end"] {
-        if params.get(f).and_then(Value::as_str).is_none_or(str::is_empty) {
+        if params
+            .get(f)
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        {
             return crate::tool_error::missing_field(f);
         }
     }
-    let tf = params.get("timeframe").and_then(Value::as_str).unwrap_or("1h");
+    let tf = params
+        .get("timeframe")
+        .and_then(Value::as_str)
+        .unwrap_or("1h");
     if tf_ns(tf).is_none() {
         return crate::tool_error::refuse_extra(
             "unknown_timeframe",
@@ -531,7 +559,12 @@ pub async fn probe_pit_provenance(api: &ApiClient, params: &Value) -> Value {
         Ok(v) => v,
         Err(e) => return e.to_tool_error(),
     };
-    let rows = |v: &Value| v.get("bars").and_then(Value::as_array).cloned().unwrap_or_default();
+    let rows = |v: &Value| {
+        v.get("bars")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
     let (early_rows, late_rows) = (rows(&early), rows(&late));
     if late_rows.is_empty() {
         return crate::tool_error::refuse_extra(
@@ -601,7 +634,10 @@ pub(crate) fn survivorship_verdict(samples: &[MembershipSample]) -> Value {
         s.members.iter().map(|m| m.0.as_str()).collect()
     }
     let (a, b) = (set(first), set(last));
-    let all: BTreeSet<&str> = samples.iter().flat_map(|s| s.members.iter().map(|m| m.0.as_str())).collect();
+    let all: BTreeSet<&str> = samples
+        .iter()
+        .flat_map(|s| s.members.iter().map(|m| m.0.as_str()))
+        .collect();
     let changed = samples.windows(2).any(|w| set(&w[0]) != set(&w[1]));
     let status_of = |inst: &str| -> String {
         samples
@@ -621,7 +657,11 @@ pub(crate) fn survivorship_verdict(samples: &[MembershipSample]) -> Value {
         .filter(|m| m.1 != "active")
         .map(|m| json!({"instrument": m.0, "status": m.1}))
         .collect();
-    let unknown: Vec<&str> = all.iter().copied().filter(|i| status_of(i) == "unknown").collect();
+    let unknown: Vec<&str> = all
+        .iter()
+        .copied()
+        .filter(|i| status_of(i) == "unknown")
+        .collect();
     let mut reasons: Vec<String> = Vec::new();
     if !changed {
         reasons.push(
@@ -638,7 +678,11 @@ pub(crate) fn survivorship_verdict(samples: &[MembershipSample]) -> Value {
             unknown.join(", ")
         ));
     }
-    let verdict = if reasons.is_empty() { "audited" } else { "unauditable" };
+    let verdict = if reasons.is_empty() {
+        "audited"
+    } else {
+        "unauditable"
+    };
     json!({
         "summary_fields": {
             "verdict": verdict,
@@ -667,7 +711,11 @@ pub(crate) fn survivorship_verdict(samples: &[MembershipSample]) -> Value {
 /// selection, or can that not be told.
 pub async fn audit_survivorship(api: &ApiClient, params: &Value) -> Value {
     for f in ["universe_id", "start", "end"] {
-        if params.get(f).and_then(Value::as_str).is_none_or(str::is_empty) {
+        if params
+            .get(f)
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        {
             return crate::tool_error::missing_field(f);
         }
     }
@@ -714,8 +762,14 @@ pub async fn audit_survivorship(api: &ApiClient, params: &Value) -> Value {
                 a.iter()
                     .map(|m| {
                         (
-                            m.get("instrument").and_then(Value::as_str).unwrap_or("").to_string(),
-                            m.get("status").and_then(Value::as_str).unwrap_or("unknown").to_string(),
+                            m.get("instrument")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string(),
+                            m.get("status")
+                                .and_then(Value::as_str)
+                                .unwrap_or("unknown")
+                                .to_string(),
                         )
                     })
                     .collect()
@@ -915,7 +969,11 @@ mod data_tool_tests {
     #[test]
     fn an_unknown_cadence_is_refused_not_defaulted() {
         let out = funding_history_result(
-            &resp(rows(&[("2024-01-01T00:00:00Z", "0.0001")]), "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"),
+            &resp(
+                rows(&[("2024-01-01T00:00:00Z", "0.0001")]),
+                "2024-01-01T00:00:00Z",
+                "2024-01-02T00:00:00Z",
+            ),
             None,
         );
         assert_eq!(out["error"]["code"], "cadence_unknown");
@@ -954,14 +1012,23 @@ mod data_tool_tests {
     #[test]
     fn the_lag_is_the_maximum_over_received_bars_and_null_when_none_were() {
         let mut d = json!({});
-        apply_lag(&mut d, &json!({"backfilled_bars": 2, "received_bars": 3,
-                                  "lag_seconds": {"max": 172800.0, "median": 60.0}}));
+        apply_lag(
+            &mut d,
+            &json!({"backfilled_bars": 2, "received_bars": 3,
+                                  "lag_seconds": {"max": 172800.0, "median": 60.0}}),
+        );
         assert_eq!(d["worst_case_lag_days"], 2.0);
         let mut e = json!({});
-        apply_lag(&mut e, &json!({"backfilled_bars": 5, "received_bars": 0,
-                                  "lag_seconds": {"max": null}}));
+        apply_lag(
+            &mut e,
+            &json!({"backfilled_bars": 5, "received_bars": 0,
+                                  "lag_seconds": {"max": null}}),
+        );
         assert!(e["worst_case_lag_days"].is_null());
-        assert!(e["worst_case_lag_note"].as_str().unwrap().contains("backfill"));
+        assert!(e["worst_case_lag_note"]
+            .as_str()
+            .unwrap()
+            .contains("backfill"));
     }
 
     #[test]

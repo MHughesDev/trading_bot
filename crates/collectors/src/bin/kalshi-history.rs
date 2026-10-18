@@ -56,7 +56,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
         let rows = history::to_rows(&bars, source_id);
         let written = storage::clickhouse::alt::write_probabilities(&ch_url, &rows).await?;
-        println!("{ticker} candles_with_trades={} written={written}", bars.len());
+        println!(
+            "{ticker} candles_with_trades={} written={written}",
+            bars.len()
+        );
     }
     Ok(())
 }

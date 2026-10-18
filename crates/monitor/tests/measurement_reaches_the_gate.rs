@@ -95,9 +95,18 @@ async fn deploy(pg: &PgPool, instrument: &str) -> String {
 
 async fn cleanup_deployment(pg: &PgPool, id: &str) {
     let scope = format!("strategy:{id}");
-    let _ = sqlx::query("DELETE FROM monitor.events WHERE scope = $1").bind(&scope).execute(pg).await;
-    let _ = sqlx::query("DELETE FROM monitor.kill_switch WHERE scope = $1").bind(&scope).execute(pg).await;
-    let _ = sqlx::query("DELETE FROM monitor.strategy_state WHERE strategy_id = $1").bind(id).execute(pg).await;
+    let _ = sqlx::query("DELETE FROM monitor.events WHERE scope = $1")
+        .bind(&scope)
+        .execute(pg)
+        .await;
+    let _ = sqlx::query("DELETE FROM monitor.kill_switch WHERE scope = $1")
+        .bind(&scope)
+        .execute(pg)
+        .await;
+    let _ = sqlx::query("DELETE FROM monitor.strategy_state WHERE strategy_id = $1")
+        .bind(id)
+        .execute(pg)
+        .await;
     let _ = sqlx::query("UPDATE strategy_deployment SET stopped_at = now(), stop_reason = 'test' WHERE deployment_id = $1::uuid AND stopped_at IS NULL")
         .bind(id)
         .execute(pg)
@@ -116,11 +125,21 @@ async fn a_hard_stale_feed_halts_the_deployment_on_it_through_the_gate_and_no_ot
     // The producer's writes, as the platform makes them: app_role.
     let producer = MonitorStore::new(app.clone());
     producer
-        .observe_bar(&feed(&symbol, "kraken"), 60, Utc::now() - chrono::Duration::seconds(700), true)
+        .observe_bar(
+            &feed(&symbol, "kraken"),
+            60,
+            Utc::now() - chrono::Duration::seconds(700),
+            true,
+        )
         .await
         .expect("app_role can write the gauge");
     producer
-        .observe_bar(&feed(&other, "kraken"), 60, Utc::now() - chrono::Duration::seconds(5), true)
+        .observe_bar(
+            &feed(&other, "kraken"),
+            60,
+            Utc::now() - chrono::Duration::seconds(5),
+            true,
+        )
         .await
         .expect("gauge");
     producer
@@ -130,15 +149,25 @@ async fn a_hard_stale_feed_halts_the_deployment_on_it_through_the_gate_and_no_ot
 
     let service = MonitorService::new(MonitorStore::new(pg.clone()), LeaseTerms::new("t", 60_000));
     let mut cadence = Cadence::default();
-    let pass = service.assess_feeds(&mut cadence, Utc::now()).await.expect("assess");
+    let pass = service
+        .assess_feeds(&mut cadence, Utc::now())
+        .await
+        .expect("assess");
     assert!(pass.halted.contains(&on_stale), "{pass:?}");
     assert!(!pass.halted.contains(&on_fresh), "{pass:?}");
 
     // It reached the gate's table, so the watched process's refresh carries it.
     let gate = Arc::new(KillSwitch::new(false));
-    let watcher = LeaseWatcher::new(MonitorStore::new(app.clone()), Arc::clone(&gate), Duration::from_secs(5));
+    let watcher = LeaseWatcher::new(
+        MonitorStore::new(app.clone()),
+        Arc::clone(&gate),
+        Duration::from_secs(5),
+    );
     watcher.refresh().await;
-    assert!(gate.is_active_scope(&Scope::strategy(on_stale.as_str())), "the halt must survive the mirror refresh");
+    assert!(
+        gate.is_active_scope(&Scope::strategy(on_stale.as_str())),
+        "the halt must survive the mirror refresh"
+    );
     assert!(!gate.is_active_scope(&Scope::strategy(on_fresh.as_str())));
 
     // The record names the instrument, the venue and the age.
@@ -149,10 +178,16 @@ async fn a_hard_stale_feed_halts_the_deployment_on_it_through_the_gate_and_no_ot
     .fetch_one(&pg)
     .await
     .expect("one halt event");
-    assert!(reason.contains(&symbol) && reason.contains("kraken") && reason.contains("700"), "{reason}");
+    assert!(
+        reason.contains(&symbol) && reason.contains("kraken") && reason.contains("700"),
+        "{reason}"
+    );
 
     // A second cadence over the same stale feed is the same incident.
-    service.assess_feeds(&mut cadence, Utc::now()).await.expect("assess again");
+    service
+        .assess_feeds(&mut cadence, Utc::now())
+        .await
+        .expect("assess again");
     let events: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM monitor.events WHERE scope = $1 AND kind = 'halted'",
     )
@@ -160,10 +195,16 @@ async fn a_hard_stale_feed_halts_the_deployment_on_it_through_the_gate_and_no_ot
     .fetch_one(&pg)
     .await
     .expect("count");
-    assert_eq!(events, 1, "a stale feed persisting for two cadences wrote two trip records");
+    assert_eq!(
+        events, 1,
+        "a stale feed persisting for two cadences wrote two trip records"
+    );
 
     for s in [&symbol, &other] {
-        let _ = sqlx::query("DELETE FROM monitor.feed_freshness WHERE symbol = $1").bind(s).execute(&pg).await;
+        let _ = sqlx::query("DELETE FROM monitor.feed_freshness WHERE symbol = $1")
+            .bind(s)
+            .execute(&pg)
+            .await;
     }
     cleanup_deployment(&pg, &on_stale).await;
     cleanup_deployment(&pg, &on_fresh).await;
@@ -176,14 +217,25 @@ async fn a_shut_session_halts_nothing_however_old_the_bar() {
     let d = deploy(&pg, &symbol).await;
     let store = MonitorStore::new(pg.clone());
     store
-        .observe_bar(&feed(&symbol, "alpaca"), 60, Utc::now() - chrono::Duration::hours(15), false)
+        .observe_bar(
+            &feed(&symbol, "alpaca"),
+            60,
+            Utc::now() - chrono::Duration::hours(15),
+            false,
+        )
         .await
         .expect("gauge");
     let service = MonitorService::new(store, LeaseTerms::new("t", 60_000));
-    let pass = service.assess_feeds(&mut Cadence::default(), Utc::now()).await.expect("assess");
+    let pass = service
+        .assess_feeds(&mut Cadence::default(), Utc::now())
+        .await
+        .expect("assess");
     assert!(!pass.halted.contains(&d));
     assert!(pass.session_closed >= 1);
-    let _ = sqlx::query("DELETE FROM monitor.feed_freshness WHERE symbol = $1").bind(&symbol).execute(&pg).await;
+    let _ = sqlx::query("DELETE FROM monitor.feed_freshness WHERE symbol = $1")
+        .bind(&symbol)
+        .execute(&pg)
+        .await;
     cleanup_deployment(&pg, &d).await;
 }
 
@@ -196,7 +248,10 @@ async fn a_venue_halted_for_a_mismatch_resumes_only_after_a_reconciliation_agree
     let gate = KillSwitch::new(false);
 
     // Raised as the platform raises it: through carry_out_mismatch, as app_role.
-    let halted = store.carry_out_mismatch(&venue, &gate).await.expect("mismatch recorded");
+    let halted = store
+        .carry_out_mismatch(&venue, &gate)
+        .await
+        .expect("mismatch recorded");
     assert_eq!(halted, Scope::venue(venue.as_str()));
     assert!(!store.venue_reconciled(&venue).await.expect("read"));
 
@@ -226,7 +281,9 @@ async fn a_venue_halted_for_a_mismatch_resumes_only_after_a_reconciliation_agree
     };
     assert!(matches!(
         store.reset(&global).await,
-        Err(StoreError::Reset(monitor::control::ResetRefusal::VenuesNotReconciled))
+        Err(StoreError::Reset(
+            monitor::control::ResetRefusal::VenuesNotReconciled
+        ))
     ));
 
     // The sweep agrees; now a human may resume it.
@@ -234,16 +291,26 @@ async fn a_venue_halted_for_a_mismatch_resumes_only_after_a_reconciliation_agree
         .record_venue_check(&venue, VenueVerdict::Agreed, 3, None, "reconciliation")
         .await
         .expect("app_role can record a verdict");
-    store.reset(&request).await.expect("an agreed venue resumes");
-    let state: String = sqlx::query_scalar("SELECT state FROM monitor.kill_switch WHERE scope = $1")
-        .bind(format!("venue:{venue}"))
-        .fetch_one(&pg)
+    store
+        .reset(&request)
         .await
-        .expect("row");
+        .expect("an agreed venue resumes");
+    let state: String =
+        sqlx::query_scalar("SELECT state FROM monitor.kill_switch WHERE scope = $1")
+            .bind(format!("venue:{venue}"))
+            .fetch_one(&pg)
+            .await
+            .expect("row");
     assert_eq!(state, "armed");
 
-    let _ = sqlx::query("DELETE FROM monitor.events WHERE scope = $1").bind(format!("venue:{venue}")).execute(&pg).await;
-    let _ = sqlx::query("DELETE FROM monitor.kill_switch WHERE scope = $1").bind(format!("venue:{venue}")).execute(&pg).await;
+    let _ = sqlx::query("DELETE FROM monitor.events WHERE scope = $1")
+        .bind(format!("venue:{venue}"))
+        .execute(&pg)
+        .await;
+    let _ = sqlx::query("DELETE FROM monitor.kill_switch WHERE scope = $1")
+        .bind(format!("venue:{venue}"))
+        .execute(&pg)
+        .await;
 }
 
 #[tokio::test]
@@ -251,11 +318,16 @@ async fn verdicts_are_append_only() {
     let pg = db!();
     let venue = format!("appendonly{}", &Uuid::new_v4().simple().to_string()[..8]);
     let store = MonitorStore::new(pg.clone());
-    store.record_venue_check(&venue, VenueVerdict::Agreed, 1, None, "reconciliation").await.expect("insert");
-    let err = sqlx::query("UPDATE monitor.venue_reconciliation SET verdict = 'disagreed' WHERE venue = $1")
-        .bind(&venue)
-        .execute(&pg)
-        .await;
+    store
+        .record_venue_check(&venue, VenueVerdict::Agreed, 1, None, "reconciliation")
+        .await
+        .expect("insert");
+    let err = sqlx::query(
+        "UPDATE monitor.venue_reconciliation SET verdict = 'disagreed' WHERE venue = $1",
+    )
+    .bind(&venue)
+    .execute(&pg)
+    .await;
     assert!(err.is_err(), "a verdict could be edited after the fact");
     // And a non-clean verdict must say why.
     let mut tx = pg.begin().await.expect("tx");
@@ -283,19 +355,40 @@ async fn a_defect_is_filed_once_per_condition_and_resolved_only_by_a_person() {
         filed_by: "reconciliation".to_owned(),
     };
     let first = store.file_defect(&d).await.expect("app_role files");
-    let Filed::New(id) = first else { panic!("first filing must be new: {first:?}") };
-    assert_eq!(store.file_defect(&d).await.expect("again"), Filed::AlreadyOpen(id));
-    assert!(store.resolve_defect(id, "monitor", "auto").await.is_err(), "a machine resolved a defect");
-    assert!(store.resolve_defect(id, "human:test", "replayed; cost model fixed in 0170").await.expect("resolve"));
+    let Filed::New(id) = first else {
+        panic!("first filing must be new: {first:?}")
+    };
+    assert_eq!(
+        store.file_defect(&d).await.expect("again"),
+        Filed::AlreadyOpen(id)
+    );
+    assert!(
+        store.resolve_defect(id, "monitor", "auto").await.is_err(),
+        "a machine resolved a defect"
+    );
+    assert!(store
+        .resolve_defect(id, "human:test", "replayed; cost model fixed in 0170")
+        .await
+        .expect("resolve"));
     // Resolved once; and now the same condition files a new defect.
-    assert!(matches!(store.file_defect(&d).await.expect("refile"), Filed::New(_)));
-    let _ = sqlx::query("ALTER TABLE monitor.platform_defect DISABLE TRIGGER platform_defect_resolve_once")
+    assert!(matches!(
+        store.file_defect(&d).await.expect("refile"),
+        Filed::New(_)
+    ));
+    let _ = sqlx::query(
+        "ALTER TABLE monitor.platform_defect DISABLE TRIGGER platform_defect_resolve_once",
+    )
+    .execute(&pg)
+    .await;
+    let _ = sqlx::query("DELETE FROM monitor.platform_defect WHERE dedupe_key = $1")
+        .bind(&key)
         .execute(&pg)
         .await;
-    let _ = sqlx::query("DELETE FROM monitor.platform_defect WHERE dedupe_key = $1").bind(&key).execute(&pg).await;
-    let _ = sqlx::query("ALTER TABLE monitor.platform_defect ENABLE TRIGGER platform_defect_resolve_once")
-        .execute(&pg)
-        .await;
+    let _ = sqlx::query(
+        "ALTER TABLE monitor.platform_defect ENABLE TRIGGER platform_defect_resolve_once",
+    )
+    .execute(&pg)
+    .await;
 }
 
 #[tokio::test]
@@ -304,7 +397,10 @@ async fn a_failed_drill_run_must_name_its_defect_and_only_paper_can_be_drilled()
     // Inside a transaction that is rolled back: drill runs are append-only, and a
     // test row would tell the real schedule the suite ran this week.
     let mut tx = pg.begin().await.expect("tx");
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.expect("role");
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .expect("role");
     let insert = |venue_class: &'static str, passed: bool| {
         format!(
             "INSERT INTO monitor.drill_run (drill, trigger, venue_class, started_at, finished_at,
@@ -314,14 +410,36 @@ async fn a_failed_drill_run_must_name_its_defect_and_only_paper_can_be_drilled()
             if passed { "NULL" } else { "'it failed'" }
         )
     };
-    sqlx::query("SAVEPOINT a").execute(&mut *tx).await.expect("sp");
-    assert!(sqlx::query(&insert("paper", false)).execute(&mut *tx).await.is_err(),
-        "a failed drill was recorded without a defect");
-    sqlx::query("ROLLBACK TO SAVEPOINT a").execute(&mut *tx).await.expect("rb");
-    assert!(sqlx::query(&insert("live", true)).execute(&mut *tx).await.is_err(),
-        "a drill against live capital was recorded");
-    sqlx::query("ROLLBACK TO SAVEPOINT a").execute(&mut *tx).await.expect("rb");
-    sqlx::query(&insert("paper", true)).execute(&mut *tx).await.expect("app_role records a passed paper drill");
+    sqlx::query("SAVEPOINT a")
+        .execute(&mut *tx)
+        .await
+        .expect("sp");
+    assert!(
+        sqlx::query(&insert("paper", false))
+            .execute(&mut *tx)
+            .await
+            .is_err(),
+        "a failed drill was recorded without a defect"
+    );
+    sqlx::query("ROLLBACK TO SAVEPOINT a")
+        .execute(&mut *tx)
+        .await
+        .expect("rb");
+    assert!(
+        sqlx::query(&insert("live", true))
+            .execute(&mut *tx)
+            .await
+            .is_err(),
+        "a drill against live capital was recorded"
+    );
+    sqlx::query("ROLLBACK TO SAVEPOINT a")
+        .execute(&mut *tx)
+        .await
+        .expect("rb");
+    sqlx::query(&insert("paper", true))
+        .execute(&mut *tx)
+        .await
+        .expect("app_role records a passed paper drill");
     tx.rollback().await.expect("rollback");
 }
 
@@ -340,10 +458,19 @@ async fn no_deployment_leaves_paper_without_limits_in_three_families() {
             instrument_id, environment, venue, starting_capital, started_by)
          VALUES ($1, 'monitor-test', 'promote', repeat('a', 64), '{}', 'BTC-USD', 'live',
                  'platform_paper', 1000, 'human:test')";
-    sqlx::query("SAVEPOINT a").execute(&mut *tx).await.expect("sp");
+    sqlx::query("SAVEPOINT a")
+        .execute(&mut *tx)
+        .await
+        .expect("sp");
     let refused = sqlx::query(insert).bind(id).execute(&mut *tx).await;
-    assert!(refused.is_err(), "a live deployment with no declared limits was written");
-    sqlx::query("ROLLBACK TO SAVEPOINT a").execute(&mut *tx).await.expect("rb");
+    assert!(
+        refused.is_err(),
+        "a live deployment with no declared limits was written"
+    );
+    sqlx::query("ROLLBACK TO SAVEPOINT a")
+        .execute(&mut *tx)
+        .await
+        .expect("rb");
     for (metric, family, method) in [
         ("fill_rate", "execution", "declared_absolute"),
         ("signals_per_hour", "behaviour", "declared_absolute"),
@@ -361,7 +488,11 @@ async fn no_deployment_leaves_paper_without_limits_in_three_families() {
         .await
         .expect("limit");
     }
-    sqlx::query(insert).bind(id).execute(&mut *tx).await.expect("with limits declared it may leave paper");
+    sqlx::query(insert)
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .expect("with limits declared it may leave paper");
     tx.rollback().await.expect("rollback");
 }
 
@@ -427,7 +558,14 @@ async fn a_sustained_cusum_breach_on_measured_daily_returns_halts_the_deployment
 
     let store = MonitorStore::new(pg.clone());
     store
-        .declare_return_baseline(&strategy, 0.001, 0.005, 365.0, "paper-run-pnl-test", "human:test")
+        .declare_return_baseline(
+            &strategy,
+            0.001,
+            0.005,
+            365.0,
+            "paper-run-pnl-test",
+            "human:test",
+        )
         .await
         .expect("baseline");
     store
@@ -452,15 +590,25 @@ async fn a_sustained_cusum_breach_on_measured_daily_returns_halts_the_deployment
     let mut last = None;
     // Dwell: a P&L breach is an estimate, so it must persist three cadences.
     for _ in 0..3 {
-        let decisions = service.collect_cadence(&mut cadence, Utc::now()).await.expect("cadence");
+        let decisions = service
+            .collect_cadence(&mut cadence, Utc::now())
+            .await
+            .expect("cadence");
         last = decisions.into_iter().find(|d| d.strategy_id == strategy);
     }
     let decision = last.expect("the deployment was judged");
-    assert_eq!(decision.transition.to, monitor::state::StrategyState::Halted, "{decision:?}");
+    assert_eq!(
+        decision.transition.to,
+        monitor::state::StrategyState::Halted,
+        "{decision:?}"
+    );
 
     // Through the gate's table: the halt reaches the order gate.
     let halted = store.halted_scopes().await.expect("scopes");
-    assert!(halted.contains(&Scope::strategy(strategy.as_str())), "{halted:?}");
+    assert!(
+        halted.contains(&Scope::strategy(strategy.as_str())),
+        "{halted:?}"
+    );
     let metric: Option<String> = sqlx::query_scalar(
         "SELECT metric FROM monitor.events WHERE scope = $1 AND kind = 'halted'",
     )
@@ -470,8 +618,14 @@ async fn a_sustained_cusum_breach_on_measured_daily_returns_halts_the_deployment
     .expect("the halt record");
     assert_eq!(metric.as_deref(), Some("cusum_low"));
 
-    let _ = sqlx::query("DELETE FROM monitor.limits WHERE strategy_id = $1").bind(&strategy).execute(&pg).await;
-    let _ = sqlx::query("DELETE FROM monitor.dwell WHERE strategy_id = $1").bind(&strategy).execute(&pg).await;
+    let _ = sqlx::query("DELETE FROM monitor.limits WHERE strategy_id = $1")
+        .bind(&strategy)
+        .execute(&pg)
+        .await;
+    let _ = sqlx::query("DELETE FROM monitor.dwell WHERE strategy_id = $1")
+        .bind(&strategy)
+        .execute(&pg)
+        .await;
     cleanup_deployment(&pg, &strategy).await;
 }
 
@@ -526,14 +680,18 @@ async fn a_measured_fill_rate_below_its_floor_scales_the_deployment_to_a_quarter
     let service = MonitorService::new(store.clone(), LeaseTerms::new("t", 60_000));
     let mut cadence = Cadence::default();
     for _ in 0..3 {
-        service.collect_cadence(&mut cadence, Utc::now()).await.expect("cadence");
-    }
-    let (state, scale): (String, i16) =
-        sqlx::query_as("SELECT state, scale_pct FROM monitor.strategy_state WHERE strategy_id = $1")
-            .bind(&strategy)
-            .fetch_one(&pg)
+        service
+            .collect_cadence(&mut cadence, Utc::now())
             .await
-            .expect("state row");
+            .expect("cadence");
+    }
+    let (state, scale): (String, i16) = sqlx::query_as(
+        "SELECT state, scale_pct FROM monitor.strategy_state WHERE strategy_id = $1",
+    )
+    .bind(&strategy)
+    .fetch_one(&pg)
+    .await
+    .expect("state row");
     assert_eq!((state.as_str(), scale), ("scaled_down", 25));
 
     // The process boundary: the watched process's refresh carries the size.
@@ -543,25 +701,40 @@ async fn a_measured_fill_rate_below_its_floor_scales_the_deployment_to_a_quarter
         .await;
     assert_eq!(gate.scale_pct(&strategy), 25);
 
-    let (metric, value, limit): (Option<String>, Option<rust_decimal::Decimal>, Option<rust_decimal::Decimal>) =
-        sqlx::query_as(
-            "SELECT metric, observed_value, limit_value FROM monitor.events
+    let (metric, value, limit): (
+        Option<String>,
+        Option<rust_decimal::Decimal>,
+        Option<rust_decimal::Decimal>,
+    ) = sqlx::query_as(
+        "SELECT metric, observed_value, limit_value FROM monitor.events
               WHERE scope = $1 AND kind = 'scaled_down'",
-        )
-        .bind(format!("strategy:{strategy}"))
-        .fetch_one(&pg)
-        .await
-        .expect("the scale-down record");
+    )
+    .bind(format!("strategy:{strategy}"))
+    .fetch_one(&pg)
+    .await
+    .expect("the scale-down record");
     assert_eq!(metric.as_deref(), Some("fill_rate"));
     let f = |d: Option<rust_decimal::Decimal>| {
         use rust_decimal::prelude::ToPrimitive;
         d.and_then(|d| d.to_f64()).expect("a number")
     };
-    assert!((f(value) - 0.4).abs() < 1e-9, "the value is not the measured 0.4");
-    assert!((f(limit) - 0.8).abs() < 1e-9, "the limit is not the declared 0.8");
+    assert!(
+        (f(value) - 0.4).abs() < 1e-9,
+        "the value is not the measured 0.4"
+    );
+    assert!(
+        (f(limit) - 0.8).abs() < 1e-9,
+        "the limit is not the declared 0.8"
+    );
 
-    let _ = sqlx::query("DELETE FROM monitor.limits WHERE strategy_id = $1").bind(&strategy).execute(&pg).await;
-    let _ = sqlx::query("DELETE FROM monitor.dwell WHERE strategy_id = $1").bind(&strategy).execute(&pg).await;
+    let _ = sqlx::query("DELETE FROM monitor.limits WHERE strategy_id = $1")
+        .bind(&strategy)
+        .execute(&pg)
+        .await;
+    let _ = sqlx::query("DELETE FROM monitor.dwell WHERE strategy_id = $1")
+        .bind(&strategy)
+        .execute(&pg)
+        .await;
     cleanup_deployment(&pg, &strategy).await;
 }
 
@@ -596,12 +769,18 @@ async fn an_events_observed_and_limit_values_are_served_and_absent_ones_stay_nul
         .await
         .expect("read");
     assert_eq!(rows.len(), 2);
-    let metric_row = rows.iter().find(|r| r.metric.as_deref() == Some("fill_rate")).expect("metric row");
+    let metric_row = rows
+        .iter()
+        .find(|r| r.metric.as_deref() == Some("fill_rate"))
+        .expect("metric row");
     assert!((metric_row.observed_value.expect("observed") - 0.4).abs() < 1e-9);
     assert!((metric_row.limit_value.expect("limit") - 0.8).abs() < 1e-9);
     let bare = rows.iter().find(|r| r.metric.is_none()).expect("bare row");
     assert_eq!(bare.observed_value, None, "a missing number became a value");
     assert_eq!(bare.limit_value, None);
 
-    let _ = sqlx::query("DELETE FROM monitor.events WHERE scope = $1").bind(&scope).execute(&pg).await;
+    let _ = sqlx::query("DELETE FROM monitor.events WHERE scope = $1")
+        .bind(&scope)
+        .execute(&pg)
+        .await;
 }

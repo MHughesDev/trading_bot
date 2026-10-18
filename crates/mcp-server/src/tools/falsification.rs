@@ -61,7 +61,10 @@ fn check_reproduction(params: &Value) -> Result<(), Value> {
         }
     }
     if params.get("seed").and_then(Value::as_u64).is_none() {
-        return Err(crate::tool_error::missing_field_because("seed", "a replay that cannot be pinned to a seed is an anecdote"));
+        return Err(crate::tool_error::missing_field_because(
+            "seed",
+            "a replay that cannot be pinned to a seed is an anecdote",
+        ));
     }
     if steps_field(params).is_empty() {
         return Err(crate::tool_error::refuse(
@@ -561,7 +564,6 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
     ])
 }
 
-
 // ── S-3.13: the two re-read falsification tools ──────────────────────────────
 //
 // Neither dispatches anything or reads new data, so neither spends a trial
@@ -704,7 +706,11 @@ pub fn read_timing_curve(dist: &[f64], bars: &[u32]) -> Value {
     let at = |bar: u32| bars.iter().position(|b| *b == bar).map(|i| dist[i]);
     let last = *dist.last().unwrap_or(&base);
     let max_delay = *bars.last().unwrap_or(&0);
-    let first_dead = bars.iter().zip(dist).find(|(b, v)| **b > 0 && **v <= 0.0).map(|(b, _)| *b);
+    let first_dead = bars
+        .iter()
+        .zip(dist)
+        .find(|(b, v)| **b > 0 && **v <= 0.0)
+        .map(|(b, _)| *b);
     let verdict = if base <= 0.0 {
         "no_edge_to_delay"
     } else if first_dead.is_some_and(|b| b <= 1) {
@@ -731,9 +737,7 @@ pub async fn timing_jitter_sensitivity(api: &ApiClient, params: &Value) -> Value
     let Some(experiment_id) = str_field(params, "experiment_id") else {
         return missing("experiment_id");
     };
-    let max_delay = params
-        .get("max_delay_bars")
-        .map_or(Some(3), Value::as_u64);
+    let max_delay = params.get("max_delay_bars").map_or(Some(3), Value::as_u64);
     let Some(max_delay) = max_delay.filter(|m| (1..=12).contains(m)) else {
         return crate::tool_error::refuse(
             "invalid_max_delay_bars",
@@ -828,7 +832,10 @@ pub async fn ablation_sweep(api: &ApiClient, params: &Value) -> Value {
         Ok(v) => v,
         Err(e) => return e.to_tool_error(),
     };
-    let base_ref = plan["strategy_ref"].as_str().unwrap_or_default().to_string();
+    let base_ref = plan["strategy_ref"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
     let variants = plan["variants"].as_array().cloned().unwrap_or_default();
     if base_ref.is_empty() || variants.is_empty() {
         return crate::tool_error::refuse_extra(
@@ -914,16 +921,17 @@ pub async fn ablation_sweep(api: &ApiClient, params: &Value) -> Value {
         .await
     {
         Ok(v) => v,
-        Err(e) => {
-            return crate::tool_error::refuse_extra(
-                "classification_failed",
-                "the study ran but its members could not be classified; the looks are spent.",
-                "do not re-run the study; read `study` and report the members' metrics unclassified",
-                json!({ "detail": e.to_tool_error(), "registered": registered, "study": study }),
-            )
-        }
+        Err(e) => return crate::tool_error::refuse_extra(
+            "classification_failed",
+            "the study ran but its members could not be classified; the looks are spent.",
+            "do not re-run the study; read `study` and report the members' metrics unclassified",
+            json!({ "detail": e.to_tool_error(), "registered": registered, "study": study }),
+        ),
     };
-    let rows = classified["components"].as_array().cloned().unwrap_or_default();
+    let rows = classified["components"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let tally = tally_ablation(&rows);
     json!({
         "summary_fields": tally,
@@ -1216,13 +1224,19 @@ mod tests {
     fn no_edge_on_time_means_the_question_does_not_apply_and_a_hole_is_not_read() {
         let none = read_timing_curve(&[-0.2, -0.3, -0.4], &[0, 1, 2]);
         assert_eq!(none["verdict"], "no_edge_to_delay");
-        assert!(none["curve"][1]["retained"].is_null(), "a share of nothing is not a number");
+        assert!(
+            none["curve"][1]["retained"].is_null(),
+            "a share of nothing is not a number"
+        );
         // A failed delay leaves fewer values than delays: refused, not skipped.
         let hole = read_timing_curve(&[1.4, 1.3], &[0, 1, 2]);
         assert_eq!(hole["verdict"], "unmeasured");
         assert!(hole["reason"].as_str().unwrap().contains("order-hold"));
         // And a curve that does not start at the on-time baseline is not read either.
-        assert_eq!(read_timing_curve(&[1.0, 1.0], &[1, 2])["verdict"], "unmeasured");
+        assert_eq!(
+            read_timing_curve(&[1.0, 1.0], &[1, 2])["verdict"],
+            "unmeasured"
+        );
     }
 
     #[test]
@@ -1253,7 +1267,11 @@ mod tests {
     fn both_tools_are_declared_as_falsification_trials_and_named_in_the_catalogue() {
         for name in ["timing_jitter_sensitivity", "ablation_sweep"] {
             let s = specs().into_iter().find(|s| s.name == name).expect(name);
-            assert_eq!(s.spends_trial, crate::spec::TrialKind::Falsification, "{name} runs backtests");
+            assert_eq!(
+                s.spends_trial,
+                crate::spec::TrialKind::Falsification,
+                "{name} runs backtests"
+            );
             assert!(s.max_calls_per_run.is_some(), "{name} must be bounded");
         }
     }

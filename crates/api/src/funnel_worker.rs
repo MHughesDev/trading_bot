@@ -138,7 +138,11 @@ pub struct SuiteFunnel {
 
 impl SuiteFunnel {
     #[must_use]
-    pub fn new(suite: Arc<SuiteManager>, evaluator: Arc<dyn CampaignEvaluator>, pg: PgPool) -> Self {
+    pub fn new(
+        suite: Arc<SuiteManager>,
+        evaluator: Arc<dyn CampaignEvaluator>,
+        pg: PgPool,
+    ) -> Self {
         Self {
             suite,
             evaluator,
@@ -225,7 +229,11 @@ mod tests {
     fn float(name: &str, min: f64, max: f64) -> Dim {
         Dim {
             name: name.into(),
-            kind: DimKind::Float { min, max, log: false },
+            kind: DimKind::Float {
+                min,
+                max,
+                log: false,
+            },
         }
     }
     fn held(k: &str, v: Value) -> ParamMap {
@@ -239,7 +247,12 @@ mod tests {
     #[test]
     fn the_axis_is_the_first_numeric_parameter_and_centres_on_the_incumbent() {
         let dims = vec![
-            Dim { name: "mode".into(), kind: DimKind::Enum { choices: vec!["a".into()] } },
+            Dim {
+                name: "mode".into(),
+                kind: DimKind::Enum {
+                    choices: vec!["a".into()],
+                },
+            },
             int("window", 5, 50, 1),
             float("threshold", 0.0, 1.0),
         ];
@@ -255,7 +268,10 @@ mod tests {
     fn the_steps_fit_inside_the_declared_range() {
         let near_edge = sweep_axis(&[int("w", 5, 50, 5)], &held("w", json!(8))).unwrap();
         assert_eq!(near_edge.center, 8.0);
-        assert_eq!(near_edge.step, 1.0, "room 3 / 4 steps floors to the minimum whole step");
+        assert_eq!(
+            near_edge.step, 1.0,
+            "room 3 / 4 steps floors to the minimum whole step"
+        );
         let roomy = sweep_axis(&[int("w", 0, 100, 5)], &held("w", json!(50))).unwrap();
         assert_eq!(roomy.step, 5.0, "the declared step when it fits");
         let f = sweep_axis(&[float("t", 0.0, 1.0)], &held("t", json!(0.5))).unwrap();
@@ -276,7 +292,12 @@ mod tests {
     /// No numeric parameter means no axis, never the legacy `fast`.
     #[test]
     fn a_strategy_with_nothing_numeric_has_no_axis() {
-        let dims = vec![Dim { name: "mode".into(), kind: DimKind::Enum { choices: vec!["a".into()] } }];
+        let dims = vec![Dim {
+            name: "mode".into(),
+            kind: DimKind::Enum {
+                choices: vec!["a".into()],
+            },
+        }];
         assert_eq!(sweep_axis(&dims, &ParamMap::new()), None);
         assert_eq!(sweep_axis(&[], &ParamMap::new()), None);
     }

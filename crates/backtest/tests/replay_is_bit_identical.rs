@@ -14,7 +14,9 @@ use std::sync::Arc;
 
 use backtest::outputs_v2;
 use backtest::position_run::{ArtifactBar, Layer1Artifact, PositionRunExecutor};
-use backtest::position_series::{PositionPoint, PositionSeries, PositionUnits, SqrtImpact, TruncationVerdict};
+use backtest::position_series::{
+    PositionPoint, PositionSeries, PositionUnits, SqrtImpact, TruncationVerdict,
+};
 use backtest::run::{Backtest, InMemoryRunStore, ParamMap, RunDispatch, RunResult};
 use ledger::{DispatchContext, InMemoryLedger};
 
@@ -23,7 +25,11 @@ fn artifact(seed: u64) -> Layer1Artifact {
         .map(|i| {
             #[allow(clippy::cast_precision_loss)]
             let p = 100.0 + (f64::from(i) * 0.21).sin() * 6.0 + (f64::from(i) * 0.013).cos() * 3.0;
-            ArtifactBar { ts_ns: (i64::from(i) + 1) * 3_600_000_000_000, open: p, close: p * 1.0007 }
+            ArtifactBar {
+                ts_ns: (i64::from(i) + 1) * 3_600_000_000_000,
+                open: p,
+                close: p * 1.0007,
+            }
         })
         .collect();
     let points = bars
@@ -39,7 +45,11 @@ fn artifact(seed: u64) -> Layer1Artifact {
         code_sha256: "cd".repeat(32),
         instrument: "BTC-USD".into(),
         timeframe: "1h".into(),
-        series: PositionSeries { points, position_units: PositionUnits::Fraction, allow_short: true },
+        series: PositionSeries {
+            points,
+            position_units: PositionUnits::Fraction,
+            allow_short: true,
+        },
         bars,
         initial_equity: 25_000.0,
         fee_bps: 10.0,
@@ -47,7 +57,11 @@ fn artifact(seed: u64) -> Layer1Artifact {
         cost_model_ref: "cost:flat".into(),
         data_snapshot: "snap".into(),
         lot_size: None,
-        impact: Some(SqrtImpact { y: 1.0, sigma: 0.012, volume_usd: 2e6 }),
+        impact: Some(SqrtImpact {
+            y: 1.0,
+            sigma: 0.012,
+            volume_usd: 2e6,
+        }),
         params: ParamMap::new(),
         seed,
     }
@@ -61,14 +75,23 @@ fn run(a: &Arc<Layer1Artifact>) -> (RunResult, backtest::run::RunConfig) {
         InMemoryLedger::new(),
     );
     let ctx = DispatchContext::human("tenant", "m-2.8", 0.1).with_experiment("exp");
-    (bt.run_traced(&RunDispatch::new(&ctx, &cfg, 1.0)).unwrap().0, cfg)
+    (
+        bt.run_traced(&RunDispatch::new(&ctx, &cfg, 1.0)).unwrap().0,
+        cfg,
+    )
 }
 
 /// Every float as its bits, so equality is bit equality and a NaN would show.
 fn bits(r: &RunResult) -> (Vec<(i64, u64)>, Vec<(i64, u64)>, String, String) {
     (
-        r.equity_curve.iter().map(|(t, e)| (t.timestamp_nanos_opt().unwrap(), e.to_bits())).collect(),
-        r.net_exposure.iter().map(|(t, e)| (t.timestamp_nanos_opt().unwrap(), e.to_bits())).collect(),
+        r.equity_curve
+            .iter()
+            .map(|(t, e)| (t.timestamp_nanos_opt().unwrap(), e.to_bits()))
+            .collect(),
+        r.net_exposure
+            .iter()
+            .map(|(t, e)| (t.timestamp_nanos_opt().unwrap(), e.to_bits()))
+            .collect(),
         serde_json::to_string(&r.trades).unwrap(),
         // `produced_at` and `compute_cost` are wall-clock facts about *this execution*, not the result.
         serde_json::to_string(&(&r.metrics, &r.integrity_flags, &r.status, &r.run_id)).unwrap(),
@@ -82,19 +105,32 @@ fn two_runs_of_one_hash_agree_bit_for_bit_in_equity_exposure_trades_and_metrics(
     let (y, cy) = run(&a);
     assert_eq!(cx.run_id, cy.run_id, "one config, one hash");
     assert_eq!(bits(&x), bits(&y));
-    assert!(!x.trades.is_empty(), "the fixture trades, so equality is not vacuous");
+    assert!(
+        !x.trades.is_empty(),
+        "the fixture trades, so equality is not vacuous"
+    );
 }
 
 #[test]
 fn the_fills_and_the_rows_written_for_them_are_identical_across_runs() {
     let a = Arc::new(artifact(7));
-    let one = PositionRunExecutor::new(a.clone(), None).evaluate().unwrap();
-    let two = PositionRunExecutor::new(a.clone(), None).evaluate().unwrap();
+    let one = PositionRunExecutor::new(a.clone(), None)
+        .evaluate()
+        .unwrap();
+    let two = PositionRunExecutor::new(a.clone(), None)
+        .evaluate()
+        .unwrap();
     assert_eq!(one.fills.len(), two.fills.len());
     for (f, g) in one.fills.iter().zip(&two.fills) {
-        assert_eq!((f.qty.to_bits(), f.price.to_bits(), f.fee.to_bits()), (g.qty.to_bits(), g.price.to_bits(), g.fee.to_bits()));
+        assert_eq!(
+            (f.qty.to_bits(), f.price.to_bits(), f.fee.to_bits()),
+            (g.qty.to_bits(), g.price.to_bits(), g.fee.to_bits())
+        );
     }
-    assert_eq!(outputs_v2::build("r", &a, &one), outputs_v2::build("r", &a, &two));
+    assert_eq!(
+        outputs_v2::build("r", &a, &one),
+        outputs_v2::build("r", &a, &two)
+    );
 }
 
 #[test]

@@ -187,10 +187,12 @@ pub fn admit_deployment(
         Some(&ceiling),
     ) {
         Admission::Admitted { .. } => Ok(()),
-        Admission::Refused { reason } | Admission::Unmeasured { reason } => Err(CeilingError::Bound {
-            binding: Binding::MaxInstrumentExposure,
-            message: reason,
-        }),
+        Admission::Refused { reason } | Admission::Unmeasured { reason } => {
+            Err(CeilingError::Bound {
+                binding: Binding::MaxInstrumentExposure,
+                message: reason,
+            })
+        }
     }
 }
 
@@ -203,7 +205,11 @@ mod tests {
     }
 
     fn r(rev: &str, instr: &str, cap: f64) -> Running {
-        Running { revision_hash: rev.into(), instrument_id: instr.into(), capital_usd: cap }
+        Running {
+            revision_hash: rev.into(),
+            instrument_id: instr.into(),
+            capital_usd: cap,
+        }
     }
 
     #[test]
@@ -213,7 +219,10 @@ mod tests {
             (Some(1.0), None, Some(1.0), Binding::MaxAggregateCapital),
             (Some(1.0), Some(1.0), None, Binding::MaxInstrumentExposure),
         ] {
-            assert_eq!(FleetCeilings::declared(a, b, c), Err(CeilingError::Undeclared(which)));
+            assert_eq!(
+                FleetCeilings::declared(a, b, c),
+                Err(CeilingError::Undeclared(which))
+            );
         }
         assert_eq!(
             FleetCeilings::declared(Some(0.0), Some(1.0), Some(1.0)),
@@ -232,13 +241,17 @@ mod tests {
         // concurrency
         let full = [r("a", "X", 1.0), r("b", "Y", 1.0), r("c", "Z", 1.0)];
         assert_eq!(
-            admit_deployment(&c, &full, &r("d", "W", 1.0)).unwrap_err().binding(),
+            admit_deployment(&c, &full, &r("d", "W", 1.0))
+                .unwrap_err()
+                .binding(),
             Binding::MaxConcurrent
         );
         // aggregate capital
         let heavy = [r("a", "X", 60_000.0)];
         assert_eq!(
-            admit_deployment(&c, &heavy, &r("b", "Y", 50_000.0)).unwrap_err().binding(),
+            admit_deployment(&c, &heavy, &r("b", "Y", 50_000.0))
+                .unwrap_err()
+                .binding(),
             Binding::MaxAggregateCapital
         );
         // within every ceiling
@@ -267,7 +280,9 @@ mod tests {
         let running = [r("a", "X", 9.0)];
         // Breaks all three; concurrency is named first.
         assert_eq!(
-            admit_deployment(&c, &running, &r("a", "X", 9.0)).unwrap_err().binding(),
+            admit_deployment(&c, &running, &r("a", "X", 9.0))
+                .unwrap_err()
+                .binding(),
             Binding::MaxConcurrent
         );
     }

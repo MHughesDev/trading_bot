@@ -323,30 +323,39 @@ async fn parity_verdicts_are_recorded_append_only_and_by_the_platform_role() {
     let mut ok = verdict(d.deployment_id, "identical");
     ok.decisions = Some(3);
     let id = journal::record_parity(&pool, &ok).await.unwrap();
-    assert!(journal::record_parity(&pool, &verdict(d.deployment_id, "identical"))
-        .await
-        .is_err(), "an identical verdict says how many decisions");
-    assert!(journal::record_parity(&pool, &verdict(d.deployment_id, "diverged"))
-        .await
-        .is_err(), "a divergence names its record and field");
+    assert!(
+        journal::record_parity(&pool, &verdict(d.deployment_id, "identical"))
+            .await
+            .is_err(),
+        "an identical verdict says how many decisions"
+    );
+    assert!(
+        journal::record_parity(&pool, &verdict(d.deployment_id, "diverged"))
+            .await
+            .is_err(),
+        "a divergence names its record and field"
+    );
     let mut div = verdict(d.deployment_id, "diverged");
     div.diverged_seq = Some(2);
     div.field = Some("values.f".into());
     div.recorded = Some(serde_json::json!(1.0));
     div.replayed = Some(serde_json::json!(1.5));
     journal::record_parity(&pool, &div).await.unwrap();
-    assert!(journal::record_parity(&pool, &verdict(d.deployment_id, "unreplayable"))
-        .await
-        .is_err(), "an unreplayable verdict says why");
+    assert!(
+        journal::record_parity(&pool, &verdict(d.deployment_id, "unreplayable"))
+            .await
+            .is_err(),
+        "an unreplayable verdict says why"
+    );
 
     // Append-only.
-    assert!(
-        sqlx::query("UPDATE strategy_parity_check SET verdict = 'identical' WHERE check_id = $1")
-            .bind(id)
-            .execute(&pool)
-            .await
-            .is_err()
-    );
+    assert!(sqlx::query(
+        "UPDATE strategy_parity_check SET verdict = 'identical' WHERE check_id = $1"
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .is_err());
     assert!(
         sqlx::query("DELETE FROM strategy_parity_check WHERE check_id = $1")
             .bind(id)

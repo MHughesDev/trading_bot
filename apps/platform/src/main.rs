@@ -17,8 +17,8 @@ mod live_runner;
 mod parity_jobs;
 mod pipeline_manager;
 mod regime_jobs;
-mod screener_jobs;
 mod retention_jobs;
+mod screener_jobs;
 mod series_runner;
 mod tee;
 #[cfg(test)]
@@ -612,11 +612,12 @@ async fn main() -> anyhow::Result<()> {
 
         // The campaign's children (Set S ML-platform gaps: EXPERIMENT, BASELINE and
         // COMPARE had no worker, so a campaign that reached them failed `no_worker`).
-        let campaign_eval: std::sync::Arc<dyn api::campaign_driver::study_worker::CampaignEvaluator> =
-            std::sync::Arc::new(api::campaign_driver::study_worker::SuiteEvaluator::new(
-                app_state.suite.clone(),
-                app_state.research.clone(),
-            ));
+        let campaign_eval: std::sync::Arc<
+            dyn api::campaign_driver::study_worker::CampaignEvaluator,
+        > = std::sync::Arc::new(api::campaign_driver::study_worker::SuiteEvaluator::new(
+            app_state.suite.clone(),
+            app_state.research.clone(),
+        ));
 
         // Nightly: re-run a sample of the last thirty days' Runs under their own
         // receipts and file an evaluator defect on drift (S-10.8). A reproduction
@@ -691,10 +692,10 @@ async fn main() -> anyhow::Result<()> {
                         ),
                     ),
                 ));
-                pool = pool.register(std::sync::Arc::new(api::workers::DataQcWorker::new(
-                    cfg.clickhouse.url.clone(),
-                )
-                .with_pool(app_state.pg.clone())));
+                pool = pool.register(std::sync::Arc::new(
+                    api::workers::DataQcWorker::new(cfg.clickhouse.url.clone())
+                        .with_pool(app_state.pg.clone()),
+                ));
                 // Deep history (Set P P-1.1). **`JobKind::Backfill` had no worker
                 // anywhere**, so every submitted window queued for ever — the same
                 // shape as S-10.11's `ResearchRun`, one aisle over. Registered here
@@ -754,22 +755,23 @@ async fn main() -> anyhow::Result<()> {
                     ));
                 // Kraken's downloadable history files (P-1.3). Inert until
                 // `config/kraken_archive.toml` declares its checksums.
-                let backfill = match collectors::backfill::kraken::KrakenArchiveBackfill::from_config_file(
-                    "config/kraken_archive.toml",
-                ) {
-                    Ok(Some(archive)) => backfill.with(std::sync::Arc::new(
-                        jobs::kinds::backfill::BackfillEngine::new(
-                            std::sync::Arc::new(archive),
-                            sink.clone(),
-                            cursors.clone(),
-                        ),
-                    )),
-                    Ok(None) => backfill,
-                    Err(e) => {
-                        warn!(error = %e, "kraken archive backfill config is invalid; not registered");
-                        backfill
-                    }
-                };
+                let backfill =
+                    match collectors::backfill::kraken::KrakenArchiveBackfill::from_config_file(
+                        "config/kraken_archive.toml",
+                    ) {
+                        Ok(Some(archive)) => backfill.with(std::sync::Arc::new(
+                            jobs::kinds::backfill::BackfillEngine::new(
+                                std::sync::Arc::new(archive),
+                                sink.clone(),
+                                cursors.clone(),
+                            ),
+                        )),
+                        Ok(None) => backfill,
+                        Err(e) => {
+                            warn!(error = %e, "kraken archive backfill config is invalid; not registered");
+                            backfill
+                        }
+                    };
                 info!(
                     sources = ?backfill.sources(),
                     "backfill worker registered"
@@ -793,9 +795,9 @@ async fn main() -> anyhow::Result<()> {
                 // `JobKind::DatasetBuild` had no worker (Set N N-1.5): builds a declared
                 // dataset and runs the leakage harness; a leak ends terminal and nothing
                 // is registered. Research-class kind.
-                pool = pool.register(std::sync::Arc::new(
-                    api::dataset_build_worker::worker(app_state.pg.clone()),
-                ));
+                pool = pool.register(std::sync::Arc::new(api::dataset_build_worker::worker(
+                    app_state.pg.clone(),
+                )));
                 pool = pool.register(std::sync::Arc::new(
                     api::synthetic_worker::SimulatePathsWorker::new(
                         cfg.clickhouse.url.clone(),

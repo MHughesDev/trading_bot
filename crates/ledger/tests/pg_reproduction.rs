@@ -9,9 +9,7 @@
 
 use ledger::pg::PgTrialLedger;
 use ledger::reproduction::ReproductionRecord;
-use ledger::{
-    DispatchContext, LedgerError, Registration, TrialEvent, TrialState, TrialSubject,
-};
+use ledger::{DispatchContext, LedgerError, Registration, TrialEvent, TrialState, TrialSubject};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 
@@ -28,7 +26,12 @@ fn with_db(url: &str, db: &str) -> String {
     format!("{}/{db}", &url[..cut])
 }
 
-const ROLES: &[&str] = &["app_role", "agent_role", "internal_ml_role", "backtest_role"];
+const ROLES: &[&str] = &[
+    "app_role",
+    "agent_role",
+    "internal_ml_role",
+    "backtest_role",
+];
 
 /// A scratch database with the ledger and 0241, and a second pool that is
 /// `app_role`. 0044's table grants are restated for the two tables this test
@@ -154,8 +157,16 @@ async fn a_reproduction_runs_as_the_platforms_role_and_spends_no_trial() {
         .await
         .expect("app_role may append a reproduction");
 
-    assert_eq!(count(&owner, "mlops.trial").await, trials_before, "no trial row");
-    assert_eq!(count(&owner, "mlops.trial_event").await, events_before, "no event");
+    assert_eq!(
+        count(&owner, "mlops.trial").await,
+        trials_before,
+        "no trial row"
+    );
+    assert_eq!(
+        count(&owner, "mlops.trial_event").await,
+        events_before,
+        "no event"
+    );
     assert_eq!(count(&owner, "mlops.reproduction").await, 1);
 }
 
@@ -199,7 +210,10 @@ async fn a_reproduction_row_cannot_be_edited_or_deleted_by_anyone() {
         .execute("UPDATE mlops.reproduction SET outcome = 'drifted'")
         .await
         .is_err());
-    assert!(owner.execute("DELETE FROM mlops.reproduction").await.is_err());
+    assert!(owner
+        .execute("DELETE FROM mlops.reproduction")
+        .await
+        .is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -214,7 +228,8 @@ async fn only_a_completed_look_can_be_reproduced_and_the_schema_refuses_a_malfor
         .await
         .unwrap();
     assert!(matches!(
-        led.begin_reproduction_async("tenant-r", &s.config_hash).await,
+        led.begin_reproduction_async("tenant-r", &s.config_hash)
+            .await,
         Err(LedgerError::NothingToReproduce(_))
     ));
     // Another tenant's look is not reproducible by this one.
@@ -241,6 +256,9 @@ async fn only_a_completed_look_can_be_reproduced_and_the_schema_refuses_a_malfor
         .bind(outcome)
         .execute(&owner)
         .await;
-        assert!(res.is_err(), "`{outcome}` with nothing behind it should be refused by a CHECK");
+        assert!(
+            res.is_err(),
+            "`{outcome}` with nothing behind it should be refused by a CHECK"
+        );
     }
 }

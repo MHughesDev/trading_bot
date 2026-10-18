@@ -42,7 +42,13 @@ use crate::state::AppState;
 /// Venues a credential may be stored for. A slug outside this list is refused
 /// rather than stored under a name no adapter will ever look up.
 pub const KNOWN_VENUES: &[&str] = &[
-    "alpaca", "coinbase", "kraken", "oanda", "tradier", "tradovate", "kalshi",
+    "alpaca",
+    "coinbase",
+    "kraken",
+    "oanda",
+    "tradier",
+    "tradovate",
+    "kalshi",
 ];
 
 const MAX_FIELDS: usize = 8;
@@ -111,7 +117,9 @@ pub fn parse_body(
                 (v.to_owned(), f.to_owned())
             }
         };
-        out.entry(venue).or_default().insert(field, value.to_owned());
+        out.entry(venue)
+            .or_default()
+            .insert(field, value.to_owned());
     }
 
     if out.is_empty() {
@@ -133,7 +141,9 @@ pub fn parse_body(
                     .chars()
                     .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
             if !name_ok {
-                return Err(invalid(format!("field name {name:?} is not [a-z0-9_]{{1,32}}")));
+                return Err(invalid(format!(
+                    "field name {name:?} is not [a-z0-9_]{{1,32}}"
+                )));
             }
             if value.len() > MAX_FIELD_VALUE {
                 return Err(invalid(format!("field {name:?} is too long")));
@@ -156,7 +166,12 @@ pub struct VenueCredentialStore {
 }
 
 type EncryptedRow = (Vec<u8>, Vec<u8>, Vec<u8>, i32);
-type StatusRow = (String, Vec<String>, Option<String>, chrono::DateTime<chrono::Utc>);
+type StatusRow = (
+    String,
+    Vec<String>,
+    Option<String>,
+    chrono::DateTime<chrono::Utc>,
+);
 
 impl VenueCredentialStore {
     #[must_use]
@@ -263,12 +278,14 @@ impl VenueCredentialStore {
         .await?;
         Ok(rows
             .into_iter()
-            .map(|(venue, field_names, key_last4, updated_at)| VenueCredentialStatus {
-                venue,
-                field_names,
-                key_last4,
-                updated_at: updated_at.to_rfc3339(),
-            })
+            .map(
+                |(venue, field_names, key_last4, updated_at)| VenueCredentialStatus {
+                    venue,
+                    field_names,
+                    key_last4,
+                    updated_at: updated_at.to_rfc3339(),
+                },
+            )
             .collect())
     }
 

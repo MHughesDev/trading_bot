@@ -52,7 +52,10 @@ impl SlidingWindow {
     /// Admit one call for `key` at `now`, or refuse it. A refused call is not recorded, so a
     /// caller that keeps hammering does not extend its own lock-out.
     pub fn admit_at(&self, key: &str, now: Instant) -> bool {
-        let mut map = self.hits.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut map = self
+            .hits
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let q = map.entry(key.to_string()).or_default();
         while q
             .front()
@@ -83,7 +86,10 @@ mod tests {
         assert!(l.admit_at("m", t0));
         assert!(l.admit_at("m", t0 + Duration::from_secs(1)));
         assert!(l.admit_at("m", t0 + Duration::from_secs(2)));
-        assert!(!l.admit_at("m", t0 + Duration::from_secs(3)), "the fourth call is refused");
+        assert!(
+            !l.admit_at("m", t0 + Duration::from_secs(3)),
+            "the fourth call is refused"
+        );
         // The calls at t0 and t0 + 1 have aged out by t0 + 61: two slots open, no more.
         assert!(l.admit_at("m", t0 + Duration::from_secs(61)));
         assert!(l.admit_at("m", t0 + Duration::from_secs(61)));
@@ -107,7 +113,10 @@ mod tests {
         for s in 1..9 {
             assert!(!l.admit_at("m", t + Duration::from_secs(s)));
         }
-        assert!(l.admit_at("m", t + Duration::from_secs(10)), "the one recorded call has aged out");
+        assert!(
+            l.admit_at("m", t + Duration::from_secs(10)),
+            "the one recorded call has aged out"
+        );
     }
 
     #[test]

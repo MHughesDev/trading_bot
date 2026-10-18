@@ -63,7 +63,10 @@ async fn marks_and_fills_come_back_in_order_with_an_unknown_fee_kept_unknown() {
     let fills = journal::forward_fills(&pool, id).await.unwrap();
     let tail = &fills[fills.len() - 2..];
     assert_eq!(tail[0].charge, Some(dec!(0.01)));
-    assert_eq!(tail[1].charge, None, "an unreported fee stays unknown, never zero");
+    assert_eq!(
+        tail[1].charge, None,
+        "an unreported fee stays unknown, never zero"
+    );
     assert_eq!(tail[1].fill_price, dec!(101.25));
 }
 

@@ -175,7 +175,9 @@ impl ProfileSidecar for HttpProfileSidecar {
         if !resp.status().is_success() {
             return Err(format!("/fingerprint answered {}", resp.status()));
         }
-        resp.json().await.map_err(|e| format!("/fingerprint body: {e}"))
+        resp.json()
+            .await
+            .map_err(|e| format!("/fingerprint body: {e}"))
     }
 
     async fn embed(
@@ -198,7 +200,8 @@ impl ProfileSidecar for HttpProfileSidecar {
                 .map_err(|e| format!("/embed body does not parse: {e}"));
         }
         if status.as_u16() == 422
-            && body.pointer("/detail/error").and_then(Value::as_str) == Some("not_enough_population")
+            && body.pointer("/detail/error").and_then(Value::as_str)
+                == Some("not_enough_population")
         {
             return Ok(EmbedAnswer::NotEnoughPopulation(
                 body.pointer("/detail/message")
@@ -341,7 +344,11 @@ impl InstrumentProfileWorker {
             .bind(spec)
             .bind(order)
             .bind(&f.tier1)
-            .bind(if f.absent.is_null() { json!({}) } else { f.absent.clone() })
+            .bind(if f.absent.is_null() {
+                json!({})
+            } else {
+                f.absent.clone()
+            })
             .bind(f.bars_used)
             .bind(now)
             .execute(&self.pg)
@@ -396,8 +403,8 @@ impl InstrumentProfileWorker {
         let mut written = 0_u64;
         for (i, (instrument, venue)) in keys.iter().enumerate() {
             let f32s: Vec<f32> = answer.retrieval[i].iter().map(|x| *x as f32).collect();
-            let lit = super::vector_literal_n(&f32s, 48)
-                .map_err(|why| logic("embedding_width", why))?;
+            let lit =
+                super::vector_literal_n(&f32s, 48).map_err(|why| logic("embedding_width", why))?;
             // Close the previous version's current row, then append the new one:
             // the table is bitemporal and a row is never edited, only ended.
             sqlx::query(
@@ -456,10 +463,13 @@ impl Worker for InstrumentProfileWorker {
             .and_then(Value::as_i64)
             .unwrap_or(DEFAULT_WINDOW_DAYS)
             .clamp(2, 365);
-        let only: Option<Vec<String>> = manifest
-            .get("symbols")
-            .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect());
+        let only: Option<Vec<String>> =
+            manifest.get("symbols").and_then(Value::as_array).map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            });
         let spec = window_spec(days);
         let end = Utc::now();
         let start = end - chrono::Duration::days(days);
@@ -488,7 +498,10 @@ impl Worker for InstrumentProfileWorker {
             }
             let mut payloads = Vec::new();
             for (instrument, venue, symbol) in chunk {
-                match store.load_bars(symbol, Timeframe::Minutes1, start, end).await {
+                match store
+                    .load_bars(symbol, Timeframe::Minutes1, start, end)
+                    .await
+                {
                     Ok(bars) if !bars.is_empty() => {
                         payloads.push(payload_from_bars(*instrument, *venue, &bars));
                     }
@@ -630,7 +643,11 @@ mod tests {
         );
         assert_eq!(p.keys, vec![(1, 1), (4, 2)]);
         assert_eq!(p.rows.len(), 2);
-        assert_eq!(p.rows[0], vec![Some(1.0), None], "absent stays null, never zero");
+        assert_eq!(
+            p.rows[0],
+            vec![Some(1.0), None],
+            "absent stays null, never zero"
+        );
         assert_eq!(p.excluded_other_order, 2);
     }
 
@@ -697,7 +714,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_small_population_is_deferred_not_failed() {
-        let answer = Small.embed(&order(&["a"]), &[vec![Some(1.0)]]).await.unwrap();
+        let answer = Small
+            .embed(&order(&["a"]), &[vec![Some(1.0)]])
+            .await
+            .unwrap();
         match answer {
             EmbedAnswer::NotEnoughPopulation(why) => assert!(why.contains("60"), "{why}"),
             EmbedAnswer::Embedded(_) => panic!("a fake that defers embedded"),

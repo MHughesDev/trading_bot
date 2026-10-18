@@ -71,12 +71,16 @@ pub fn replay(fills: &[AttributedFill], window: &Window) -> FillReplay {
     let mut net: BTreeMap<&str, (Decimal, Option<DateTime<Utc>>)> = BTreeMap::new();
     let mut out = FillReplay::default();
     for f in fills.iter().filter(|f| f.filled_at <= window.to) {
-        let (pos, opened) = net.entry(f.instrument_id.as_str()).or_insert((Decimal::ZERO, None));
+        let (pos, opened) = net
+            .entry(f.instrument_id.as_str())
+            .or_insert((Decimal::ZERO, None));
         let before = *pos;
         let after = before + f.signed_qty;
         if before.is_zero() && !after.is_zero() {
             *opened = Some(f.filled_at);
-        } else if !before.is_zero() && (after.is_zero() || after.is_sign_positive() != before.is_sign_positive()) {
+        } else if !before.is_zero()
+            && (after.is_zero() || after.is_sign_positive() != before.is_sign_positive())
+        {
             if let Some(o) = opened.take() {
                 if window.contains(f.filled_at) {
                     out.round_trips.push(HoldingPeriod {
@@ -129,16 +133,20 @@ impl MonitorStore {
                 "buy" => qty,
                 "sell" => -qty,
                 other => {
-                    return Err(StoreError::Invalid(format!("fill side {other:?} is neither buy nor sell")))
+                    return Err(StoreError::Invalid(format!(
+                        "fill side {other:?} is neither buy nor sell"
+                    )))
                 }
             };
             let strategy_id: String = r.get("strategy_id");
-            out.entry(strategy_id.clone()).or_default().push(AttributedFill {
-                strategy_id,
-                instrument_id: r.get("instrument_id"),
-                signed_qty,
-                filled_at: r.get("filled_at"),
-            });
+            out.entry(strategy_id.clone())
+                .or_default()
+                .push(AttributedFill {
+                    strategy_id,
+                    instrument_id: r.get("instrument_id"),
+                    signed_qty,
+                    filled_at: r.get("filled_at"),
+                });
         }
         Ok(out)
     }
@@ -152,7 +160,10 @@ impl MonitorStore {
     ///
     /// # Errors
     /// The database.
-    pub async fn signal_counts(&self, window: &Window) -> Result<BTreeMap<String, usize>, StoreError> {
+    pub async fn signal_counts(
+        &self,
+        window: &Window,
+    ) -> Result<BTreeMap<String, usize>, StoreError> {
         let rows = sqlx::query(
             "SELECT d.deployment_id::text AS strategy_id,
                     count(j.seq) FILTER (
@@ -207,7 +218,10 @@ mod tests {
     fn a_round_trip_that_closed_inside_the_window_is_measured_from_its_open() {
         // Opened before the window, closed inside it: the holding period is the
         // whole hold, not the part that overlapped the window.
-        let r = replay(&[fill("BTC", 2, 30), fill("BTC", -1, 70), fill("BTC", -1, 90)], &window());
+        let r = replay(
+            &[fill("BTC", 2, 30), fill("BTC", -1, 70), fill("BTC", -1, 90)],
+            &window(),
+        );
         assert_eq!(
             r.round_trips,
             [HoldingPeriod {
@@ -220,7 +234,10 @@ mod tests {
 
     #[test]
     fn a_flip_through_zero_closes_one_trip_and_opens_the_next() {
-        let r = replay(&[fill("BTC", 1, 70), fill("BTC", -2, 80), fill("BTC", 1, 100)], &window());
+        let r = replay(
+            &[fill("BTC", 1, 70), fill("BTC", -2, 80), fill("BTC", 1, 100)],
+            &window(),
+        );
         assert_eq!(r.round_trips.len(), 2);
         assert_eq!(r.round_trips[0].closed_at, t(80));
         assert_eq!(r.round_trips[1].opened_at, t(80));
@@ -229,7 +246,10 @@ mod tests {
 
     #[test]
     fn open_positions_count_instruments_not_fills() {
-        let r = replay(&[fill("BTC", 1, 70), fill("BTC", 1, 75), fill("ETH", -3, 80)], &window());
+        let r = replay(
+            &[fill("BTC", 1, 70), fill("BTC", 1, 75), fill("ETH", -3, 80)],
+            &window(),
+        );
         assert_eq!(r.open_positions, 2);
         assert!(r.round_trips.is_empty());
     }

@@ -99,8 +99,14 @@ async fn store_db() -> PgPool {
     pool
 }
 
-
-fn finding(id: &str, run: &str, dir: Direction, value: f64, se: f64, window: (&str, &str)) -> Entry {
+fn finding(
+    id: &str,
+    run: &str,
+    dir: Direction,
+    value: f64,
+    se: f64,
+    window: (&str, &str),
+) -> Entry {
     let mut e = Entry::finding(
         id,
         "BTC-USD 1h",
@@ -129,20 +135,39 @@ async fn an_opposing_finding_links_both_rows_and_downgrades_neither() {
     let store = MemoryStore::new(store_db().await);
     let user = Uuid::new_v4();
     store
-        .put(user, &finding("f_a", "run_1", Direction::Positive, 3.0, 0.3, W))
+        .put(
+            user,
+            &finding("f_a", "run_1", Direction::Positive, 3.0, 0.3, W),
+        )
         .await
         .unwrap();
     let out = store
-        .put_checked(user, &finding("f_b", "run_2", Direction::Negative, -3.0, 0.3, W))
+        .put_checked(
+            user,
+            &finding("f_b", "run_2", Direction::Negative, -3.0, 0.3, W),
+        )
         .await
         .unwrap();
-    assert_eq!(out, WriteOutcome::Inserted { conflicts_with: vec!["f_a".into()] });
+    assert_eq!(
+        out,
+        WriteOutcome::Inserted {
+            conflicts_with: vec!["f_a".into()]
+        }
+    );
 
     let a = store.get(user, "f_a").await.unwrap().unwrap();
     let b = store.get(user, "f_b").await.unwrap().unwrap();
-    assert_eq!(a.conflicts_with, vec!["f_b".to_string()], "the stored row is linked back");
+    assert_eq!(
+        a.conflicts_with,
+        vec!["f_b".to_string()],
+        "the stored row is linked back"
+    );
     assert_eq!(b.conflicts_with, vec!["f_a".to_string()]);
-    assert_eq!(a.confidence, Confidence::Established, "neither is downgraded");
+    assert_eq!(
+        a.confidence,
+        Confidence::Established,
+        "neither is downgraded"
+    );
     assert_eq!(b.confidence, Confidence::Established);
     // Both enter the brief's view together.
     let live = store.for_subject(user, "BTC-USD 1h", 10).await.unwrap();
@@ -155,15 +180,32 @@ async fn overlapping_interval_disagreement_is_not_flagged() {
     let store = MemoryStore::new(store_db().await);
     let user = Uuid::new_v4();
     store
-        .put(user, &finding("f_a", "run_1", Direction::Positive, 0.4, 0.5, W))
+        .put(
+            user,
+            &finding("f_a", "run_1", Direction::Positive, 0.4, 0.5, W),
+        )
         .await
         .unwrap();
     let out = store
-        .put_checked(user, &finding("f_b", "run_2", Direction::Negative, -0.4, 0.5, W))
+        .put_checked(
+            user,
+            &finding("f_b", "run_2", Direction::Negative, -0.4, 0.5, W),
+        )
         .await
         .unwrap();
-    assert_eq!(out, WriteOutcome::Inserted { conflicts_with: vec![] });
-    assert!(store.get(user, "f_a").await.unwrap().unwrap().conflicts_with.is_empty());
+    assert_eq!(
+        out,
+        WriteOutcome::Inserted {
+            conflicts_with: vec![]
+        }
+    );
+    assert!(store
+        .get(user, "f_a")
+        .await
+        .unwrap()
+        .unwrap()
+        .conflicts_with
+        .is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -172,20 +214,36 @@ async fn a_near_duplicate_increments_corroboration_rather_than_inserting() {
     let store = MemoryStore::new(store_db().await);
     let user = Uuid::new_v4();
     store
-        .put(user, &finding("f_a", "run_1", Direction::Positive, 3.0, 0.3, W))
+        .put(
+            user,
+            &finding("f_a", "run_1", Direction::Positive, 3.0, 0.3, W),
+        )
         .await
         .unwrap();
     let out = store
-        .put_checked(user, &finding("f_dup", "run_2", Direction::Positive, 3.1, 0.3, W))
+        .put_checked(
+            user,
+            &finding("f_dup", "run_2", Direction::Positive, 3.1, 0.3, W),
+        )
         .await
         .unwrap();
     assert_eq!(out, WriteOutcome::Corroborated { into: "f_a".into() });
 
-    assert!(store.get(user, "f_dup").await.unwrap().is_none(), "no row for the duplicate");
+    assert!(
+        store.get(user, "f_dup").await.unwrap().is_none(),
+        "no row for the duplicate"
+    );
     let a = store.get(user, "f_a").await.unwrap().unwrap();
     assert_eq!(a.corroborations, 2);
     assert!(a.corroborated_by.contains(&"run_2".to_string()));
-    assert_eq!(store.for_subject(user, "BTC-USD 1h", 10).await.unwrap().len(), 1);
+    assert_eq!(
+        store
+            .for_subject(user, "BTC-USD 1h", 10)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
     let _ = Kind::Finding;
 }
 
@@ -198,7 +256,15 @@ async fn rewriting_the_same_id_is_an_upsert_not_a_corroboration() {
     store.put(user, &e).await.unwrap();
     let out = store.put_checked(user, &e).await.unwrap();
     assert!(matches!(out, WriteOutcome::Inserted { .. }));
-    assert_eq!(store.get(user, "f_a").await.unwrap().unwrap().corroborations, 1);
+    assert_eq!(
+        store
+            .get(user, "f_a")
+            .await
+            .unwrap()
+            .unwrap()
+            .corroborations,
+        1
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -230,10 +296,21 @@ async fn the_retention_sweep_archives_a_stale_uncited_finding_but_the_id_still_r
 
     let live = store.for_subject(user, "BTC-USD 1h", 10).await.unwrap();
     assert!(live.is_empty(), "an archived finding leaves the brief");
-    let still = store.get(user, "f_old").await.unwrap().expect("still resolves by id");
+    let still = store
+        .get(user, "f_old")
+        .await
+        .unwrap()
+        .expect("still resolves by id");
     assert!(still.archived);
     // Its sibling with no expiry stays live.
-    assert_eq!(store.for_subject(user, "ETH-USD 1h", 10).await.unwrap().len(), 1);
+    assert_eq!(
+        store
+            .for_subject(user, "ETH-USD 1h", 10)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 
     let rep = store.store_report(user).await.unwrap();
     assert!(rep.total >= 2 && rep.archived >= 1);
@@ -263,12 +340,24 @@ async fn an_always_start_preference_skips_the_offer_until_it_is_deleted() {
     store.put(user, &p).await.unwrap();
 
     assert!(store.prefers_always_start(user, "BTC-USD").await.unwrap());
-    assert!(!store.prefers_always_start(user, "ETH-USD").await.unwrap(), "scoped");
-    assert!(!store.prefers_always_start(Uuid::new_v4(), "BTC-USD").await.unwrap(), "per user");
+    assert!(
+        !store.prefers_always_start(user, "ETH-USD").await.unwrap(),
+        "scoped"
+    );
+    assert!(
+        !store
+            .prefers_always_start(Uuid::new_v4(), "BTC-USD")
+            .await
+            .unwrap(),
+        "per user"
+    );
 
     sqlx::query("UPDATE agent_memory.entry SET archived = true WHERE entry_id = 'pref_start'")
         .execute(&pool)
         .await
         .unwrap();
-    assert!(!store.prefers_always_start(user, "BTC-USD").await.unwrap(), "deleted restores the offer");
+    assert!(
+        !store.prefers_always_start(user, "BTC-USD").await.unwrap(),
+        "deleted restores the offer"
+    );
 }

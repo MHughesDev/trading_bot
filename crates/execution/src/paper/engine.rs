@@ -779,8 +779,11 @@ impl PaperTradingEngine {
                 let e = PaperTradeError::PostOnlyWouldTake {
                     instrument_id: intent.instrument_id.clone(),
                 };
-                self.lock_book(book)
-                    .record_rejection(&order_id, &intent.instrument_id, &e.to_string());
+                self.lock_book(book).record_rejection(
+                    &order_id,
+                    &intent.instrument_id,
+                    &e.to_string(),
+                );
                 self.insert_record(record);
                 return Err(e);
             }
@@ -810,8 +813,11 @@ impl PaperTradingEngine {
                 }
                 Attempt::Cancelled(e) => {
                     record.state = BrokerOrderState::Cancelled;
-                    self.lock_book(book)
-                        .record_rejection(&order_id, &intent.instrument_id, &e.to_string());
+                    self.lock_book(book).record_rejection(
+                        &order_id,
+                        &intent.instrument_id,
+                        &e.to_string(),
+                    );
                     self.insert_record(record);
                     return Err(e);
                 }
@@ -911,18 +917,30 @@ impl PaperTradingEngine {
 
     /// The positions of the account `strategy_id` trades in: its deployment's
     /// when it opened one (U-4.7), otherwise the asset class's.
-    pub fn positions_for(&self, asset_class: AssetClass, strategy_id: Option<&str>) -> Vec<BrokerPosition> {
+    pub fn positions_for(
+        &self,
+        asset_class: AssetClass,
+        strategy_id: Option<&str>,
+    ) -> Vec<BrokerPosition> {
         self.positions_in(self.book_for(asset_class, strategy_id))
     }
 
     /// The snapshot of the account `strategy_id` trades in.
-    pub fn snapshot_for(&self, asset_class: AssetClass, strategy_id: Option<&str>) -> PaperAccountSnapshot {
+    pub fn snapshot_for(
+        &self,
+        asset_class: AssetClass,
+        strategy_id: Option<&str>,
+    ) -> PaperAccountSnapshot {
         self.snapshot_in(self.book_for(asset_class, strategy_id))
     }
 
     /// Today's loss on the account `strategy_id` trades in — what the risk
     /// gate's daily-loss limit reads for that strategy's orders.
-    pub fn daily_loss_usd_for(&self, asset_class: AssetClass, strategy_id: Option<&str>) -> Decimal {
+    pub fn daily_loss_usd_for(
+        &self,
+        asset_class: AssetClass,
+        strategy_id: Option<&str>,
+    ) -> Decimal {
         self.daily_loss_in(self.book_for(asset_class, strategy_id))
     }
 
@@ -992,8 +1010,7 @@ impl PaperTradingEngine {
         asset_class: AssetClass,
         since: Option<DateTime<Utc>>,
     ) -> Vec<PaperLedgerEntry> {
-        self.lock_account(asset_class)
-            .transactions_since(since)
+        self.lock_account(asset_class).transactions_since(since)
     }
 
     /// Every order the engine retains for `instrument_id` (open and terminal),
@@ -1050,8 +1067,7 @@ impl PaperTradingEngine {
         self.orders.clear();
         self.resting.clear();
         self.idempotency.clear();
-        self.lock_fifo()
-            .clear();
+        self.lock_fifo().clear();
         info!("all paper accounts reset to opening balances");
     }
 
@@ -1077,8 +1093,7 @@ impl PaperTradingEngine {
         }
         let removed: std::collections::HashSet<&String> =
             to_remove.iter().map(|(id, _, _)| id).collect();
-        self.lock_fifo()
-            .retain(|id| !removed.contains(id));
+        self.lock_fifo().retain(|id| !removed.contains(id));
     }
 
     // ── Internal admin operations (settlement / funding) ─────────────────────
@@ -1127,7 +1142,8 @@ impl PaperTradingEngine {
     /// How much of a reduce-only order may fill now: the size of an opposite
     /// position, or nothing.
     fn reduce_capacity(&self, book: Book, instrument_id: &str, side: Side) -> Decimal {
-        let pos = self.lock_book(book)
+        let pos = self
+            .lock_book(book)
             .position(instrument_id)
             .map_or(Decimal::ZERO, |p| p.quantity);
         match side {
@@ -1157,11 +1173,7 @@ impl PaperTradingEngine {
         }
         let mut qty = remaining;
         if record.intent.reduce_only {
-            let cap = self.reduce_capacity(
-                book,
-                &record.intent.instrument_id,
-                record.intent.side,
-            );
+            let cap = self.reduce_capacity(book, &record.intent.instrument_id, record.intent.side);
             if cap <= Decimal::ZERO {
                 return Attempt::Cancelled(PaperTradeError::ReduceOnlyWouldIncrease {
                     instrument_id: record.intent.instrument_id.clone(),
@@ -1199,11 +1211,8 @@ impl PaperTradingEngine {
                 // position later.
                 if record.is_open()
                     && record.intent.reduce_only
-                    && self.reduce_capacity(
-                        book,
-                        &record.intent.instrument_id,
-                        record.intent.side,
-                    ) <= Decimal::ZERO
+                    && self.reduce_capacity(book, &record.intent.instrument_id, record.intent.side)
+                        <= Decimal::ZERO
                 {
                     record.state = BrokerOrderState::Cancelled;
                 }
@@ -1292,7 +1301,10 @@ impl PaperTradingEngine {
     ) -> Option<(AssetClass, super::account::PaperAccountState)> {
         let slot = *self.deployment_index.get(&deployment)?;
         let d = self.deployment_accounts[slot].get()?;
-        Some((d.asset_class, self.lock_book(Book::Deployment(slot)).export_state()))
+        Some((
+            d.asset_class,
+            self.lock_book(Book::Deployment(slot)).export_state(),
+        ))
     }
 
     /// Restore a deployment account from a stored state — opening it if this
@@ -2270,7 +2282,10 @@ mod tests {
         poison(&eng, AssetClass::CryptoSpotCex);
 
         let err = eng
-            .submit(AssetClass::CryptoSpotCex, &market("BTC-USD", Side::Buy, dec!(1)))
+            .submit(
+                AssetClass::CryptoSpotCex,
+                &market("BTC-USD", Side::Buy, dec!(1)),
+            )
             .unwrap_err();
         assert!(
             matches!(err, PaperTradeError::AccountUnavailable { .. }),
@@ -2286,8 +2301,11 @@ mod tests {
         // A reset replaces the account and clears the poison.
         eng.reset_account(AssetClass::CryptoSpotCex);
         assert!(!eng.account_poisoned(AssetClass::CryptoSpotCex));
-        eng.submit(AssetClass::CryptoSpotCex, &market("BTC-USD", Side::Buy, dec!(1)))
-            .expect("a reset account trades again");
+        eng.submit(
+            AssetClass::CryptoSpotCex,
+            &market("BTC-USD", Side::Buy, dec!(1)),
+        )
+        .expect("a reset account trades again");
     }
 
     // ── Set E #5: an account's whole state round-trips ─────────────────────
@@ -2296,11 +2314,17 @@ mod tests {
     fn exported_state_restores_into_a_fresh_engine_exactly() {
         let a = engine();
         a.on_mark("BTC-USD", Price::from_decimal(dec!(50_000)));
-        a.submit(AssetClass::CryptoSpotCex, &market("BTC-USD", Side::Buy, dec!(1)))
-            .unwrap();
+        a.submit(
+            AssetClass::CryptoSpotCex,
+            &market("BTC-USD", Side::Buy, dec!(1)),
+        )
+        .unwrap();
         a.on_mark("BTC-USD", Price::from_decimal(dec!(51_000)));
-        a.submit(AssetClass::CryptoSpotCex, &market("BTC-USD", Side::Sell, dec!(0.5)))
-            .unwrap();
+        a.submit(
+            AssetClass::CryptoSpotCex,
+            &market("BTC-USD", Side::Sell, dec!(0.5)),
+        )
+        .unwrap();
         let before = a.export_account(AssetClass::CryptoSpotCex);
         assert!(!before.positions.is_empty());
 
@@ -2329,7 +2353,9 @@ mod tests {
     fn a_state_for_another_class_is_refused() {
         let eng = engine();
         let state = eng.export_account(AssetClass::Equity);
-        assert!(eng.restore_account(AssetClass::CryptoSpotCex, state).is_err());
+        assert!(eng
+            .restore_account(AssetClass::CryptoSpotCex, state)
+            .is_err());
     }
 
     #[test]
@@ -2364,13 +2390,19 @@ mod tests {
         assert!(eng.open_deployment_account(b, ac, dec!(5_000)).unwrap());
         let class_cash = eng.snapshot(ac).cash;
         eng.on_mark("BTC-USD", Price::from_decimal(dec!(100)));
-        eng.submit(ac, &as_deployment(market("BTC-USD", Side::Buy, dec!(1)), a)).unwrap();
-        eng.submit(ac, &as_deployment(market("BTC-USD", Side::Buy, dec!(2)), b)).unwrap();
+        eng.submit(ac, &as_deployment(market("BTC-USD", Side::Buy, dec!(1)), a))
+            .unwrap();
+        eng.submit(ac, &as_deployment(market("BTC-USD", Side::Buy, dec!(2)), b))
+            .unwrap();
 
         let (sa, sb) = (a.to_string(), b.to_string());
         assert_eq!(qty(&eng.positions_for(ac, Some(&sa)), "BTC-USD"), dec!(1));
         assert_eq!(qty(&eng.positions_for(ac, Some(&sb)), "BTC-USD"), dec!(2));
-        assert_eq!(qty(&eng.positions(ac), "BTC-USD"), Decimal::ZERO, "the class account traded nothing");
+        assert_eq!(
+            qty(&eng.positions(ac), "BTC-USD"),
+            Decimal::ZERO,
+            "the class account traded nothing"
+        );
         assert_eq!(eng.snapshot(ac).cash, class_cash);
         assert!(eng.snapshot_for(ac, Some(&sa)).cash < dec!(10_000));
         assert!(eng.snapshot_for(ac, Some(&sb)).cash < dec!(5_000));
@@ -2387,14 +2419,23 @@ mod tests {
         let ac = AssetClass::CryptoSpotCex;
         eng.on_mark("ETH-USD", Price::from_decimal(dec!(50)));
         // A deployment that never opened an account, and a manual order.
-        eng.submit(ac, &as_deployment(market("ETH-USD", Side::Buy, dec!(1)), Uuid::new_v4()))
+        eng.submit(
+            ac,
+            &as_deployment(market("ETH-USD", Side::Buy, dec!(1)), Uuid::new_v4()),
+        )
+        .unwrap();
+        eng.submit(ac, &market("ETH-USD", Side::Buy, dec!(1)))
             .unwrap();
-        eng.submit(ac, &market("ETH-USD", Side::Buy, dec!(1))).unwrap();
         assert_eq!(qty(&eng.positions(ac), "ETH-USD"), dec!(2));
         // An account opened on another class does not capture this class's orders.
         let fx = Uuid::new_v4();
-        eng.open_deployment_account(fx, AssetClass::Fx, dec!(1_000)).unwrap();
-        eng.submit(ac, &as_deployment(market("ETH-USD", Side::Buy, dec!(1)), fx)).unwrap();
+        eng.open_deployment_account(fx, AssetClass::Fx, dec!(1_000))
+            .unwrap();
+        eng.submit(
+            ac,
+            &as_deployment(market("ETH-USD", Side::Buy, dec!(1)), fx),
+        )
+        .unwrap();
         assert_eq!(qty(&eng.positions(ac), "ETH-USD"), dec!(3));
     }
 
@@ -2406,7 +2447,8 @@ mod tests {
         eng.open_deployment_account(a, ac, dec!(10_000)).unwrap();
         eng.open_deployment_account(b, ac, dec!(10_000)).unwrap();
         eng.on_mark("SOL-USD", Price::from_decimal(dec!(20)));
-        eng.submit(ac, &as_deployment(market("SOL-USD", Side::Buy, dec!(3)), a)).unwrap();
+        eng.submit(ac, &as_deployment(market("SOL-USD", Side::Buy, dec!(3)), a))
+            .unwrap();
         // B is flat: its reduce-only sell has nothing to reduce, whatever A holds.
         let mut sell_b = as_deployment(market("SOL-USD", Side::Sell, dec!(1)), b);
         sell_b.reduce_only = true;
@@ -2414,7 +2456,10 @@ mod tests {
         let mut sell_a = as_deployment(market("SOL-USD", Side::Sell, dec!(3)), a);
         sell_a.reduce_only = true;
         eng.submit(ac, &sell_a).unwrap();
-        assert_eq!(qty(&eng.positions_for(ac, Some(&a.to_string())), "SOL-USD"), Decimal::ZERO);
+        assert_eq!(
+            qty(&eng.positions_for(ac, Some(&a.to_string())), "SOL-USD"),
+            Decimal::ZERO
+        );
     }
 
     #[test]
@@ -2424,9 +2469,13 @@ mod tests {
         let a = Uuid::new_v4();
         eng.open_deployment_account(a, ac, dec!(10_000)).unwrap();
         eng.on_mark("XRP-USD", Price::from_decimal(dec!(10)));
-        eng.submit(ac, &as_deployment(market("XRP-USD", Side::Buy, dec!(5)), a)).unwrap();
+        eng.submit(ac, &as_deployment(market("XRP-USD", Side::Buy, dec!(5)), a))
+            .unwrap();
         eng.settle_at_price(ac, "XRP-USD", dec!(12)).unwrap();
-        assert_eq!(qty(&eng.positions_for(ac, Some(&a.to_string())), "XRP-USD"), Decimal::ZERO);
+        assert_eq!(
+            qty(&eng.positions_for(ac, Some(&a.to_string())), "XRP-USD"),
+            Decimal::ZERO
+        );
         // With no holder anywhere, the class account answers with the error.
         assert!(eng.settle_at_price(ac, "XRP-USD", dec!(12)).is_err());
     }
@@ -2438,7 +2487,8 @@ mod tests {
         let a = Uuid::new_v4();
         eng.open_deployment_account(a, ac, dec!(10_000)).unwrap();
         eng.on_mark("BTC-USD", Price::from_decimal(dec!(100)));
-        eng.submit(ac, &as_deployment(market("BTC-USD", Side::Buy, dec!(1)), a)).unwrap();
+        eng.submit(ac, &as_deployment(market("BTC-USD", Side::Buy, dec!(1)), a))
+            .unwrap();
         assert!(eng.take_deployment_dirty(a));
         assert!(!eng.take_deployment_dirty(a));
         let (class, state) = eng.export_deployment_account(a).unwrap();

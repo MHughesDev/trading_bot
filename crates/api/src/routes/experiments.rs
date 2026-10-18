@@ -258,8 +258,10 @@ pub async fn run_study(
             if matches!(m.get(&key), Some(DetachedStudy::Running)) {
                 return (
                     StatusCode::ACCEPTED,
-                    Json(json!({ "detached": true, "experiment_id": id, "study_id": study_id,
-                                 "status": "running", "already_running": true })),
+                    Json(
+                        json!({ "detached": true, "experiment_id": id, "study_id": study_id,
+                                 "status": "running", "already_running": true }),
+                    ),
                 )
                     .into_response();
             }
@@ -277,14 +279,19 @@ pub async fn run_study(
                     m.insert(key, DetachedStudy::Failed(format!("{e:?}")));
                 }
                 Err(e) => {
-                    m.insert(key, DetachedStudy::Failed(format!("the study panicked: {e}")));
+                    m.insert(
+                        key,
+                        DetachedStudy::Failed(format!("the study panicked: {e}")),
+                    );
                 }
             }
         });
         return (
             StatusCode::ACCEPTED,
-            Json(json!({ "detached": true, "experiment_id": id, "study_id": study_id,
-                         "status": "running" })),
+            Json(
+                json!({ "detached": true, "experiment_id": id, "study_id": study_id,
+                         "status": "running" }),
+            ),
         )
             .into_response();
     }

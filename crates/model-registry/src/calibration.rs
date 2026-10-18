@@ -151,9 +151,17 @@ mod tests {
         let changes = CoverageCusum::scan(0.10, DEFAULT_K, DEFAULT_H, &covered);
         let first = changes.first().expect("the shift is detected");
         assert_eq!(first.shift, Shift::Undercover);
-        assert!(first.at >= 400, "no false alarm before the shift: {}", first.at);
+        assert!(
+            first.at >= 400,
+            "no false alarm before the shift: {}",
+            first.at
+        );
         // Excess miss mass per observation is ~0.233 - 0.05 = 0.18, so h = 4 needs ~22.
-        assert!(first.at - 400 <= 40, "detected {} observations late", first.at - 400);
+        assert!(
+            first.at - 400 <= 40,
+            "detected {} observations late",
+            first.at - 400
+        );
     }
 
     #[test]

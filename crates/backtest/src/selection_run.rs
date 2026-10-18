@@ -452,7 +452,11 @@ pub async fn watches_for(pg: &sqlx::PgPool, user_id: &str) -> Result<Vec<Watch>,
 ///
 /// # Errors
 /// The database.
-pub async fn stop_watch(pg: &sqlx::PgPool, user_id: &str, watch_id: Uuid) -> Result<bool, sqlx::Error> {
+pub async fn stop_watch(
+    pg: &sqlx::PgPool,
+    user_id: &str,
+    watch_id: Uuid,
+) -> Result<bool, sqlx::Error> {
     let done = sqlx::query(
         "UPDATE selection_watch SET stopped_at = now() \
          WHERE watch_id = $1 AND user_id = $2 AND stopped_at IS NULL",

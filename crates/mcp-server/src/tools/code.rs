@@ -40,8 +40,11 @@ pub const NAMESPACE: &str = "code";
 /// `run_python` — run a script in this conversation's sandbox.
 pub async fn run_python(ctx: &crate::McpContext, params: &Value) -> Value {
     let Some(script) = params.get("script").and_then(Value::as_str) else {
-        return crate::tool_error::missing_field_because("script", "the Python to run. Write your result to the path in RESULT_PATH as JSON; \
-                    stdout is captured but a result is what the platform can cite");
+        return crate::tool_error::missing_field_because(
+            "script",
+            "the Python to run. Write your result to the path in RESULT_PATH as JSON; \
+                    stdout is captured but a result is what the platform can cite",
+        );
     };
     if ctx.run_id.is_nil() {
         // A workspace per conversation, and this front door has no conversation.

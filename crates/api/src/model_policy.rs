@@ -94,7 +94,10 @@ mod tests {
 
     #[test]
     fn a_default_falls_back_to_the_baseline() {
-        assert_eq!(or_baseline("anthropic", "claude-opus-5".into()), "claude-sonnet-5");
+        assert_eq!(
+            or_baseline("anthropic", "claude-opus-5".into()),
+            "claude-sonnet-5"
+        );
         assert_eq!(or_baseline("openai", "gpt-4o-mini".into()), "gpt-4o-mini");
         assert_eq!(or_baseline("vllm", "anything".into()), "anything");
     }

@@ -825,14 +825,23 @@ mod tests {
                 _ => -0.01,
             };
             let curve = daily_curve(&[100.0, 100.0 * (1.0 + level)]);
-            map_sim_result(cfg, curve, vec![], vec![], ComputeCost::default(), ENGINE_VERSION)
+            map_sim_result(
+                cfg,
+                curve,
+                vec![],
+                vec![],
+                ComputeCost::default(),
+                ENGINE_VERSION,
+            )
         });
         let bt = Backtest::new(InMemoryRunStore::new(), exec, InMemoryLedger::new());
         let study = StudyConfig {
             study_id: "jitter".into(),
             kind: StudyKind::TimingJitter,
             base_config: base(),
-            vary: VarySpec::FillDelays { bars: vec![0, 1, 3] },
+            vary: VarySpec::FillDelays {
+                bars: vec![0, 1, 3],
+            },
             metric: MetricKind::TotalReturn,
             null_ref: None,
             null: None,
@@ -853,9 +862,20 @@ mod tests {
     #[test]
     fn ablation_runs_one_member_per_strategy_in_the_order_given() {
         let exec = ClosureExecutor(|cfg: &RunConfig| {
-            let level = if cfg.strategy_ref.ends_with("--ablate-0") { 0.0 } else { 0.02 };
+            let level = if cfg.strategy_ref.ends_with("--ablate-0") {
+                0.0
+            } else {
+                0.02
+            };
             let curve = daily_curve(&[100.0, 100.0 * (1.0 + level)]);
-            map_sim_result(cfg, curve, vec![], vec![], ComputeCost::default(), ENGINE_VERSION)
+            map_sim_result(
+                cfg,
+                curve,
+                vec![],
+                vec![],
+                ComputeCost::default(),
+                ENGINE_VERSION,
+            )
         });
         let bt = Backtest::new(InMemoryRunStore::new(), exec, InMemoryLedger::new());
         let study = StudyConfig {

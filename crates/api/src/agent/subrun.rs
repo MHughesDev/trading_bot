@@ -361,8 +361,12 @@ async fn parent_remaining(
             leased_trials,
         ))
         .unwrap_or(0),
-        steps: u32::try_from(left(u64::from(max_steps), i64::from(spent_steps), leased_steps))
-            .unwrap_or(0),
+        steps: u32::try_from(left(
+            u64::from(max_steps),
+            i64::from(spent_steps),
+            leased_steps,
+        ))
+        .unwrap_or(0),
     }))
 }
 
@@ -465,9 +469,21 @@ pub async fn claim_leased(
     .bind(seq)
     .bind(&brief.digest)
     .bind(brief.withheld)
-    .bind(lease.as_ref().map(|l| i64::try_from(l.tokens()).unwrap_or(i64::MAX)))
-    .bind(lease.as_ref().map(|l| i32::try_from(l.trials()).unwrap_or(i32::MAX)))
-    .bind(lease.as_ref().map(|l| i32::try_from(l.steps()).unwrap_or(i32::MAX)))
+    .bind(
+        lease
+            .as_ref()
+            .map(|l| i64::try_from(l.tokens()).unwrap_or(i64::MAX)),
+    )
+    .bind(
+        lease
+            .as_ref()
+            .map(|l| i32::try_from(l.trials()).unwrap_or(i32::MAX)),
+    )
+    .bind(
+        lease
+            .as_ref()
+            .map(|l| i32::try_from(l.steps()).unwrap_or(i32::MAX)),
+    )
     .fetch_optional(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -528,7 +544,13 @@ pub async fn claim_leased(
 /// A failed write is logged, not propagated: like the run effect log, a lost row
 /// costs a replay, and failing a worker's proposal to protect its record would
 /// trade the contingent thing for the certain one.
-pub async fn log_effect(pg: &PgPool, sub_run_id: Uuid, direction: &str, kind: &str, payload: &Value) {
+pub async fn log_effect(
+    pg: &PgPool,
+    sub_run_id: Uuid,
+    direction: &str,
+    kind: &str,
+    payload: &Value,
+) {
     for _ in 0..5 {
         let r = sqlx::query(
             "INSERT INTO agent_lifecycle.sub_run_effect
@@ -850,13 +872,22 @@ mod tests {
     /// ones it does not: a missing axis is "bounded by the profile", never zero.
     #[test]
     fn a_persisted_lease_refuses_past_its_steps_and_tokens_and_a_missing_axis_is_not_zero() {
-        let l = PersistedLease { tokens: Some(1_000), steps: Some(2) };
+        let l = PersistedLease {
+            tokens: Some(1_000),
+            steps: Some(2),
+        };
         assert!(l.admits(0, 0).is_ok());
         assert!(l.admits(1, 999).is_ok());
         assert!(l.admits(2, 10).unwrap_err().contains("2 model call"));
         assert!(l.admits(1, 1_000).unwrap_err().contains("1000 token"));
-        let open = PersistedLease { tokens: None, steps: None };
-        assert!(open.admits(500, u64::MAX).is_ok(), "no recorded lease is not a zero lease");
+        let open = PersistedLease {
+            tokens: None,
+            steps: None,
+        };
+        assert!(
+            open.admits(500, u64::MAX).is_ok(),
+            "no recorded lease is not a zero lease"
+        );
         // The lease narrows a call and never widens it.
         assert_eq!(l.max_output(2_000, 0), 1_000);
         assert_eq!(l.max_output(2_000, 900), 100);

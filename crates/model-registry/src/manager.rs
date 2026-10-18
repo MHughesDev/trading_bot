@@ -917,7 +917,11 @@ impl ModelManager {
     /// The usage-rule verdict for a version, from its latest successful evaluation, for the
     /// uses its definition implies. The one reading of the evidence the promotion gate, the
     /// verdict route and the evidence route share.
-    pub async fn usage_verdict(&self, model_id: &str, version: i32) -> crate::verdict::VerdictReport {
+    pub async fn usage_verdict(
+        &self,
+        model_id: &str,
+        version: i32,
+    ) -> crate::verdict::VerdictReport {
         let uses = crate::studio::uses_for_version(&self.pg, model_id, version).await;
         self.usage_verdict_for(model_id, version, &uses).await
     }
@@ -1670,16 +1674,18 @@ impl ModelManager {
         };
 
         // The declaration and family this run was started with (migration 0207).
-        let (studio_declaration, studio_family): (Option<serde_json::Value>, Option<serde_json::Value>) =
-            sqlx::query_as(
-                "SELECT declaration_json, family_json FROM training_runs WHERE run_id = $1",
-            )
-            .bind(job.run_id)
-            .fetch_optional(&self.pg)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or((None, None));
+        let (studio_declaration, studio_family): (
+            Option<serde_json::Value>,
+            Option<serde_json::Value>,
+        ) = sqlx::query_as(
+            "SELECT declaration_json, family_json FROM training_runs WHERE run_id = $1",
+        )
+        .bind(job.run_id)
+        .fetch_optional(&self.pg)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or((None, None));
 
         let nats_subject = format!("models.run.{}.progress", job.run_id);
         let dispatch = crate::sidecar::TrainDispatchRequest {
@@ -2256,8 +2262,12 @@ impl ModelManager {
         declaration: Option<&serde_json::Value>,
         metrics: Option<&serde_json::Value>,
     ) {
-        let fam = family.and_then(|f| f.get("family")).and_then(serde_json::Value::as_str);
-        let var = family.and_then(|f| f.get("variant")).and_then(serde_json::Value::as_str);
+        let fam = family
+            .and_then(|f| f.get("family"))
+            .and_then(serde_json::Value::as_str);
+        let var = family
+            .and_then(|f| f.get("variant"))
+            .and_then(serde_json::Value::as_str);
         let engine = metrics
             .and_then(|m| m.get("engine_version"))
             .and_then(serde_json::Value::as_str);
@@ -2281,7 +2291,9 @@ impl ModelManager {
             tracing::warn!(model_id, version, error = %e, "could not record the version's family");
         }
         if let Some(d) = declaration {
-            let hash = d.get("declaration_hash").and_then(serde_json::Value::as_str);
+            let hash = d
+                .get("declaration_hash")
+                .and_then(serde_json::Value::as_str);
             if let Err(e) = sqlx::query(
                 "UPDATE dataset_versions SET dataset_spec = $2, declaration_hash = $3                  WHERE dataset_version_id = $1",
             )
@@ -2628,9 +2640,7 @@ impl ModelManager {
                 .bind(model_id)
                 .fetch_optional(&self.pg)
                 .await?;
-        let refs: Vec<String> = std::iter::once(model_id.to_string())
-            .chain(slug)
-            .collect();
+        let refs: Vec<String> = std::iter::once(model_id.to_string()).chain(slug).collect();
         let probes: Vec<serde_json::Value> = refs
             .iter()
             .map(|r| serde_json::json!([{ "model_ref": r }]))

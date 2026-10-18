@@ -501,7 +501,10 @@ fn days_from_civil(date: &str) -> Option<i64> {
 }
 
 fn fresh(verified_at: Option<&str>, today: &str) -> bool {
-    match (verified_at.and_then(days_from_civil), days_from_civil(today)) {
+    match (
+        verified_at.and_then(days_from_civil),
+        days_from_civil(today),
+    ) {
         (Some(v), Some(t)) => t >= v && t - v <= MAX_PRICE_AGE_DAYS,
         _ => false,
     }

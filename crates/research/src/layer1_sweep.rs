@@ -122,7 +122,12 @@ pub fn draw_points(
     }
     let mut rng = Rng::new(seed);
     Ok((0..n)
-        .map(|_| declared.iter().map(|p| (p.name.clone(), decode(p, rng.next_f64()))).collect())
+        .map(|_| {
+            declared
+                .iter()
+                .map(|p| (p.name.clone(), decode(p, rng.next_f64())))
+                .collect()
+        })
         .collect())
 }
 
@@ -130,7 +135,11 @@ fn quantile(sorted: &[f64], q: f64) -> Option<f64> {
     if sorted.is_empty() {
         return None;
     }
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     let i = ((sorted.len() - 1) as f64 * q).round() as usize;
     sorted.get(i).copied()
 }
@@ -153,7 +162,12 @@ pub fn run_sweep<B: Layer1Backend>(
 /// Fold member outcomes into the sealed report. The async platform worker evaluates members
 /// itself (a trial each) and hands the outcomes here, so the report has one definition.
 #[must_use]
-pub fn report_from(declared: Vec<DeclaredParam>, n: u32, seed: u64, outcomes: Vec<Result<Member, String>>) -> SweepReport {
+pub fn report_from(
+    declared: Vec<DeclaredParam>,
+    n: u32,
+    seed: u64,
+    outcomes: Vec<Result<Member, String>>,
+) -> SweepReport {
     let (mut metrics, mut failed, mut rejected, mut run) = (Vec::new(), 0_u32, 0_u32, 0_u32);
     for o in outcomes {
         match o {
@@ -198,8 +212,18 @@ mod tests {
 
     fn declared() -> Vec<DeclaredParam> {
         vec![
-            DeclaredParam { name: "lb".into(), kind: "int".into(), low: 2.0, high: 50.0 },
-            DeclaredParam { name: "k".into(), kind: "float".into(), low: 0.5, high: 3.0 },
+            DeclaredParam {
+                name: "lb".into(),
+                kind: "int".into(),
+                low: 2.0,
+                high: 50.0,
+            },
+            DeclaredParam {
+                name: "k".into(),
+                kind: "float".into(),
+                low: 0.5,
+                high: 3.0,
+            },
         ]
     }
 
@@ -218,12 +242,19 @@ mod tests {
                 return Err("boom".into());
             }
             let lb = p["lb"].as_f64().unwrap();
-            Ok(Member { metric: Some(lb - 20.0), rejected: lb as u32 % 10 == 0 })
+            Ok(Member {
+                metric: Some(lb - 20.0),
+                rejected: lb as u32 % 10 == 0,
+            })
         }
     }
 
     fn counting() -> Counting {
-        Counting { calls: 0, seen: vec![], fail_every: 0 }
+        Counting {
+            calls: 0,
+            seen: vec![],
+            fail_every: 0,
+        }
     }
 
     #[test]
@@ -236,9 +267,15 @@ mod tests {
 
     #[test]
     fn a_failed_member_is_counted_and_never_retried() {
-        let mut b = Counting { fail_every: 5, ..counting() };
+        let mut b = Counting {
+            fail_every: 5,
+            ..counting()
+        };
         let r = run_sweep(&mut b, declared(), 20, 7).unwrap();
-        assert_eq!(b.calls, 20, "no retry: a retry would be a second look at the point");
+        assert_eq!(
+            b.calls, 20,
+            "no retry: a retry would be a second look at the point"
+        );
         assert_eq!((r.n_run, r.n_failed), (16, 4));
     }
 
@@ -261,7 +298,10 @@ mod tests {
             assert!((2..=50).contains(&lb) && (0.5..3.0).contains(&k), "{p:?}");
         }
         let lbs: Vec<i64> = pts.iter().map(|p| p["lb"].as_i64().unwrap()).collect();
-        assert!(lbs.contains(&2) && lbs.contains(&50), "inclusive ends are reachable");
+        assert!(
+            lbs.contains(&2) && lbs.contains(&50),
+            "inclusive ends are reachable"
+        );
     }
 
     /// INV-2: no tool result contains the best member. The report type has no field that could.
@@ -270,14 +310,39 @@ mod tests {
         let r = run_sweep(&mut counting(), declared(), 30, 1).unwrap();
         let v = serde_json::to_value(&r).unwrap();
         let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
-        for banned in ["best", "best_params", "argmax", "max", "members", "ranked", "top", "winner", "min"] {
-            assert!(!keys.contains(&banned), "{banned} must not be a report field");
+        for banned in [
+            "best",
+            "best_params",
+            "argmax",
+            "max",
+            "members",
+            "ranked",
+            "top",
+            "winner",
+            "min",
+        ] {
+            assert!(
+                !keys.contains(&banned),
+                "{banned} must not be a report field"
+            );
         }
         assert_eq!(
             keys,
             vec![
-                "declared", "median", "n_failed", "n_measured", "n_positive", "n_rejected_gate0",
-                "n_requested", "n_run", "p05", "p25", "p75", "p95", "sampler", "seed"
+                "declared",
+                "median",
+                "n_failed",
+                "n_measured",
+                "n_positive",
+                "n_rejected_gate0",
+                "n_requested",
+                "n_run",
+                "p05",
+                "p25",
+                "p75",
+                "p95",
+                "sampler",
+                "seed"
             ]
         );
         assert!(r.p95.unwrap() >= r.median.unwrap() && r.median.unwrap() >= r.p05.unwrap());
@@ -286,11 +351,31 @@ mod tests {
     #[test]
     fn gate_0_rejections_are_counted_and_degenerate_inputs_are_refused() {
         let r = run_sweep(&mut counting(), declared(), 60, 5).unwrap();
-        assert!(r.n_rejected_gate0 > 0, "lb divisible by 10 is rejected by the fake backend");
-        assert_eq!(run_sweep(&mut counting(), declared(), 0, 1).unwrap_err(), SweepError::BadRunCount(0));
-        assert_eq!(run_sweep(&mut counting(), declared(), 201, 1).unwrap_err(), SweepError::BadRunCount(201));
-        assert_eq!(run_sweep(&mut counting(), vec![], 5, 1).unwrap_err(), SweepError::NoParams);
-        let bad = vec![DeclaredParam { name: "x".into(), kind: "float".into(), low: 1.0, high: 1.0 }];
-        assert_eq!(run_sweep(&mut counting(), bad, 5, 1).unwrap_err(), SweepError::BadRange("x".into()));
+        assert!(
+            r.n_rejected_gate0 > 0,
+            "lb divisible by 10 is rejected by the fake backend"
+        );
+        assert_eq!(
+            run_sweep(&mut counting(), declared(), 0, 1).unwrap_err(),
+            SweepError::BadRunCount(0)
+        );
+        assert_eq!(
+            run_sweep(&mut counting(), declared(), 201, 1).unwrap_err(),
+            SweepError::BadRunCount(201)
+        );
+        assert_eq!(
+            run_sweep(&mut counting(), vec![], 5, 1).unwrap_err(),
+            SweepError::NoParams
+        );
+        let bad = vec![DeclaredParam {
+            name: "x".into(),
+            kind: "float".into(),
+            low: 1.0,
+            high: 1.0,
+        }];
+        assert_eq!(
+            run_sweep(&mut counting(), bad, 5, 1).unwrap_err(),
+            SweepError::BadRange("x".into())
+        );
     }
 }

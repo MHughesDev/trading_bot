@@ -506,14 +506,10 @@ impl DatasetManager {
                     step_ns,
                 );
                 // The high/low barrier and CUSUM sampling the label spec names (N-1.4, N-1.7).
-                let frame =
-                    crate::dataset_labels::apply(frame, &obs, step_ns, &req.label_spec)?;
+                let frame = crate::dataset_labels::apply(frame, &obs, step_ns, &req.label_spec)?;
                 // The leakage harness (N-1.5) runs on the frame it is about to store.
-                let build = crate::leakage::production_builder(
-                    &plan.features,
-                    plan.horizon_bars,
-                    step_ns,
-                );
+                let build =
+                    crate::leakage::production_builder(&plan.features, plan.horizon_bars, step_ns);
                 leakage_checks.extend(crate::leakage::dataset_checks(
                     instrument,
                     &obs,

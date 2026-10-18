@@ -104,7 +104,9 @@ fn price_seconds(
         return Err("no seconds estimate to price");
     };
     let Some(class) = class else {
-        return Err("TBOT_HARDWARE_CLASS is not set, so the platform does not know what its compute costs");
+        return Err(
+            "TBOT_HARDWARE_CLASS is not set, so the platform does not know what its compute costs",
+        );
     };
     let Some(table) = table else {
         return Err("no price table could be read (TBOT_PRICES_PATH / config/prices.yaml)");
@@ -206,7 +208,13 @@ pub async fn estimate(
     let class = std::env::var("TBOT_HARDWARE_CLASS").ok();
     let table = load_price_table();
     let today = Utc::now().date_naive().to_string();
-    let usd = price_seconds(seconds, (low, high), class.as_deref(), table.as_ref(), &today);
+    let usd = price_seconds(
+        seconds,
+        (low, high),
+        class.as_deref(),
+        table.as_ref(),
+        &today,
+    );
     let (est_usd, usd_low, usd_high, usd_note) = match usd {
         Ok((m, lo, hi)) => (Some(m), Some(lo), Some(hi), "seconds x the hardware class's verified price per second".to_string()),
         Err(why) => (None, None, None, format!("no dollar figure: {why}. A rate nobody verified would make `ask_above_usd` look like it was working whichever way it was wrong.")),
@@ -311,7 +319,14 @@ mod tests {
     #[test]
     fn a_fresh_row_prices_seconds_and_the_band() {
         let t = table("2026-10-01");
-        let (m, lo, hi) = price_seconds(Some(100.0), (Some(33.0), Some(300.0)), Some("gtx1080ti"), Some(&t), "2026-10-03").unwrap();
+        let (m, lo, hi) = price_seconds(
+            Some(100.0),
+            (Some(33.0), Some(300.0)),
+            Some("gtx1080ti"),
+            Some(&t),
+            "2026-10-03",
+        )
+        .unwrap();
         assert!((m - 0.01).abs() < 1e-12 && lo < m && hi > m);
     }
 
@@ -321,10 +336,38 @@ mod tests {
     fn no_fresh_row_is_no_number() {
         let t = table("2026-10-01");
         assert!(price_seconds(Some(1.0), (None, None), None, Some(&t), "2026-10-03").is_err());
-        assert!(price_seconds(Some(1.0), (None, None), Some("gtx1080ti"), None, "2026-10-03").is_err());
-        assert!(price_seconds(Some(1.0), (None, None), Some("other"), Some(&t), "2026-10-03").is_err());
+        assert!(price_seconds(
+            Some(1.0),
+            (None, None),
+            Some("gtx1080ti"),
+            None,
+            "2026-10-03"
+        )
+        .is_err());
+        assert!(price_seconds(
+            Some(1.0),
+            (None, None),
+            Some("other"),
+            Some(&t),
+            "2026-10-03"
+        )
+        .is_err());
         let stale = table("2025-01-01");
-        assert!(price_seconds(Some(1.0), (None, None), Some("gtx1080ti"), Some(&stale), "2026-10-03").is_err());
-        assert!(price_seconds(None, (None, None), Some("gtx1080ti"), Some(&t), "2026-10-03").is_err());
+        assert!(price_seconds(
+            Some(1.0),
+            (None, None),
+            Some("gtx1080ti"),
+            Some(&stale),
+            "2026-10-03"
+        )
+        .is_err());
+        assert!(price_seconds(
+            None,
+            (None, None),
+            Some("gtx1080ti"),
+            Some(&t),
+            "2026-10-03"
+        )
+        .is_err());
     }
 }

@@ -122,7 +122,9 @@ impl Hmm {
             let prior: Vec<f64> = if t == 0 {
                 alpha.clone()
             } else {
-                (0..k).map(|j| (0..k).map(|i| alpha[i] * self.trans[i][j]).sum()).collect()
+                (0..k)
+                    .map(|j| (0..k).map(|i| alpha[i] * self.trans[i][j]).sum())
+                    .collect()
             };
             let mut post: Vec<f64> = (0..k)
                 .map(|s| prior[s] * ln_normal(x, self.means[s], self.vars[s]).exp())
@@ -165,7 +167,17 @@ pub fn fit(xs: &[f64], k: usize, iterations: usize) -> Result<Hmm, HmmError> {
             })
             .collect(),
         trans: (0..k)
-            .map(|i| (0..k).map(|j| if i == j { 0.9 } else { 0.1 / (k - 1).max(1) as f64 }).collect())
+            .map(|i| {
+                (0..k)
+                    .map(|j| {
+                        if i == j {
+                            0.9
+                        } else {
+                            0.1 / (k - 1).max(1) as f64
+                        }
+                    })
+                    .collect()
+            })
             .collect(),
         init: vec![1.0 / k as f64; k],
     };
@@ -174,13 +186,21 @@ pub fn fit(xs: &[f64], k: usize, iterations: usize) -> Result<Hmm, HmmError> {
         // this function (ADR-RB-09).
         let emit: Vec<Vec<f64>> = xs
             .iter()
-            .map(|&x| (0..k).map(|s| ln_normal(x, m.means[s], m.vars[s]).exp().max(1e-300)).collect())
+            .map(|&x| {
+                (0..k)
+                    .map(|s| ln_normal(x, m.means[s], m.vars[s]).exp().max(1e-300))
+                    .collect()
+            })
             .collect();
         let mut alpha = vec![vec![0.0; k]; n];
         let mut c = vec![0.0; n];
         for t in 0..n {
             for s in 0..k {
-                let prior = if t == 0 { m.init[s] } else { (0..k).map(|i| alpha[t - 1][i] * m.trans[i][s]).sum() };
+                let prior = if t == 0 {
+                    m.init[s]
+                } else {
+                    (0..k).map(|i| alpha[t - 1][i] * m.trans[i][s]).sum()
+                };
                 alpha[t][s] = prior * emit[t][s];
             }
             c[t] = alpha[t].iter().sum::<f64>().max(1e-300);
@@ -189,7 +209,10 @@ pub fn fit(xs: &[f64], k: usize, iterations: usize) -> Result<Hmm, HmmError> {
         let mut beta = vec![vec![1.0; k]; n];
         for t in (0..n - 1).rev() {
             for i in 0..k {
-                beta[t][i] = (0..k).map(|j| m.trans[i][j] * emit[t + 1][j] * beta[t + 1][j]).sum::<f64>() / c[t + 1];
+                beta[t][i] = (0..k)
+                    .map(|j| m.trans[i][j] * emit[t + 1][j] * beta[t + 1][j])
+                    .sum::<f64>()
+                    / c[t + 1];
             }
         }
         let gamma: Vec<Vec<f64>> = (0..n)
@@ -203,7 +226,8 @@ pub fn fit(xs: &[f64], k: usize, iterations: usize) -> Result<Hmm, HmmError> {
         for t in 0..n - 1 {
             for i in 0..k {
                 for j in 0..k {
-                    trans[i][j] += alpha[t][i] * m.trans[i][j] * emit[t + 1][j] * beta[t + 1][j] / c[t + 1];
+                    trans[i][j] +=
+                        alpha[t][i] * m.trans[i][j] * emit[t + 1][j] * beta[t + 1][j] / c[t + 1];
                 }
             }
         }
@@ -216,7 +240,13 @@ pub fn fit(xs: &[f64], k: usize, iterations: usize) -> Result<Hmm, HmmError> {
         for s in 0..k {
             let w: f64 = gamma.iter().map(|g| g[s]).sum::<f64>().max(1e-300);
             m.means[s] = gamma.iter().zip(xs).map(|(g, x)| g[s] * x).sum::<f64>() / w;
-            m.vars[s] = (gamma.iter().zip(xs).map(|(g, x)| g[s] * (x - m.means[s]).powi(2)).sum::<f64>() / w).max(MIN_VAR);
+            m.vars[s] = (gamma
+                .iter()
+                .zip(xs)
+                .map(|(g, x)| g[s] * (x - m.means[s]).powi(2))
+                .sum::<f64>()
+                / w)
+                .max(MIN_VAR);
         }
         m.trans = trans;
         m.init = gamma[0].clone();
@@ -277,7 +307,9 @@ impl Bocpd {
         let scale2 = self.beta[l] * (self.kappa[l] + 1.0) / (self.alpha[l] * self.kappa[l]);
         let z = (x - self.mu[l]).powi(2) / (nu * scale2);
         let ln_gamma = |v: f64| libm_ln_gamma(v);
-        (ln_gamma((nu + 1.0) / 2.0) - ln_gamma(nu / 2.0) - 0.5 * (nu * std::f64::consts::PI * scale2).ln()
+        (ln_gamma((nu + 1.0) / 2.0)
+            - ln_gamma(nu / 2.0)
+            - 0.5 * (nu * std::f64::consts::PI * scale2).ln()
             - (nu + 1.0) / 2.0 * (1.0 + z).ln())
         .exp()
     }
@@ -286,7 +318,9 @@ impl Bocpd {
     pub fn update(&mut self, x: f64, window: usize) -> ChangeState {
         let n = self.r.len();
         let pred: Vec<f64> = (0..n).map(|l| self.predictive(l, x)).collect();
-        let mut growth: Vec<f64> = (0..n).map(|l| self.r[l] * pred[l] * (1.0 - self.hazard)).collect();
+        let mut growth: Vec<f64> = (0..n)
+            .map(|l| self.r[l] * pred[l] * (1.0 - self.hazard))
+            .collect();
         let cp: f64 = (0..n).map(|l| self.r[l] * pred[l] * self.hazard).sum();
         let mut next_r = Vec::with_capacity(n + 1);
         next_r.push(cp);
@@ -302,7 +336,10 @@ impl Bocpd {
             mu.push((self.kappa[l] * self.mu[l] + x) / (self.kappa[l] + 1.0));
             kappa.push(self.kappa[l] + 1.0);
             alpha.push(self.alpha[l] + 0.5);
-            beta.push(self.beta[l] + self.kappa[l] * (x - self.mu[l]).powi(2) / (2.0 * (self.kappa[l] + 1.0)));
+            beta.push(
+                self.beta[l]
+                    + self.kappa[l] * (x - self.mu[l]).powi(2) / (2.0 * (self.kappa[l] + 1.0)),
+            );
         }
         self.mu = mu;
         self.kappa = kappa;
@@ -339,7 +376,8 @@ fn libm_ln_gamma(x: f64) -> f64 {
         1.505_632_735_149_311_6e-7,
     ];
     if x < 0.5 {
-        return (std::f64::consts::PI / (std::f64::consts::PI * x).sin()).ln() - libm_ln_gamma(1.0 - x);
+        return (std::f64::consts::PI / (std::f64::consts::PI * x).sin()).ln()
+            - libm_ln_gamma(1.0 - x);
     }
     let x = x - 1.0;
     let mut a = C[0];
@@ -420,13 +458,25 @@ mod tests {
     fn the_hmm_recovers_ordered_variances_and_sticky_transitions() {
         let (x, _) = mixture(2500, 7);
         let m = fit(&x, 3, 40).unwrap();
-        assert!(m.vars[0] < m.vars[1] && m.vars[1] < m.vars[2], "{:?}", m.vars);
+        assert!(
+            m.vars[0] < m.vars[1] && m.vars[1] < m.vars[2],
+            "{:?}",
+            m.vars
+        );
         for i in 0..3 {
-            assert!(m.trans[i][i] > 0.8, "state {i} self-transition {}", m.trans[i][i]);
+            assert!(
+                m.trans[i][i] > 0.8,
+                "state {i} self-transition {}",
+                m.trans[i][i]
+            );
             assert!((m.trans[i].iter().sum::<f64>() - 1.0).abs() < 1e-9);
         }
         // The calm state's sd is near the truth.
-        assert!((m.vars[0].sqrt() - 0.004).abs() < 0.002, "{}", m.vars[0].sqrt());
+        assert!(
+            (m.vars[0].sqrt() - 0.004).abs() < 0.002,
+            "{}",
+            m.vars[0].sqrt()
+        );
     }
 
     #[test]
@@ -437,7 +487,13 @@ mod tests {
         for t in [100usize, 400, 799] {
             assert_eq!(m.labels(&x[..=t]), all[..=t].to_vec());
         }
-        let agree = all.iter().zip(&truth).skip(50).filter(|(a, b)| a == b).count() as f64 / (x.len() - 50) as f64;
+        let agree = all
+            .iter()
+            .zip(&truth)
+            .skip(50)
+            .filter(|(a, b)| a == b)
+            .count() as f64
+            / (x.len() - 50) as f64;
         assert!(agree > 0.6, "{agree}");
         // Filtered posteriors are distributions.
         for p in m.filter(&x[..200]) {
@@ -450,7 +506,11 @@ mod tests {
         let (x, _) = mixture(1500, 9);
         let m = fit(&x, 3, 30).unwrap();
         let single = fit_single_ll(&x);
-        assert!(m.log_likelihood(&x) > single + 50.0, "{} vs {single}", m.log_likelihood(&x));
+        assert!(
+            m.log_likelihood(&x) > single + 50.0,
+            "{} vs {single}",
+            m.log_likelihood(&x)
+        );
     }
 
     fn fit_single_ll(x: &[f64]) -> f64 {
@@ -462,7 +522,10 @@ mod tests {
 
     #[test]
     fn too_short_a_series_is_refused() {
-        assert!(matches!(fit(&[0.0; 20], 3, 5), Err(HmmError::TooShort(20, 3, 90))));
+        assert!(matches!(
+            fit(&[0.0; 20], 3, 5),
+            Err(HmmError::TooShort(20, 3, 90))
+        ));
     }
 
     #[test]
@@ -483,8 +546,14 @@ mod tests {
                 after_min = after_min.min(s.map_run_length);
             }
         }
-        assert!(before_min >= 30, "MAP run length dipped to {before_min} on stationary data");
-        assert!(after_min <= 15, "MAP run length never collapsed after the break: {after_min}");
+        assert!(
+            before_min >= 30,
+            "MAP run length dipped to {before_min} on stationary data"
+        );
+        assert!(
+            after_min <= 15,
+            "MAP run length never collapsed after the break: {after_min}"
+        );
     }
 
     #[test]
@@ -497,20 +566,39 @@ mod tests {
     #[test]
     fn below_the_trigger_the_rule_tier_answers_and_says_why() {
         for g in [None, Some(false)] {
-            let a = LearnedGate { separation_passed: g }.answer();
+            let a = LearnedGate {
+                separation_passed: g,
+            }
+            .answer();
             assert_eq!(a.decision_tier, DecisionTier::Rule);
             assert!(!a.reason.is_empty());
         }
-        assert_eq!(LearnedGate { separation_passed: Some(true) }.answer().decision_tier, DecisionTier::Learned);
+        assert_eq!(
+            LearnedGate {
+                separation_passed: Some(true)
+            }
+            .answer()
+            .decision_tier,
+            DecisionTier::Learned
+        );
     }
 
     #[test]
     fn no_public_function_returns_a_smoothed_posterior() {
         let src = include_str!("regime_learned.rs");
         let prod = src.split("#[cfg(test)]").next().unwrap();
-        for line in prod.lines().filter(|l| l.trim_start().starts_with("pub fn")) {
+        for line in prod
+            .lines()
+            .filter(|l| l.trim_start().starts_with("pub fn"))
+        {
             let l = line.to_ascii_lowercase();
-            assert!(!l.contains("smooth") && !l.contains("viterbi") && !l.contains("backward") && !l.contains("gamma"), "{line}");
+            assert!(
+                !l.contains("smooth")
+                    && !l.contains("viterbi")
+                    && !l.contains("backward")
+                    && !l.contains("gamma"),
+                "{line}"
+            );
         }
     }
 }

@@ -85,19 +85,37 @@ pub struct PreviewBody {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PerturbationIn {
-    ShiftColumn { column: String, shift_bars: i32 },
-    MaskColumn { column: String },
-    JitterColumn { column: String, perturbation_pct: f64, #[serde(default)] seed: u64 },
+    ShiftColumn {
+        column: String,
+        shift_bars: i32,
+    },
+    MaskColumn {
+        column: String,
+    },
+    JitterColumn {
+        column: String,
+        perturbation_pct: f64,
+        #[serde(default)]
+        seed: u64,
+    },
 }
 
 impl From<PerturbationIn> for backtest::perturb::Perturbation {
     fn from(p: PerturbationIn) -> Self {
         match p {
-            PerturbationIn::ShiftColumn { column, shift_bars } => Self::ShiftColumn { column, shift_bars },
-            PerturbationIn::MaskColumn { column } => Self::MaskColumn { column },
-            PerturbationIn::JitterColumn { column, perturbation_pct, seed } => {
-                Self::JitterColumn { column, perturbation_pct, seed }
+            PerturbationIn::ShiftColumn { column, shift_bars } => {
+                Self::ShiftColumn { column, shift_bars }
             }
+            PerturbationIn::MaskColumn { column } => Self::MaskColumn { column },
+            PerturbationIn::JitterColumn {
+                column,
+                perturbation_pct,
+                seed,
+            } => Self::JitterColumn {
+                column,
+                perturbation_pct,
+                seed,
+            },
         }
     }
 }
@@ -217,11 +235,11 @@ pub async fn preview(
     // preview reads feature names as written, so a swept `ema_{{fast}}` reached the
     // engine unresolved and the first draft the platform handed a model could not
     // be previewed (S-5.15).
-    let definition = match domain::strategy_def::params::materialize(&definition, &Default::default())
-    {
-        Ok(d) => d,
-        Err(e) => return unprocessable("params_do_not_materialise", e.to_string()),
-    };
+    let definition =
+        match domain::strategy_def::params::materialize(&definition, &Default::default()) {
+            Ok(d) => d,
+            Err(e) => return unprocessable("params_do_not_materialise", e.to_string()),
+        };
 
     let timeframe = match <Timeframe as backtest::types::TimeframeExt>::from_key(&body.timeframe) {
         Some(tf) => tf,
@@ -318,10 +336,11 @@ pub async fn preview(
         // Validated against the columns the strategy actually reads: a
         // perturbation of a column nothing reads cannot diverge, and that
         // negative would be about the request rather than the strategy.
-        let known: Vec<String> = match backtest::requirements::derive_requirements(&definition, timeframe) {
-            Ok(r) => r.features.iter().map(|f| f.name.clone()).collect(),
-            Err(e) => return unprocessable("preview_failed", e.to_string()),
-        };
+        let known: Vec<String> =
+            match backtest::requirements::derive_requirements(&definition, timeframe) {
+                Ok(r) => r.features.iter().map(|f| f.name.clone()).collect(),
+                Err(e) => return unprocessable("preview_failed", e.to_string()),
+            };
         let items: Vec<backtest::perturb::Perturbation> =
             body.perturbations.into_iter().map(Into::into).collect();
         let set = match backtest::perturb::PerturbationSet::validate(items, &known, bars.len()) {

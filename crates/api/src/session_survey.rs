@@ -156,7 +156,11 @@ pub async fn store_proposals(
         .bind(r.workflow.as_deref())
         // The label is stored only when it is one this module can read, so the
         // `an_estimate_has_its_label` CHECK and `estimate_for` cannot disagree.
-        .bind(r.label.as_deref().filter(|l| estimate_for(Some(l)).is_some()))
+        .bind(
+            r.label
+                .as_deref()
+                .filter(|l| estimate_for(Some(l)).is_some()),
+        )
         .bind(r.estimate())
         .execute(pg)
         .await?;
@@ -300,6 +304,9 @@ mod tests {
         assert_eq!(r.proposed_questions.len(), 2);
         assert_eq!(r.proposed_questions[0].value_estimate, Some(1.0));
         assert_eq!(r.proposed_questions[1].value_estimate, None);
-        assert_eq!(r.proposed_questions[1].workflow.as_deref(), Some("diagnose"));
+        assert_eq!(
+            r.proposed_questions[1].workflow.as_deref(),
+            Some("diagnose")
+        );
     }
 }

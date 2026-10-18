@@ -119,7 +119,9 @@ pub fn list_features(params: &Value) -> Value {
         .take(MAX_FAMILIES)
         .map(|f| render(f))
         .collect();
-    let truncated = matched.len().saturating_sub(offset.saturating_add(shown.len()));
+    let truncated = matched
+        .len()
+        .saturating_sub(offset.saturating_add(shown.len()));
     let next_offset = (truncated > 0).then(|| offset + shown.len());
 
     json!({
@@ -255,7 +257,10 @@ fn render_diagnostic(d: &strategy_lang::Diagnostic) -> Value {
 fn diagnostics(ds: &[strategy_lang::Diagnostic]) -> Value {
     crate::tool_error::refuse_extra(
         "compile_failed",
-        format!("the SLv2 text has {} diagnostic(s); see `diagnostics`.", ds.len()),
+        format!(
+            "the SLv2 text has {} diagnostic(s); see `diagnostics`.",
+            ds.len()
+        ),
         "apply the `fix` on each entry in `diagnostics`, then call again",
         json!({
             "n_diagnostics": ds.len(),
@@ -415,16 +420,14 @@ pub fn diff_strategies(params: &Value) -> Value {
         let Some(v) = params.get(field).filter(|v| !v.is_null()) else {
             return Err(crate::tool_error::missing_field(field));
         };
-        serde_json::from_value(v.clone()).map_err(
-            |e| {
-                crate::tool_error::refuse_ids(
-                    "invalid_definition",
-                    format!("`{field}` is not a strategy definition: {e}"),
-                    format!("send `{field}` as the object get_strategy returned"),
-                    &[("field", field)],
-                )
-            },
-        )
+        serde_json::from_value(v.clone()).map_err(|e| {
+            crate::tool_error::refuse_ids(
+                "invalid_definition",
+                format!("`{field}` is not a strategy definition: {e}"),
+                format!("send `{field}` as the object get_strategy returned"),
+                &[("field", field)],
+            )
+        })
     };
     let before = match read("before") {
         Ok(d) => d,
@@ -514,7 +517,14 @@ pub fn apply_move(params: &Value) -> Value {
     let applied = match strategy_lang::apply_move(&def, &edit) {
         Ok(a) => a,
         Err(d) => {
-            return crate::tool_error::from_diagnostic_see(d.code.as_str(), &d.message, d.fix.as_deref().unwrap_or(crate::tool_error::DIAGNOSTIC_FIX), &d.see)
+            return crate::tool_error::from_diagnostic_see(
+                d.code.as_str(),
+                &d.message,
+                d.fix
+                    .as_deref()
+                    .unwrap_or(crate::tool_error::DIAGNOSTIC_FIX),
+                &d.see,
+            )
         }
     };
     let kind = applied.kind();
@@ -1253,14 +1263,12 @@ pub async fn lookahead_truncation_test(api: &ApiClient, params: &Value) -> Value
     };
     let full = match read_run(&full_raw) {
         Ok(r) => r,
-        Err(e) => {
-            return crate::tool_error::refuse_extra(
-                "full_window_refused",
-                "the full window did not preview, so no shorter window can be compared to it.",
-                "fix what `detail` reports so preview_signals runs on the full window, then call again",
-                json!({ "detail": e }),
-            )
-        }
+        Err(e) => return crate::tool_error::refuse_extra(
+            "full_window_refused",
+            "the full window did not preview, so no shorter window can be compared to it.",
+            "fix what `detail` reports so preview_signals runs on the full window, then call again",
+            json!({ "detail": e }),
+        ),
     };
     if full.bars_evaluated == 0 {
         return json!({

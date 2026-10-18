@@ -20,7 +20,14 @@ use crate::ApiClient;
 
 /// `propose_skill` — submit a procedure for verification.
 pub async fn propose_skill(api: &ApiClient, params: &Value) -> Value {
-    for field in ["project_id", "name", "category", "reason", "source_ref", "files"] {
+    for field in [
+        "project_id",
+        "name",
+        "category",
+        "reason",
+        "source_ref",
+        "files",
+    ] {
         if params.get(field).is_none() {
             return json!({ "error": "missing_field", "field": field });
         }
@@ -206,10 +213,19 @@ mod tests {
         let src = include_str!("skills_registry.rs");
         let prod = src.split("#[cfg(test)]").next().unwrap();
         for forbidden in [
-            "/admit", "/verify", "/steps", "/pairs", "/quarantine", "/deprecate", "/promote", "/conditions",
+            "/admit",
+            "/verify",
+            "/steps",
+            "/pairs",
+            "/quarantine",
+            "/deprecate",
+            "/promote",
+            "/conditions",
         ] {
             assert!(
-                !prod.contains(&format!("\"{forbidden}")) && !prod.contains(&format!("{forbidden}\"")) && !prod.contains(&format!("{forbidden}`")),
+                !prod.contains(&format!("\"{forbidden}"))
+                    && !prod.contains(&format!("{forbidden}\""))
+                    && !prod.contains(&format!("{forbidden}`")),
                 "a skills tool mentions {forbidden}, an admin route"
             );
         }
@@ -221,14 +237,26 @@ mod tests {
     fn every_schema_spells_out_its_fields() {
         for s in specs() {
             let props = s.input_schema.get("properties").and_then(Value::as_object);
-            assert!(props.is_some_and(|p| !p.is_empty() || s.name == "get_skill_proposal"), "{} has no declared properties", s.name);
+            assert!(
+                props.is_some_and(|p| !p.is_empty() || s.name == "get_skill_proposal"),
+                "{} has no declared properties",
+                s.name
+            );
         }
     }
 
     #[test]
     fn four_tools_in_the_skills_namespace_beside_the_library() {
         let names: Vec<&str> = specs().iter().map(|s| s.name).collect();
-        assert_eq!(names, ["propose_skill", "search_skills", "get_skill_proposal", "rate_skill"]);
+        assert_eq!(
+            names,
+            [
+                "propose_skill",
+                "search_skills",
+                "get_skill_proposal",
+                "rate_skill"
+            ]
+        );
         assert!(specs().iter().all(|s| s.namespace == "skills"));
     }
 }

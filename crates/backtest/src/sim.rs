@@ -1389,7 +1389,10 @@ mod tests {
         let base = schedule_for("coinbase_advanced", 0);
         let dear = schedule_for("coinbase_advanced", 2000);
         let cheap = schedule_for("coinbase_advanced", -2000);
-        assert_eq!(base, FeeBook::platform_default().resolve(Some("coinbase_advanced"), None));
+        assert_eq!(
+            base,
+            FeeBook::platform_default().resolve(Some("coinbase_advanced"), None)
+        );
         assert!((dear.taker_bps - base.taker_bps * 1.2).abs() < 1e-9);
         assert!((cheap.taker_bps - base.taker_bps * 0.8).abs() < 1e-9);
         assert!((dear.half_spread_bps - base.half_spread_bps * 1.2).abs() < 1e-9);
@@ -1568,7 +1571,11 @@ mod tests {
         }
         let doc = o.result_document();
         let rows = doc["exit_reasons"].as_array().expect("exit_reasons");
-        let get = |r: &str| rows.iter().find(|x| x["reason"] == r).unwrap_or_else(|| panic!("{rows:?}"));
+        let get = |r: &str| {
+            rows.iter()
+                .find(|x| x["reason"] == r)
+                .unwrap_or_else(|| panic!("{rows:?}"))
+        };
         assert_eq!(get("stop_loss")["trades"], serde_json::json!(2));
         assert_eq!(get("stop_loss")["share"], serde_json::json!(0.5));
         assert_eq!(get("signal_exit")["trades"], serde_json::json!(1));

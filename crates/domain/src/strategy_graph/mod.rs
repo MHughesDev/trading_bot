@@ -20,8 +20,8 @@ pub use deployment::{
 };
 pub use graph::{
     Arg, DataInput, Decide, GraphError, GraphParseError, InstrumentRef, NodeDef, RefPath,
-    RiskLimits, Rule, Select,
-    Sink, StrategyGraph, StrategyKind, TimeframeKey, Triggers, UniverseRef, FORMAT,
+    RiskLimits, Rule, Select, Sink, StrategyGraph, StrategyKind, TimeframeKey, Triggers,
+    UniverseRef, FORMAT,
 };
 pub use intent::{
     Bracket, Distance, DistanceUnit, Entry, OrderSpec, OrderStyle, Protect, SizeSpec, TradeIntent,

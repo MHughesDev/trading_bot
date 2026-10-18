@@ -1062,7 +1062,10 @@ fn check_free_sources() {
             .filter(|p| p.extension().is_some_and(|x| x == "sql"))
             .collect(),
         Err(e) => {
-            eprintln!("check-free-sources: FAILED — cannot read {}: {e}", root.display());
+            eprintln!(
+                "check-free-sources: FAILED — cannot read {}: {e}",
+                root.display()
+            );
             std::process::exit(1);
         }
     };
@@ -1127,7 +1130,10 @@ fn check_free_sources() {
         return;
     }
 
-    eprintln!("check-free-sources: FAILED — {} problem(s):", problems.len());
+    eprintln!(
+        "check-free-sources: FAILED — {} problem(s):",
+        problems.len()
+    );
     for p in &problems {
         eprintln!("  {p}");
     }
@@ -1280,7 +1286,8 @@ mod free_sources_tests {
     fn a_column_list_is_not_mistaken_for_a_value_tuple() {
         // `(source_id, name, kind)` has no leading integer, so it is skipped —
         // otherwise `name` itself would be collected as a source called "name".
-        let sql = "INSERT INTO dataplane.source (source_id, name, kind) VALUES (7, 'x', 'rest_history');";
+        let sql =
+            "INSERT INTO dataplane.source (source_id, name, kind) VALUES (7, 'x', 'rest_history');";
         assert_eq!(source_names_inserted(sql), vec!["x"]);
     }
 

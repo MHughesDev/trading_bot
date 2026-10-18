@@ -46,7 +46,10 @@ fn no_agent_scope_set_can_carry_skills_admit() {
     assert!(validate_agent_scopes(&owned(&["skills.admit"])).is_err());
     let mut with_legit = owned(RESEARCH_SCOPES);
     with_legit.push("skills.admit".into());
-    assert!(validate_agent_scopes(&with_legit).is_err(), "not even among legitimate scopes");
+    assert!(
+        validate_agent_scopes(&with_legit).is_err(),
+        "not even among legitimate scopes"
+    );
     // An agent's whole vocabulary does not permit it.
     assert!(!permits(&owned(RESEARCH_SCOPES), "skills.admit"));
     // Only a web login does, which is how a person admits.
@@ -63,7 +66,10 @@ fn the_platform_write_scope_for_knowledge_is_not_an_agent_scope_either() {
 #[test]
 fn the_database_trigger_names_the_scope_too() {
     let sql = read("migrations/0038_token_scopes.sql");
-    assert!(sql.contains("'skills.admit'"), "0038's trigger no longer lists skills.admit");
+    assert!(
+        sql.contains("'skills.admit'"),
+        "0038's trigger no longer lists skills.admit"
+    );
 }
 
 /// Handlers a caller without `skills.admit` may reach, each with the guard that stands in
@@ -85,7 +91,10 @@ fn handler_names(src: &str) -> Vec<(String, String)> {
     prod.split("pub async fn ")
         .skip(1)
         .map(|chunk| {
-            let name: String = chunk.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+            let name: String = chunk
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
             let body_at = chunk.find('{').unwrap_or(0);
             (name, chunk[body_at..].chars().take(500).collect::<String>())
         })
@@ -97,7 +106,11 @@ fn every_skills_handler_is_admin_guarded_or_on_the_closed_list() {
     let src = read("crates/api/src/routes/skills.rs");
     assert!(src.contains("pub const ADMIT: &str = \"skills.admit\";"));
     let handlers = handler_names(&src);
-    assert!(handlers.len() >= 16, "found only {} handlers; the scan has drifted", handlers.len());
+    assert!(
+        handlers.len() >= 16,
+        "found only {} handlers; the scan has drifted",
+        handlers.len()
+    );
     let mut admin = 0;
     for (name, head) in &handlers {
         if NON_ADMIN_HANDLERS.iter().any(|(n, _)| n == name) {
@@ -124,12 +137,21 @@ fn every_mounted_skills_route_points_at_a_known_handler() {
     let mut mounted = 0;
     for line in router.lines().filter(|l| l.contains("\"/api/skills/")) {
         for part in line.split("(skills::").skip(1) {
-            let name: String = part.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
-            assert!(handlers.contains(&name), "route line {line:?} names an unknown handler {name}");
+            let name: String = part
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            assert!(
+                handlers.contains(&name),
+                "route line {line:?} names an unknown handler {name}"
+            );
             mounted += 1;
         }
     }
-    assert!(mounted >= 16, "only {mounted} skills routes found in the router");
+    assert!(
+        mounted >= 16,
+        "only {mounted} skills routes found in the router"
+    );
 }
 
 #[test]
@@ -143,15 +165,36 @@ fn no_mcp_tool_posts_to_an_admin_route() {
         .collect();
     // There is no tool for any admin action, by name.
     for forbidden in [
-        "admit_skill", "promote_skill", "quarantine_skill", "deprecate_skill", "verify_skill",
-        "record_skill_condition", "run_curator",
+        "admit_skill",
+        "promote_skill",
+        "quarantine_skill",
+        "deprecate_skill",
+        "verify_skill",
+        "record_skill_condition",
+        "run_curator",
     ] {
-        assert!(!names.iter().any(|n| n == forbidden), "{forbidden} is an agent tool");
+        assert!(
+            !names.iter().any(|n| n == forbidden),
+            "{forbidden} is an agent tool"
+        );
     }
     // And the one file that talks to the registry names none of the admin paths.
     let tool_src = read("crates/mcp-server/src/tools/skills_registry.rs");
     let prod = tool_src.split("#[cfg(test)]").next().unwrap();
-    for path in ["/admit", "/verify", "/steps", "/pairs", "/quarantine", "/deprecate", "/promote", "/conditions", "/curator"] {
-        assert!(!prod.contains(&format!("{path}\"")), "skills tool reaches {path}");
+    for path in [
+        "/admit",
+        "/verify",
+        "/steps",
+        "/pairs",
+        "/quarantine",
+        "/deprecate",
+        "/promote",
+        "/conditions",
+        "/curator",
+    ] {
+        assert!(
+            !prod.contains(&format!("{path}\"")),
+            "skills tool reaches {path}"
+        );
     }
 }

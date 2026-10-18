@@ -235,22 +235,28 @@ pub async fn inbox(
           ORDER BY occurred_at DESC
           LIMIT 200",
     )
-    .bind(INBOX_KINDS.iter().map(|k| (*k).to_owned()).collect::<Vec<_>>())
+    .bind(
+        INBOX_KINDS
+            .iter()
+            .map(|k| (*k).to_owned())
+            .collect::<Vec<_>>(),
+    )
     .fetch_all(&state.pg)
     .await
     .map_err(server_error)?;
 
-    let prices = sqlx::query_as::<_, (Uuid, String, String, String, DateTime<Utc>, Option<String>)>(
-        "SELECT alert_id, instrument_id, kind, value::text, triggered_at, triggered_price::text
+    let prices =
+        sqlx::query_as::<_, (Uuid, String, String, String, DateTime<Utc>, Option<String>)>(
+            "SELECT alert_id, instrument_id, kind, value::text, triggered_at, triggered_price::text
            FROM price_alerts
           WHERE user_id = $1 AND triggered_at IS NOT NULL
           ORDER BY triggered_at DESC
           LIMIT 100",
-    )
-    .bind(user)
-    .fetch_all(&state.pg)
-    .await
-    .map_err(server_error)?;
+        )
+        .bind(user)
+        .fetch_all(&state.pg)
+        .await
+        .map_err(server_error)?;
 
     let drifts = calibration_drifts(&state.pg).await.map_err(server_error)?;
 
@@ -361,7 +367,11 @@ pub async fn acknowledge(
     Path((source, id)): Path<(String, String)>,
 ) -> Result<Json<Value>, Response> {
     if !valid_source(&source) || id.parse::<Uuid>().is_err() {
-        return Err(refuse(StatusCode::BAD_REQUEST, "invalid_item", "unknown source or id"));
+        return Err(refuse(
+            StatusCode::BAD_REQUEST,
+            "invalid_item",
+            "unknown source or id",
+        ));
     }
     // A dismissed item never comes back as merely acknowledged.
     sqlx::query(
@@ -377,7 +387,9 @@ pub async fn acknowledge(
     .execute(&state.pg)
     .await
     .map_err(server_error)?;
-    Ok(Json(json!({ "source": source, "id": id, "state": "acknowledged" })))
+    Ok(Json(
+        json!({ "source": source, "id": id, "state": "acknowledged" }),
+    ))
 }
 
 /// `POST /api/alert-inbox/{source}/{id}/dismiss`
@@ -387,10 +399,18 @@ pub async fn dismiss(
     Path((source, id)): Path<(String, String)>,
 ) -> Result<Json<Value>, Response> {
     let Ok(uuid) = id.parse::<Uuid>() else {
-        return Err(refuse(StatusCode::BAD_REQUEST, "invalid_item", "unknown source or id"));
+        return Err(refuse(
+            StatusCode::BAD_REQUEST,
+            "invalid_item",
+            "unknown source or id",
+        ));
     };
     if !valid_source(&source) {
-        return Err(refuse(StatusCode::BAD_REQUEST, "invalid_item", "unknown source or id"));
+        return Err(refuse(
+            StatusCode::BAD_REQUEST,
+            "invalid_item",
+            "unknown source or id",
+        ));
     }
     if source == "monitor" {
         let row: Option<(String, String)> =
@@ -400,7 +420,11 @@ pub async fn dismiss(
                 .await
                 .map_err(server_error)?;
         let Some((kind, scope)) = row else {
-            return Err(refuse(StatusCode::NOT_FOUND, "not_found", "no such monitor event"));
+            return Err(refuse(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "no such monitor event",
+            ));
         };
         let halted = halted_scopes(&state).await.map_err(server_error)?;
         if is_pinned(&kind, &scope, &halted) {
@@ -415,16 +439,21 @@ pub async fn dismiss(
         // would otherwise be a row nobody can ever see.
         let known = calibration_drifts(&state.pg).await.map_err(server_error)?;
         if !known.iter().any(|d| d.id == uuid) {
-            return Err(refuse(StatusCode::NOT_FOUND, "not_found", "no such calibration alert"));
+            return Err(refuse(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "no such calibration alert",
+            ));
         }
     } else {
-        let own: Option<(Uuid,)> =
-            sqlx::query_as("SELECT alert_id FROM price_alerts WHERE alert_id = $1 AND user_id = $2")
-                .bind(uuid)
-                .bind(token.user_id())
-                .fetch_optional(&state.pg)
-                .await
-                .map_err(server_error)?;
+        let own: Option<(Uuid,)> = sqlx::query_as(
+            "SELECT alert_id FROM price_alerts WHERE alert_id = $1 AND user_id = $2",
+        )
+        .bind(uuid)
+        .bind(token.user_id())
+        .fetch_optional(&state.pg)
+        .await
+        .map_err(server_error)?;
         if own.is_none() {
             return Err(refuse(StatusCode::NOT_FOUND, "not_found", "no such alert"));
         }
@@ -441,7 +470,9 @@ pub async fn dismiss(
     .execute(&state.pg)
     .await
     .map_err(server_error)?;
-    Ok(Json(json!({ "source": source, "id": id, "state": "dismissed" })))
+    Ok(Json(
+        json!({ "source": source, "id": id, "state": "dismissed" }),
+    ))
 }
 
 #[cfg(test)]
@@ -461,7 +492,11 @@ mod tests {
         // A kind added to the inbox without a decision about its severity would
         // silently be `info`; this makes that a failing test instead.
         for k in INBOX_KINDS {
-            assert_ne!(monitor_severity(k), "info", "{k} is in the inbox but ranks as info");
+            assert_ne!(
+                monitor_severity(k),
+                "info",
+                "{k} is in the inbox but ranks as info"
+            );
         }
     }
 
@@ -469,15 +504,33 @@ mod tests {
     fn a_trip_is_pinned_only_while_its_scope_is_halted() {
         let halted: HashSet<String> = ["global".to_owned()].into_iter().collect();
         assert!(is_pinned("tripped", "global", &halted));
-        assert!(!is_pinned("tripped", "strategy:s1", &halted), "another scope is not this trip");
-        assert!(!is_pinned("breach", "global", &halted), "only a trip is pinned");
-        assert!(!is_pinned("tripped", "global", &HashSet::new()), "after the reset it is ordinary");
+        assert!(
+            !is_pinned("tripped", "strategy:s1", &halted),
+            "another scope is not this trip"
+        );
+        assert!(
+            !is_pinned("breach", "global", &halted),
+            "only a trip is pinned"
+        );
+        assert!(
+            !is_pinned("tripped", "global", &HashSet::new()),
+            "after the reset it is ordinary"
+        );
     }
 
-    fn win(day: i64, c50: f64, c90: f64, n: u32) -> (DateTime<Utc>, research::refit::CoverageWindow) {
+    fn win(
+        day: i64,
+        c50: f64,
+        c90: f64,
+        n: u32,
+    ) -> (DateTime<Utc>, research::refit::CoverageWindow) {
         (
             DateTime::from_timestamp(1_700_000_000 + day * 86_400, 0).unwrap(),
-            research::refit::CoverageWindow { coverage_50: c50, coverage_90: c90, n },
+            research::refit::CoverageWindow {
+                coverage_50: c50,
+                coverage_90: c90,
+                n,
+            },
         )
     }
 
@@ -486,21 +539,46 @@ mod tests {
         let good = |d| win(d, 0.5, 0.9, 100);
         let bad = |d| win(d, 0.8, 0.99, 100);
         let ok = vec![good(0), bad(1), good(2), bad(3), good(4)];
-        assert!(drift_of("m", &ok).is_none(), "isolated bad windows are not a drift");
+        assert!(
+            drift_of("m", &ok).is_none(),
+            "isolated bad windows are not a drift"
+        );
         let drifting = vec![good(0), bad(1), bad(2), bad(3)];
         let d = drift_of("m", &drifting).expect("two in a row");
-        assert_eq!(d.at, drifting[2].0, "dated at the window that completed the pair");
-        assert_eq!(d.id, drift_of("m", &drifting).unwrap().id, "the same drift has the same id");
-        assert_ne!(d.id, calibration_item_id("other", d.at), "and the id is per model");
+        assert_eq!(
+            d.at, drifting[2].0,
+            "dated at the window that completed the pair"
+        );
+        assert_eq!(
+            d.id,
+            drift_of("m", &drifting).unwrap().id,
+            "the same drift has the same id"
+        );
+        assert_ne!(
+            d.id,
+            calibration_item_id("other", d.at),
+            "and the id is per model"
+        );
         let mut longer = drifting.clone();
         longer.push(bad(4));
-        assert_eq!(drift_of("m", &longer).unwrap().id, d.id, "a longer run is not a second alert");
+        assert_eq!(
+            drift_of("m", &longer).unwrap().id,
+            d.id,
+            "a longer run is not a second alert"
+        );
     }
 
     #[test]
     fn thin_windows_neither_raise_nor_hide_a_drift() {
-        let thin = vec![win(0, 0.99, 0.5, 3), win(1, 0.99, 0.5, 3), win(2, 0.5, 0.9, 100)];
-        assert!(drift_of("m", &thin).is_none(), "a window under min_n judges nothing");
+        let thin = vec![
+            win(0, 0.99, 0.5, 3),
+            win(1, 0.99, 0.5, 3),
+            win(2, 0.5, 0.9, 100),
+        ];
+        assert!(
+            drift_of("m", &thin).is_none(),
+            "a window under min_n judges nothing"
+        );
     }
 
     #[test]
@@ -509,7 +587,10 @@ mod tests {
         assert!(!valid_source("anything_else"));
         let src = include_str!("alerts_inbox.rs");
         let body = &src[src.find("pub async fn dismiss(").unwrap()..];
-        assert!(body.contains("calibration_drifts(&state.pg)"), "dismissing a derived id verifies it");
+        assert!(
+            body.contains("calibration_drifts(&state.pg)"),
+            "dismissing a derived id verifies it"
+        );
     }
 
     #[test]
@@ -524,6 +605,8 @@ mod tests {
         let at = src.find("pub async fn dismiss(").unwrap();
         let body = &src[at..];
         assert!(body.contains("halted_scopes(&state)"));
-        assert!(body.find("is_pinned(").unwrap() < body.find("INSERT INTO alert_inbox_state").unwrap());
+        assert!(
+            body.find("is_pinned(").unwrap() < body.find("INSERT INTO alert_inbox_state").unwrap()
+        );
     }
 }

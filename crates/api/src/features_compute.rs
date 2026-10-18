@@ -208,7 +208,8 @@ pub async fn load_external_rows(
                     if !seen.insert(format!("m:{series_id}")) {
                         continue;
                     }
-                    let from = (first_bar - chrono::Duration::days(MACRO_LOOKBACK_DAYS)).date_naive();
+                    let from =
+                        (first_bar - chrono::Duration::days(MACRO_LOOKBACK_DAYS)).date_naive();
                     let rows = storage::clickhouse::alt::macro_vintages(
                         clickhouse_url,
                         series_id,

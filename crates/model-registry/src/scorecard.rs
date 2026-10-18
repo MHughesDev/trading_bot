@@ -209,7 +209,12 @@ mod tests {
     #[test]
     fn a_stub_evaluation_is_not_judged_it_never_claimed_a_measurement() {
         let metrics = json!({"note": "sidecar offline"});
-        let r = eval_scorecard("stub", &json!({"metrics": metrics}), &metrics, &[ForecastUse::Return]);
+        let r = eval_scorecard(
+            "stub",
+            &json!({"metrics": metrics}),
+            &metrics,
+            &[ForecastUse::Return],
+        );
         assert!(r.refusal.is_none());
     }
 
@@ -225,6 +230,9 @@ mod tests {
         assert_eq!(r.scorecard["family_baselines"][0]["name"], json!("mean"));
         // No series was recorded, so the verdict exists and is not an allow.
         assert_eq!(r.scorecard["usage_verdict"]["allowed"], json!(false));
-        assert_eq!(r.scorecard["usage_verdict"]["rules"][0]["status"], json!("not_computable"));
+        assert_eq!(
+            r.scorecard["usage_verdict"]["rules"][0]["status"],
+            json!("not_computable")
+        );
     }
 }

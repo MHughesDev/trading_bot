@@ -24,7 +24,10 @@ fn main() {
         Some(other) => Err(format!("unknown argument `{other}`; use --nightly [DIR]")),
     };
     match cards {
-        Ok(cards) => println!("{}", serde_json::to_string_pretty(&cards).expect("serialises")),
+        Ok(cards) => println!(
+            "{}",
+            serde_json::to_string_pretty(&cards).expect("serialises")
+        ),
         Err(e) => {
             eprintln!("error: {e}");
             std::process::exit(2);

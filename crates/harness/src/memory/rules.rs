@@ -50,7 +50,11 @@ pub fn annotate(
     let (capability_mismatch, missing) = match have {
         None => (None, Vec::new()),
         Some(have) => {
-            let missing: Vec<String> = requires.iter().filter(|r| !have.contains(r)).cloned().collect();
+            let missing: Vec<String> = requires
+                .iter()
+                .filter(|r| !have.contains(r))
+                .cloned()
+                .collect();
             (Some(!missing.is_empty()), missing)
         }
     };
@@ -93,7 +97,11 @@ pub fn is_finding_id(id: &str) -> bool {
 /// The offending ids: findings are cited as *where an idea came from*, never as the
 /// evidence a new experiment rests on.
 pub fn refuse_findings_as_evidence(evidence_ids: &[String]) -> Result<(), Vec<String>> {
-    let bad: Vec<String> = evidence_ids.iter().filter(|i| is_finding_id(i)).cloned().collect();
+    let bad: Vec<String> = evidence_ids
+        .iter()
+        .filter(|i| is_finding_id(i))
+        .cloned()
+        .collect();
     if bad.is_empty() {
         Ok(())
     } else {
@@ -115,7 +123,11 @@ pub struct RepeatKey {
 pub fn flag_repeat(new: &RepeatKey, earlier: &[RepeatKey]) -> usize {
     earlier
         .iter()
-        .filter(|e| e.finding == new.finding && e.instrument == new.instrument && e.window.overlaps(&new.window))
+        .filter(|e| {
+            e.finding == new.finding
+                && e.instrument == new.instrument
+                && e.window.overlaps(&new.window)
+        })
         .count()
 }
 
@@ -129,7 +141,14 @@ mod tests {
 
     #[test]
     fn age_staleness_and_capability_flags_are_present_on_every_annotation() {
-        let a = annotate("2026-06-01", "2026-10-04", Some(90), false, &s(&["short_selling"]), Some(&s(&["long_only"])));
+        let a = annotate(
+            "2026-06-01",
+            "2026-10-04",
+            Some(90),
+            false,
+            &s(&["short_selling"]),
+            Some(&s(&["long_only"])),
+        );
         assert_eq!(a.age_days, 125);
         assert!(a.stale);
         assert_eq!(a.capability_mismatch, Some(true));
@@ -138,7 +157,10 @@ mod tests {
         assert!(!fresh.stale);
         assert_eq!(fresh.capability_mismatch, Some(false));
         // Not stated is unknown, never "fine".
-        assert_eq!(annotate("2026-10-01", "2026-10-04", None, false, &s(&["x"]), None).capability_mismatch, None);
+        assert_eq!(
+            annotate("2026-10-01", "2026-10-04", None, false, &s(&["x"]), None).capability_mismatch,
+            None
+        );
         // A kind that never expires on a timer is not stale by age, but a marked-stale row is.
         assert!(!annotate("2020-01-01", "2026-10-04", None, false, &[], None).stale);
         assert!(annotate("2026-10-01", "2026-10-04", None, true, &[], None).stale);
@@ -146,8 +168,14 @@ mod tests {
 
     #[test]
     fn a_source_is_memory_only_with_a_finding_id_after_the_prefix() {
-        assert_eq!(Source::parse("memory:fnd_abc"), Source::Memory("fnd_abc".into()));
-        assert_eq!(Source::parse(" memory: fnd_abc "), Source::Memory("fnd_abc".into()));
+        assert_eq!(
+            Source::parse("memory:fnd_abc"),
+            Source::Memory("fnd_abc".into())
+        );
+        assert_eq!(
+            Source::parse(" memory: fnd_abc "),
+            Source::Memory("fnd_abc".into())
+        );
         assert_eq!(Source::parse("memory:"), Source::Other("memory:".into()));
         assert_eq!(Source::parse("a paper"), Source::Other("a paper".into()));
     }
@@ -155,7 +183,10 @@ mod tests {
     #[test]
     fn an_experiment_citing_a_finding_as_evidence_is_refused_naming_it() {
         assert_eq!(refuse_findings_as_evidence(&s(&["exp_1", "art_2"])), Ok(()));
-        assert_eq!(refuse_findings_as_evidence(&s(&["exp_1", "fnd_9"])), Err(s(&["fnd_9"])));
+        assert_eq!(
+            refuse_findings_as_evidence(&s(&["exp_1", "fnd_9"])),
+            Err(s(&["fnd_9"]))
+        );
     }
 
     #[test]
@@ -165,10 +196,29 @@ mod tests {
             instrument: i.into(),
             window: DataWindow::new(a, b),
         };
-        let earlier = vec![k("fnd_1", "BTC", "2026-01-01", "2026-03-01"), k("fnd_2", "BTC", "2026-01-01", "2026-03-01")];
-        assert_eq!(flag_repeat(&k("fnd_1", "BTC", "2026-02-01", "2026-04-01"), &earlier), 1, "overlapping window");
-        assert_eq!(flag_repeat(&k("fnd_1", "BTC", "2026-03-02", "2026-05-01"), &earlier), 0, "disjoint window");
-        assert_eq!(flag_repeat(&k("fnd_1", "ETH", "2026-02-01", "2026-04-01"), &earlier), 0, "other instrument");
-        assert_eq!(flag_repeat(&k("fnd_3", "BTC", "2026-02-01", "2026-04-01"), &earlier), 0, "other finding");
+        let earlier = vec![
+            k("fnd_1", "BTC", "2026-01-01", "2026-03-01"),
+            k("fnd_2", "BTC", "2026-01-01", "2026-03-01"),
+        ];
+        assert_eq!(
+            flag_repeat(&k("fnd_1", "BTC", "2026-02-01", "2026-04-01"), &earlier),
+            1,
+            "overlapping window"
+        );
+        assert_eq!(
+            flag_repeat(&k("fnd_1", "BTC", "2026-03-02", "2026-05-01"), &earlier),
+            0,
+            "disjoint window"
+        );
+        assert_eq!(
+            flag_repeat(&k("fnd_1", "ETH", "2026-02-01", "2026-04-01"), &earlier),
+            0,
+            "other instrument"
+        );
+        assert_eq!(
+            flag_repeat(&k("fnd_3", "BTC", "2026-02-01", "2026-04-01"), &earlier),
+            0,
+            "other finding"
+        );
     }
 }

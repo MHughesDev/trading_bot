@@ -210,7 +210,9 @@ pub fn parse_candlesticks(
             event_time,
             knowledge,
             close_probability: probability,
-            volume: whole(candle.volume_fp.as_deref()).or(candle.volume).unwrap_or(0),
+            volume: whole(candle.volume_fp.as_deref())
+                .or(candle.volume)
+                .unwrap_or(0),
             open_interest: whole(candle.open_interest_fp.as_deref())
                 .or(candle.open_interest)
                 .unwrap_or(0),
@@ -298,7 +300,10 @@ pub async fn fetch_candlesticks(
 /// History rows as stored rows. The source id is resolved by the caller from
 /// `dataplane.source` by [`SOURCE_NAME`]; this does not guess one.
 #[must_use]
-pub fn to_rows(bars: &[KalshiHistoryBar], source_id: i32) -> Vec<storage::clickhouse::alt::ProbabilityRow> {
+pub fn to_rows(
+    bars: &[KalshiHistoryBar],
+    source_id: i32,
+) -> Vec<storage::clickhouse::alt::ProbabilityRow> {
     bars.iter()
         .map(|b| {
             storage::clickhouse::alt::ProbabilityRow::new(
@@ -399,7 +404,11 @@ mod tests {
     #[test]
     fn the_live_dollar_shape_parses_and_a_no_trade_period_is_skipped() {
         let rows = parse_candlesticks("KXHIGHNY-26SEP23-B65.5", LIVE_PAGE).expect("live shape");
-        assert_eq!(rows.len(), 1, "an empty price object is a period with no trades");
+        assert_eq!(
+            rows.len(),
+            1,
+            "an empty price object is a period with no trades"
+        );
         assert_eq!(rows[0].close_probability, dec!(0.34));
         assert_eq!(rows[0].volume, 30);
         assert_eq!(rows[0].open_interest, 30);
@@ -408,13 +417,18 @@ mod tests {
 
     #[test]
     fn a_dollar_price_outside_zero_to_one_is_refused() {
-        let bad = r#"{"candlesticks":[{"end_period_ts":1790089200,"price":{"close_dollars":"1.4000"}}]}"#;
+        let bad =
+            r#"{"candlesticks":[{"end_period_ts":1790089200,"price":{"close_dollars":"1.4000"}}]}"#;
         assert!(matches!(
             parse_candlesticks("KXTEST-26", bad),
             Err(KalshiHistoryError::ImpossibleProbability { .. })
         ));
-        let junk = r#"{"candlesticks":[{"end_period_ts":1790089200,"price":{"close_dollars":"abc"}}]}"#;
-        assert!(matches!(parse_candlesticks("KXTEST-26", junk), Err(KalshiHistoryError::Parse(_))));
+        let junk =
+            r#"{"candlesticks":[{"end_period_ts":1790089200,"price":{"close_dollars":"abc"}}]}"#;
+        assert!(matches!(
+            parse_candlesticks("KXTEST-26", junk),
+            Err(KalshiHistoryError::Parse(_))
+        ));
     }
 
     #[test]
@@ -428,7 +442,10 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::backfill::HttpGet for Canned {
-        async fn get(&self, url: &str) -> Result<crate::backfill::HttpResponse, dataplane::backfill::FetchError> {
+        async fn get(
+            &self,
+            url: &str,
+        ) -> Result<crate::backfill::HttpResponse, dataplane::backfill::FetchError> {
             self.0.lock().unwrap().push(url.to_owned());
             Ok(crate::backfill::HttpResponse {
                 status: 200,
@@ -449,17 +466,44 @@ mod tests {
             Utc.timestamp_opt(1_790_100_000, 0).unwrap(),
         );
         for _ in 0..limit().capacity {
-            let rows = fetch_candlesticks(&http, &limiter, KALSHI_REST_BASE, "KXHIGHNY-26SEP23-B65.5", from, to, 60)
-                .await
-                .expect("within budget");
+            let rows = fetch_candlesticks(
+                &http,
+                &limiter,
+                KALSHI_REST_BASE,
+                "KXHIGHNY-26SEP23-B65.5",
+                from,
+                to,
+                60,
+            )
+            .await
+            .expect("within budget");
             assert_eq!(rows.len(), 1);
         }
         let sent = http.0.lock().unwrap().len();
-        let refused = fetch_candlesticks(&http, &limiter, KALSHI_REST_BASE, "KXHIGHNY-26SEP23-B65.5", from, to, 60).await;
-        assert!(matches!(refused, Err(KalshiHistoryError::RateLimited(_))), "{refused:?}");
-        assert_eq!(http.0.lock().unwrap().len(), sent, "a refused request is not sent");
+        let refused = fetch_candlesticks(
+            &http,
+            &limiter,
+            KALSHI_REST_BASE,
+            "KXHIGHNY-26SEP23-B65.5",
+            from,
+            to,
+            60,
+        )
+        .await;
+        assert!(
+            matches!(refused, Err(KalshiHistoryError::RateLimited(_))),
+            "{refused:?}"
+        );
+        assert_eq!(
+            http.0.lock().unwrap().len(),
+            sent,
+            "a refused request is not sent"
+        );
         let url = http.0.lock().unwrap()[0].clone();
-        assert!(url.contains("/series/KXHIGHNY/markets/KXHIGHNY-26SEP23-B65.5/candlesticks?"), "{url}");
+        assert!(
+            url.contains("/series/KXHIGHNY/markets/KXHIGHNY-26SEP23-B65.5/candlesticks?"),
+            "{url}"
+        );
         assert!(url.contains("period_interval=60"), "{url}");
     }
 

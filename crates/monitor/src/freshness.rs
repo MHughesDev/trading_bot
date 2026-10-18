@@ -161,7 +161,8 @@ impl MonitorStore {
             let symbol: String = r.get("symbol");
             let venue: String = r.get("venue");
             let venue = Venue::named(&venue).map_err(|e| StoreError::Invalid(e.to_string()))?;
-            let feed = FeedKey::new(&symbol, venue).map_err(|e| StoreError::Invalid(e.to_string()))?;
+            let feed =
+                FeedKey::new(&symbol, venue).map_err(|e| StoreError::Invalid(e.to_string()))?;
             let tf: i32 = r.get("timeframe_secs");
             out.push(FeedRow {
                 feed,
@@ -357,7 +358,10 @@ mod tests {
     #[test]
     fn a_deployment_with_no_gauge_is_reported_unwatched() {
         let now = Utc::now();
-        let deployments = [deployment("d-eth", "ETH-USD"), deployment("d-btc", "BTC-USD")];
+        let deployments = [
+            deployment("d-eth", "ETH-USD"),
+            deployment("d-btc", "BTC-USD"),
+        ];
         let blind = unwatched(&deployments, &[row(10, true, 10, now)]);
         assert_eq!(blind.len(), 1);
         assert_eq!(blind[0].strategy_id, "d-eth");

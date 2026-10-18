@@ -96,8 +96,18 @@ async fn a_column_over_a_revised_macro_series_and_a_restated_fact_steps_only_whe
         &ch,
         21,
         &[
-            MacroObservation::derived("DGS10", d(2025, 6, 9), d(2025, 6, 10), Some(Decimal::new(40, 1))),
-            MacroObservation::derived("DGS10", d(2025, 6, 9), d(2025, 6, 12), Some(Decimal::new(42, 1))),
+            MacroObservation::derived(
+                "DGS10",
+                d(2025, 6, 9),
+                d(2025, 6, 10),
+                Some(Decimal::new(40, 1)),
+            ),
+            MacroObservation::derived(
+                "DGS10",
+                d(2025, 6, 9),
+                d(2025, 6, 12),
+                Some(Decimal::new(42, 1)),
+            ),
             MacroObservation::derived("DGS10", d(2025, 6, 13), d(2025, 6, 14), None),
         ],
     )
@@ -156,17 +166,37 @@ async fn a_column_over_a_revised_macro_series_and_a_restated_fact_steps_only_whe
     let t = |day, h| Utc.with_ymd_and_hms(2025, 6, day, h, 0, 0).unwrap();
 
     // Macro: a vintage is knowable at the end of its publication day.
-    assert_eq!(at(&rows, &m, t(10, 12)), None, "published today, not yet knowable");
-    assert_eq!(at(&rows, &m, t(11, 12)), Some(4.0), "the ORIGINAL before the revision");
-    assert_eq!(at(&rows, &m, t(12, 12)), Some(4.0), "revised today, not yet knowable");
-    assert_eq!(at(&rows, &m, t(13, 12)), Some(4.2), "the revision once its day has ended");
+    assert_eq!(
+        at(&rows, &m, t(10, 12)),
+        None,
+        "published today, not yet knowable"
+    );
+    assert_eq!(
+        at(&rows, &m, t(11, 12)),
+        Some(4.0),
+        "the ORIGINAL before the revision"
+    );
+    assert_eq!(
+        at(&rows, &m, t(12, 12)),
+        Some(4.0),
+        "revised today, not yet knowable"
+    );
+    assert_eq!(
+        at(&rows, &m, t(13, 12)),
+        Some(4.2),
+        "the revision once its day has ended"
+    );
     // The newest period reported missing: absent, never the older period's 4.2.
     assert_eq!(at(&rows, &m, t(15, 12)), None);
 
     // Fundamentals: absent before acceptance, the original at acceptance, the
     // restated figure only after its own acceptance.
     assert_eq!(at(&rows, &f, t(11, 19)), None, "filed after this bar");
-    assert_eq!(at(&rows, &f, t(11, 21)), Some(100.0), "the original once accepted");
+    assert_eq!(
+        at(&rows, &f, t(11, 21)),
+        Some(100.0),
+        "the original once accepted"
+    );
     assert_eq!(
         at(&rows, &f, t(13, 20)),
         Some(100.0),

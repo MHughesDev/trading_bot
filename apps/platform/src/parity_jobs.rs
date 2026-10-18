@@ -240,8 +240,12 @@ mod tests {
         }))
         .unwrap();
         Arc::new(
-            backtest::runner::compile_for_run(&g, &backtest::run::ParamMap::new(), &StdRegistries::new())
-                .unwrap(),
+            backtest::runner::compile_for_run(
+                &g,
+                &backtest::run::ParamMap::new(),
+                &StdRegistries::new(),
+            )
+            .unwrap(),
         )
     }
 
@@ -320,7 +324,8 @@ mod tests {
 
     #[test]
     fn yesterday_is_the_previous_utc_day() {
-        let (from, to) = yesterday(DateTime::from_timestamp_nanos(T0) + chrono::Duration::hours(30));
+        let (from, to) =
+            yesterday(DateTime::from_timestamp_nanos(T0) + chrono::Duration::hours(30));
         assert_eq!(from, DateTime::from_timestamp_nanos(T0));
         assert_eq!(to - from, chrono::Duration::days(1));
     }
@@ -350,7 +355,10 @@ mod tests {
         assert_eq!(checks[0].verdict, "diverged", "{checks:#?}");
         assert_eq!(checks[0].diverged_seq, Some(12));
         assert!(
-            checks[0].field.as_deref().is_some_and(|f| f.starts_with("values.f")),
+            checks[0]
+                .field
+                .as_deref()
+                .is_some_and(|f| f.starts_with("values.f")),
             "{checks:#?}"
         );
         assert_eq!(alert(&checks[0]), Severity::P1);
@@ -382,7 +390,10 @@ mod tests {
         assert_eq!(checks[0].verdict, "diverged", "{checks:#?}");
         assert_eq!(checks[0].diverged_seq, Some(1));
         assert!(
-            checks[0].field.as_deref().is_some_and(|f| f.starts_with("values.s")),
+            checks[0]
+                .field
+                .as_deref()
+                .is_some_and(|f| f.starts_with("values.s")),
             "{checks:#?}"
         );
     }
@@ -392,7 +403,14 @@ mod tests {
         let id = Uuid::nil();
         let records = journal(id, 3);
         let (from, to) = day();
-        let checks = check(id, "rev", Err("unknown operator".into()), &records, from, to);
+        let checks = check(
+            id,
+            "rev",
+            Err("unknown operator".into()),
+            &records,
+            from,
+            to,
+        );
         assert_eq!(checks[0].verdict, "unreplayable");
         assert_eq!(alert(&checks[0]), Severity::Warning);
     }
@@ -419,7 +437,10 @@ mod tests {
     #[test]
     fn the_parity_job_is_spawned_at_boot() {
         let main = include_str!("main.rs");
-        assert!(main.contains("\nmod parity_jobs;"), "main declares the module");
+        assert!(
+            main.contains("\nmod parity_jobs;"),
+            "main declares the module"
+        );
         let at = main
             .find("parity_jobs::spawn(pg.clone());")
             .expect("main must spawn the nightly parity job");

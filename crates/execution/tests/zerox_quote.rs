@@ -45,14 +45,20 @@ async fn a_sell_quote_is_requested_in_wei_and_priced_in_usdc() {
     assert_eq!(quote.fee_usd, Decimal::from(15));
 
     let head = mock.head_containing("GET /swap/permit2/price");
-    assert!(head.contains("sellAmount=1000000000000000000"), "1 WETH in wei: {head}");
+    assert!(
+        head.contains("sellAmount=1000000000000000000"),
+        "1 WETH in wei: {head}"
+    );
     assert!(head.contains("chainId=1"), "{head}");
     assert!(
         head.to_lowercase().contains("0x-api-key: key-1")
             && head.to_lowercase().contains("0x-version: v2"),
         "{head}"
     );
-    assert!(head.contains("sellToken=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), "{head}");
+    assert!(
+        head.contains("sellToken=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
+        "{head}"
+    );
 }
 
 #[tokio::test]
@@ -101,7 +107,11 @@ async fn an_unknown_token_or_no_liquidity_is_an_error() {
     .await;
     let quoter = ZeroXQuoter::new("k").with_base_url(&mock.base);
     assert!(quoter
-        .fetch_quote(&intent(Side::Sell, 1), Price::from_decimal(Decimal::ONE), Decimal::ONE)
+        .fetch_quote(
+            &intent(Side::Sell, 1),
+            Price::from_decimal(Decimal::ONE),
+            Decimal::ONE
+        )
         .await
         .is_err());
 }

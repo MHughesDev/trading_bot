@@ -22,7 +22,8 @@ use domain::{
     instrument::HaltPolicy,
     money::{Price, Size},
     order::{OrderIntent, Side},
-    strategy_def::risk_overrides::RiskOverrides, RiskRejection, TrustTier,
+    strategy_def::risk_overrides::RiskOverrides,
+    RiskRejection, TrustTier,
 };
 use rust_decimal::Decimal;
 use uuid::Uuid;
@@ -437,7 +438,11 @@ impl RiskGate {
     /// **reduces** the position (`reduce_only`, or the opposite side and no larger
     /// than the position) is never cut: a strategy being sized down must still be
     /// able to get out.
-    fn scaled(&self, mut intent: OrderIntent, ctx: &GateContext) -> Result<OrderIntent, RiskRejection> {
+    fn scaled(
+        &self,
+        mut intent: OrderIntent,
+        ctx: &GateContext,
+    ) -> Result<OrderIntent, RiskRejection> {
         let key = intent.strategy_id.as_deref().or(ctx.strategy_id.as_deref());
         let Some(key) = key else { return Ok(intent) };
         let pct = self.kill_switch.scale_pct(key);
@@ -945,10 +950,14 @@ mod tests {
         let ks = Arc::new(KillSwitch::new(false));
         let gate = gate_with(&ks);
         ks.scale_strategy("dep-1", 50);
-        let ok = gate.check(sized("dep-1", Side::Buy, "1"), &simple_ctx()).unwrap();
+        let ok = gate
+            .check(sized("dep-1", Side::Buy, "1"), &simple_ctx())
+            .unwrap();
         assert_eq!(ok.intent.size.inner(), Decimal::from_str("0.5").unwrap());
         // Another strategy, and a manual order, keep their size.
-        let other = gate.check(sized("dep-2", Side::Buy, "1"), &simple_ctx()).unwrap();
+        let other = gate
+            .check(sized("dep-2", Side::Buy, "1"), &simple_ctx())
+            .unwrap();
         assert_eq!(other.intent.size.inner(), Decimal::ONE);
         let manual = gate.check(simple_intent("BTC-USD"), &simple_ctx()).unwrap();
         assert_eq!(manual.intent.size.inner(), Decimal::ONE);
@@ -960,7 +969,9 @@ mod tests {
         let gate = gate_with(&ks);
         ks.scale_strategy("dep-1", 25);
         // 0.0107 * 25% = 0.002675 -> lot 0.001 -> 0.002
-        let ok = gate.check(sized("dep-1", Side::Buy, "0.0107"), &simple_ctx()).unwrap();
+        let ok = gate
+            .check(sized("dep-1", Side::Buy, "0.0107"), &simple_ctx())
+            .unwrap();
         assert_eq!(ok.intent.size.inner(), Decimal::from_str("0.002").unwrap());
     }
 
@@ -970,7 +981,10 @@ mod tests {
         let gate = gate_with(&ks);
         ks.scale_strategy("dep-1", 10);
         let err = gate.check(sized("dep-1", Side::Buy, "0.005"), &simple_ctx());
-        assert!(matches!(err, Err(RiskRejection::StrategyHalted { .. })), "{err:?}");
+        assert!(
+            matches!(err, Err(RiskRejection::StrategyHalted { .. })),
+            "{err:?}"
+        );
     }
 
     #[test]

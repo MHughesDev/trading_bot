@@ -130,7 +130,10 @@ pub fn feature_truncation(
     Check {
         name: "feature_truncation",
         passed: true,
-        detail: format!("{compared} feature values identical on a series cut to {keep} of {} bars", obs.len()),
+        detail: format!(
+            "{compared} feature values identical on a series cut to {keep} of {} bars",
+            obs.len()
+        ),
     }
 }
 
@@ -193,7 +196,10 @@ pub fn check_folds(split: &SplitSpec, labels: &[LabelInterval]) -> Check {
     Check {
         name: "label_fold_overlap",
         passed: true,
-        detail: format!("{} folds, no train label overlaps a test label", folds.len()),
+        detail: format!(
+            "{} folds, no train label overlaps a test label",
+            folds.len()
+        ),
     }
 }
 
@@ -239,8 +245,12 @@ pub fn dataset_checks(
         ),
         from_report(
             "causal_alignment",
-            &features::leakage::causal_alignment(obs, step_ns, features::leakage::Stamping::AsDeclared)
-                .report,
+            &features::leakage::causal_alignment(
+                obs,
+                step_ns,
+                features::leakage::Stamping::AsDeclared,
+            )
+            .report,
         ),
     ];
     for c in &mut out {
@@ -255,14 +265,16 @@ pub fn production_builder(
     horizon_bars: u64,
     step_ns: i64,
 ) -> impl Fn(&[BarObs]) -> TrainingFrame + '_ {
-    move |obs| features::training_frame::build_aligned_training_frame(obs, features, horizon_bars, step_ns)
+    move |obs| {
+        features::training_frame::build_aligned_training_frame(obs, features, horizon_bars, step_ns)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dataplane::split::{EmbargoInputs, SplitKind, SplitSpec};
     use dataplane::quality::QualityFlags;
+    use dataplane::split::{EmbargoInputs, SplitKind, SplitSpec};
 
     fn bars(n: usize) -> Vec<BarObs> {
         (0..n)
@@ -350,8 +362,11 @@ mod tests {
         // the purge cannot cover them and a train label reaches into the test block.
         let long = horizon_intervals(200, 40);
         let mut s = spec(SplitKind::PurgedKfold, 5);
-        s.set_purge_on(dataplane::split::PurgeOn::T0, Some("planted: purge on label start only"))
-            .expect("override with a reason");
+        s.set_purge_on(
+            dataplane::split::PurgeOn::T0,
+            Some("planted: purge on label start only"),
+        )
+        .expect("override with a reason");
         let c = check_folds(&s, &long);
         assert!(!c.passed, "an overlap must fail: {}", c.detail);
         assert!(c.detail.contains("overlaps test label"), "{}", c.detail);

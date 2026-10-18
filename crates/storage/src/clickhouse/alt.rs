@@ -38,7 +38,10 @@ fn ns(t: DateTime<Utc>) -> String {
 }
 
 fn dec(d: Option<Decimal>) -> String {
-    d.map_or_else(|| "NULL".to_string(), |v| format!("toDecimal128('{v}', 18)"))
+    d.map_or_else(
+        || "NULL".to_string(),
+        |v| format!("toDecimal128('{v}', 18)"),
+    )
 }
 
 fn parse_dec(s: &str) -> Result<Decimal, ChError> {
@@ -61,7 +64,11 @@ async fn exec(url: &str, sql: &str) -> Result<(), ChError> {
 ///
 /// # Errors
 /// An invalid observation, or the backend.
-pub async fn write_macro(url: &str, source_id: i32, rows: &[MacroObservation]) -> Result<usize, ChError> {
+pub async fn write_macro(
+    url: &str,
+    source_id: i32,
+    rows: &[MacroObservation],
+) -> Result<usize, ChError> {
     if rows.is_empty() {
         return Ok(0);
     }

@@ -51,7 +51,10 @@ mod tests {
         c.record_consumer_lag("corr-test-lane", 42);
         c.record_reconciliation_divergence(3);
         let text = metrics::global().render();
-        assert!(text.contains("pipeline_consumer_lag_ms{lane=\"corr-test-lane\"} 42"), "{text}");
+        assert!(
+            text.contains("pipeline_consumer_lag_ms{lane=\"corr-test-lane\"} 42"),
+            "{text}"
+        );
         assert!(text.contains("reconciliation_divergences 3"), "{text}");
     }
 }

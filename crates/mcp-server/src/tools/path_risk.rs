@@ -1162,7 +1162,9 @@ mod tests {
     fn too_few_trades_is_refused_rather_than_answered() {
         let out = resample_report(&rows(&[1.0, 2.0, -1.0], 0.1), &req(Mode::Bootstrap, None));
         assert_eq!(
-            out.get("error").and_then(|e| e.get("code")).and_then(Value::as_str),
+            out.get("error")
+                .and_then(|e| e.get("code"))
+                .and_then(Value::as_str),
             Some("too_few_trades")
         );
         assert_eq!(
@@ -1178,10 +1180,15 @@ mod tests {
     fn a_missing_mode_is_refused_and_the_refusal_explains_both_modes() {
         let e = parse_resample(&json!({ "run_id": "r1" })).expect_err("mode is required");
         assert_eq!(
-            e.get("error").and_then(|e| e.get("code")).and_then(Value::as_str),
+            e.get("error")
+                .and_then(|e| e.get("code"))
+                .and_then(Value::as_str),
             Some("mode_required")
         );
-        let why = e.pointer("/error/message").and_then(Value::as_str).expect("why");
+        let why = e
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .expect("why");
         assert!(why.contains("path risk"), "{why}");
         assert!(why.contains("estimation uncertainty"), "{why}");
     }
@@ -1190,7 +1197,12 @@ mod tests {
     fn block_mode_is_refused_by_name_and_names_the_symbol_it_would_need() {
         let e = parse_resample(&json!({ "run_id": "r1", "mode": "block" }))
             .expect_err("block is not offered");
-        assert_eq!(e.get("error").and_then(|e| e.get("code")).and_then(Value::as_str), Some("unknown_mode"));
+        assert_eq!(
+            e.get("error")
+                .and_then(|e| e.get("code"))
+                .and_then(Value::as_str),
+            Some("unknown_mode")
+        );
         let note = e
             .get("block_not_offered")
             .and_then(Value::as_str)
@@ -1203,7 +1215,9 @@ mod tests {
         let e = parse_resample(&json!({ "run_id": "r1", "mode": "bootstrap", "n_paths": 10 }))
             .expect_err("below the floor");
         assert_eq!(
-            e.get("error").and_then(|e| e.get("code")).and_then(Value::as_str),
+            e.get("error")
+                .and_then(|e| e.get("code"))
+                .and_then(Value::as_str),
             Some("n_paths_out_of_range")
         );
     }
@@ -1302,7 +1316,9 @@ mod tests {
         let trades = rows(&vec![10.0; 40], 0.0);
         let out = shock_report(&trades, &shock("r1"));
         assert_eq!(
-            out.get("error").and_then(|e| e.get("code")).and_then(Value::as_str),
+            out.get("error")
+                .and_then(|e| e.get("code"))
+                .and_then(Value::as_str),
             Some("no_costs_charged")
         );
         assert!(out.get("breakeven_multiplier").is_none(), "{out}");
@@ -1314,7 +1330,9 @@ mod tests {
         trades[7].costs_paid = None;
         let out = shock_report(&trades, &shock("r1"));
         assert_eq!(
-            out.get("error").and_then(|e| e.get("code")).and_then(Value::as_str),
+            out.get("error")
+                .and_then(|e| e.get("code"))
+                .and_then(Value::as_str),
             Some("costs_not_recorded")
         );
         assert_eq!(
@@ -1392,7 +1410,9 @@ mod tests {
         let e = parse_shock(&json!({ "run_id": "r1", "multipliers": [1.0, -2.0] }))
             .expect_err("negative costs are not a shock");
         assert_eq!(
-            e.get("error").and_then(|e| e.get("code")).and_then(Value::as_str),
+            e.get("error")
+                .and_then(|e| e.get("code"))
+                .and_then(Value::as_str),
             Some("bad_multipliers")
         );
     }

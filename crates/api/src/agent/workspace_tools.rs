@@ -408,7 +408,10 @@ mod tests {
             Some("playbook")
         );
         assert_eq!(activated_skill(".claude/skills/playbook/notes.md"), None);
-        assert_eq!(activated_skill(".claude/skills/skill-finder/GLOSSARY.md"), None);
+        assert_eq!(
+            activated_skill(".claude/skills/skill-finder/GLOSSARY.md"),
+            None
+        );
         assert_eq!(activated_skill("work/SKILL.md"), None);
     }
 }

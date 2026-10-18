@@ -197,8 +197,16 @@ enum Kind {
     YangZhang,
     Hurst,
     Fracdiff(usize),
-    EnsembleZscore { n1: usize, n2: usize, n3: usize },
-    EnsembleReturns { n1: usize, n2: usize, n3: usize },
+    EnsembleZscore {
+        n1: usize,
+        n2: usize,
+        n3: usize,
+    },
+    EnsembleReturns {
+        n1: usize,
+        n2: usize,
+        n3: usize,
+    },
 }
 
 /// Which line of a two-sided band a feature returns.
@@ -811,8 +819,16 @@ fn construct(name: &str) -> Option<Arc<dyn Feature>> {
         "yang_zhang_vol" => windowed(Kind::YangZhang),
         "hurst" => windowed(Kind::Hurst),
         "fracdiff" => windowed(Kind::Fracdiff(p[1])),
-        "lookback_ensemble_zscore" => windowed(Kind::EnsembleZscore { n1: p[0], n2: p[1], n3: p[2] }),
-        "lookback_ensemble_returns" => windowed(Kind::EnsembleReturns { n1: p[0], n2: p[1], n3: p[2] }),
+        "lookback_ensemble_zscore" => windowed(Kind::EnsembleZscore {
+            n1: p[0],
+            n2: p[1],
+            n3: p[2],
+        }),
+        "lookback_ensemble_returns" => windowed(Kind::EnsembleReturns {
+            n1: p[0],
+            n2: p[1],
+            n3: p[2],
+        }),
 
         // Unreachable while the catalogue and this match agree, which
         // `the_catalogue_and_the_constructor_agree_in_both_directions` asserts.

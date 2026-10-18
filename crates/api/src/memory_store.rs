@@ -525,13 +525,12 @@ impl MemoryStore {
     /// As [`Self::store_report`], or the insert failing.
     pub async fn publish_monthly_reports(&self, today: &str) -> Result<usize, MemoryError> {
         use chrono::Datelike;
-        let day = NaiveDate::parse_from_str(today, "%Y-%m-%d").map_err(|_| {
-            MemoryError::Unreadable {
+        let day =
+            NaiveDate::parse_from_str(today, "%Y-%m-%d").map_err(|_| MemoryError::Unreadable {
                 id: "monthly_report".into(),
                 field: "today",
                 value: today.to_string(),
-            }
-        })?;
+            })?;
         let month = day.with_day(1).unwrap_or(day);
         let users: Vec<Uuid> = sqlx::query_scalar(
             "SELECT DISTINCT e.user_id FROM agent_memory.entry e

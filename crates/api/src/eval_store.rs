@@ -55,10 +55,10 @@ pub async fn refresh_calibration(
         let model: String = r.get("model");
         let est: i64 = r.get("est_prompt_tokens");
         let act: i64 = r.get("prompt_tokens");
-        by_model
-            .entry(model)
-            .or_default()
-            .push((u64::try_from(est).unwrap_or(0), u64::try_from(act).unwrap_or(0)));
+        by_model.entry(model).or_default().push((
+            u64::try_from(est).unwrap_or(0),
+            u64::try_from(act).unwrap_or(0),
+        ));
     }
 
     let mut written = Vec::new();
@@ -128,11 +128,10 @@ pub async fn record_holdout_draw(
     holdout: &Holdout,
     harness_version: &str,
 ) -> Result<(), EvalStoreError> {
-    let last: Option<i32> = sqlx::query_scalar(
-        "SELECT corpus_size FROM eval_holdout_draw ORDER BY id DESC LIMIT 1",
-    )
-    .fetch_optional(pool)
-    .await?;
+    let last: Option<i32> =
+        sqlx::query_scalar("SELECT corpus_size FROM eval_holdout_draw ORDER BY id DESC LIMIT 1")
+            .fetch_optional(pool)
+            .await?;
     if let Some(prev) = last {
         let prev_draw = Holdout {
             draw: harness::eval::HoldoutDraw {
@@ -240,7 +239,11 @@ pub fn spawn_eval_jobs(pool: PgPool) {
             match refresh_calibration(&pool).await {
                 Ok(rows) => {
                     for (model, c) in rows {
-                        tracing::info!(model, bytes_per_token = c.bytes_per_token, "token calibration refreshed");
+                        tracing::info!(
+                            model,
+                            bytes_per_token = c.bytes_per_token,
+                            "token calibration refreshed"
+                        );
                     }
                 }
                 Err(e) => tracing::warn!(error = %e, "token calibration refresh failed"),

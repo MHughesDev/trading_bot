@@ -202,13 +202,19 @@ impl OrderBookBuilder {
             .iter()
             .rev()
             .take(n)
-            .map(|(p, s)| BookLevel { price: *p, size: *s })
+            .map(|(p, s)| BookLevel {
+                price: *p,
+                size: *s,
+            })
             .collect();
         let asks = self
             .asks
             .iter()
             .take(n)
-            .map(|(p, s)| BookLevel { price: *p, size: *s })
+            .map(|(p, s)| BookLevel {
+                price: *p,
+                size: *s,
+            })
             .collect();
         (bids, asks)
     }
@@ -278,10 +284,16 @@ mod tests {
         let skipped = OrderBookPayload::new_delta(vec![lvl("100", "9")], vec![], 12);
         assert_eq!(
             b.feed_update(&skipped),
-            ApplyOutcome::GapDetected { expected: 11, got: 12 }
+            ApplyOutcome::GapDetected {
+                expected: 11,
+                got: 12
+            }
         );
         assert_eq!(b.state(), BookState::NeedsSnapshot);
-        assert!(b.best_bid().is_none() && b.mid().is_none(), "no reads from a broken book");
+        assert!(
+            b.best_bid().is_none() && b.mid().is_none(),
+            "no reads from a broken book"
+        );
         // Later deltas are refused until a snapshot.
         let next = OrderBookPayload::new_delta(vec![], vec![], 13);
         assert_eq!(b.feed_update(&next), ApplyOutcome::AwaitingSnapshot);

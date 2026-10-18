@@ -61,13 +61,17 @@ async fn re_polling_an_unchanged_settlement_writes_nothing_and_a_restatement_wri
     assert_eq!(write_funding(&url, &[row(first, 52)]).await.unwrap(), 1);
     // The restart / the next poll: same settlement, same rate, later receipt.
     assert_eq!(
-        write_funding(&url, &[row(first + Duration::minutes(15), 52)]).await.unwrap(),
+        write_funding(&url, &[row(first + Duration::minutes(15), 52)])
+            .await
+            .unwrap(),
         0,
         "an unchanged settlement must not be written twice"
     );
     // A restatement: same settlement, different rate. Kept, as a new row.
     assert_eq!(
-        write_funding(&url, &[row(first + Duration::minutes(30), 53)]).await.unwrap(),
+        write_funding(&url, &[row(first + Duration::minutes(30), 53)])
+            .await
+            .unwrap(),
         1
     );
     let n: N = connect(&url)

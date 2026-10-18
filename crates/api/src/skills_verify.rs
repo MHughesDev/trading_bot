@@ -27,7 +27,9 @@ use skills::registry::{
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use crate::skills_store::{files_from_json, files_to_json, patch_threshold, tool_catalogue, SkillStore, StoreError};
+use crate::skills_store::{
+    files_from_json, files_to_json, patch_threshold, tool_catalogue, SkillStore, StoreError,
+};
 
 #[derive(Debug)]
 pub struct ProposalInput {
@@ -50,7 +52,13 @@ pub struct ProposalOutcome {
     pub verdicts: Vec<Value>,
 }
 
-async fn record(pg: &PgPool, proposal: Uuid, step: &str, passed: bool, detail: Value) -> Result<Value, StoreError> {
+async fn record(
+    pg: &PgPool,
+    proposal: Uuid,
+    step: &str,
+    passed: bool,
+    detail: Value,
+) -> Result<Value, StoreError> {
     sqlx::query(
         "INSERT INTO skill_registry.skill_verdict (proposal_id, step, passed, detail) VALUES ($1, $2, $3, $4)",
     )
@@ -65,14 +73,15 @@ async fn record(pg: &PgPool, proposal: Uuid, step: &str, passed: bool, detail: V
 
 /// Existing skills this proposer can see, as `(name, body)`, for the near-duplicate
 /// search.
-async fn existing_bodies(store: &SkillStore, user: Uuid, project: Uuid) -> Result<Vec<(String, String)>, StoreError> {
+async fn existing_bodies(
+    store: &SkillStore,
+    user: Uuid,
+    project: Uuid,
+) -> Result<Vec<(String, String)>, StoreError> {
     let vis = store.visible(user, Some(project)).await?;
     let refs: Vec<&skills::materialiser::RegistrySkill> = vis.iter().collect();
     let bundles = store.bundles_for(&refs).await?;
-    Ok(bundles
-        .into_iter()
-        .map(|(n, f)| (n, body_of(&f)))
-        .collect())
+    Ok(bundles.into_iter().map(|(n, f)| (n, body_of(&f))).collect())
 }
 
 /// Submit a proposal (RA-3.1).
@@ -148,7 +157,10 @@ pub async fn propose(pg: &PgPool, input: ProposalInput) -> Result<ProposalOutcom
     .await
     .map_err(|e| match e {
         sqlx::Error::Database(ref d) if d.message().contains("proposed_name") => {
-            StoreError::Refused(format!("{:?} is not a valid skill name: lowercase letters, digits and hyphens", input.name))
+            StoreError::Refused(format!(
+                "{:?} is not a valid skill name: lowercase letters, digits and hyphens",
+                input.name
+            ))
         }
         other => StoreError::Db(other),
     })?
@@ -163,7 +175,17 @@ pub async fn propose(pg: &PgPool, input: ProposalInput) -> Result<ProposalOutcom
     .execute(pg)
     .await?;
 
-    let verdicts = run_static(pg, proposal_id, &proposed_name, &input.category, &files, &disposition, similarity, &input.reason).await?;
+    let verdicts = run_static(
+        pg,
+        proposal_id,
+        &proposed_name,
+        &input.category,
+        &files,
+        &disposition,
+        similarity,
+        &input.reason,
+    )
+    .await?;
     let failed = verdicts.iter().any(|v| v["passed"] == json!(false));
     if failed {
         sqlx::query(
@@ -203,7 +225,16 @@ async fn run_static(
     match &checked {
         Ok(_) => {
             out.push(record(pg, proposal, "lint", true, json!({})).await?);
-            out.push(record(pg, proposal, "procedure", true, json!({ "checked": is_procedure })).await?);
+            out.push(
+                record(
+                    pg,
+                    proposal,
+                    "procedure",
+                    true,
+                    json!({ "checked": is_procedure }),
+                )
+                .await?,
+            );
         }
         Err(skills::registry::AdmissionError::Procedure(p)) => {
             out.push(record(pg, proposal, "lint", true, json!({})).await?);
@@ -217,10 +248,28 @@ async fn run_static(
             out.push(record(pg, proposal, "lint", false, json!({ "findings": findings })).await?);
         }
         Err(e) => {
-            out.push(record(pg, proposal, "lint", false, json!({ "error": e.to_string() })).await?);
+            out.push(
+                record(
+                    pg,
+                    proposal,
+                    "lint",
+                    false,
+                    json!({ "error": e.to_string() }),
+                )
+                .await?,
+            );
         }
     }
-    out.push(record(pg, proposal, "triggers", skills::registry::Reason::parse(reason).is_some(), json!({ "reason": reason })).await?);
+    out.push(
+        record(
+            pg,
+            proposal,
+            "triggers",
+            skills::registry::Reason::parse(reason).is_some(),
+            json!({ "reason": reason }),
+        )
+        .await?,
+    );
     out.push(
         record(
             pg,
@@ -256,9 +305,17 @@ async fn latest(pg: &PgPool, proposal: Uuid) -> Result<BTreeMap<String, bool>, S
 ///
 /// # Errors
 /// A step name the table does not know; the database.
-pub async fn record_step(pg: &PgPool, proposal: Uuid, step: &str, passed: bool, detail: Value) -> Result<Value, StoreError> {
+pub async fn record_step(
+    pg: &PgPool,
+    proposal: Uuid,
+    step: &str,
+    passed: bool,
+    detail: Value,
+) -> Result<Value, StoreError> {
     if !skills::registry::REQUIRED_STEPS.contains(&step) && !matches!(step, "tests" | "savings") {
-        return Err(StoreError::Refused(format!("{step:?} is not a verification step")));
+        return Err(StoreError::Refused(format!(
+            "{step:?} is not a verification step"
+        )));
     }
     record(pg, proposal, step, passed, detail).await
 }
@@ -307,7 +364,8 @@ async fn analysis_tests(files: &BTreeMap<String, Vec<u8>>) -> (bool, Value) {
         .unwrap_or_else(|_| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
     let cfg = skills::runner::RunnerConfig::from_workspace(&root);
     let name = format!("{}_check", key("name", "skill").replace('-', "_"));
-    let description = "An analysis-code skill under the platform's quality tests, run in the sandbox.";
+    let description =
+        "An analysis-code skill under the platform's quality tests, run in the sandbox.";
     let make = |outputs: Vec<String>| {
         let contract = Contract::new(
             vec![spec.ts_key.clone(), spec.series_key.clone()],
@@ -349,7 +407,10 @@ async fn analysis_tests(files: &BTreeMap<String, Vec<u8>>) -> (bool, Value) {
                     }
                     Err(e) => {
                         ok = false;
-                        detail.insert("truncation".into(), json!({ "passed": false, "error": e.to_string() }));
+                        detail.insert(
+                            "truncation".into(),
+                            json!({ "passed": false, "error": e.to_string() }),
+                        );
                     }
                 }
             }
@@ -373,7 +434,10 @@ async fn analysis_tests(files: &BTreeMap<String, Vec<u8>>) -> (bool, Value) {
                     }
                     Err(e) => {
                         ok = false;
-                        detail.insert("noise_null".into(), json!({ "passed": false, "error": e.to_string() }));
+                        detail.insert(
+                            "noise_null".into(),
+                            json!({ "passed": false, "error": e.to_string() }),
+                        );
                     }
                 }
             }
@@ -390,11 +454,13 @@ async fn analysis_tests(files: &BTreeMap<String, Vec<u8>>) -> (bool, Value) {
 }
 
 async fn bundle_of(pg: &PgPool, proposal: Uuid) -> Result<BTreeMap<String, Vec<u8>>, StoreError> {
-    let row = sqlx::query("SELECT files FROM skill_registry.skill_proposal_bundle WHERE proposal_id = $1")
-        .bind(proposal)
-        .fetch_optional(pg)
-        .await?
-        .ok_or_else(|| StoreError::NotFound(proposal.to_string()))?;
+    let row = sqlx::query(
+        "SELECT files FROM skill_registry.skill_proposal_bundle WHERE proposal_id = $1",
+    )
+    .bind(proposal)
+    .fetch_optional(pg)
+    .await?
+    .ok_or_else(|| StoreError::NotFound(proposal.to_string()))?;
     Ok(files_from_json(&row.get::<Value, _>(0)))
 }
 
@@ -410,8 +476,12 @@ pub async fn verify(pg: &PgPool, proposal: Uuid) -> Result<Value, StoreError> {
     let (pairs, variants) = store.pairs(Some(proposal), None, "replay").await?;
     let replay = replay_verdict(&pairs, variants, &SequentialDesign::default());
     let detail = match &replay {
-        Ok(d) => json!({ "decision": format!("{d:?}"), "pairs": pairs.len(), "variants": variants }),
-        Err(f) => json!({ "failure": format!("{f:?}"), "pairs": pairs.len(), "variants": variants }),
+        Ok(d) => {
+            json!({ "decision": format!("{d:?}"), "pairs": pairs.len(), "variants": variants })
+        }
+        Err(f) => {
+            json!({ "failure": format!("{f:?}"), "pairs": pairs.len(), "variants": variants })
+        }
     };
     record(pg, proposal, "replay", replay.is_ok(), detail).await?;
     if is_analysis_code(&files) {
@@ -423,7 +493,10 @@ pub async fn verify(pg: &PgPool, proposal: Uuid) -> Result<Value, StoreError> {
         let (rows, _) = store.pairs(Some(proposal), None, "replay").await?;
         let (passed, detail) = match skills::lifecycle::savings_condition(&rows, 0.20) {
             Ok(saved) => (true, json!({ "saved": saved, "required": 0.20 })),
-            Err(f) => (false, json!({ "failure": format!("{f:?}"), "required": 0.20 })),
+            Err(f) => (
+                false,
+                json!({ "failure": format!("{f:?}"), "required": 0.20 }),
+            ),
         };
         record(pg, proposal, "savings", passed, detail).await?;
     }
@@ -455,7 +528,11 @@ pub async fn verify(pg: &PgPool, proposal: Uuid) -> Result<Value, StoreError> {
 ///
 /// # Errors
 /// [`StoreError::Refused`] naming the first unmet step.
-pub async fn admit_proposal(pg: &PgPool, proposal: Uuid, admitted_by: &str) -> Result<Uuid, StoreError> {
+pub async fn admit_proposal(
+    pg: &PgPool,
+    proposal: Uuid,
+    admitted_by: &str,
+) -> Result<Uuid, StoreError> {
     let l = latest(pg, proposal).await?;
     let required = required_steps(&bundle_of(pg, proposal).await?);
     if let Some(step) = first_unmet_in(&required, &l) {
@@ -480,21 +557,37 @@ pub async fn admit_proposal(pg: &PgPool, proposal: Uuid, admitted_by: &str) -> R
         return Err(StoreError::Refused(format!("proposal is already {status}")));
     }
     let (category, files): (String, Value) = (row.get(4), row.get(5));
-    let draft = Draft::check(Scope::Project, &category, &name, files_from_json(&files), &tool_catalogue())
-        .map_err(|e| StoreError::Refused(e.to_string()))?;
+    let draft = Draft::check(
+        Scope::Project,
+        &category,
+        &name,
+        files_from_json(&files),
+        &tool_catalogue(),
+    )
+    .map_err(|e| StoreError::Refused(e.to_string()))?;
     let store = SkillStore::new(pg.clone());
     // A patch's parent is the target's current version, read at admission, so a
     // second patch of the same skill chains onto the first.
     let parent: Option<String> = match target {
-        Some(t) => sqlx::query("SELECT current_version FROM skill_registry.skill WHERE skill_id = $1")
-            .bind(t)
-            .fetch_optional(pg)
-            .await?
-            .and_then(|r| r.get::<Option<String>, _>(0)),
+        Some(t) => {
+            sqlx::query("SELECT current_version FROM skill_registry.skill WHERE skill_id = $1")
+                .bind(t)
+                .fetch_optional(pg)
+                .await?
+                .and_then(|r| r.get::<Option<String>, _>(0))
+        }
         None => None,
     };
     let id = store
-        .admit(&draft, Status::Provisional, None, Some(project), false, parent.as_deref(), admitted_by)
+        .admit(
+            &draft,
+            Status::Provisional,
+            None,
+            Some(project),
+            false,
+            parent.as_deref(),
+            admitted_by,
+        )
         .await?;
     if target.is_none() {
         store.freeze_with(project, &name).await?;

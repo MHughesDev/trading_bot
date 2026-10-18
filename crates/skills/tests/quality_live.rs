@@ -70,9 +70,16 @@ const BFILL: &str = r#"def run(payload):
 #[ignore = "requires python on PATH"]
 async fn a_causal_skill_passes_truncation() {
     let (ts, x) = series(120);
-    let r = truncation_check(&skill(CAUSAL, &["result"]), &config(), &SeriesSpec::default(), &ts, &x, &default_cuts(120, 4))
-        .await
-        .unwrap();
+    let r = truncation_check(
+        &skill(CAUSAL, &["result"]),
+        &config(),
+        &SeriesSpec::default(),
+        &ts,
+        &x,
+        &default_cuts(120, 4),
+    )
+    .await
+    .unwrap();
     assert!(r.passed, "{r:?}");
     assert_eq!(r.cuts_checked, 4);
 }
@@ -83,10 +90,20 @@ async fn a_bfill_skill_fails_truncation_naming_the_first_differing_timestamp() {
     let (ts, x) = series(120);
     // Cut at row 40, the first gap: the prefix has no later value to fill it from, so the
     // truncated run answers `None` where the full run answered the value from row 42.
-    let r = truncation_check(&skill(BFILL, &["result"]), &config(), &SeriesSpec::default(), &ts, &x, &[40, 60, 100])
-        .await
-        .unwrap();
-    assert!(!r.passed, "a back-fill reads the future and must fail: {r:?}");
+    let r = truncation_check(
+        &skill(BFILL, &["result"]),
+        &config(),
+        &SeriesSpec::default(),
+        &ts,
+        &x,
+        &[40, 60, 100],
+    )
+    .await
+    .unwrap();
+    assert!(
+        !r.passed,
+        "a back-fill reads the future and must fail: {r:?}"
+    );
     assert_eq!(r.first_differing_ts, Some(ts[40]), "{r:?}");
     assert_eq!(r.cut_ts, Some(ts[40]));
     assert!(r.full.is_some() && r.truncated.is_none());
@@ -118,9 +135,27 @@ def run(payload):
 #[ignore = "requires python on PATH"]
 async fn a_calibrated_test_passes_the_noise_null_and_one_that_finds_structure_in_noise_fails() {
     let spec = SeriesSpec::default();
-    let good = noise_null(&skill(WELL_CALIBRATED, &["p_value"]), &config(), &spec, 400, 200, 11).await.unwrap();
+    let good = noise_null(
+        &skill(WELL_CALIBRATED, &["p_value"]),
+        &config(),
+        &spec,
+        400,
+        200,
+        11,
+    )
+    .await
+    .unwrap();
     assert!(good.passed, "{good:?}");
-    let bad = noise_null(&skill(FINDS_STRUCTURE, &["p_value"]), &config(), &spec, 200, 200, 11).await.unwrap();
+    let bad = noise_null(
+        &skill(FINDS_STRUCTURE, &["p_value"]),
+        &config(),
+        &spec,
+        200,
+        200,
+        11,
+    )
+    .await
+    .unwrap();
     assert!(!bad.passed, "{bad:?}");
     assert!(bad.false_positive_rate > 0.07);
 }

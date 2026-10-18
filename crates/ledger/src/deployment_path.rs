@@ -130,7 +130,9 @@ impl ValidatedProposal {
 }
 
 fn is_sha256(s: &str) -> bool {
-    s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    s.len() == 64
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 fn positive_decimal(s: &str) -> bool {
@@ -177,15 +179,25 @@ impl ProposalDraft {
         }
         let t = &self.thresholds;
         for (name, v, lo_open) in [
-            ("max_abs_return_divergence", t.max_abs_return_divergence, true),
-            ("max_cum_return_divergence", t.max_cum_return_divergence, true),
+            (
+                "max_abs_return_divergence",
+                t.max_abs_return_divergence,
+                true,
+            ),
+            (
+                "max_cum_return_divergence",
+                t.max_cum_return_divergence,
+                true,
+            ),
             ("max_position_divergence", t.max_position_divergence, false),
         ] {
             if !v.is_finite() || v < 0.0 || (lo_open && v == 0.0) {
                 return Err(ProposalRefusal::BadThreshold(name));
             }
         }
-        if !(t.min_signal_match.is_finite() && t.min_signal_match > 0.0 && t.min_signal_match <= 1.0)
+        if !(t.min_signal_match.is_finite()
+            && t.min_signal_match > 0.0
+            && t.min_signal_match <= 1.0)
         {
             return Err(ProposalRefusal::BadThreshold("min_signal_match"));
         }
@@ -206,7 +218,10 @@ impl ProposalDraft {
 ///
 /// # Errors
 /// [`ProposalRefusal::StaleAgainstHead`] when they differ.
-pub fn check_not_stale(proposal_revision: &str, head_revision: &str) -> Result<(), ProposalRefusal> {
+pub fn check_not_stale(
+    proposal_revision: &str,
+    head_revision: &str,
+) -> Result<(), ProposalRefusal> {
     if proposal_revision == head_revision {
         Ok(())
     } else {
@@ -233,7 +248,10 @@ pub struct PaperAuthority {
 impl PaperAuthority {
     /// # Errors
     /// The first of gates 1..=15 that did not pass, or that is absent.
-    pub fn from_pass(profile_id: &str, verdict: &[GateVerdictEntry]) -> Result<Self, ProposalRefusal> {
+    pub fn from_pass(
+        profile_id: &str,
+        verdict: &[GateVerdictEntry],
+    ) -> Result<Self, ProposalRefusal> {
         for n in 1..=15 {
             match verdict.iter().find(|g| g.gate_no == n) {
                 None => return Err(ProposalRefusal::GateMissing(n)),
@@ -347,7 +365,10 @@ mod tests {
     fn a_verdict_for_another_revision_is_stale() {
         let mut d = draft();
         d.verdict_revision_hash = "b".repeat(64);
-        assert!(matches!(d.validate(), Err(ProposalRefusal::StaleVerdict { .. })));
+        assert!(matches!(
+            d.validate(),
+            Err(ProposalRefusal::StaleVerdict { .. })
+        ));
         // And against the head: the strategy moved after the verdict was made.
         assert!(check_not_stale(REV, REV).is_ok());
         assert!(matches!(
@@ -373,15 +394,22 @@ mod tests {
     fn thresholds_capital_and_period_are_each_required_to_mean_something() {
         for (mutate, expect) in [
             (
-                (|d: &mut ProposalDraft| d.thresholds.min_signal_match = 0.0) as fn(&mut ProposalDraft),
+                (|d: &mut ProposalDraft| d.thresholds.min_signal_match = 0.0)
+                    as fn(&mut ProposalDraft),
                 ProposalRefusal::BadThreshold("min_signal_match"),
             ),
             (
                 |d| d.thresholds.max_abs_return_divergence = f64::NAN,
                 ProposalRefusal::BadThreshold("max_abs_return_divergence"),
             ),
-            (|d| d.starting_capital = "0".into(), ProposalRefusal::BadCapital),
-            (|d| d.starting_capital = "-5".into(), ProposalRefusal::BadCapital),
+            (
+                |d| d.starting_capital = "0".into(),
+                ProposalRefusal::BadCapital,
+            ),
+            (
+                |d| d.starting_capital = "-5".into(),
+                ProposalRefusal::BadCapital,
+            ),
             (|d| d.review_period_days = 0, ProposalRefusal::BadPeriod),
         ] {
             let mut d = draft();
@@ -439,8 +467,15 @@ mod tests {
         d.thresholds.min_signal_match = 0.5;
         assert_ne!(a, evidence_hash(&d));
         let e = envelope(&draft(), "mason", "2026-10-03T00:00:00Z");
-        for key in ["decided_by", "decided_at", "evidence_hash", "starting_capital",
-                    "review_period_days", "thresholds", "profile_id"] {
+        for key in [
+            "decided_by",
+            "decided_at",
+            "evidence_hash",
+            "starting_capital",
+            "review_period_days",
+            "thresholds",
+            "profile_id",
+        ] {
             assert!(e.get(key).is_some(), "{key}");
         }
     }

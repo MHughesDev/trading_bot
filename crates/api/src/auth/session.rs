@@ -50,7 +50,8 @@ pub const SWEEP_EVERY_SECS: i64 = 600;
 /// The lookup. `session_token_hash` is the migration-0150 SQL function; the
 /// token presented is hashed by the database, which is the only definition of
 /// the key.
-pub const SESSION_LOOKUP_SQL: &str = "SELECT token, user_id, scopes, kind, last_seen_at, expires_at \
+pub const SESSION_LOOKUP_SQL: &str =
+    "SELECT token, user_id, scopes, kind, last_seen_at, expires_at \
      FROM sessions WHERE token = session_token_hash($1) AND expires_at > now()";
 
 /// The sliding-expiry write for a web session. Never extends past the absolute
@@ -140,7 +141,8 @@ pub async fn resolve(pg: &PgPool, presented: &str) -> Result<Option<ResolvedSess
         last_seen_at,
         expires_at,
     };
-    if session.kind == "web" && (Utc::now() - session.last_seen_at).num_seconds() >= TOUCH_EVERY_SECS
+    if session.kind == "web"
+        && (Utc::now() - session.last_seen_at).num_seconds() >= TOUCH_EVERY_SECS
     {
         // A failed touch does not refuse the request: the session was valid
         // when read. It only means the expiry did not move this time.
@@ -176,7 +178,10 @@ pub async fn touch_key(pg: &PgPool, key: &str) -> Result<Option<DateTime<Utc>>, 
 /// # Errors
 /// A database error.
 pub async fn sweep_expired(pg: &PgPool) -> Result<u64, sqlx::Error> {
-    Ok(sqlx::query(SESSION_SWEEP_SQL).execute(pg).await?.rows_affected())
+    Ok(sqlx::query(SESSION_SWEEP_SQL)
+        .execute(pg)
+        .await?
+        .rows_affected())
 }
 
 static LAST_SWEEP: AtomicI64 = AtomicI64::new(0);

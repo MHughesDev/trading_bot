@@ -36,13 +36,15 @@ pub mod conflict;
 pub mod curator;
 pub mod negative;
 pub mod questions;
-pub mod rules;
 pub mod retention;
+pub mod rules;
 pub mod turn;
 pub mod verify;
 pub mod window;
 
-pub use brief::{assemble_brief, cited_ids, Brief, BriefItem, Detail as BriefDetail, Retrieval, Slot};
+pub use brief::{
+    assemble_brief, cited_ids, Brief, BriefItem, Detail as BriefDetail, Retrieval, Slot,
+};
 pub use conflict::{relate, Relation};
 pub use negative::{derive_negative_result, FailureClass, NegativeSource, RefusedWrite};
 pub use retention::{retention, Retention};

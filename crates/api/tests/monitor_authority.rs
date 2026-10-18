@@ -140,12 +140,13 @@ async fn the_database_refuses_to_grant_monitor_control_to_any_service_session() 
     .await
     .expect("a research service session is legitimate");
 
-    let held: Vec<String> = sqlx::query("SELECT scopes FROM sessions WHERE token = session_token_hash($1)")
-        .bind(&token)
-        .fetch_one(&pg)
-        .await
-        .expect("read back")
-        .get("scopes");
+    let held: Vec<String> =
+        sqlx::query("SELECT scopes FROM sessions WHERE token = session_token_hash($1)")
+            .bind(&token)
+            .fetch_one(&pg)
+            .await
+            .expect("read back")
+            .get("scopes");
     assert!(
         !scopes::permits_monitor_control(&held),
         "a real minted agent token, read back from the database, reaches no monitor POST"

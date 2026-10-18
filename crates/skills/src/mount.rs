@@ -98,7 +98,11 @@ pub fn write_mount(
             });
         }
     }
-    if !resident.resident.iter().any(|(_, s)| s.name == FINDER_SKILL) {
+    if !resident
+        .resident
+        .iter()
+        .any(|(_, s)| s.name == FINDER_SKILL)
+    {
         return Err(MountError::NoFinder(FINDER_SKILL));
     }
     std::fs::create_dir_all(dest).map_err(|e| io_err(&e, dest))?;
@@ -258,7 +262,10 @@ mod tests {
         let dest = scratch("tamper");
         let err = write_mount(&dest, &res, &vis, &bundles).unwrap_err();
         assert!(matches!(err, MountError::DigestMismatch { ref skill, .. } if skill == "playbook"));
-        assert!(!dest.exists(), "nothing may be written when verification fails");
+        assert!(
+            !dest.exists(),
+            "nothing may be written when verification fails"
+        );
     }
 
     #[test]

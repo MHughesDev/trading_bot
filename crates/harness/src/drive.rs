@@ -1157,7 +1157,8 @@ pub struct Loop {
 /// boundary. Deliberately a plain function of its arguments: it is called inside
 /// `next`, and anything it read from the world would make the loop's decisions
 /// depend on when it was asked.
-pub type CostEstimator = std::sync::Arc<dyn Fn(&str, &Map<String, Value>) -> Option<f64> + Send + Sync>;
+pub type CostEstimator =
+    std::sync::Arc<dyn Fn(&str, &Map<String, Value>) -> Option<f64> + Send + Sync>;
 
 /// What a run has spent, summed (S-2.12).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1430,14 +1431,20 @@ impl Loop {
     /// hole in it would under-report, which is the direction that lets a cap pass.
     pub fn record_spend(&mut self, tokens: u64, usd_tenth_cents: Option<i64>) {
         self.spend.tokens = self.spend.tokens.saturating_add(tokens);
-        self.spend.usd_tenth_cents = match (self.spend.reported, self.spend.usd_tenth_cents, usd_tenth_cents) {
+        self.spend.usd_tenth_cents = match (
+            self.spend.reported,
+            self.spend.usd_tenth_cents,
+            usd_tenth_cents,
+        ) {
             (false, _, Some(u)) => Some(u),
             (true, Some(total), Some(u)) => Some(total.saturating_add(u)),
             _ => None,
         };
         self.spend.reported = true;
         let b = &mut self.working.budget;
-        b.tokens_remaining = b.tokens_cap.map(|cap| cap.saturating_sub(self.spend.tokens));
+        b.tokens_remaining = b
+            .tokens_cap
+            .map(|cap| cap.saturating_sub(self.spend.tokens));
         b.usd_tenth_cents_remaining = match (self.usd_cap_tenth_cents, self.spend.usd_tenth_cents) {
             (Some(cap), Some(spent)) => Some((cap - spent).max(0)),
             _ => None,
@@ -2020,7 +2027,8 @@ impl Loop {
             clippy::cast_sign_loss,
             clippy::cast_precision_loss
         )]
-        let bytes = (self.remaining_body_tokens() as f64 * context::current_bytes_per_token()) as usize;
+        let bytes =
+            (self.remaining_body_tokens() as f64 * context::current_bytes_per_token()) as usize;
         bytes
     }
 
@@ -2666,8 +2674,10 @@ impl Loop {
                 .iter()
                 .map(|f| format!("- {} [{}]", f.headline, f.id))
                 .collect::<Vec<_>>()
-                .join("
-")
+                .join(
+                    "
+",
+                )
         };
         let done: Vec<String> = self
             .working
@@ -5834,14 +5844,26 @@ mod tests {
             raw: r#"{"name":"read_bars"}"#.into(),
         });
         let tape = l.context_tape();
-        assert!(!tape.renders.is_empty(), "each assembly records what it rendered");
-        assert!(!tape.actions.is_empty(), "each call is kept as evidence of use");
         assert!(
-            tape.renders.iter().flat_map(|r| r.ids.iter()).all(|id| tape.signals.contains_key(id)),
+            !tape.renders.is_empty(),
+            "each assembly records what it rendered"
+        );
+        assert!(
+            !tape.actions.is_empty(),
+            "each call is kept as evidence of use"
+        );
+        assert!(
+            tape.renders
+                .iter()
+                .flat_map(|r| r.ids.iter())
+                .all(|id| tape.signals.contains_key(id)),
             "every rendered record has the signals it was scored on"
         );
         let a = l.context_attribution();
-        assert!(a.rendered_tokens > 0, "attribution ran over the tape: {a:?}");
+        assert!(
+            a.rendered_tokens > 0,
+            "attribution ran over the tape: {a:?}"
+        );
         // The buffer policy renders no retrieval records and keeps no renders.
         let (mut control, _) = started();
         one_result(&mut control);
@@ -6761,7 +6783,10 @@ mod tests {
         // two are reported separately. A tool that folded them into one sentence
         // would be back to letting a reader infer a burn from a ceiling.
         assert!(detail.contains("steps left"), "{detail}");
-        assert!(detail.contains("Tokens: cap 20000000, no model reply counted yet"), "{detail}");
+        assert!(
+            detail.contains("Tokens: cap 20000000, no model reply counted yet"),
+            "{detail}"
+        );
         assert!(
             detail.contains("Dollars: no dollar cap enforced"),
             "{detail}"
@@ -6793,8 +6818,14 @@ mod tests {
                 _ => None,
             })
             .expect("a second self-status note");
-        assert!(detail2.contains("Tokens: 1200 spent, 19998800 of 20000000 left"), "{detail2}");
-        assert!(detail2.contains("calibrated bytes-per-token 3.20"), "{detail2}");
+        assert!(
+            detail2.contains("Tokens: 1200 spent, 19998800 of 20000000 left"),
+            "{detail2}"
+        );
+        assert!(
+            detail2.contains("calibrated bytes-per-token 3.20"),
+            "{detail2}"
+        );
         // And it does not invent a monitor state it has not seen.
         assert!(detail.contains("not visible from here"), "{detail}");
         assert!(
@@ -6825,7 +6856,10 @@ mod tests {
                 _ => None,
             })
             .expect("a self-status note");
-        assert!(!args.is_null(), "null args make the trajectory unreplayable");
+        assert!(
+            !args.is_null(),
+            "null args make the trajectory unreplayable"
+        );
     }
 
     /// A routing miss costs one turn, not one step of the task's budget, and it never
@@ -7562,7 +7596,11 @@ mod runtime_tests {
         assert_eq!(i, 1, "the completed step is not re-run");
         assert_eq!(step.goal, "test momentum");
         assert_eq!(l.working().plan[0].status, StepStatus::Done);
-        assert_eq!(l.working().budget.trials_spent, 2, "trials are counted once");
+        assert_eq!(
+            l.working().budget.trials_spent,
+            2,
+            "trials are counted once"
+        );
         assert!(l.working().last_error.is_none());
         assert_eq!(
             l.working().budget.steps_total,
@@ -7702,10 +7740,9 @@ mod runtime_tests {
     fn the_cost_axis_fires_from_the_drivers_estimator() {
         let mut p = frontier_fixture();
         p.budgets.ask_above_usd = Some(5.0);
-        let estimator: CostEstimator =
-            std::sync::Arc::new(|tool: &str, _: &Map<String, Value>| {
-                (tool == "read_bars").then_some(42.0)
-            });
+        let estimator: CostEstimator = std::sync::Arc::new(|tool: &str, _: &Map<String, Value>| {
+            (tool == "read_bars").then_some(42.0)
+        });
         let mut l = Loop::new(p, reg(), task())
             .with_usd_cap(Some(60_000))
             .with_cost_estimator(estimator);
@@ -7750,8 +7787,8 @@ mod runtime_tests {
         assert_eq!(l.exposed().iter().collect::<Vec<_>>(), vec!["finish_task"]);
 
         // No cap: the same call never wraps the run up.
-        let mut l = Loop::new(frontier_fixture(), reg(), task())
-            .with_trial_spending_tools(["read_bars"]);
+        let mut l =
+            Loop::new(frontier_fixture(), reg(), task()).with_trial_spending_tools(["read_bars"]);
         l.next(Input::Admission(Admission::Admit));
         native_read(&mut l, 1);
         l.next(Input::ToolResult {
@@ -7781,7 +7818,10 @@ mod runtime_tests {
         .unwrap();
         let l = Loop::new(frontier_fixture(), reg(), task()).with_budget_lease(lease);
         let b = &l.working().budget;
-        assert_eq!((b.steps_total, b.tokens_cap, b.trials_cap), (3, Some(1_000), Some(2)));
+        assert_eq!(
+            (b.steps_total, b.tokens_cap, b.trials_cap),
+            (3, Some(1_000), Some(2))
+        );
 
         // Asking for more steps than the profile allows is clamped to the profile.
         let mut big = Remaining {
@@ -7807,7 +7847,10 @@ mod runtime_tests {
         let text = "x".repeat(400);
         assert_eq!(context::estimate_tokens(&text), 100);
         let under = context::with_bytes_per_token(2.5, || context::estimate_tokens(&text));
-        assert_eq!(under, 160, "2.5 bytes per token is 160 tokens for 400 bytes");
+        assert_eq!(
+            under, 160,
+            "2.5 bytes per token is 160 tokens for 400 bytes"
+        );
         assert_eq!(context::estimate_tokens(&text), 100, "restored");
 
         // Through the loop: a calibrated run still plans and asks for a model call,
@@ -7825,7 +7868,10 @@ mod runtime_tests {
     fn the_body_cap_in_bytes_follows_the_calibrated_bytes_per_token() {
         let l = Loop::new(frontier_fixture(), reg(), task());
         let tokens = l.remaining_body_tokens();
-        assert!(tokens > 1_000, "a frontier window leaves real room: {tokens}");
+        assert!(
+            tokens > 1_000,
+            "a frontier window leaves real room: {tokens}"
+        );
         let at_prior = l.remaining_body_bytes();
         assert_eq!(at_prior, tokens * 4, "uncalibrated: four bytes per token");
         let calibrated = context::with_bytes_per_token(2.5, || {
@@ -7835,6 +7881,10 @@ mod runtime_tests {
         // Same tokens in the window (nothing is held yet), fewer bytes per token.
         assert!(calibrated.1 >= tokens - 8 && calibrated.1 <= tokens + 8);
         let expected = (calibrated.1 as f64 * 2.5) as usize;
-        assert!(calibrated.0.abs_diff(expected) <= 2, "{} vs {expected}", calibrated.0);
+        assert!(
+            calibrated.0.abs_diff(expected) <= 2,
+            "{} vs {expected}",
+            calibrated.0
+        );
     }
 }

@@ -61,7 +61,11 @@ struct DecisionRow {
 }
 
 fn err(status: StatusCode, code: &str, message: String, extra: Value) -> axum::response::Response {
-    (status, Json(json!({ "error": code, "message": message, "detail": extra }))).into_response()
+    (
+        status,
+        Json(json!({ "error": code, "message": message, "detail": extra })),
+    )
+        .into_response()
 }
 
 fn parse(s: &str) -> Value {
@@ -70,11 +74,13 @@ fn parse(s: &str) -> Value {
 
 async fn owns_run(state: &AppState, tenant: &str, run_id: &str) -> Result<bool, sqlx::Error> {
     let mut tx = ledger::pg::tenant_tx(&state.pg, tenant).await?;
-    let found: Option<i32> = sqlx::query_scalar("SELECT 1 FROM mlops.trial WHERE tenant_id = $1 AND config_hash = $2 LIMIT 1")
-        .bind(tenant)
-        .bind(run_id)
-        .fetch_optional(&mut *tx)
-        .await?;
+    let found: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 FROM mlops.trial WHERE tenant_id = $1 AND config_hash = $2 LIMIT 1",
+    )
+    .bind(tenant)
+    .bind(run_id)
+    .fetch_optional(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(found.is_some())
 }
@@ -87,11 +93,32 @@ pub async fn explain_trade(
     let tenant = token.user_id().to_string();
     match owns_run(&state, &tenant, &run_id).await {
         Ok(true) => {}
-        Ok(false) => return err(StatusCode::NOT_FOUND, "run_not_found", format!("no run {run_id} for this tenant"), json!({})),
-        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string(), json!({})),
+        Ok(false) => {
+            return err(
+                StatusCode::NOT_FOUND,
+                "run_not_found",
+                format!("no run {run_id} for this tenant"),
+                json!({}),
+            )
+        }
+        Err(e) => {
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal",
+                e.to_string(),
+                json!({}),
+            )
+        }
     }
     let ch = storage::clickhouse::connect(&state.clickhouse_url);
-    let fail = |e: clickhouse::error::Error| err(StatusCode::INTERNAL_SERVER_ERROR, "outputs_unavailable", e.to_string(), json!({}));
+    let fail = |e: clickhouse::error::Error| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "outputs_unavailable",
+            e.to_string(),
+            json!({}),
+        )
+    };
 
     let count: u64 = match ch
         .query("SELECT count() FROM backtest_run_trade_detail FINAL WHERE run_id = ?")
@@ -114,7 +141,10 @@ pub async fn explain_trade(
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "trade_index_out_of_range",
-            format!("trade {idx} is out of range: the run has {count} trades (0..{})", count - 1),
+            format!(
+                "trade {idx} is out of range: the run has {count} trades (0..{})",
+                count - 1
+            ),
             json!({ "trades": count }),
         );
     }

@@ -253,7 +253,10 @@ pub async fn record_forward_fill(pool: &PgPool, f: &ForwardFill) -> Result<(), P
 ///
 /// # Errors
 /// A database error.
-pub async fn forward_marks(pool: &PgPool, forward_deployment_id: Uuid) -> Result<Vec<ForwardMark>, PgError> {
+pub async fn forward_marks(
+    pool: &PgPool,
+    forward_deployment_id: Uuid,
+) -> Result<Vec<ForwardMark>, PgError> {
     Ok(sqlx::query_as(
         "SELECT forward_deployment_id, tenant_id, bar, mark, kind FROM strategy_forward_mark \
          WHERE forward_deployment_id = $1 ORDER BY bar",
@@ -267,7 +270,10 @@ pub async fn forward_marks(pool: &PgPool, forward_deployment_id: Uuid) -> Result
 ///
 /// # Errors
 /// A database error.
-pub async fn forward_fills(pool: &PgPool, forward_deployment_id: Uuid) -> Result<Vec<ForwardFill>, PgError> {
+pub async fn forward_fills(
+    pool: &PgPool,
+    forward_deployment_id: Uuid,
+) -> Result<Vec<ForwardFill>, PgError> {
     Ok(sqlx::query_as(
         "SELECT forward_deployment_id, tenant_id, seq, side, filled, fill_price, charge, \
                 decision_price, filled_at \

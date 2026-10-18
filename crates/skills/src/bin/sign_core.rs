@@ -13,12 +13,18 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let dir = PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| "skills/core".into()));
+    let dir = PathBuf::from(
+        std::env::args()
+            .nth(1)
+            .unwrap_or_else(|| "skills/core".into()),
+    );
     let Some(secret) = std::env::var("TBOT_SKILLS_SIGNING_SECRET")
         .ok()
         .and_then(|s| skills::signing::parse_secret(&s))
     else {
-        eprintln!("TBOT_SKILLS_SIGNING_SECRET must be set to 64 hex characters (an Ed25519 secret key)");
+        eprintln!(
+            "TBOT_SKILLS_SIGNING_SECRET must be set to 64 hex characters (an Ed25519 secret key)"
+        );
         return ExitCode::from(2);
     };
     let core = match skills::core::load_core_dir(&dir) {
@@ -36,6 +42,10 @@ fn main() -> ExitCode {
         return ExitCode::from(1);
     }
     println!("signed {} core skills -> {}", core.len(), out.display());
-    println!("deploy with {}={}", skills::signing::PUBKEY_ENV, skills::signing::public_key_hex(&secret));
+    println!(
+        "deploy with {}={}",
+        skills::signing::PUBKEY_ENV,
+        skills::signing::public_key_hex(&secret)
+    );
     ExitCode::SUCCESS
 }

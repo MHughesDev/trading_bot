@@ -62,7 +62,6 @@ fn bars(closes: &[f64]) -> Vec<LoadedBar> {
         .collect()
 }
 
-
 fn wave(n: usize) -> Vec<f64> {
     (0..n)
         .map(|i| {
@@ -113,8 +112,12 @@ fn run_with(delay: u32) -> runner::V3Outcome {
     const WARM: usize = 30;
     let all = bars(&wave(WARM + 240));
     let plan = Arc::new(
-        runner::compile_for_run(&ema_cross(), &ParamMap::new(), &strategy_engine::StdRegistries::new())
-            .unwrap(),
+        runner::compile_for_run(
+            &ema_cross(),
+            &ParamMap::new(),
+            &strategy_engine::StdRegistries::new(),
+        )
+        .unwrap(),
     );
     runner::run_delayed(
         V3Run {
@@ -171,6 +174,9 @@ fn the_delay_is_part_of_a_runs_identity_only_when_set() {
     let a = base().build();
     let b = base().fill_delay_bars(0).build();
     let c = base().fill_delay_bars(1).build();
-    assert_eq!(a.run_id, b.run_id, "zero leaves every existing run id alone");
+    assert_eq!(
+        a.run_id, b.run_id,
+        "zero leaves every existing run id alone"
+    );
     assert_ne!(a.run_id, c.run_id);
 }

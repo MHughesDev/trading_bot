@@ -380,7 +380,9 @@ fn a_selection_strategy_is_refused_selection_attr() {
     );
     let diags = compile(&g, &StdRegistries::new(), &ParamValues::new()).unwrap_err();
     assert!(
-        diags.iter().any(|d| d.code == "selection_attr_in_selection"),
+        diags
+            .iter()
+            .any(|d| d.code == "selection_attr_in_selection"),
         "{diags:#?}"
     );
 }

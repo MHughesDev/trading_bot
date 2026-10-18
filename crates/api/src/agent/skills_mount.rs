@@ -59,7 +59,9 @@ pub struct SessionSkills {
 #[must_use]
 pub fn core_dir() -> Option<PathBuf> {
     let candidates = [
-        std::env::var("TBOT_SKILLS_CORE_DIR").ok().map(PathBuf::from),
+        std::env::var("TBOT_SKILLS_CORE_DIR")
+            .ok()
+            .map(PathBuf::from),
         Some(PathBuf::from("skills/core")),
         Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skills/core")),
     ];
@@ -159,12 +161,18 @@ pub async fn session_start(
     let n = admit_after_exposures();
     if let Ok((promoted, _flagged)) = store.settle_provisional(n).await {
         if !promoted.is_empty() {
-            tracing::info!(?promoted, "provisional skills admitted after enough exposures");
+            tracing::info!(
+                ?promoted,
+                "provisional skills admitted after enough exposures"
+            );
         }
     }
     if let Ok(archived) = store.sweep_retirements(n).await {
         if !archived.is_empty() {
-            tracing::info!(?archived, "skills archived: no activation or no contribution");
+            tracing::info!(
+                ?archived,
+                "skills archived: no activation or no contribution"
+            );
         }
     }
 
@@ -237,7 +245,10 @@ pub fn with_skills(charter: &str, skills: &SessionSkills) -> String {
     if skills.hint.is_empty() {
         charter.to_string()
     } else {
-        format!("{charter}\n\n\u{2500}\u{2500} SKILLS \u{2500}\u{2500}\n\n{}", skills.hint)
+        format!(
+            "{charter}\n\n\u{2500}\u{2500} SKILLS \u{2500}\u{2500}\n\n{}",
+            skills.hint
+        )
     }
 }
 

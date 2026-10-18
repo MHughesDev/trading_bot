@@ -320,7 +320,11 @@ impl ResearchRunWorker {
                     "lease_exhausted",
                     format!(
                         "this worker sub-run's budget lease is spent ({why}); last refusal: {}",
-                        if last_error.is_empty() { "none" } else { &last_error }
+                        if last_error.is_empty() {
+                            "none"
+                        } else {
+                            &last_error
+                        }
                     ),
                 ));
             }
@@ -349,9 +353,7 @@ impl ResearchRunWorker {
                     // names another model runs on the provider's baseline.
                     model: crate::model_policy::or_baseline(&provider, profile.model_id.clone()),
                     system: Some(subrun::WORKER_CHARTER.to_string()),
-                    messages: vec![Message::User {
-                        content: prompt,
-                    }],
+                    messages: vec![Message::User { content: prompt }],
                     tools: vec![],
                     max_tokens: lease.max_output(profile.context.reserve_for_output, tokens_spent),
                     // Pinned, not read from the profile: the propensity below is

@@ -53,8 +53,19 @@ async fn cleanup(pool: &PgPool, users: &[Uuid]) {
     }
 }
 
-async fn insert_session(pool: &PgPool, token: &str, user: Uuid, kind: &str, created_days_ago: i32, expires_in: &str) {
-    let scopes = if kind == "web" { vec!["web:full".to_owned()] } else { vec![] };
+async fn insert_session(
+    pool: &PgPool,
+    token: &str,
+    user: Uuid,
+    kind: &str,
+    created_days_ago: i32,
+    expires_in: &str,
+) {
+    let scopes = if kind == "web" {
+        vec!["web:full".to_owned()]
+    } else {
+        vec![]
+    };
     sqlx::query(&format!(
         "INSERT INTO sessions (token, user_id, kind, scopes, created_at, last_seen_at, expires_at) \
          VALUES ($1, $2, $3, $4, now() - make_interval(days => $5), \
@@ -86,9 +97,15 @@ async fn a_session_is_stored_as_a_digest_and_only_the_credential_resolves() {
     assert_eq!(stored.len(), 64);
     assert!(stored.chars().all(|c| c.is_ascii_hexdigit()));
 
-    let ok = session::resolve(&pool, &raw).await.unwrap().expect("the credential resolves");
+    let ok = session::resolve(&pool, &raw)
+        .await
+        .unwrap()
+        .expect("the credential resolves");
     assert_eq!(ok.user_id, user);
-    assert_eq!(ok.key, stored, "the extractor carries the digest, never the credential");
+    assert_eq!(
+        ok.key, stored,
+        "the extractor carries the digest, never the credential"
+    );
     assert_eq!(ok.scopes, vec!["web:full".to_owned()]);
 
     // Presenting the stored digest as if it were the credential must not work:
@@ -150,15 +167,30 @@ async fn a_web_session_slides_up_to_its_absolute_cap_and_a_service_session_never
     let old = format!("cap-{}", Uuid::new_v4().simple());
     insert_session(&pool, &old, user, "web", 29, "1 hour").await;
     let s = session::resolve(&pool, &old).await.unwrap().unwrap();
-    assert!(s.expires_at < Utc::now() + chrono::Duration::days(2), "{}", s.expires_at);
-    assert!(s.expires_at > Utc::now() + chrono::Duration::hours(12), "{}", s.expires_at);
+    assert!(
+        s.expires_at < Utc::now() + chrono::Duration::days(2),
+        "{}",
+        s.expires_at
+    );
+    assert!(
+        s.expires_at > Utc::now() + chrono::Duration::hours(12),
+        "{}",
+        s.expires_at
+    );
 
     // A service session keeps the lifetime it was minted with.
     let svc = format!("svc-{}", Uuid::new_v4().simple());
     insert_session(&pool, &svc, user, "service", 0, "1 hour").await;
     let s = session::resolve(&pool, &svc).await.unwrap().unwrap();
-    assert!(s.expires_at < Utc::now() + chrono::Duration::hours(2), "{}", s.expires_at);
-    assert!(session::touch_key(&pool, &s.key).await.unwrap().is_none(), "service sessions never slide");
+    assert!(
+        s.expires_at < Utc::now() + chrono::Duration::hours(2),
+        "{}",
+        s.expires_at
+    );
+    assert!(
+        session::touch_key(&pool, &s.key).await.unwrap().is_none(),
+        "service sessions never slide"
+    );
 
     // The explicit touch (POST /auth/touch) slides a web session.
     let web_key: String = sqlx::query_scalar("SELECT token FROM sessions WHERE user_id=$1 AND kind='web' AND created_at > now() - interval '2 days'")
@@ -190,16 +222,48 @@ async fn automations_are_visible_and_changeable_only_by_their_owner() {
     .await
     .unwrap();
 
-    assert_eq!(automation::list_automations_for(&pool, alice).await.unwrap().len(), 1);
-    assert!(automation::list_automations_for(&pool, bob).await.unwrap().is_empty());
-    assert!(automation::get_automation_owned(&pool, bob, id).await.unwrap().is_none());
-    assert!(!automation::disarm_automation_owned(&pool, bob, id).await.unwrap(), "bob cannot disarm alice's");
-    assert!(!automation::delete_automation_owned(&pool, bob, id).await.unwrap(), "bob cannot delete alice's");
-    let still = automation::get_automation_owned(&pool, alice, id).await.unwrap().unwrap();
-    assert!(still.armed, "a stranger's disarm must not have taken effect");
+    assert_eq!(
+        automation::list_automations_for(&pool, alice)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(automation::list_automations_for(&pool, bob)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(automation::get_automation_owned(&pool, bob, id)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(
+        !automation::disarm_automation_owned(&pool, bob, id)
+            .await
+            .unwrap(),
+        "bob cannot disarm alice's"
+    );
+    assert!(
+        !automation::delete_automation_owned(&pool, bob, id)
+            .await
+            .unwrap(),
+        "bob cannot delete alice's"
+    );
+    let still = automation::get_automation_owned(&pool, alice, id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        still.armed,
+        "a stranger's disarm must not have taken effect"
+    );
 
-    assert!(automation::disarm_automation_owned(&pool, alice, id).await.unwrap());
-    assert!(automation::delete_automation_owned(&pool, alice, id).await.unwrap());
+    assert!(automation::disarm_automation_owned(&pool, alice, id)
+        .await
+        .unwrap());
+    assert!(automation::delete_automation_owned(&pool, alice, id)
+        .await
+        .unwrap());
 
     // The nil owner cannot be written (migration 0151's CHECK).
     let nil = automation::insert_automation(
@@ -215,7 +279,10 @@ async fn automations_are_visible_and_changeable_only_by_their_owner() {
         },
     )
     .await;
-    assert!(nil.is_err(), "a nil-owned automation must be refused by the database");
+    assert!(
+        nil.is_err(),
+        "a nil-owned automation must be refused by the database"
+    );
     cleanup(&pool, &[alice, bob]).await;
 }
 
@@ -248,10 +315,18 @@ async fn venue_credentials_are_encrypted_at_rest_scoped_to_their_owner_and_delet
     let status = store.status(alice).await.unwrap();
     assert_eq!(status.len(), 1);
     assert_eq!(status[0].venue, "alpaca");
-    assert!(!serde_json::to_string(&status).unwrap().contains("supersecret"));
+    assert!(!serde_json::to_string(&status)
+        .unwrap()
+        .contains("supersecret"));
 
-    assert_eq!(store.load(alice, "alpaca").await.unwrap().as_ref(), Some(&fields));
-    assert!(store.load(bob, "alpaca").await.unwrap().is_none(), "bob cannot read alice's");
+    assert_eq!(
+        store.load(alice, "alpaca").await.unwrap().as_ref(),
+        Some(&fields)
+    );
+    assert!(
+        store.load(bob, "alpaca").await.unwrap().is_none(),
+        "bob cannot read alice's"
+    );
     assert!(store.status(bob).await.unwrap().is_empty());
     assert!(!store.remove(bob, "alpaca").await.unwrap());
     assert!(store.remove(alice, "alpaca").await.unwrap());
@@ -275,7 +350,10 @@ async fn app_role_holds_the_grants_these_tables_need() {
     let Some(pool) = pool().await else { return };
     let user = make_user(&pool).await;
     let mut tx = pool.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     sqlx::query("INSERT INTO sessions (token, user_id, kind, scopes) VALUES ('grant-check', $1, 'web', ARRAY['web:full'])")
         .bind(user)
         .execute(&mut *tx)
@@ -285,17 +363,28 @@ async fn app_role_holds_the_grants_these_tables_need() {
         .fetch_one(&mut *tx)
         .await
         .expect("app_role can execute session_token_hash and read sessions");
-    sqlx::query("UPDATE sessions SET last_seen_at = now() WHERE token = session_token_hash('grant-check')")
-        .execute(&mut *tx)
-        .await
-        .expect("app_role can touch sessions");
+    sqlx::query(
+        "UPDATE sessions SET last_seen_at = now() WHERE token = session_token_hash('grant-check')",
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("app_role can touch sessions");
     sqlx::query("DELETE FROM sessions WHERE token = session_token_hash('grant-check')")
         .execute(&mut *tx)
         .await
         .expect("app_role can delete sessions");
-    sqlx::query("SELECT count(*) FROM venue_credentials").fetch_one(&mut *tx).await.expect("venue_credentials");
-    sqlx::query("SELECT count(*) FROM automations").fetch_one(&mut *tx).await.expect("automations");
-    sqlx::query("SELECT count(*) FROM pnl_lots").fetch_one(&mut *tx).await.expect("pnl_lots");
+    sqlx::query("SELECT count(*) FROM venue_credentials")
+        .fetch_one(&mut *tx)
+        .await
+        .expect("venue_credentials");
+    sqlx::query("SELECT count(*) FROM automations")
+        .fetch_one(&mut *tx)
+        .await
+        .expect("automations");
+    sqlx::query("SELECT count(*) FROM pnl_lots")
+        .fetch_one(&mut *tx)
+        .await
+        .expect("pnl_lots");
     tx.rollback().await.unwrap();
     cleanup(&pool, &[user]).await;
 }

@@ -220,9 +220,10 @@ pub fn report_json(a: &FleetAssessment) -> Value {
     let r = &a.report;
     let (verdict, detail) = match &r.verdict {
         FleetVerdict::NotComputable(why) => ("not_computable", json!(why.to_string())),
-        FleetVerdict::NoDivergence { measurable, bars } => {
-            ("no_divergence", json!({ "measurable": measurable, "bars": bars }))
-        }
+        FleetVerdict::NoDivergence { measurable, bars } => (
+            "no_divergence",
+            json!({ "measurable": measurable, "bars": bars }),
+        ),
         FleetVerdict::Idiosyncratic {
             diverging,
             measurable,
@@ -276,7 +277,13 @@ mod tests {
     use super::*;
     use uuid::Uuid;
 
-    fn obs(deployment: Uuid, strategy: &str, i: i64, realised: f64, expected: f64) -> ForwardObservation {
+    fn obs(
+        deployment: Uuid,
+        strategy: &str,
+        i: i64,
+        realised: f64,
+        expected: f64,
+    ) -> ForwardObservation {
         let bar = DateTime::from_timestamp(1_800_000_000 + i * 60, 0).expect("bar");
         ForwardObservation {
             deployment_id: deployment,
@@ -319,7 +326,10 @@ mod tests {
         let defect = defect_for("tenant-a", &report).expect("a common-mode finding files a defect");
         assert_eq!(defect.source, DefectSource::FleetCommonMode);
         assert_eq!(defect.dedupe_key, "fleet:tenant-a:simulator_optimistic");
-        assert_eq!(defect.evidence["deployments"].as_array().map(Vec::len), Some(4));
+        assert_eq!(
+            defect.evidence["deployments"].as_array().map(Vec::len),
+            Some(4)
+        );
         let a = FleetAssessment {
             tenant_id: "tenant-a".into(),
             window_from: Utc::now(),
@@ -338,7 +348,11 @@ mod tests {
         let mut rows = Vec::new();
         for k in 0..4 {
             let id = Uuid::new_v4();
-            let (r, e) = if k % 2 == 0 { (0.0, 0.001) } else { (0.001, 0.0) };
+            let (r, e) = if k % 2 == 0 {
+                (0.0, 0.001)
+            } else {
+                (0.001, 0.0)
+            };
             for i in 0..40 {
                 rows.push(obs(id, &format!("s{k}"), i, r, e));
             }

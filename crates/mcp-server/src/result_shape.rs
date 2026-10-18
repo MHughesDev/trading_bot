@@ -184,7 +184,10 @@ pub fn rendered_summary(spec: &ToolSpec, out: &Value) -> Option<String> {
         _ => out,
     };
     let text = render_summary(template, spec.output.detail_fields, source).ok()?;
-    Some(clip(&text, spec.output.summary_tokens as usize * BYTES_PER_TOKEN))
+    Some(clip(
+        &text,
+        spec.output.summary_tokens as usize * BYTES_PER_TOKEN,
+    ))
 }
 
 /// Truncate on a char boundary. A summary over budget is cut, never refused:
@@ -223,8 +226,12 @@ mod tests {
     use crate::spec::{catalog, find};
     use crate::taxonomy::Risk;
 
-    fn spec_with(template: &'static str, fields: &'static [(&'static str, &'static str)]) -> ToolSpec {
-        ToolSpec::new("t", "core", Risk::Read, "d", json!({"type": "object"})).summary(template, fields)
+    fn spec_with(
+        template: &'static str,
+        fields: &'static [(&'static str, &'static str)],
+    ) -> ToolSpec {
+        ToolSpec::new("t", "core", Risk::Read, "d", json!({"type": "object"}))
+            .summary(template, fields)
     }
 
     // ── The seam ─────────────────────────────────────────────────────────────
@@ -294,7 +301,11 @@ mod tests {
         let mut out = json!({ "a": "x".repeat(10_000) });
         attach_summary(&s, &mut out);
         let text = out["summary"].as_str().unwrap();
-        assert!(estimate_tokens(text) <= 400, "{} tokens", estimate_tokens(text));
+        assert!(
+            estimate_tokens(text) <= 400,
+            "{} tokens",
+            estimate_tokens(text)
+        );
         assert!(text.ends_with("..."));
     }
 
@@ -315,7 +326,9 @@ mod tests {
             match find(name) {
                 None => unwired.push(format!("{name}: not in the catalogue")),
                 Some(s) if s.output.summary_template != Some(*template) => {
-                    unwired.push(format!("{name}: its module does not call result_shape::declared"));
+                    unwired.push(format!(
+                        "{name}: its module does not call result_shape::declared"
+                    ));
                 }
                 Some(s) if s.output.detail_fields != *fields => {
                     unwired.push(format!("{name}: declared fields differ"));
@@ -448,14 +461,19 @@ exit time 48 bars
             "compile_strategy" => strategy::compile_strategy(&json!({ "text": TREND })),
             "explain_strategy" => strategy::explain_strategy(&json!({ "text": TREND })),
             "diff_strategies" => {
-                let a = strategy::compile_strategy(&json!({ "text": TREND }))["detail"]["definition"].clone();
+                let a = strategy::compile_strategy(&json!({ "text": TREND }))["detail"]
+                    ["definition"]
+                    .clone();
                 let b = strategy::compile_strategy(&json!({
                     "text": TREND.replace("exit time 48 bars", "exit time 96 bars")
-                }))["detail"]["definition"].clone();
+                }))["detail"]["definition"]
+                    .clone();
                 strategy::diff_strategies(&json!({ "before": a, "after": b }))
             }
             "apply_move" => {
-                let def = strategy::compile_strategy(&json!({ "text": TREND }))["detail"]["definition"].clone();
+                let def = strategy::compile_strategy(&json!({ "text": TREND }))["detail"]
+                    ["definition"]
+                    .clone();
                 strategy::apply_move(&json!({
                     "definition": def, "strategy_id": "trend_v2",
                     "edit": { "edit": "add_filter", "entry": "entry.long[0]",
@@ -484,12 +502,29 @@ exit time 48 bars
     /// [`TEMPLATES`]: the check is on what the handler emits, not on who wrote the
     /// template.
     const FIXTURED: &[&str] = &[
-        "create_experiment", "get_experiment", "get_sweep", "run_sweep", "backtest_strategy",
-        "train_model", "get_training_run", "get_bars", "get_funding_history",
-        "probe_pit_provenance", "audit_survivorship", "regime_failure_search",
-        "parameter_fragility_map", "timing_jitter_sensitivity", "ablation_sweep",
-        "list_features", "compile_strategy", "explain_strategy", "diff_strategies",
-        "apply_move", "lookahead_truncation_test", "strategy_skeleton", "suggest_moves",
+        "create_experiment",
+        "get_experiment",
+        "get_sweep",
+        "run_sweep",
+        "backtest_strategy",
+        "train_model",
+        "get_training_run",
+        "get_bars",
+        "get_funding_history",
+        "probe_pit_provenance",
+        "audit_survivorship",
+        "regime_failure_search",
+        "parameter_fragility_map",
+        "timing_jitter_sensitivity",
+        "ablation_sweep",
+        "list_features",
+        "compile_strategy",
+        "explain_strategy",
+        "diff_strategies",
+        "apply_move",
+        "lookahead_truncation_test",
+        "strategy_skeleton",
+        "suggest_moves",
     ];
 
     /// The acceptance clause: ≤ 400 tokens on the reference payloads, and no
@@ -500,12 +535,18 @@ exit time 48 bars
         for name in FIXTURED {
             let s = find(name).unwrap_or_else(|| panic!("{name} is not in the catalogue"));
             if s.output.summary_template.is_none() {
-                problems.push(format!("{name}: has a reference payload but declares no template"));
+                problems.push(format!(
+                    "{name}: has a reference payload but declares no template"
+                ));
                 continue;
             }
             let mut out = reference(name);
             attach_summary(s, &mut out);
-            let key = if out["summary"].is_string() { "summary" } else { "summary_text" };
+            let key = if out["summary"].is_string() {
+                "summary"
+            } else {
+                "summary_text"
+            };
             let Some(text) = out[key].as_str() else {
                 problems.push(format!("{name}: no summary attached to {out}"));
                 continue;
@@ -514,7 +555,9 @@ exit time 48 bars
                 problems.push(format!("{name}: {} tokens", estimate_tokens(text)));
             }
             if text.contains("(n unknown)") {
-                problems.push(format!("{name}: a declared field is absent from the real output: {text}"));
+                problems.push(format!(
+                    "{name}: a declared field is absent from the real output: {text}"
+                ));
             }
         }
         assert!(problems.is_empty(), "{problems:#?}");
@@ -527,11 +570,18 @@ exit time 48 bars
     fn every_template_in_the_catalogue_says_n_unknown_for_every_missing_field() {
         let mut checked = 0;
         for s in catalog() {
-            let Some(template) = s.output.summary_template else { continue };
+            let Some(template) = s.output.summary_template else {
+                continue;
+            };
             let slots = crate::spec::template_slots(template).unwrap().len();
             let text = rendered_summary(s, &json!({}))
                 .unwrap_or_else(|| panic!("{} rendered nothing", s.name));
-            assert_eq!(text.matches("(n unknown)").count(), slots, "{}: {text}", s.name);
+            assert_eq!(
+                text.matches("(n unknown)").count(),
+                slots,
+                "{}: {text}",
+                s.name
+            );
             checked += 1;
         }
         assert!(checked >= 30, "only {checked} templates in the catalogue");
@@ -542,7 +592,9 @@ exit time 48 bars
     #[test]
     fn every_template_in_the_catalogue_stays_within_its_token_budget_on_huge_fields() {
         for s in catalog() {
-            let Some(_) = s.output.summary_template else { continue };
+            let Some(_) = s.output.summary_template else {
+                continue;
+            };
             let mut obj = serde_json::Map::new();
             for (f, _) in s.output.detail_fields {
                 obj.insert((*f).to_string(), json!("x".repeat(5_000)));
@@ -564,7 +616,9 @@ exit time 48 bars
     fn no_template_repeats_the_unit_it_declares() {
         let mut bad = Vec::new();
         for s in catalog() {
-            let Some(template) = s.output.summary_template else { continue };
+            let Some(template) = s.output.summary_template else {
+                continue;
+            };
             // Templated tools take their summary from the skill-runner header (Set M/Q
             // territory); they are reported by `the templated tools' own header tests`.
             if matches!(s.tier, crate::spec::Tier::Templated { .. }) {
@@ -578,8 +632,14 @@ exit time 48 bars
                 for (at, _) in template.match_indices(&slot) {
                     let after = template[at + slot.len()..].trim_start();
                     // A whole word: `{n_obs} observations` is not `obs` twice.
-                    if after.strip_prefix(unit).is_some_and(|r| !r.starts_with(|c: char| c.is_alphanumeric())) {
-                        bad.push(format!("{}: `{field}` is followed by its own unit `{unit}`", s.name));
+                    if after
+                        .strip_prefix(unit)
+                        .is_some_and(|r| !r.starts_with(|c: char| c.is_alphanumeric()))
+                    {
+                        bad.push(format!(
+                            "{}: `{field}` is followed by its own unit `{unit}`",
+                            s.name
+                        ));
                     }
                 }
             }
@@ -611,6 +671,9 @@ exit time 48 bars
                 .map(|s| s.name)
                 .collect::<Vec<_>>()
         );
-        assert!(with.len() >= TEMPLATES.len(), "templates have fallen out of the catalogue");
+        assert!(
+            with.len() >= TEMPLATES.len(),
+            "templates have fallen out of the catalogue"
+        );
     }
 }

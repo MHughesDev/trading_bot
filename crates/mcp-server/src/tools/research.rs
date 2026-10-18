@@ -565,7 +565,10 @@ pub async fn backtest_strategy(
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if strategy_id.is_empty() {
-        return crate::tool_error::missing_field_because("strategy_id", "it is the slug you passed to create_strategy");
+        return crate::tool_error::missing_field_because(
+            "strategy_id",
+            "it is the slug you passed to create_strategy",
+        );
     }
     let instrument = params
         .get("instrument_id")

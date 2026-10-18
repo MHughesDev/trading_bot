@@ -23,9 +23,8 @@ use sqlx::{Executor, PgPool};
 use uuid::Uuid;
 
 fn url() -> String {
-    std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://postgres:postgres@127.0.0.1:5433/lifecycle_scratch".into()
-    })
+    std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@127.0.0.1:5433/lifecycle_scratch".into())
 }
 
 async fn owner() -> PgPool {
@@ -137,7 +136,12 @@ async fn evidence_is_read_as_the_platforms_role_and_a_verdict_keeps_its_inputs()
         "three measurements, a cost ticket and a benchmark ticket, and no receipt yet: {:?}",
         d.inputs
     );
-    assert_eq!(d.missing, vec!["a reproducibility receipt"], "{:?}", d.missing);
+    assert_eq!(
+        d.missing,
+        vec!["a reproducibility receipt"],
+        "{:?}",
+        d.missing
+    );
     assert_eq!(d.inputs["battery"]["cost_model_ticket"], cost.to_string());
     assert_eq!(d.inputs["battery"]["benchmark_ticket"], bench.to_string());
     assert_eq!(d.inputs["battery"]["out_of_sample_ticket"], t1.to_string());
@@ -205,7 +209,10 @@ async fn supported_needs_a_reproduction_under_a_receipt_the_original_carried() {
     // (a) reproduced, but the original carried no receipt: the number only.
     let run_a = Uuid::new_v4();
     let config_a = build(&pg, &tenant, run_a, "ra").await;
-    let ticket = led.begin_reproduction_async(&tenant, &config_a).await.unwrap();
+    let ticket = led
+        .begin_reproduction_async(&tenant, &config_a)
+        .await
+        .unwrap();
     led.record_reproduction_async(
         ticket,
         &ReproductionRecord {
@@ -233,7 +240,10 @@ async fn supported_needs_a_reproduction_under_a_receipt_the_original_carried() {
     // (b) reproduced bit-identical under a receipt the original carried.
     let run_b = Uuid::new_v4();
     let config_b = build(&pg, &tenant, run_b, "rb").await;
-    let ticket = led.begin_reproduction_async(&tenant, &config_b).await.unwrap();
+    let ticket = led
+        .begin_reproduction_async(&tenant, &config_b)
+        .await
+        .unwrap();
     let receipt = serde_json::json!({"calendar_version": "sessions@1", "dataset_hash": "sha256:d"});
     led.record_reproduction_async(
         ticket,

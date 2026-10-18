@@ -21,9 +21,7 @@ use api::knowledge_jobs::{
     INSIGHT_TOKEN_CAP,
 };
 use ledger::pg::PgTrialLedger;
-use ledger::{
-    DispatchContext, OutcomeVector, Registration, TrialEvent, TrialState, TrialSubject,
-};
+use ledger::{DispatchContext, OutcomeVector, Registration, TrialEvent, TrialState, TrialSubject};
 use uuid::Uuid;
 
 async fn pool() -> sqlx::PgPool {
@@ -72,7 +70,9 @@ async fn settled_trial(led: &PgTrialLedger, tenant: &str, sharpe: Option<f64>) -
         TrialState::Evaluate,
         TrialState::Gated,
     ] {
-        led.transition_async(&mut t, TrialEvent::to(st)).await.unwrap();
+        led.transition_async(&mut t, TrialEvent::to(st))
+            .await
+            .unwrap();
     }
     led.settle_async(
         t,
@@ -102,18 +102,23 @@ async fn the_timer_rebuilds_the_tensor_and_is_idempotent() {
     settled_trial(&led, &tenant, None).await; // a trial with no Sharpe: skipped, counted
 
     let p = TensorProjection::new(pg.clone());
-    let first = p.rebuild(&tenant).await.expect("the projection's query runs");
+    let first = p
+        .rebuild(&tenant)
+        .await
+        .expect("the projection's query runs");
     assert_eq!(first.facts_written, 2, "{first:?}");
     assert_eq!(first.skipped_without_metric, 1, "{first:?}");
     let second = p.rebuild(&tenant).await.unwrap();
-    let (n,): (i64,) = sqlx::query_as(
-        "SELECT count(*) FROM knowledge.outcome_tensor_fact WHERE tenant_id = $1",
-    )
-    .bind(&tenant)
-    .fetch_one(&pg)
-    .await
-    .unwrap();
-    assert_eq!(n, 2, "a rebuild upserts; it does not double the facts ({second:?})");
+    let (n,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM knowledge.outcome_tensor_fact WHERE tenant_id = $1")
+            .bind(&tenant)
+            .fetch_one(&pg)
+            .await
+            .unwrap();
+    assert_eq!(
+        n, 2,
+        "a rebuild upserts; it does not double the facts ({second:?})"
+    );
     let (value,): (f64,) = sqlx::query_as(
         "SELECT max(metric_value) FROM knowledge.outcome_tensor_fact WHERE tenant_id = $1",
     )
@@ -141,9 +146,18 @@ async fn an_insight_needs_real_evidence_and_decays_when_contradicted() {
 
     // Evidence that is not a trial this tenant ran is a rumour.
     let rumour = store
-        .create(&tenant, 3, &scope, "momentum fails in high vol", &[Uuid::new_v4()])
+        .create(
+            &tenant,
+            3,
+            &scope,
+            "momentum fails in high vol",
+            &[Uuid::new_v4()],
+        )
         .await;
-    assert!(matches!(rumour, Err(InsightError::UnknownEvidence(1))), "{rumour:?}");
+    assert!(
+        matches!(rumour, Err(InsightError::UnknownEvidence(1))),
+        "{rumour:?}"
+    );
     let empty = store.create(&tenant, 3, &scope, "no evidence", &[]).await;
     assert!(matches!(empty, Err(InsightError::Invalid(_))), "{empty:?}");
 
@@ -152,12 +166,21 @@ async fn an_insight_needs_real_evidence_and_decays_when_contradicted() {
         .await
         .expect("an evidenced claim");
     let b = store
-        .create(&tenant, 3, &scope, "mean reversion holds in low vol", &[trial])
+        .create(
+            &tenant,
+            3,
+            &scope,
+            "mean reversion holds in low vol",
+            &[trial],
+        )
         .await
         .unwrap();
 
     // Contradict one twice; the other is confirmed once.
-    let s1 = store.contradict(&tenant, a, &[trial], Some("a counter-example")).await.unwrap();
+    let s1 = store
+        .contradict(&tenant, a, &[trial], Some("a counter-example"))
+        .await
+        .unwrap();
     assert!((s1 - 0.5).abs() < 1e-6, "{s1}");
     let s2 = store.contradict(&tenant, a, &[trial], None).await.unwrap();
     assert!((s2 - 0.25).abs() < 1e-6, "{s2}");
@@ -168,7 +191,9 @@ async fn an_insight_needs_real_evidence_and_decays_when_contradicted() {
     assert!(store.contradict(&tenant, a, &[], None).await.is_err());
     // And one for a claim that does not exist is NotFound.
     assert!(matches!(
-        store.contradict(&tenant, Uuid::new_v4(), &[trial], None).await,
+        store
+            .contradict(&tenant, Uuid::new_v4(), &[trial], None)
+            .await,
         Err(InsightError::NotFound)
     ));
 
@@ -221,7 +246,10 @@ async fn the_decay_sweep_is_idempotent_and_ages_claims_by_their_last_confirmatio
             .fetch_one(&pg)
             .await
             .unwrap();
-    assert!((score - decayed_score(HALF_LIFE_DAYS, 0)).abs() < 1e-3, "{score}");
+    assert!(
+        (score - decayed_score(HALF_LIFE_DAYS, 0)).abs() < 1e-3,
+        "{score}"
+    );
     assert_eq!(
         store.decay_sweep(&tenant).await.unwrap(),
         0,

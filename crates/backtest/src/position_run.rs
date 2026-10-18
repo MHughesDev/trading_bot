@@ -58,7 +58,11 @@ pub struct ArtifactBar {
 
 impl From<ArtifactBar> for Bar {
     fn from(b: ArtifactBar) -> Self {
-        Self { ts_ns: b.ts_ns, open: b.open, close: b.close }
+        Self {
+            ts_ns: b.ts_ns,
+            open: b.open,
+            close: b.close,
+        }
     }
 }
 
@@ -148,7 +152,12 @@ impl Layer1Artifact {
         let first = self.bars.first().ok_or(ArtifactError::NoBars)?;
         let last = self.bars.last().ok_or(ArtifactError::NoBars)?;
         let at = |ns: i64| Utc.timestamp_nanos(ns);
-        let slice = DataSlice::new(self.instrument.clone(), at(first.ts_ns), at(last.ts_ns), self.resolution()?);
+        let slice = DataSlice::new(
+            self.instrument.clone(),
+            at(first.ts_ns),
+            at(last.ts_ns),
+            self.resolution()?,
+        );
         Ok(RunConfigBuilder::new(
             format!("{STRATEGY_REF_PREFIX}{}", self.instrument),
             self.strategy_version(),
@@ -208,13 +217,25 @@ impl TradeLegs {
         self.fee + self.spread + self.impact
     }
     fn scaled(self, k: f64) -> Self {
-        Self { fee: self.fee * k, spread: self.spread * k, impact: self.impact * k }
+        Self {
+            fee: self.fee * k,
+            spread: self.spread * k,
+            impact: self.impact * k,
+        }
     }
     fn plus(self, o: Self) -> Self {
-        Self { fee: self.fee + o.fee, spread: self.spread + o.spread, impact: self.impact + o.impact }
+        Self {
+            fee: self.fee + o.fee,
+            spread: self.spread + o.spread,
+            impact: self.impact + o.impact,
+        }
     }
     fn minus(self, o: Self) -> Self {
-        Self { fee: self.fee - o.fee, spread: self.spread - o.spread, impact: self.impact - o.impact }
+        Self {
+            fee: self.fee - o.fee,
+            spread: self.spread - o.spread,
+            impact: self.impact - o.impact,
+        }
     }
 }
 
@@ -226,7 +247,10 @@ impl TradeLegs {
 /// cost is split by quantity). MAE and MFE are measured on bar closes between entry and exit.
 #[must_use]
 pub fn trades_from_fills(symbol: &str, fills: &[Fill], bars: &[Bar]) -> Vec<Trade> {
-    trades_and_legs(symbol, fills, bars).into_iter().map(|(t, _)| t).collect()
+    trades_and_legs(symbol, fills, bars)
+        .into_iter()
+        .map(|(t, _)| t)
+        .collect()
 }
 
 /// [`trades_from_fills`] with each trade's cost legs beside it.
@@ -244,21 +268,33 @@ pub fn trades_and_legs(symbol: &str, fills: &[Fill], bars: &[Bar]) -> Vec<(Trade
     let mut cur: Option<Open> = None;
     let excursions = |entry_ns: i64, exit_ns: i64, entry_px: f64, side: f64| {
         let (mut mae, mut mfe) = (0.0_f64, 0.0_f64);
-        for b in bars.iter().filter(|b| b.ts_ns >= entry_ns && b.ts_ns <= exit_ns) {
+        for b in bars
+            .iter()
+            .filter(|b| b.ts_ns >= entry_ns && b.ts_ns <= exit_ns)
+        {
             let r = side * (b.close / entry_px - 1.0);
             mae = mae.min(r);
             mfe = mfe.max(r);
         }
         (mae, mfe)
     };
-    let close = |o: &Open, qty_closed: f64, exit_px: f64, exit_ns: i64, extra: TradeLegs| -> (Trade, TradeLegs) {
+    let close = |o: &Open,
+                 qty_closed: f64,
+                 exit_px: f64,
+                 exit_ns: i64,
+                 extra: TradeLegs|
+     -> (Trade, TradeLegs) {
         let legs = o.legs.scaled(qty_closed / o.qty).plus(extra);
         let gross = o.side * (exit_px - o.avg) * qty_closed;
         let (mae, mfe) = excursions(o.entry_ns, exit_ns, o.avg, o.side);
         (
             Trade {
                 symbol: symbol.to_string(),
-                side: if o.side > 0.0 { Side::Long } else { Side::Short },
+                side: if o.side > 0.0 {
+                    Side::Long
+                } else {
+                    Side::Short
+                },
                 entry_time: at(o.entry_ns),
                 exit_time: at(exit_ns),
                 entry_price: decimal(o.avg),
@@ -276,7 +312,11 @@ pub fn trades_and_legs(symbol: &str, fills: &[Fill], bars: &[Bar]) -> Vec<(Trade
     };
     for f in fills {
         let mut remaining = f.qty;
-        let mut left_legs = TradeLegs { fee: f.fee, spread: f.spread_cost, impact: f.impact_cost };
+        let mut left_legs = TradeLegs {
+            fee: f.fee,
+            spread: f.spread_cost,
+            impact: f.impact_cost,
+        };
         while remaining != 0.0 {
             match cur.take() {
                 None => {
@@ -305,9 +345,17 @@ pub fn trades_and_legs(symbol: &str, fills: &[Fill], bars: &[Bar]) -> Vec<(Trade
                     let left = o.qty - reduce;
                     remaining += o.side * reduce; // moves toward zero
                     if left > 1e-12 {
-                        cur = Some(Open { qty: left, legs: o.legs.scaled(left / o.qty), ..o });
+                        cur = Some(Open {
+                            qty: left,
+                            legs: o.legs.scaled(left / o.qty),
+                            ..o
+                        });
                     } else {
-                        remaining = if remaining.abs() < 1e-12 { 0.0 } else { remaining };
+                        remaining = if remaining.abs() < 1e-12 {
+                            0.0
+                        } else {
+                            remaining
+                        };
                     }
                 }
             }
@@ -344,11 +392,21 @@ impl PositionRunExecutor {
     /// rejected with `leakage.position_truncation_not_run`.
     #[must_use]
     pub fn new(artifact: Arc<Layer1Artifact>, truncation: Option<TruncationVerdict>) -> Self {
-        Self { artifact, truncation }
+        Self {
+            artifact,
+            truncation,
+        }
     }
 
     fn failed(cfg: &RunConfig, why: &EvalError) -> RunResult {
-        let mut r = map_sim_result(cfg, Vec::new(), Vec::new(), Vec::new(), ComputeCost::default(), ENGINE_VERSION);
+        let mut r = map_sim_result(
+            cfg,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            ComputeCost::default(),
+            ENGINE_VERSION,
+        );
         r.status = RunStatus::Failed(ledger::TerminalReason::DataError);
         r.integrity_flags.push(crate::run::Flag {
             code: "position_series.invalid".into(),
@@ -379,7 +437,10 @@ impl PositionRunExecutor {
             &bars,
             &EvalConfig {
                 initial_equity: a.initial_equity,
-                costs: Costs { fee_bps: a.fee_bps * k, half_spread_bps: a.half_spread_bps * k },
+                costs: Costs {
+                    fee_bps: a.fee_bps * k,
+                    half_spread_bps: a.half_spread_bps * k,
+                },
                 lot_size: a.lot_size,
             },
             a.impact.map(|i| SqrtImpact { y: i.y * k, ..i }),
@@ -400,35 +461,78 @@ impl PositionRunExecutor {
         let a = &self.artifact;
         let want = a.strategy_version();
         if cfg.strategy_version != want {
-            return Err(("strategy_version", format!("version_mismatch: the config says {} and the artifact is {want}", cfg.strategy_version)));
+            return Err((
+                "strategy_version",
+                format!(
+                    "version_mismatch: the config says {} and the artifact is {want}",
+                    cfg.strategy_version
+                ),
+            ));
         }
         if cfg.params != a.params {
-            return Err(("params", "the config's params are not the ones the series was produced with".into()));
+            return Err((
+                "params",
+                "the config's params are not the ones the series was produced with".into(),
+            ));
         }
         if cfg.seed != a.seed {
-            return Err(("seed", format!("the config's seed {} is not the series' {}", cfg.seed, a.seed)));
+            return Err((
+                "seed",
+                format!(
+                    "the config's seed {} is not the series' {}",
+                    cfg.seed, a.seed
+                ),
+            ));
         }
         if cfg.cost_model_ref != a.cost_model_ref {
-            return Err(("cost_model_ref", format!("{} is not the model the artifact was priced under ({})", cfg.cost_model_ref, a.cost_model_ref)));
+            return Err((
+                "cost_model_ref",
+                format!(
+                    "{} is not the model the artifact was priced under ({})",
+                    cfg.cost_model_ref, a.cost_model_ref
+                ),
+            ));
         }
         if cfg.data_snapshot != a.data_snapshot {
-            return Err(("data_snapshot", format!("{} is not the horizon the bars were read at ({})", cfg.data_snapshot, a.data_snapshot)));
+            return Err((
+                "data_snapshot",
+                format!(
+                    "{} is not the horizon the bars were read at ({})",
+                    cfg.data_snapshot, a.data_snapshot
+                ),
+            ));
         }
         if cfg.sizing_ref != SIZING_REF {
-            return Err(("sizing_ref", format!("a position series carries its own sizes; {} is not {SIZING_REF}", cfg.sizing_ref)));
+            return Err((
+                "sizing_ref",
+                format!(
+                    "a position series carries its own sizes; {} is not {SIZING_REF}",
+                    cfg.sizing_ref
+                ),
+            ));
         }
         if cfg.fill_model != crate::run::FillModel::NextBarOpen {
-            return Err(("fill_model", "a position series fills at the next bar's open and no other model is implemented".into()));
+            return Err((
+                "fill_model",
+                "a position series fills at the next bar's open and no other model is implemented"
+                    .into(),
+            ));
         }
         if cfg.fill_delay_bars != 0 {
             return Err(("fill_delay_bars", "extra fill delay is not implemented for position series; refusing rather than ignoring it".into()));
         }
         if cfg.null_world.is_some() || cfg.target.is_some() {
-            return Err(("null_world/target", "a position-series run has no null world and no deployment target".into()));
+            return Err((
+                "null_world/target",
+                "a position-series run has no null world and no deployment target".into(),
+            ));
         }
         let expected = a.run_config().map_err(|e| ("data_slice", e.to_string()))?;
         if cfg.data_slice != expected.data_slice {
-            return Err(("data_slice", "the config's slice is not the span of the bars the series was decided on".into()));
+            return Err((
+                "data_slice",
+                "the config's slice is not the span of the bars the series was decided on".into(),
+            ));
         }
         Ok(())
     }
@@ -439,9 +543,19 @@ impl RunExecutor for PositionRunExecutor {
         let started = std::time::Instant::now();
         let a = &self.artifact;
         if let Err((field, why)) = self.check_config(cfg) {
-            let mut r = map_sim_result(cfg, Vec::new(), Vec::new(), Vec::new(), ComputeCost::default(), ENGINE_VERSION);
+            let mut r = map_sim_result(
+                cfg,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                ComputeCost::default(),
+                ENGINE_VERSION,
+            );
             r.status = RunStatus::Failed(ledger::TerminalReason::IntegrityRejected);
-            r.integrity_flags.push(crate::run::Flag { code: format!("layer1.config.{}", field.replace('/', "_")), detail: why });
+            r.integrity_flags.push(crate::run::Flag {
+                code: format!("layer1.config.{}", field.replace('/', "_")),
+                detail: why,
+            });
             return r;
         }
         let run = match self.evaluate_scaled(cfg.cost_scale_bp) {
@@ -461,13 +575,19 @@ impl RunExecutor for PositionRunExecutor {
             equity,
             net_exposure,
             trades,
-            ComputeCost { wall_ms: elapsed, cpu_ms: elapsed },
+            ComputeCost {
+                wall_ms: elapsed,
+                cpu_ms: elapsed,
+            },
             ENGINE_VERSION,
         );
         if run.ruined_at_ns.is_some() {
             result.integrity_flags.push(crate::run::Flag {
                 code: "position_series.ruin".into(),
-                detail: format!("equity reached zero at {}; trading stopped there", at(run.ruined_at_ns.unwrap_or(0)).to_rfc3339()),
+                detail: format!(
+                    "equity reached zero at {}; trading stopped there",
+                    at(run.ruined_at_ns.unwrap_or(0)).to_rfc3339()
+                ),
             });
         }
         // Gate 0 (M-1.7): a missing or failing truncation verdict rejects the run.
@@ -488,15 +608,27 @@ mod tests {
             .map(|i| {
                 #[allow(clippy::cast_precision_loss)]
                 let p = 100.0 + (i as f64 * 0.31).sin() * 4.0 + i as f64 * 0.02;
-                ArtifactBar { ts_ns: (i64::try_from(i).unwrap() + 1) * 3_600_000_000_000, open: p, close: p * 1.001 }
+                ArtifactBar {
+                    ts_ns: (i64::try_from(i).unwrap() + 1) * 3_600_000_000_000,
+                    open: p,
+                    close: p * 1.001,
+                }
             })
             .collect();
-        let points = bars.iter().enumerate().map(|(i, b)| PositionPoint::new(b.ts_ns, target(i))).collect();
+        let points = bars
+            .iter()
+            .enumerate()
+            .map(|(i, b)| PositionPoint::new(b.ts_ns, target(i)))
+            .collect();
         Layer1Artifact {
             code_sha256: "ab".repeat(32),
             instrument: "BTC-USD".into(),
             timeframe: "1h".into(),
-            series: PositionSeries { points, position_units: PositionUnits::Fraction, allow_short: true },
+            series: PositionSeries {
+                points,
+                position_units: PositionUnits::Fraction,
+                allow_short: true,
+            },
             bars,
             initial_equity: 10_000.0,
             fee_bps: 10.0,
@@ -513,9 +645,15 @@ mod tests {
     fn run_with(a: Layer1Artifact, truncation: Option<TruncationVerdict>) -> RunResult {
         let a = Arc::new(a);
         let cfg = a.run_config().unwrap();
-        let bt = Backtest::new(InMemoryRunStore::new(), PositionRunExecutor::new(a, truncation), InMemoryLedger::new());
+        let bt = Backtest::new(
+            InMemoryRunStore::new(),
+            PositionRunExecutor::new(a, truncation),
+            InMemoryLedger::new(),
+        );
         let ctx = DispatchContext::human("tenant-test", "layer1", 0.1).with_experiment("exp-l1");
-        let (result, _) = bt.run_traced(&crate::run::RunDispatch::new(&ctx, &cfg, 1.0)).unwrap();
+        let (result, _) = bt
+            .run_traced(&crate::run::RunDispatch::new(&ctx, &cfg, 1.0))
+            .unwrap();
         result
     }
 
@@ -537,7 +675,10 @@ mod tests {
     fn a_run_whose_truncation_verdict_is_missing_or_failed_is_rejected_not_ok() {
         let missing = run_with(artifact(120, |_| 1.0), None);
         assert_eq!(missing.status, RunStatus::RejectedIntegrity);
-        assert_eq!(missing.integrity_flags.last().unwrap().code, position_leakage::NOT_RUN_CODE);
+        assert_eq!(
+            missing.integrity_flags.last().unwrap().code,
+            position_leakage::NOT_RUN_CODE
+        );
 
         let failed = TruncationVerdict::Fail(TruncationFailure {
             cut_ns: 50 * 3_600_000_000_000,
@@ -549,7 +690,11 @@ mod tests {
         assert_eq!(r.status, RunStatus::RejectedIntegrity);
         let flag = r.integrity_flags.last().unwrap();
         assert_eq!(flag.code, position_leakage::CODE);
-        assert!(flag.detail.contains("1970-01-02T16:00:00"), "{}", flag.detail);
+        assert!(
+            flag.detail.contains("1970-01-02T16:00:00"),
+            "{}",
+            flag.detail
+        );
     }
 
     #[test]
@@ -567,10 +712,18 @@ mod tests {
         let v = a.strategy_version();
         assert!(v.starts_with("layer1.abababababababab."), "{v}");
         let b = artifact(60, |i| if i == 10 { 0.0 } else { 1.0 });
-        assert_ne!(a.strategy_version(), b.strategy_version(), "a different series is a different version");
+        assert_ne!(
+            a.strategy_version(),
+            b.strategy_version(),
+            "a different series is a different version"
+        );
         let mut c = artifact(60, |_| 1.0);
         c.code_sha256 = "cd".repeat(32);
-        assert_ne!(a.strategy_version(), c.strategy_version(), "and so is different code");
+        assert_ne!(
+            a.strategy_version(),
+            c.strategy_version(),
+            "and so is different code"
+        );
     }
 
     #[test]
@@ -578,7 +731,10 @@ mod tests {
         let a = artifact(30, |_| 1.0);
         let mut v: serde_json::Value = serde_json::from_slice(&a.to_bytes()).unwrap();
         v["pnl"] = serde_json::json!(123.0);
-        assert!(matches!(Layer1Artifact::from_bytes(&serde_json::to_vec(&v).unwrap()), Err(ArtifactError::Parse(_))));
+        assert!(matches!(
+            Layer1Artifact::from_bytes(&serde_json::to_vec(&v).unwrap()),
+            Err(ArtifactError::Parse(_))
+        ));
         let mut nested: serde_json::Value = serde_json::from_slice(&a.to_bytes()).unwrap();
         nested["series"]["equity"] = serde_json::json!([1.0]);
         assert!(Layer1Artifact::from_bytes(&serde_json::to_vec(&nested).unwrap()).is_err());
@@ -605,18 +761,31 @@ mod tests {
         assert_eq!(t.side, Side::Long);
         let fees_and_spread = run.total_fees + run.total_spread_cost;
         let paid: f64 = rust_decimal::prelude::ToPrimitive::to_f64(&t.costs_paid).unwrap();
-        assert!((paid - fees_and_spread).abs() < 1e-6, "{paid} vs {fees_and_spread}");
+        assert!(
+            (paid - fees_and_spread).abs() < 1e-6,
+            "{paid} vs {fees_and_spread}"
+        );
         let pnl: f64 = rust_decimal::prelude::ToPrimitive::to_f64(&t.pnl).unwrap();
-        assert!((run.final_equity - (a.initial_equity + pnl)).abs() < 1e-6, "equity {} pnl {pnl}", run.final_equity);
+        assert!(
+            (run.final_equity - (a.initial_equity + pnl)).abs() < 1e-6,
+            "equity {} pnl {pnl}",
+            run.final_equity
+        );
     }
 
     #[test]
     fn a_flip_closes_one_trade_and_opens_the_next() {
         let a = Arc::new(artifact(100, |i| if i < 30 { 1.0 } else { -1.0 }));
-        let run = PositionRunExecutor::new(a.clone(), Some(pass())).evaluate().unwrap();
+        let run = PositionRunExecutor::new(a.clone(), Some(pass()))
+            .evaluate()
+            .unwrap();
         let bars: Vec<Bar> = a.bars.iter().copied().map(Bar::from).collect();
         let trades = trades_from_fills("X", &run.fills, &bars);
-        assert_eq!(trades.len(), 1, "the short is still open at the end: {trades:?}");
+        assert_eq!(
+            trades.len(),
+            1,
+            "the short is still open at the end: {trades:?}"
+        );
         assert_eq!(trades[0].side, Side::Long);
     }
 }

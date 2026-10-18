@@ -5,7 +5,7 @@
 //! successful evaluation through the same function the promotion gate uses
 //! (`model_registry::manager::usage_verdict_pg`) and applies the hard usage rules.
 
-use backtest::gates::model_binding::{BindingDecision, ModelBinding, ModelUse, ModelUsagePolicy};
+use backtest::gates::model_binding::{BindingDecision, ModelBinding, ModelUsagePolicy, ModelUse};
 use model_registry::scoring_v2::ForecastUse;
 use sqlx::PgPool;
 
@@ -34,7 +34,8 @@ impl ModelUsagePolicy for RegistryUsagePolicy {
     async fn decide(&self, b: &ModelBinding) -> BindingDecision {
         let uses: Vec<ForecastUse> = b.uses.iter().copied().map(forecast_use).collect();
         let report =
-            model_registry::manager::usage_verdict_pg(&self.pg, &b.model_id, b.version, &uses).await;
+            model_registry::manager::usage_verdict_pg(&self.pg, &b.model_id, b.version, &uses)
+                .await;
         if report.allowed {
             BindingDecision::allow()
         } else {
@@ -49,9 +50,12 @@ impl ModelUsagePolicy for RegistryUsagePolicy {
 /// # Errors
 /// The refusals, joined.
 pub async fn check_bindings(pg: &PgPool, bindings: &[ModelBinding]) -> Result<(), String> {
-    backtest::gates::model_binding::BindingOutcome::judge(bindings, &RegistryUsagePolicy::new(pg.clone()))
-        .await
-        .satisfied()
+    backtest::gates::model_binding::BindingOutcome::judge(
+        bindings,
+        &RegistryUsagePolicy::new(pg.clone()),
+    )
+    .await
+    .satisfied()
 }
 
 #[cfg(test)]

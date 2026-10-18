@@ -67,7 +67,11 @@ pub fn sample(
         return Vec::new();
     }
     eligible.sort_by(|a, b| a.0.cmp(&b.0));
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     let want = ((eligible.len() as f64 * NIGHTLY_SAMPLE_SHARE).ceil() as usize).max(1);
     eligible
         .into_iter()
@@ -103,7 +107,8 @@ pub async fn run_once(suite: Arc<SuiteManager>, pg: &PgPool, now: DateTime<Utc>)
                 continue;
             }
             Err(e) => {
-                out.skipped.push((run.run_id, format!("the re-run panicked: {e}")));
+                out.skipped
+                    .push((run.run_id, format!("the re-run panicked: {e}")));
                 continue;
             }
         };
@@ -195,7 +200,9 @@ async fn file_defect(
 /// # Errors
 /// Backend failures.
 pub async fn drift_since(pg: &PgPool, tenant: &str, days: u32) -> Result<DriftReport, String> {
-    let mut tx = ledger::pg::tenant_tx(pg, tenant).await.map_err(|e| e.to_string())?;
+    let mut tx = ledger::pg::tenant_tx(pg, tenant)
+        .await
+        .map_err(|e| e.to_string())?;
     let rows: Vec<(String, i64)> = sqlx::query_as(
         "SELECT outcome, count(*) FROM mlops.reproduction
           WHERE tenant_id = $1 AND created_at > now() - make_interval(days => $2)

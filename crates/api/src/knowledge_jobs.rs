@@ -695,7 +695,16 @@ impl InsightStore {
     }
 }
 
-type InsightRow = (Uuid, i16, String, serde_json::Value, Vec<Uuid>, i32, i32, f32);
+type InsightRow = (
+    Uuid,
+    i16,
+    String,
+    serde_json::Value,
+    Vec<Uuid>,
+    i32,
+    i32,
+    f32,
+);
 
 impl From<InsightRow> for Insight {
     fn from(r: InsightRow) -> Self {
@@ -839,7 +848,9 @@ pub fn is_local_endpoint(url: &str) -> bool {
     host == "localhost"
         || host == "::1"
         || host == "host.docker.internal"
-        || host.strip_prefix("127.").is_some_and(|r| r.split('.').count() == 3 && r.split('.').all(|o| o.parse::<u8>().is_ok()))
+        || host.strip_prefix("127.").is_some_and(|r| {
+            r.split('.').count() == 3 && r.split('.').all(|o| o.parse::<u8>().is_ok())
+        })
 }
 
 /// A local Ollama server running `nomic-embed-text` (768 dimensions).
@@ -1091,7 +1102,9 @@ pub async fn search_insights(
             .map(str::to_string)
             .collect()
     });
-    let annotated = crate::knowledge_routes::annotate_insights(&state.pg, &tenant, &insights, have.as_deref()).await;
+    let annotated =
+        crate::knowledge_routes::annotate_insights(&state.pg, &tenant, &insights, have.as_deref())
+            .await;
     Json(json!({
         "insights": annotated,
         "tokens_used": used,
@@ -1545,9 +1558,18 @@ mod tests {
     #[test]
     fn the_insight_endpoints_are_behind_the_memory_scope() {
         assert_eq!(scopes::MEMORY, "research:memory");
-        assert!(!scopes::permits(&["research:data.read".to_string()], scopes::MEMORY));
-        assert!(scopes::permits(&[scopes::MEMORY.to_string()], scopes::MEMORY));
-        assert!(scopes::permits(&[scopes::WEB_FULL.to_string()], scopes::MEMORY));
+        assert!(!scopes::permits(
+            &["research:data.read".to_string()],
+            scopes::MEMORY
+        ));
+        assert!(scopes::permits(
+            &[scopes::MEMORY.to_string()],
+            scopes::MEMORY
+        ));
+        assert!(scopes::permits(
+            &[scopes::WEB_FULL.to_string()],
+            scopes::MEMORY
+        ));
     }
 
     #[tokio::test]
@@ -1578,6 +1600,9 @@ mod tests {
             .await
             .unwrap_err();
         assert!(e.contains("not on this host"), "{e}");
-        assert_eq!(OllamaEmbedder::new("http://127.0.0.1:11434", "m1").model_name(), "m1");
+        assert_eq!(
+            OllamaEmbedder::new("http://127.0.0.1:11434", "m1").model_name(),
+            "m1"
+        );
     }
 }

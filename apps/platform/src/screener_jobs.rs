@@ -80,14 +80,13 @@ pub async fn run_once(
                 continue;
             }
         }
-        let report =
-            match selection::run_selection(pg, ch_url, &w.revision, minute, models).await {
-                Ok(r) => r,
-                Err(e) => {
-                    warn!(watch = %w.watch_id, error = %e, "watched screener did not run");
-                    continue;
-                }
-            };
+        let report = match selection::run_selection(pg, ch_url, &w.revision, minute, models).await {
+            Ok(r) => r,
+            Err(e) => {
+                warn!(watch = %w.watch_id, error = %e, "watched screener did not run");
+                continue;
+            }
+        };
         match selection::journal(pg, &report, selection::RequestedBy::Schedule).await {
             Ok(run) => info!(
                 watch = %w.watch_id,
@@ -95,7 +94,9 @@ pub async fn run_once(
                 selected = report.run.selection.selected.len(),
                 "watched screener ran on its schedule"
             ),
-            Err(e) => warn!(watch = %w.watch_id, error = %e, "watched screener ran but was not journaled"),
+            Err(e) => {
+                warn!(watch = %w.watch_id, error = %e, "watched screener ran but was not journaled")
+            }
         }
     }
 }
@@ -119,7 +120,11 @@ mod tests {
 
     #[test]
     fn a_watch_is_due_exactly_when_its_schedule_fires() {
-        let ws = vec![watch("30 14 * * 1-5"), watch("0 * * * *"), watch("not a cron")];
+        let ws = vec![
+            watch("30 14 * * 1-5"),
+            watch("0 * * * *"),
+            watch("not a cron"),
+        ];
         // Monday 2026-10-05 14:30 UTC.
         let at = Utc.with_ymd_and_hms(2026, 10, 5, 14, 30, 0).unwrap();
         let d = due(&ws, at);
@@ -135,7 +140,10 @@ mod tests {
     #[test]
     fn a_tick_late_in_the_minute_is_still_that_minute() {
         let late = Utc.with_ymd_and_hms(2026, 10, 5, 14, 30, 59).unwrap();
-        assert_eq!(minute_of(late), Utc.with_ymd_and_hms(2026, 10, 5, 14, 30, 0).unwrap());
+        assert_eq!(
+            minute_of(late),
+            Utc.with_ymd_and_hms(2026, 10, 5, 14, 30, 0).unwrap()
+        );
     }
 
     /// Registered at boot — a source scan, for the reason `fill_stream_tests`

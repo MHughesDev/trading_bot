@@ -46,7 +46,9 @@ pub fn arm_seed(campaign_id: &str) -> u64 {
 ///
 /// # Errors
 /// [`SpaceError`] when the definition has nothing to sweep.
-pub fn declared_space(def: &domain::strategy_def::StrategyDefinition) -> Result<SearchSpace, SpaceError> {
+pub fn declared_space(
+    def: &domain::strategy_def::StrategyDefinition,
+) -> Result<SearchSpace, SpaceError> {
     SearchSpace::from_definition(def, &BTreeMap::new())
 }
 
@@ -179,7 +181,10 @@ const BOOTSTRAP: usize = 4000;
 ///
 /// # Errors
 /// [`ArmError`] when there is no arm, it is incomplete, or its budget differs.
-pub fn compare_to_random(agent_scores: &[f64], arm: Option<&Arm>) -> Result<RandomArmReport, ArmError> {
+pub fn compare_to_random(
+    agent_scores: &[f64],
+    arm: Option<&Arm>,
+) -> Result<RandomArmReport, ArmError> {
     gate_check(arm)?;
     let arm = arm.ok_or(ArmError::NoArm)?;
     if agent_scores.len() != arm.budget {
@@ -188,7 +193,12 @@ pub fn compare_to_random(agent_scores: &[f64], arm: Option<&Arm>) -> Result<Rand
             random: arm.budget,
         });
     }
-    let finite: Vec<f64> = arm.scores.iter().copied().filter(|s| s.is_finite()).collect();
+    let finite: Vec<f64> = arm
+        .scores
+        .iter()
+        .copied()
+        .filter(|s| s.is_finite())
+        .collect();
     let agent_best = agent_scores
         .iter()
         .copied()
@@ -212,11 +222,20 @@ pub fn compare_to_random(agent_scores: &[f64], arm: Option<&Arm>) -> Result<Rand
         maxes.push(m);
     }
     let beaten = maxes.iter().filter(|m| **m < agent_best).count() as f64;
-    let ties = maxes.iter().filter(|m| (**m - agent_best).abs() < f64::EPSILON).count() as f64;
+    let ties = maxes
+        .iter()
+        .filter(|m| (**m - agent_best).abs() < f64::EPSILON)
+        .count() as f64;
     Ok(RandomArmReport {
         budget: arm.budget,
         agent_best,
-        agent_scores: quantiles(agent_scores.iter().copied().filter(|s| s.is_finite()).collect()),
+        agent_scores: quantiles(
+            agent_scores
+                .iter()
+                .copied()
+                .filter(|s| s.is_finite())
+                .collect(),
+        ),
         random_scores: quantiles(finite),
         random_best_of_budget: quantiles(maxes.clone()),
         percentile: (beaten + 0.5 * ties) / maxes.len() as f64,
@@ -242,7 +261,11 @@ mod tests {
         if let Some((lo, hi)) = narrow {
             n.insert(
                 "a".to_string(),
-                crate::space::Narrow { min: Some(lo), max: Some(hi), ..Default::default() },
+                crate::space::Narrow {
+                    min: Some(lo),
+                    max: Some(hi),
+                    ..Default::default()
+                },
             );
         }
         SearchSpace::from_definition(&def, &n).unwrap()
@@ -254,7 +277,11 @@ mod tests {
         let pts = draw(&s, 40, arm_seed("camp-1"));
         assert_eq!(pts.len(), 40);
         assert_ne!(arm_seed("camp-1"), arm_seed("camp-2"));
-        assert_eq!(draw(&s, 40, arm_seed("camp-1")), pts, "reproducible from the campaign id");
+        assert_eq!(
+            draw(&s, 40, arm_seed("camp-1")),
+            pts,
+            "reproducible from the campaign id"
+        );
     }
 
     #[test]
@@ -265,7 +292,11 @@ mod tests {
         let narrowed = space(Some((0.9, 1.0)));
         let arm_pts = draw(&declared, 200, arm_seed("c"));
         let agent_pts = draw(&narrowed, 200, 7);
-        let low = |pts: &[ParamMap]| pts.iter().filter(|p| p["a"].as_f64().unwrap() < 0.9).count();
+        let low = |pts: &[ParamMap]| {
+            pts.iter()
+                .filter(|p| p["a"].as_f64().unwrap() < 0.9)
+                .count()
+        };
         assert!(low(&arm_pts) > 100, "declared space spans [0,1]");
         assert_eq!(low(&agent_pts), 0, "the agent's arm stays in its narrowing");
     }
@@ -275,14 +306,23 @@ mod tests {
         assert_eq!(gate_check(None), Err(ArmError::NoArm));
         let mut arm = Arm::new("c", 10);
         arm.scores = vec![0.1; 4];
-        assert_eq!(gate_check(Some(&arm)), Err(ArmError::Incomplete { done: 4, budget: 10 }));
+        assert_eq!(
+            gate_check(Some(&arm)),
+            Err(ArmError::Incomplete {
+                done: 4,
+                budget: 10
+            })
+        );
         assert_eq!(compare_to_random(&[0.0; 10], None), Err(ArmError::NoArm));
         assert!(compare_to_random(&[0.0; 10], Some(&arm)).is_err());
         arm.scores = vec![0.1; 10];
         assert!(gate_check(Some(&arm)).is_ok());
         assert_eq!(
             compare_to_random(&[0.0; 7], Some(&arm)),
-            Err(ArmError::UnequalBudget { agent: 7, random: 10 })
+            Err(ArmError::UnequalBudget {
+                agent: 7,
+                random: 10
+            })
         );
     }
 
@@ -307,7 +347,10 @@ mod tests {
         }
         let mean = total / f64::from(reps);
         assert!((0.35..0.65).contains(&mean), "mean null percentile {mean}");
-        assert!(at_one < reps / 4, "{at_one} of {reps} null campaigns read as beating all of random search");
+        assert!(
+            at_one < reps / 4,
+            "{at_one} of {reps} null campaigns read as beating all of random search"
+        );
 
         // An agent whose best is far above anything random found, and one far below.
         let mut arm = Arm::new("c-edge", 50);

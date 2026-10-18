@@ -420,7 +420,9 @@ pub fn spawn_context_corpus_job(pool: PgPool) {
         loop {
             match refresh(&pool).await {
                 Ok(reports) if reports.is_empty() => {
-                    tracing::info!("context attribution corpus is empty: no run has recorded one yet");
+                    tracing::info!(
+                        "context attribution corpus is empty: no run has recorded one yet"
+                    );
                 }
                 Ok(reports) => {
                     for r in reports {

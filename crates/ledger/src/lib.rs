@@ -1530,10 +1530,11 @@ impl TrialLedger for InMemoryLedger {
             ));
         };
         record.validate().map_err(LedgerError::Invalid)?;
-        self.reproductions
-            .lock()
-            .expect("ledger poisoned")
-            .push((ticket.tenant_id, original, record.clone()));
+        self.reproductions.lock().expect("ledger poisoned").push((
+            ticket.tenant_id,
+            original,
+            record.clone(),
+        ));
         Ok(())
     }
 
@@ -2110,14 +2111,19 @@ mod tests {
         let first_id = first.trial_id();
         l.transition(&mut first, TrialEvent::to(TrialState::Running))
             .unwrap();
-        l.settle(first, TrialEvent::completed("run9", None)).unwrap();
+        l.settle(first, TrialEvent::completed("run9", None))
+            .unwrap();
         let rows_before = l.rows("tenant-a");
         let count_before = l.trial_count("tenant-a");
         let n_eff_before = l.n_eff("tenant-a").unwrap().value();
 
         let ticket = l.begin_reproduction("tenant-a", &s.config_hash).unwrap();
         assert_eq!(ticket.reproduces(), Some(first_id));
-        assert_ne!(ticket.trial_id(), first_id, "it has no trial row of its own");
+        assert_ne!(
+            ticket.trial_id(),
+            first_id,
+            "it has no trial row of its own"
+        );
         l.record_reproduction(
             ticket,
             &reproduction::ReproductionRecord {
@@ -2133,9 +2139,20 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(l.trial_count("tenant-a"), count_before, "no trial was counted");
-        assert_eq!(l.rows("tenant-a"), rows_before, "the hash chain did not move");
-        assert_eq!(l.n_eff("tenant-a").unwrap().value().to_bits(), n_eff_before.to_bits());
+        assert_eq!(
+            l.trial_count("tenant-a"),
+            count_before,
+            "no trial was counted"
+        );
+        assert_eq!(
+            l.rows("tenant-a"),
+            rows_before,
+            "the hash chain did not move"
+        );
+        assert_eq!(
+            l.n_eff("tenant-a").unwrap().value().to_bits(),
+            n_eff_before.to_bits()
+        );
         assert_eq!(l.reproductions("tenant-a").len(), 1);
         assert!(l.reproductions("tenant-a")[0].1.receipt_missing());
     }
@@ -2150,7 +2167,8 @@ mod tests {
         let mut first = l.register(&Registration::new(&c, &s, 0.5)).unwrap();
         l.transition(&mut first, TrialEvent::to(TrialState::Running))
             .unwrap();
-        l.settle(first, TrialEvent::completed("run10", None)).unwrap();
+        l.settle(first, TrialEvent::completed("run10", None))
+            .unwrap();
 
         let mut t = l.begin_reproduction("tenant-a", &s.config_hash).unwrap();
         assert!(matches!(

@@ -89,7 +89,10 @@ fn distance_without_unit_is_produced_by_the_language_and_teaches_the_same_units(
     // so the property is that they teach the same three units and the same
     // lookback syntax, and drift in either fails here.
     for needle in ["%", "atr(", "sigma(", "from entry"] {
-        assert!(fix.contains(needle), "the parser's fix lacks `{needle}`: {fix}");
+        assert!(
+            fix.contains(needle),
+            "the parser's fix lacks `{needle}`: {fix}"
+        );
         assert!(
             table.contains(needle),
             "the teaching table's fix lacks `{needle}`: {table}"

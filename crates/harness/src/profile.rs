@@ -867,7 +867,8 @@ impl Profile {
             },
             _ => Measurement::Unmeasured {
                 why: if self.multi_step_evidence.is_some() {
-                    "the multi_step claim rests on a recorded eval run, not on a scorecard row".into()
+                    "the multi_step claim rests on a recorded eval run, not on a scorecard row"
+                        .into()
                 } else {
                     "no scorecard row backs this profile's budget or tool-calling claims".into()
                 },
@@ -1398,7 +1399,9 @@ mod tests {
         p.scorecard_row = Some("qwen3.6-35b-a3b/routing".into());
         assert_eq!(
             p.measurement(),
-            Measurement::Measured { row: "qwen3.6-35b-a3b/routing".into() }
+            Measurement::Measured {
+                row: "qwen3.6-35b-a3b/routing".into()
+            }
         );
         assert_eq!(p.tier_label(), "local_mid");
         p.scorecard_row = Some("   ".into());

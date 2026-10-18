@@ -15,8 +15,8 @@ pub mod manager;
 pub mod prompt;
 pub mod resume;
 pub mod routes;
-pub mod subrun;
 pub mod skills_mount;
+pub mod subrun;
 pub mod workspace_tools;
 
 /// The one driver, under the name the spec gives it (AGENT-010 §2; S-2.10).

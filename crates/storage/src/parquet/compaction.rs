@@ -71,7 +71,11 @@ fn sorted_dir(dir: &Path) -> Result<Vec<PathBuf>, ParquetError> {
 pub fn recover_partition(dir: &Path) -> Result<usize, ParquetError> {
     let mut resolved = 0;
     for path in sorted_dir(dir)? {
-        let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         let Some(stem) = name.strip_suffix(MANIFEST_SUFFIX) else {
             continue;
         };
@@ -189,7 +193,8 @@ fn write_merged(sources: &[PathBuf], tmp: &Path) -> Result<usize, ParquetError> 
                 None => {
                     schema = Some(batch.schema());
                     let file = std::fs::File::create(tmp)?;
-                    writer = Some(ArrowWriter::try_new(file, batch.schema(), None).map_err(pq_err)?);
+                    writer =
+                        Some(ArrowWriter::try_new(file, batch.schema(), None).map_err(pq_err)?);
                 }
                 Some(s) if *s != batch.schema() => {
                     return Err(ParquetError::Arrow(format!(
@@ -236,7 +241,11 @@ pub fn closed_partitions(
             if !path.is_dir() {
                 continue;
             }
-            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             if let Some(date) = name.strip_prefix("date=") {
                 if chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok_and(|d| d < today) {
                     out.push(path);
@@ -261,7 +270,9 @@ pub async fn compact_closed_partitions(
         match compact_partition(&dir).await {
             Ok(o) if o.merged_files > 0 => done.push(o),
             Ok(_) => {}
-            Err(e) => tracing::error!(path = %dir.display(), error = %e, "partition compaction failed; sources intact"),
+            Err(e) => {
+                tracing::error!(path = %dir.display(), error = %e, "partition compaction failed; sources intact")
+            }
         }
     }
     Ok(done)
@@ -283,11 +294,18 @@ pub fn spawn_nightly(base_path: PathBuf, hour_utc: u32) -> tokio::task::JoinHand
             } else {
                 today_run + chrono::Duration::days(1)
             };
-            let wait = (next - now).to_std().unwrap_or(std::time::Duration::from_secs(3600));
+            let wait = (next - now)
+                .to_std()
+                .unwrap_or(std::time::Duration::from_secs(3600));
             tokio::time::sleep(wait).await;
             match compact_closed_partitions(&base_path, chrono::Utc::now().date_naive()).await {
-                Ok(done) => tracing::info!(partitions = done.len(), "nightly parquet compaction finished"),
-                Err(e) => tracing::error!(error = %e, "nightly parquet compaction could not walk the archive"),
+                Ok(done) => tracing::info!(
+                    partitions = done.len(),
+                    "nightly parquet compaction finished"
+                ),
+                Err(e) => {
+                    tracing::error!(error = %e, "nightly parquet compaction could not walk the archive")
+                }
             }
         }
     })
@@ -303,7 +321,8 @@ mod tests {
     struct TempDir(PathBuf);
     impl TempDir {
         fn new() -> Self {
-            let p = std::env::temp_dir().join(format!("compaction-test-{}", uuid::Uuid::new_v4().simple()));
+            let p = std::env::temp_dir()
+                .join(format!("compaction-test-{}", uuid::Uuid::new_v4().simple()));
             std::fs::create_dir_all(&p).unwrap();
             Self(p)
         }
@@ -319,7 +338,11 @@ mod tests {
 
     fn read_rows(dir: &Path) -> Vec<Vec<u8>> {
         let mut rows = Vec::new();
-        for p in sorted_dir(dir).unwrap().into_iter().filter(|p| is_final_parquet(p)) {
+        for p in sorted_dir(dir)
+            .unwrap()
+            .into_iter()
+            .filter(|p| is_final_parquet(p))
+        {
             let reader = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(&p).unwrap())
                 .unwrap()
                 .build()
@@ -339,13 +362,27 @@ mod tests {
     async fn seed(base: &Path, date: NaiveDate, batches: usize) -> PathBuf {
         let w = super::super::ParquetWriter::new(base);
         for b in 0..batches {
-            let rows: Vec<Vec<u8>> = (0..3).map(|i| format!("{{\"b\":{b},\"i\":{i}}}").into_bytes()).collect();
+            let rows: Vec<Vec<u8>> = (0..3)
+                .map(|i| format!("{{\"b\":{b},\"i\":{i}}}").into_bytes())
+                .collect();
             let refs: Vec<&[u8]> = rows.iter().map(Vec::as_slice).collect();
-            w.write_batch("market.trades", "kraken", "BTC-USD", date, &format!("batch-{b}"), &refs)
-                .await
-                .unwrap();
+            w.write_batch(
+                "market.trades",
+                "kraken",
+                "BTC-USD",
+                date,
+                &format!("batch-{b}"),
+                &refs,
+            )
+            .await
+            .unwrap();
         }
-        base.join(super::super::partition::partition_path("market.trades", "kraken", "BTC-USD", date))
+        base.join(super::super::partition::partition_path(
+            "market.trades",
+            "kraken",
+            "BTC-USD",
+            date,
+        ))
     }
 
     #[tokio::test]
@@ -376,7 +413,11 @@ mod tests {
             .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
             .collect();
         std::fs::write(dir.join("compacted-x.manifest"), names.join("\n")).unwrap();
-        std::fs::rename(dir.join("compacted-x.parquet.tmp"), dir.join("compacted-x.parquet")).unwrap();
+        std::fs::rename(
+            dir.join("compacted-x.parquet.tmp"),
+            dir.join("compacted-x.parquet"),
+        )
+        .unwrap();
         // The crash state reads every row twice; recovery must fix that.
         assert_eq!(read_rows(&dir).len(), before.len() * 2);
         assert_eq!(recover_partition(&dir).unwrap(), 1);
@@ -393,7 +434,11 @@ mod tests {
         std::fs::write(dir.join("compacted-y.manifest"), "whatever").unwrap();
         recover_partition(&dir).unwrap();
         assert_eq!(read_rows(&dir), before);
-        assert_eq!(sorted_dir(&dir).unwrap().len(), 3, "temp and manifest removed, sources stand");
+        assert_eq!(
+            sorted_dir(&dir).unwrap().len(),
+            3,
+            "temp and manifest removed, sources stand"
+        );
     }
 
     #[tokio::test]
@@ -405,6 +450,10 @@ mod tests {
         let done = compact_closed_partitions(tmp.path(), today).await.unwrap();
         assert_eq!(done.len(), 1);
         assert_eq!(sorted_dir(&old).unwrap().len(), 1);
-        assert_eq!(sorted_dir(&live).unwrap().len(), 2, "today's partition is untouched");
+        assert_eq!(
+            sorted_dir(&live).unwrap().len(),
+            2,
+            "today's partition is untouched"
+        );
     }
 }

@@ -101,15 +101,22 @@ fn normal_expr(s: &str) -> String {
 #[must_use]
 pub fn motif(m: &Move) -> String {
     match m {
-        Move::AddConditionFilter { expr, .. } => format!("add_condition_filter:{}", normal_expr(expr)),
-        Move::RemoveNode { node } => format!("remove_node:{}", abstract_numbers(&node.to_ascii_lowercase())),
+        Move::AddConditionFilter { expr, .. } => {
+            format!("add_condition_filter:{}", normal_expr(expr))
+        }
+        Move::RemoveNode { node } => format!(
+            "remove_node:{}",
+            abstract_numbers(&node.to_ascii_lowercase())
+        ),
         Move::SwapFeature { from, to, .. } => format!(
             "swap_feature:{}->{}",
             abstract_numbers(&from.to_ascii_lowercase()),
             abstract_numbers(&to.to_ascii_lowercase())
         ),
         Move::ChangeExit { mode } => format!("change_exit:{mode:?}").to_ascii_lowercase(),
-        Move::AddRegimeGate { regime } => format!("add_regime_gate:{}", regime.to_ascii_lowercase()),
+        Move::AddRegimeGate { regime } => {
+            format!("add_regime_gate:{}", regime.to_ascii_lowercase())
+        }
         Move::ChangeSizing { mode, .. } => format!("change_sizing:{mode:?}").to_ascii_lowercase(),
         Move::Simplify => "simplify".to_string(),
         Move::Combine { how, .. } => format!("combine:{how:?}").to_ascii_lowercase(),
@@ -186,8 +193,14 @@ impl Veto {
 #[must_use]
 pub fn check(motif_key: &str, records: &[MoveRecord], policy: &VetoPolicy) -> Veto {
     let mine: Vec<&MoveRecord> = records.iter().filter(|r| r.motif == motif_key).collect();
-    let tries = u32::try_from(mine.iter().filter(|r| r.outcome != Outcome::Neutral).count()).unwrap_or(u32::MAX);
-    let failures = u32::try_from(mine.iter().filter(|r| r.outcome == Outcome::Failed).count()).unwrap_or(u32::MAX);
+    let tries = u32::try_from(
+        mine.iter()
+            .filter(|r| r.outcome != Outcome::Neutral)
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
+    let failures = u32::try_from(mine.iter().filter(|r| r.outcome == Outcome::Failed).count())
+        .unwrap_or(u32::MAX);
     let confidence = failure_confidence(failures, tries);
     let cites: Vec<String> = mine
         .iter()
@@ -198,9 +211,21 @@ pub fn check(motif_key: &str, records: &[MoveRecord], policy: &VetoPolicy) -> Ve
         "motif `{motif_key}` failed {failures} of {tries} tries; P(failure rate > 0.5) = {confidence:.3}"
     );
     if confidence >= policy.block_confidence && failures >= policy.min_failures {
-        Veto::Block { tries, failures, confidence, cites, why }
+        Veto::Block {
+            tries,
+            failures,
+            confidence,
+            cites,
+            why,
+        }
     } else if confidence >= policy.warn_confidence && failures > 0 {
-        Veto::Warn { tries, failures, confidence, cites, why }
+        Veto::Warn {
+            tries,
+            failures,
+            confidence,
+            cites,
+            why,
+        }
     } else {
         Veto::Allow { tries, failures }
     }
@@ -227,12 +252,26 @@ mod tests {
 
     #[test]
     fn instrument_specific_numbers_and_node_digits_are_not_part_of_the_motif() {
-        let a = Move::AddConditionFilter { node: "sig1".into(), expr: "rsi_14 < 30".into() };
-        let b = Move::AddConditionFilter { node: "sig2".into(), expr: "RSI_21  <  25.5".into() };
+        let a = Move::AddConditionFilter {
+            node: "sig1".into(),
+            expr: "rsi_14 < 30".into(),
+        };
+        let b = Move::AddConditionFilter {
+            node: "sig2".into(),
+            expr: "RSI_21  <  25.5".into(),
+        };
         assert_eq!(motif(&a), motif(&b));
-        let c = Move::AddConditionFilter { node: "sig1".into(), expr: "adx_14 > 20".into() };
+        let c = Move::AddConditionFilter {
+            node: "sig1".into(),
+            expr: "adx_14 > 20".into(),
+        };
         assert_ne!(motif(&a), motif(&c));
-        assert_eq!(motif(&Move::ChangeExit { mode: ExitMode::Trail }), "change_exit:trail");
+        assert_eq!(
+            motif(&Move::ChangeExit {
+                mode: ExitMode::Trail
+            }),
+            "change_exit:trail"
+        );
     }
 
     #[test]
@@ -255,7 +294,13 @@ mod tests {
         let recs: Vec<MoveRecord> = (0..6).map(|i| rec(m, Outcome::Failed, i)).collect();
         let v = check(m, &recs, &VetoPolicy::default());
         match v {
-            Veto::Block { failures, cites, why, confidence, .. } => {
+            Veto::Block {
+                failures,
+                cites,
+                why,
+                confidence,
+                ..
+            } => {
                 assert_eq!(failures, 6);
                 assert_eq!(cites.len(), 6);
                 assert!(why.contains("failed 6 of 6"));
@@ -277,9 +322,25 @@ mod tests {
         assert!(!check(m, &three, &VetoPolicy::default()).blocks());
         // Mostly improvements: allowed.
         let mixed: Vec<MoveRecord> = (0..5)
-            .map(|i| rec(m, if i == 0 { Outcome::Failed } else { Outcome::Improved }, i))
+            .map(|i| {
+                rec(
+                    m,
+                    if i == 0 {
+                        Outcome::Failed
+                    } else {
+                        Outcome::Improved
+                    },
+                    i,
+                )
+            })
             .collect();
-        assert!(matches!(check(m, &mixed, &VetoPolicy::default()), Veto::Allow { tries: 5, failures: 1 }));
+        assert!(matches!(
+            check(m, &mixed, &VetoPolicy::default()),
+            Veto::Allow {
+                tries: 5,
+                failures: 1
+            }
+        ));
     }
 
     #[test]
@@ -289,9 +350,17 @@ mod tests {
             rec("b", Outcome::Failed, 2),
             rec("b", Outcome::Neutral, 3),
         ];
-        assert!(matches!(check("c", &recs, &VetoPolicy::default()), Veto::Allow { tries: 0, failures: 0 }));
+        assert!(matches!(
+            check("c", &recs, &VetoPolicy::default()),
+            Veto::Allow {
+                tries: 0,
+                failures: 0
+            }
+        ));
         match check("b", &recs, &VetoPolicy::default()) {
-            Veto::Warn { tries, failures, .. } => assert_eq!((tries, failures), (1, 1)),
+            Veto::Warn {
+                tries, failures, ..
+            } => assert_eq!((tries, failures), (1, 1)),
             other => panic!("{other:?}"),
         }
     }
@@ -300,7 +369,11 @@ mod tests {
     fn a_stricter_policy_blocks_sooner_and_the_policy_is_an_argument() {
         let m = "x";
         let recs: Vec<MoveRecord> = (0..2).map(|i| rec(m, Outcome::Failed, i)).collect();
-        let strict = VetoPolicy { warn_confidence: 0.5, block_confidence: 0.8, min_failures: 2 };
+        let strict = VetoPolicy {
+            warn_confidence: 0.5,
+            block_confidence: 0.8,
+            min_failures: 2,
+        };
         assert!(check(m, &recs, &strict).blocks());
         assert!(!check(m, &recs, &VetoPolicy::default()).blocks());
     }

@@ -60,7 +60,11 @@ pub fn profile(instrument: &str, labels: &[String]) -> Result<RegimeProfile, Pro
     }
     let mut counts: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
     for w in labels.windows(2) {
-        *counts.entry(w[0].clone()).or_default().entry(w[1].clone()).or_default() += 1.0;
+        *counts
+            .entry(w[0].clone())
+            .or_default()
+            .entry(w[1].clone())
+            .or_default() += 1.0;
     }
     let transitions = labels
         .iter()
@@ -88,7 +92,11 @@ pub fn profile(instrument: &str, labels: &[String]) -> Result<RegimeProfile, Pro
     runs.push(len);
     runs.sort_unstable();
     let m = runs.len();
-    let median_run = if m % 2 == 1 { runs[m / 2] as f64 } else { (runs[m / 2 - 1] + runs[m / 2]) as f64 / 2.0 };
+    let median_run = if m % 2 == 1 {
+        runs[m / 2] as f64
+    } else {
+        (runs[m / 2 - 1] + runs[m / 2]) as f64 / 2.0
+    };
     Ok(RegimeProfile {
         instrument: instrument.to_string(),
         n: labels.len(),
@@ -140,7 +148,11 @@ impl PriorCell {
 /// count so a reader can see how much a number rests on. Cells with no data are
 /// listed last with `n_obs = 0`.
 #[must_use]
-pub fn top_families(cells: &BTreeMap<String, PriorCell>, k: usize, c: f64) -> Vec<(String, Option<f64>, u32)> {
+pub fn top_families(
+    cells: &BTreeMap<String, PriorCell>,
+    k: usize,
+    c: f64,
+) -> Vec<(String, Option<f64>, u32)> {
     let mut rows: Vec<(String, Option<f64>, u32)> = cells
         .iter()
         .map(|(f, cell)| (f.clone(), cell.ucb(c), cell.n_obs))
@@ -163,7 +175,9 @@ pub enum RegimeGateError {
     WrongMove,
     #[error("{0:?} is not a regime label the engine knows; known labels: {1:?}")]
     UnknownLabel(String, Vec<String>),
-    #[error("a regime gate needs a regime source to cite (the model version that labelled the history)")]
+    #[error(
+        "a regime gate needs a regime source to cite (the model version that labelled the history)"
+    )]
     NoSource,
 }
 
@@ -179,7 +193,11 @@ pub struct RegimeGate {
 ///
 /// # Errors
 /// [`RegimeGateError`].
-pub fn resolve_regime_gate(m: &Move, known_labels: &[&str], source: &str) -> Result<RegimeGate, RegimeGateError> {
+pub fn resolve_regime_gate(
+    m: &Move,
+    known_labels: &[&str],
+    source: &str,
+) -> Result<RegimeGate, RegimeGateError> {
     let Move::AddRegimeGate { regime } = m else {
         return Err(RegimeGateError::WrongMove);
     };
@@ -222,10 +240,7 @@ mod tests {
 
     #[test]
     fn an_instrument_with_no_labels_is_a_typed_refusal() {
-        assert_eq!(
-            profile("X", &[]),
-            Err(ProfileError::NoLabels("X".into()))
-        );
+        assert_eq!(profile("X", &[]), Err(ProfileError::NoLabels("X".into())));
     }
 
     #[test]
@@ -239,15 +254,25 @@ mod tests {
         let mut cells: BTreeMap<String, PriorCell> = BTreeMap::new();
         cells.entry("trend".into()).or_default().update(1.2, true);
         cells.entry("trend".into()).or_default().update(0.8, true);
-        cells.entry("mean_reversion".into()).or_default().update(-0.2, false);
+        cells
+            .entry("mean_reversion".into())
+            .or_default()
+            .update(-0.2, false);
         cells.entry("carry".into()).or_default();
-        cells.entry("trend".into()).or_default().update(f64::NAN, true); // ignored
+        cells
+            .entry("trend".into())
+            .or_default()
+            .update(f64::NAN, true); // ignored
         assert_eq!(cells["trend"].n_obs, 2);
         assert!((cells["trend"].mean().unwrap() - 1.0).abs() < 1e-12);
         let top = top_families(&cells, 3, 0.5);
         assert_eq!(top[0].0, "trend");
         assert_eq!(top[0].2, 2, "n_obs travels with the number");
-        assert_eq!(top.last().unwrap().0, "carry", "an untried family is listed last with n_obs 0");
+        assert_eq!(
+            top.last().unwrap().0,
+            "carry",
+            "an untried family is listed last with n_obs 0"
+        );
         assert_eq!(top.last().unwrap().2, 0);
     }
 
@@ -265,15 +290,25 @@ mod tests {
     #[test]
     fn an_unknown_regime_label_is_refused_and_a_known_one_cites_its_source() {
         let known = ["low_vol", "mid_vol", "high_vol"];
-        let ok = Move::AddRegimeGate { regime: "high_vol".into() };
+        let ok = Move::AddRegimeGate {
+            regime: "high_vol".into(),
+        };
         let g = resolve_regime_gate(&ok, &known, "jump_v1:2026-10").unwrap();
         assert_eq!(g.source, "regime_causal.regime_state@jump_v1:2026-10");
-        let bad = Move::AddRegimeGate { regime: "bubble".into() };
+        let bad = Move::AddRegimeGate {
+            regime: "bubble".into(),
+        };
         assert!(matches!(
             resolve_regime_gate(&bad, &known, "x"),
             Err(RegimeGateError::UnknownLabel(..))
         ));
-        assert_eq!(resolve_regime_gate(&ok, &known, " "), Err(RegimeGateError::NoSource));
-        assert_eq!(resolve_regime_gate(&Move::Simplify, &known, "x"), Err(RegimeGateError::WrongMove));
+        assert_eq!(
+            resolve_regime_gate(&ok, &known, " "),
+            Err(RegimeGateError::NoSource)
+        );
+        assert_eq!(
+            resolve_regime_gate(&Move::Simplify, &known, "x"),
+            Err(RegimeGateError::WrongMove)
+        );
     }
 }

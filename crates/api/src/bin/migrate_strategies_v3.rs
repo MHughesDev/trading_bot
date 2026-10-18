@@ -67,7 +67,11 @@ struct Entry {
 #[allow(clippy::large_enum_variant)] // a one-shot migration report: one value per strategy
 enum Outcome {
     /// A construct with no v3 translation yet — named, never approximated.
-    Refused { construct: String, at: String, why: String },
+    Refused {
+        construct: String,
+        at: String,
+        why: String,
+    },
     /// v1 JSON this build cannot read as a v1 definition.
     Unreadable { why: String },
     /// Translated, but the graph does not compile today.
@@ -233,7 +237,10 @@ async fn migrate(
     apply: bool,
 ) -> Entry {
     let (timeframe, timeframe_source) = job.as_ref().map_or(
-        (DEFAULT_TIMEFRAME.to_string(), "default: no backtest on record"),
+        (
+            DEFAULT_TIMEFRAME.to_string(),
+            "default: no backtest on record",
+        ),
         |j| (j.timeframe.clone(), "its latest backtest"),
     );
     let entry = |outcome| Entry {
@@ -355,7 +362,10 @@ async fn rerun(
 /// What `market_simulator` reported (NautilusTrader's summary).
 fn old_result(r: &Value) -> OldResult {
     let int = |v: Option<&Value>| {
-        v.and_then(|x| x.as_i64().or_else(|| x.as_str().and_then(|s| s.parse().ok())))
+        v.and_then(|x| {
+            x.as_i64()
+                .or_else(|| x.as_str().and_then(|s| s.parse().ok()))
+        })
     };
     OldResult {
         bars: int(r.get("iterations")),
@@ -494,9 +504,7 @@ fn headline(o: &Outcome) -> String {
         Outcome::Refused { construct, why, .. } => format!("refused — `{construct}`: {why}"),
         Outcome::Unreadable { why } => format!("unreadable — {why}"),
         Outcome::DoesNotCompile { errors, .. } => format!("does not compile — {errors}"),
-        Outcome::Translated {
-            rerun, applied, ..
-        } => format!(
+        Outcome::Translated { rerun, applied, .. } => format!(
             "translated{}{}",
             match rerun {
                 Some(Rerun { new: Ok(_), .. }) => ", re-run",
@@ -514,7 +522,10 @@ fn fmt_opt(v: Option<f64>) -> String {
 
 fn markdown(r: &Report) -> String {
     let mut s = String::new();
-    let _ = writeln!(s, "# Stored strategies on the one engine — v1 → v3 migration\n");
+    let _ = writeln!(
+        s,
+        "# Stored strategies on the one engine — v1 → v3 migration\n"
+    );
     let _ = writeln!(
         s,
         "Generated {} by `cargo run -p api --bin migrate_strategies_v3{}` (Set U U-8.5; \
@@ -537,15 +548,24 @@ fn markdown(r: &Report) -> String {
          metric — not by re-running with each change removed. Models answer `unavailable` \
          in these re-runs (no inference service), so a model-driven rule holds.\n"
     );
-    let _ = writeln!(s, "| strategy | timeframe | outcome | orders old → new | P&L old → new |");
+    let _ = writeln!(
+        s,
+        "| strategy | timeframe | outcome | orders old → new | P&L old → new |"
+    );
     let _ = writeln!(s, "|---|---|---|---|---|");
     for e in &r.strategies {
         let (orders, pnl) = match &e.outcome {
             Outcome::Translated {
-                rerun: Some(Rerun { old, new: Ok(n), .. }),
+                rerun: Some(Rerun {
+                    old, new: Ok(n), ..
+                }),
                 ..
             } => (
-                format!("{} → {}", old.orders.map_or("—".into(), |o| o.to_string()), n.orders),
+                format!(
+                    "{} → {}",
+                    old.orders.map_or("—".into(), |o| o.to_string()),
+                    n.orders
+                ),
                 format!("{} → {:.2}", fmt_opt(old.pnl), n.pnl),
             ),
             _ => ("—".into(), "—".into()),
@@ -697,7 +717,10 @@ mod tests {
             "stats_pnls": {"USD": {"PnL (total)": 0.0}}
         });
         let o = old_result(&r);
-        assert_eq!((o.orders, o.positions, o.pnl), (Some(58), Some(1), Some(0.0)));
+        assert_eq!(
+            (o.orders, o.positions, o.pnl),
+            (Some(58), Some(1), Some(0.0))
+        );
     }
 
     #[test]
@@ -708,13 +731,19 @@ mod tests {
             positions: Some(1),
             pnl: Some(0.0),
         };
-        let d = attribute(&old, &new(40, -12.5), &changes(&["fills_next_bar_open", "exits_are_orders"]));
+        let d = attribute(
+            &old,
+            &new(40, -12.5),
+            &changes(&["fills_next_bar_open", "exits_are_orders"]),
+        );
         let orders = d.iter().find(|x| x.metric == "orders").unwrap();
         assert!(!orders.attributed_to.contains(&"fills_next_bar_open".into()));
         assert_eq!(d.len(), 2);
         assert!(d.iter().all(|x| !x.attributed_to.is_empty()));
         let pnl = d.iter().find(|x| x.metric == "pnl").unwrap();
-        assert!(pnl.attributed_to.contains(&"v1_venue_reported_no_fills".into()));
+        assert!(pnl
+            .attributed_to
+            .contains(&"v1_venue_reported_no_fills".into()));
     }
 
     #[test]
@@ -739,7 +768,11 @@ mod tests {
             positions: None,
             pnl: Some(0.0),
         };
-        let d = attribute(&old, &new(10_079, -3_771.6), &changes(&["fills_next_bar_open"]));
+        let d = attribute(
+            &old,
+            &new(10_079, -3_771.6),
+            &changes(&["fills_next_bar_open"]),
+        );
         let orders = d.iter().find(|x| x.metric == "orders").unwrap();
         assert!(orders.attributed_to.is_empty(), "{orders:?}");
     }
@@ -753,7 +786,11 @@ mod tests {
             pnl: Some(0.0),
         };
         // `new` has 10 decisions; the old run saw 6 022 bars.
-        let d = attribute(&old, &new(567, -3_770.1), &changes(&["fills_next_bar_open"]));
+        let d = attribute(
+            &old,
+            &new(567, -3_770.1),
+            &changes(&["fills_next_bar_open"]),
+        );
         let orders = d.iter().find(|x| x.metric == "orders").unwrap();
         assert_eq!(orders.attributed_to, vec!["bars_differ".to_string()]);
     }

@@ -55,7 +55,11 @@ use crate::{auth::BearerToken, state::AppState};
 pub const KNOWLEDGE_WRITE: &str = "knowledge.write";
 
 fn err(status: StatusCode, code: &str, message: impl Into<String>) -> Response {
-    (status, Json(json!({ "error": code, "message": message.into() }))).into_response()
+    (
+        status,
+        Json(json!({ "error": code, "message": message.into() })),
+    )
+        .into_response()
 }
 
 fn db(e: &sqlx::Error) -> Response {
@@ -67,7 +71,11 @@ fn need(token: &BearerToken, scope: &str) -> Result<(), Response> {
     if token.permits(scope) {
         Ok(())
     } else {
-        Err(err(StatusCode::FORBIDDEN, "missing_scope", format!("this route needs the `{scope}` scope")))
+        Err(err(
+            StatusCode::FORBIDDEN,
+            "missing_scope",
+            format!("this route needs the `{scope}` scope"),
+        ))
     }
 }
 
@@ -88,7 +96,8 @@ pub async fn annotate_insights(
     have: Option<&[String]>,
 ) -> Vec<Value> {
     let ids: Vec<Uuid> = insights.iter().map(|i| i.insight_id).collect();
-    let mut when: std::collections::HashMap<Uuid, (DateTime<Utc>, Option<DateTime<Utc>>)> = std::collections::HashMap::new();
+    let mut when: std::collections::HashMap<Uuid, (DateTime<Utc>, Option<DateTime<Utc>>)> =
+        std::collections::HashMap::new();
     if let Ok(mut tx) = ledger::pg::tenant_tx(pg, tenant).await {
         if let Ok(rows) = sqlx::query(
             "SELECT insight_id, created_at, last_confirmed_at FROM knowledge.insight WHERE insight_id = ANY($1)",
@@ -112,11 +121,24 @@ pub async fn annotate_insights(
                 .scope
                 .get("requires")
                 .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
                 .unwrap_or_default();
-            if let (Some(obj), Some((created, confirmed))) = (v.as_object_mut(), when.get(&i.insight_id)) {
+            if let (Some(obj), Some((created, confirmed))) =
+                (v.as_object_mut(), when.get(&i.insight_id))
+            {
                 let last = confirmed.unwrap_or(*created).date_naive().to_string();
-                let a = harness::memory::rules::annotate(&last, &today, Some(INSIGHT_STALE_DAYS), false, &requires, have);
+                let a = harness::memory::rules::annotate(
+                    &last,
+                    &today,
+                    Some(INSIGHT_STALE_DAYS),
+                    false,
+                    &requires,
+                    have,
+                );
                 obj.insert("age_days".into(), json!(a.age_days));
                 obj.insert("stale".into(), json!(a.stale));
                 obj.insert("capability_mismatch".into(), json!(a.capability_mismatch));
@@ -152,7 +174,14 @@ impl MoveStore {
     ///
     /// # Errors
     /// The database.
-    pub async fn record(&self, user: Uuid, instrument: &str, m: &Move, outcome: Outcome, run_ref: &str) -> Result<(), sqlx::Error> {
+    pub async fn record(
+        &self,
+        user: Uuid,
+        instrument: &str,
+        m: &Move,
+        outcome: Outcome,
+        run_ref: &str,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO agent_memory.move_record (user_id, instrument, motif, outcome, run_ref) VALUES ($1, $2, $3, $4, $5)",
         )
@@ -170,7 +199,11 @@ impl MoveStore {
     ///
     /// # Errors
     /// The database.
-    pub async fn history(&self, user: Uuid, motif_key: &str) -> Result<Vec<MoveRecord>, sqlx::Error> {
+    pub async fn history(
+        &self,
+        user: Uuid,
+        motif_key: &str,
+    ) -> Result<Vec<MoveRecord>, sqlx::Error> {
         Ok(sqlx::query(
             "SELECT motif, outcome, run_ref FROM agent_memory.move_record WHERE user_id = $1 AND motif = $2 ORDER BY record_id",
         )
@@ -211,7 +244,11 @@ pub struct VetoBody {
 /// `POST /api/knowledge/moves/veto` — has this shape of move a record of failure, and
 /// how sure are we? Advisory below the policy's confidence, blocking above it, citing
 /// the records either way. A block a person has overridden says so and does not stop.
-pub async fn veto(State(state): State<AppState>, token: BearerToken, Json(b): Json<VetoBody>) -> Response {
+pub async fn veto(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(b): Json<VetoBody>,
+) -> Response {
     if let Err(r) = need(&token, scopes::MEMORY) {
         return r;
     }
@@ -222,7 +259,11 @@ pub async fn veto(State(state): State<AppState>, token: BearerToken, Json(b): Js
         Err(e) => return db(&e),
     };
     let verdict = veto_move(&b.candidate, &records, &VetoPolicy::default());
-    let overridden = verdict.blocks() && store.overridden(token.user_id(), &key).await.unwrap_or(false);
+    let overridden = verdict.blocks()
+        && store
+            .overridden(token.user_id(), &key)
+            .await
+            .unwrap_or(false);
     Json(json!({ "motif": key, "veto": verdict, "overridden": overridden, "may_proceed": !verdict.blocks() || overridden })).into_response()
 }
 
@@ -235,14 +276,31 @@ pub struct MoveRecordBody {
 }
 
 /// `POST /api/knowledge/moves/records` — record what a move did. Platform authority.
-pub async fn record_move(State(state): State<AppState>, token: BearerToken, Json(b): Json<MoveRecordBody>) -> Response {
+pub async fn record_move(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(b): Json<MoveRecordBody>,
+) -> Response {
     if let Err(r) = need(&token, KNOWLEDGE_WRITE) {
         return r;
     }
     let Some(outcome) = Outcome::parse(&b.outcome) else {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "bad_outcome", "outcome is improved, failed or neutral");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "bad_outcome",
+            "outcome is improved, failed or neutral",
+        );
     };
-    match MoveStore::new(state.pg.clone()).record(token.user_id(), &b.instrument, &b.candidate, outcome, &b.run_ref).await {
+    match MoveStore::new(state.pg.clone())
+        .record(
+            token.user_id(),
+            &b.instrument,
+            &b.candidate,
+            outcome,
+            &b.run_ref,
+        )
+        .await
+    {
         Ok(()) => StatusCode::CREATED.into_response(),
         Err(e) => db(&e),
     }
@@ -255,16 +313,22 @@ pub struct OverrideBody {
 }
 
 /// `POST /api/knowledge/moves/overrides` — a person proceeds past a blocking veto.
-pub async fn override_veto(State(state): State<AppState>, token: BearerToken, Json(b): Json<OverrideBody>) -> Response {
+pub async fn override_veto(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(b): Json<OverrideBody>,
+) -> Response {
     if let Err(r) = need(&token, KNOWLEDGE_WRITE) {
         return r;
     }
-    match sqlx::query("INSERT INTO agent_memory.move_veto_override (user_id, motif, reason) VALUES ($1, $2, $3)")
-        .bind(token.user_id())
-        .bind(&b.motif)
-        .bind(&b.reason)
-        .execute(&state.pg)
-        .await
+    match sqlx::query(
+        "INSERT INTO agent_memory.move_veto_override (user_id, motif, reason) VALUES ($1, $2, $3)",
+    )
+    .bind(token.user_id())
+    .bind(&b.motif)
+    .bind(&b.reason)
+    .execute(&state.pg)
+    .await
     {
         Ok(_) => StatusCode::CREATED.into_response(),
         Err(e) => db(&e),
@@ -310,7 +374,11 @@ pub struct SourceBody {
 /// finding cited as evidence is refused; a hypothesis that repeats an earlier one (the
 /// same finding, instrument and an overlapping window) is recorded as a repeated trial
 /// and the response says how many times.
-pub async fn hypothesis_source(State(state): State<AppState>, token: BearerToken, Json(b): Json<SourceBody>) -> Response {
+pub async fn hypothesis_source(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(b): Json<SourceBody>,
+) -> Response {
     if let Err(r) = need(&token, scopes::MEMORY) {
         return r;
     }
@@ -394,7 +462,10 @@ pub struct AnalogParams {
 }
 
 fn window_days(spec: &str) -> i64 {
-    spec.split('d').next().and_then(|n| n.parse().ok()).unwrap_or(21)
+    spec.split('d')
+        .next()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(21)
 }
 
 #[derive(Debug)]
@@ -478,14 +549,31 @@ pub async fn analog_search(
 /// `GET /api/knowledge/analogs` — nearest windows over the **explicit** fingerprint
 /// vector, excluding the query's own episode and anything on the same instrument within
 /// one window length of it, and nothing known after `as_of`.
-pub async fn analogs(State(state): State<AppState>, token: BearerToken, Query(p): Query<AnalogParams>) -> Response {
+pub async fn analogs(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Query(p): Query<AnalogParams>,
+) -> Response {
     if let Err(r) = need(&token, scopes::MEMORY) {
         return r;
     }
     let spec = p.window_spec.unwrap_or_else(|| "21d@1m".to_string());
-    match analog_search(&state.pg, p.instrument_id, p.venue_id, p.as_of.unwrap_or_else(Utc::now), p.k.unwrap_or(5), &spec).await {
+    match analog_search(
+        &state.pg,
+        p.instrument_id,
+        p.venue_id,
+        p.as_of.unwrap_or_else(Utc::now),
+        p.k.unwrap_or(5),
+        &spec,
+    )
+    .await
+    {
         Ok(v) => Json(v).into_response(),
-        Err(AnalogError::NoFingerprint) => err(StatusCode::NOT_FOUND, "no_fingerprint", "that instrument has no complete fingerprint at or before as_of"),
+        Err(AnalogError::NoFingerprint) => err(
+            StatusCode::NOT_FOUND,
+            "no_fingerprint",
+            "that instrument has no complete fingerprint at or before as_of",
+        ),
         Err(AnalogError::Db(e)) => db(&e),
     }
 }
@@ -532,7 +620,11 @@ async fn resolve_scope(pg: &PgPool, p: &RegimeParams) -> Result<(String, String)
 
 /// `GET /api/knowledge/regimes/profile` — occupancy, transitions and the current label.
 /// An instrument with no labels is a typed refusal, never an empty profile.
-pub async fn regime_profile(State(state): State<AppState>, token: BearerToken, Query(p): Query<RegimeParams>) -> Response {
+pub async fn regime_profile(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Query(p): Query<RegimeParams>,
+) -> Response {
     if let Err(r) = need(&token, scopes::MEMORY) {
         return r;
     }
@@ -541,20 +633,29 @@ pub async fn regime_profile(State(state): State<AppState>, token: BearerToken, Q
         Err(r) => return r,
     };
     let now = Utc::now();
-    let hist = match RegimeStore::new(state.pg.clone()).history(&scope, &version, now - Duration::days(900), now).await {
+    let hist = match RegimeStore::new(state.pg.clone())
+        .history(&scope, &version, now - Duration::days(900), now)
+        .await
+    {
         Ok(h) => h,
         Err(e) => return db(&e),
     };
     let labels: Vec<String> = hist.iter().map(|o| o.label.as_str().to_string()).collect();
     match profile(&p.instrument, &labels) {
-        Ok(pr) => Json(json!({ "scope": scope, "model_version": version, "profile": pr })).into_response(),
+        Ok(pr) => {
+            Json(json!({ "scope": scope, "model_version": version, "profile": pr })).into_response()
+        }
         Err(e) => err(StatusCode::UNPROCESSABLE_ENTITY, "no_labels", e.to_string()),
     }
 }
 
 /// `GET /api/knowledge/regimes/prior` — the top families per regime, each with its
 /// observation count. With `regime` set, that regime only.
-pub async fn regime_prior(State(state): State<AppState>, token: BearerToken, Query(p): Query<RegimeParams>) -> Response {
+pub async fn regime_prior(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Query(p): Query<RegimeParams>,
+) -> Response {
     if let Err(r) = need(&token, scopes::MEMORY) {
         return r;
     }
@@ -564,7 +665,10 @@ pub async fn regime_prior(State(state): State<AppState>, token: BearerToken, Que
         if p.regime.as_deref().is_some_and(|r| r != l.as_str()) {
             continue;
         }
-        let cells = match store.cells(&token.user_id().to_string(), &p.instrument, l.as_str()).await {
+        let cells = match store
+            .cells(&token.user_id().to_string(), &p.instrument, l.as_str())
+            .await
+        {
             Ok(c) => c,
             Err(e) => return db(&e),
         };
@@ -574,7 +678,8 @@ pub async fn regime_prior(State(state): State<AppState>, token: BearerToken, Que
             .collect();
         out.insert(l.as_str().to_string(), Value::Array(top));
     }
-    Json(json!({ "instrument": p.instrument, "prior": out, "kind": "contextual_bandit_table" })).into_response()
+    Json(json!({ "instrument": p.instrument, "prior": out, "kind": "contextual_bandit_table" }))
+        .into_response()
 }
 
 pub struct PriorStore {
@@ -591,7 +696,15 @@ impl PriorStore {
     ///
     /// # Errors
     /// The database.
-    pub async fn update(&self, tenant: &str, instrument: &str, regime: &str, family: &str, score: f64, success: bool) -> Result<(), sqlx::Error> {
+    pub async fn update(
+        &self,
+        tenant: &str,
+        instrument: &str,
+        regime: &str,
+        family: &str,
+        score: f64,
+        success: bool,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO regime_causal.regime_strategy_prior
                (tenant_id, instrument, regime, strategy_family, n_obs, n_success, score_sum, score_sumsq)
@@ -619,7 +732,12 @@ impl PriorStore {
     ///
     /// # Errors
     /// The database.
-    pub async fn cells(&self, tenant: &str, instrument: &str, regime: &str) -> Result<std::collections::BTreeMap<String, PriorCell>, sqlx::Error> {
+    pub async fn cells(
+        &self,
+        tenant: &str,
+        instrument: &str,
+        regime: &str,
+    ) -> Result<std::collections::BTreeMap<String, PriorCell>, sqlx::Error> {
         Ok(sqlx::query(
             "SELECT strategy_family, n_obs, n_success, score_sum, score_sumsq
                FROM regime_causal.regime_strategy_prior WHERE tenant_id = $1 AND instrument = $2 AND regime = $3",
@@ -656,18 +774,37 @@ pub struct PriorUpdateBody {
 
 /// `POST /api/knowledge/regimes/prior` — fold one regime-sliced study into the table.
 /// Platform authority: the numbers are measurements.
-pub async fn update_regime_prior(State(state): State<AppState>, token: BearerToken, Json(b): Json<PriorUpdateBody>) -> Response {
+pub async fn update_regime_prior(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(b): Json<PriorUpdateBody>,
+) -> Response {
     if let Err(r) = need(&token, KNOWLEDGE_WRITE) {
         return r;
     }
     if RegimeLabel::from_code(&b.regime).is_none() {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "unknown_regime", "regime is low_vol, mid_vol or high_vol");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unknown_regime",
+            "regime is low_vol, mid_vol or high_vol",
+        );
     }
     if !b.score.is_finite() {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "bad_score", "score must be finite");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "bad_score",
+            "score must be finite",
+        );
     }
     match PriorStore::new(state.pg.clone())
-        .update(&token.user_id().to_string(), &b.instrument, &b.regime, &b.family, b.score, b.success)
+        .update(
+            &token.user_id().to_string(),
+            &b.instrument,
+            &b.regime,
+            &b.family,
+            b.score,
+            b.success,
+        )
         .await
     {
         Ok(()) => StatusCode::CREATED.into_response(),
@@ -677,7 +814,11 @@ pub async fn update_regime_prior(State(state): State<AppState>, token: BearerTok
 
 /// `POST /api/knowledge/regimes/gate` — the `add_regime_gate` move's machine check: an
 /// unknown regime label is refused, and a known one returns the regime source it cites.
-pub async fn regime_gate(State(state): State<AppState>, token: BearerToken, Query(p): Query<RegimeParams>) -> Response {
+pub async fn regime_gate(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Query(p): Query<RegimeParams>,
+) -> Response {
     if let Err(r) = need(&token, scopes::MEMORY) {
         return r;
     }
@@ -691,7 +832,11 @@ pub async fn regime_gate(State(state): State<AppState>, token: BearerToken, Quer
     let known: Vec<&str> = RegimeLabel::ALL.iter().map(|l| l.as_str()).collect();
     match resolve_regime_gate(&Move::AddRegimeGate { regime }, &known, &version) {
         Ok(g) => Json(json!({ "gate": g })).into_response(),
-        Err(e) => err(StatusCode::UNPROCESSABLE_ENTITY, "regime_gate_refused", e.to_string()),
+        Err(e) => err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "regime_gate_refused",
+            e.to_string(),
+        ),
     }
 }
 
@@ -717,8 +862,16 @@ pub async fn ledger_counts(pg: &PgPool, tenant: &str) -> LedgerCounts {
           GROUP BY COALESCE(trial_id::text, experiment_id)) t WHERE p",
     )
     .await;
-    let steps = one(&mut tx, "SELECT count(*)::bigint FROM mlops.trajectory_label").await;
-    let curves = one(&mut tx, "SELECT count(DISTINCT run_id)::bigint FROM mlops.training_metric").await;
+    let steps = one(
+        &mut tx,
+        "SELECT count(*)::bigint FROM mlops.trajectory_label",
+    )
+    .await;
+    let curves = one(
+        &mut tx,
+        "SELECT count(DISTINCT run_id)::bigint FROM mlops.training_metric",
+    )
+    .await;
     let _ = tx.commit().await;
     LedgerCounts {
         curves,
@@ -747,7 +900,10 @@ pub async fn tiers(State(state): State<AppState>, token: BearerToken) -> Respons
     // module may name (AT-42). Until that module exposes it, the regime tier reports "never
     // run", which keeps the rule tier answering and says so.
     let separation: Option<bool> = None;
-    let regime = research::regime_learned::LearnedGate { separation_passed: separation }.answer();
+    let regime = research::regime_learned::LearnedGate {
+        separation_passed: separation,
+    }
+    .answer();
     Json(json!({
         "counts": counts,
         "ladder": ladder(&counts),
@@ -773,7 +929,12 @@ impl ArmStore {
     ///
     /// # Errors
     /// The database (a second arm for one campaign is refused by the primary key).
-    pub async fn create(&self, campaign: Uuid, user: Uuid, budget: i32) -> Result<u64, sqlx::Error> {
+    pub async fn create(
+        &self,
+        campaign: Uuid,
+        user: Uuid,
+        budget: i32,
+    ) -> Result<u64, sqlx::Error> {
         let seed = arm_seed(&campaign.to_string());
         sqlx::query("INSERT INTO agent_memory.campaign_arm (campaign_id, user_id, budget, seed) VALUES ($1, $2, $3, $4)")
             .bind(campaign)
@@ -789,7 +950,13 @@ impl ArmStore {
     ///
     /// # Errors
     /// The database (no arm for the campaign, or a repeated `seq`).
-    pub async fn record_score(&self, campaign: Uuid, arm: &str, seq: i32, score: f64) -> Result<(), sqlx::Error> {
+    pub async fn record_score(
+        &self,
+        campaign: Uuid,
+        arm: &str,
+        seq: i32,
+        score: f64,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query("INSERT INTO agent_memory.campaign_arm_score (campaign_id, arm, seq, score) VALUES ($1, $2, $3, $4)")
             .bind(campaign)
             .bind(arm)
@@ -807,7 +974,12 @@ impl ArmStore {
     ///
     /// # Errors
     /// The database (no arm for the campaign).
-    pub async fn record_scores(&self, campaign: Uuid, arm: &str, scores: &[f64]) -> Result<u64, sqlx::Error> {
+    pub async fn record_scores(
+        &self,
+        campaign: Uuid,
+        arm: &str,
+        scores: &[f64],
+    ) -> Result<u64, sqlx::Error> {
         Ok(sqlx::query(
             "INSERT INTO agent_memory.campaign_arm_score (campaign_id, arm, seq, score)
              SELECT $1, $2, (t.ord - 1)::int, t.s FROM unnest($3::float8[]) WITH ORDINALITY AS t(s, ord)
@@ -826,10 +998,12 @@ impl ArmStore {
     /// # Errors
     /// The database.
     pub async fn load(&self, campaign: Uuid) -> Result<Option<(Arm, Vec<f64>)>, sqlx::Error> {
-        let Some(a) = sqlx::query("SELECT budget, seed FROM agent_memory.campaign_arm WHERE campaign_id = $1")
-            .bind(campaign)
-            .fetch_optional(&self.pg)
-            .await?
+        let Some(a) = sqlx::query(
+            "SELECT budget, seed FROM agent_memory.campaign_arm WHERE campaign_id = $1",
+        )
+        .bind(campaign)
+        .fetch_optional(&self.pg)
+        .await?
         else {
             return Ok(None);
         };
@@ -838,8 +1012,18 @@ impl ArmStore {
                 .bind(campaign)
                 .bind(arm)
         };
-        let random: Vec<f64> = scores("random").fetch_all(&self.pg).await?.iter().map(|r| r.get(0)).collect();
-        let agent: Vec<f64> = scores("agent").fetch_all(&self.pg).await?.iter().map(|r| r.get(0)).collect();
+        let random: Vec<f64> = scores("random")
+            .fetch_all(&self.pg)
+            .await?
+            .iter()
+            .map(|r| r.get(0))
+            .collect();
+        let agent: Vec<f64> = scores("agent")
+            .fetch_all(&self.pg)
+            .await?
+            .iter()
+            .map(|r| r.get(0))
+            .collect();
         Ok(Some((
             Arm {
                 campaign_id: campaign.to_string(),
@@ -858,7 +1042,10 @@ impl ArmStore {
 /// # Errors
 /// [`ArmError`], or the database as a string.
 pub async fn arm_gate(pg: &PgPool, campaign: Uuid) -> Result<(), String> {
-    let loaded = ArmStore::new(pg.clone()).load(campaign).await.map_err(|e| e.to_string())?;
+    let loaded = ArmStore::new(pg.clone())
+        .load(campaign)
+        .await
+        .map_err(|e| e.to_string())?;
     gate_check(loaded.as_ref().map(|(a, _)| a)).map_err(|e| e.to_string())
 }
 
@@ -869,16 +1056,36 @@ pub struct ArmBody {
 
 /// `POST /api/knowledge/campaigns/{id}/random-arm` — create the campaign's arm. Platform
 /// authority; the seed is derived from the campaign id and is not a parameter.
-pub async fn create_arm(State(state): State<AppState>, token: BearerToken, Path(id): Path<Uuid>, Json(b): Json<ArmBody>) -> Response {
+pub async fn create_arm(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+    Json(b): Json<ArmBody>,
+) -> Response {
     if let Err(r) = need(&token, KNOWLEDGE_WRITE) {
         return r;
     }
     if b.budget <= 0 {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "bad_budget", "budget must be positive");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "bad_budget",
+            "budget must be positive",
+        );
     }
-    match ArmStore::new(state.pg.clone()).create(id, token.user_id(), b.budget).await {
-        Ok(seed) => (StatusCode::CREATED, Json(json!({ "campaign_id": id, "budget": b.budget, "seed": seed }))).into_response(),
-        Err(sqlx::Error::Database(d)) if d.is_unique_violation() => err(StatusCode::CONFLICT, "arm_exists", "this campaign already has its random arm"),
+    match ArmStore::new(state.pg.clone())
+        .create(id, token.user_id(), b.budget)
+        .await
+    {
+        Ok(seed) => (
+            StatusCode::CREATED,
+            Json(json!({ "campaign_id": id, "budget": b.budget, "seed": seed })),
+        )
+            .into_response(),
+        Err(sqlx::Error::Database(d)) if d.is_unique_violation() => err(
+            StatusCode::CONFLICT,
+            "arm_exists",
+            "this campaign already has its random arm",
+        ),
         Err(e) => db(&e),
     }
 }
@@ -892,14 +1099,26 @@ pub struct ScoreBody {
 
 /// `POST /api/knowledge/campaigns/{id}/scores` — record one trial's sealed-metric score
 /// for either arm. Platform authority.
-pub async fn record_arm_score(State(state): State<AppState>, token: BearerToken, Path(id): Path<Uuid>, Json(b): Json<ScoreBody>) -> Response {
+pub async fn record_arm_score(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+    Json(b): Json<ScoreBody>,
+) -> Response {
     if let Err(r) = need(&token, KNOWLEDGE_WRITE) {
         return r;
     }
     if !matches!(b.arm.as_str(), "agent" | "random") || !b.score.is_finite() {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "bad_score", "arm is agent or random and the score is finite");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "bad_score",
+            "arm is agent or random and the score is finite",
+        );
     }
-    match ArmStore::new(state.pg.clone()).record_score(id, &b.arm, b.seq, b.score).await {
+    match ArmStore::new(state.pg.clone())
+        .record_score(id, &b.arm, b.seq, b.score)
+        .await
+    {
         Ok(()) => StatusCode::CREATED.into_response(),
         Err(e) => db(&e),
     }
@@ -908,7 +1127,11 @@ pub async fn record_arm_score(State(state): State<AppState>, token: BearerToken,
 /// `GET /api/knowledge/campaigns/{id}/compare-to-random` — both arms' sealed
 /// distributions and the agent's percentile in the random arm's best-of-budget
 /// distribution. A campaign with no arm, an incomplete one, or unequal budgets refuses.
-pub async fn compare_random(State(state): State<AppState>, token: BearerToken, Path(id): Path<Uuid>) -> Response {
+pub async fn compare_random(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+) -> Response {
     if let Err(r) = need(&token, scopes::MEMORY) {
         return r;
     }
@@ -922,9 +1145,9 @@ pub async fn compare_random(State(state): State<AppState>, token: BearerToken, P
     };
     match compare_to_random(agent, arm) {
         Ok(c) => Json(json!({ "campaign_id": id, "comparison": c })).into_response(),
-        Err(e @ (ArmError::NoArm | ArmError::Incomplete { .. } | ArmError::UnequalBudget { .. })) => {
-            err(StatusCode::CONFLICT, "no_matched_arm", e.to_string())
-        }
+        Err(
+            e @ (ArmError::NoArm | ArmError::Incomplete { .. } | ArmError::UnequalBudget { .. }),
+        ) => err(StatusCode::CONFLICT, "no_matched_arm", e.to_string()),
     }
 }
 
@@ -933,10 +1156,16 @@ mod tests {
     #[test]
     fn the_write_scope_is_not_an_agent_scope() {
         assert!(!crate::auth::scopes::RESEARCH_SCOPES.contains(&super::KNOWLEDGE_WRITE));
-        assert!(crate::auth::scopes::validate_agent_scopes(&[super::KNOWLEDGE_WRITE.to_string()]).is_err());
+        assert!(
+            crate::auth::scopes::validate_agent_scopes(&[super::KNOWLEDGE_WRITE.to_string()])
+                .is_err()
+        );
         // A web login holds everything, which is how a person (and the platform's own
         // tooling) reaches the platform-write routes.
-        assert!(crate::auth::scopes::permits(&["web:full".to_string()], super::KNOWLEDGE_WRITE));
+        assert!(crate::auth::scopes::permits(
+            &["web:full".to_string()],
+            super::KNOWLEDGE_WRITE
+        ));
     }
 
     /// Every platform-write handler asks for the write scope first. Read from the source
@@ -945,11 +1174,22 @@ mod tests {
     fn every_platform_write_handler_begins_with_the_write_scope_check() {
         let src = include_str!("knowledge_routes.rs");
         let prod = src.split("#[cfg(test)]").next().unwrap();
-        let writers = ["record_move", "override_veto", "update_regime_prior", "create_arm", "record_arm_score"];
+        let writers = [
+            "record_move",
+            "override_veto",
+            "update_regime_prior",
+            "create_arm",
+            "record_arm_score",
+        ];
         for w in writers {
-            let at = prod.find(&format!("pub async fn {w}(")).unwrap_or_else(|| panic!("{w} missing"));
+            let at = prod
+                .find(&format!("pub async fn {w}("))
+                .unwrap_or_else(|| panic!("{w} missing"));
             let head: String = prod[at..].chars().take(420).collect();
-            assert!(head.contains("need(&token, KNOWLEDGE_WRITE)"), "{w} does not begin with the write-scope check");
+            assert!(
+                head.contains("need(&token, KNOWLEDGE_WRITE)"),
+                "{w} does not begin with the write-scope check"
+            );
         }
     }
 
@@ -958,8 +1198,15 @@ mod tests {
     fn a_finding_offered_as_evidence_is_refused_by_every_route_that_takes_evidence() {
         let refused = super::finding_evidence_refusal(&["fnd_01".to_string(), "job-7".to_string()])
             .expect("a finding id is refused");
-        assert_eq!(refused.status(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
-        assert!(super::finding_evidence_refusal(&["job-7".to_string(), "artifact:abc".to_string()]).is_none());
+        assert_eq!(
+            refused.status(),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert!(super::finding_evidence_refusal(&[
+            "job-7".to_string(),
+            "artifact:abc".to_string()
+        ])
+        .is_none());
         assert!(super::finding_evidence_refusal(&[]).is_none());
         // The three routes that take evidence all go through it (read from the source so a
         // new copy of the rule, or a route that stops calling it, fails here).
@@ -969,7 +1216,10 @@ mod tests {
             ("knowledge_routes.rs", include_str!("knowledge_routes.rs")),
         ];
         for (name, src) in routes {
-            assert!(src.contains("finding_evidence_refusal("), "{name} does not refuse a finding offered as evidence");
+            assert!(
+                src.contains("finding_evidence_refusal("),
+                "{name} does not refuse a finding offered as evidence"
+            );
         }
     }
 
@@ -978,10 +1228,19 @@ mod tests {
     #[test]
     fn sweeps_are_given_the_slots_that_leave_one_free_for_interactive_backtests() {
         let state = include_str!("state.rs");
-        assert!(state.contains("research::refit::sweep_slots("), "ResearchManager is not given sweep_slots");
+        assert!(
+            state.contains("research::refit::sweep_slots("),
+            "ResearchManager is not given sweep_slots"
+        );
         assert!(state.contains("backtest::manager::MAX_CONCURRENT_RUNS"));
-        let slots = research::refit::sweep_slots(backtest::manager::MAX_CONCURRENT_RUNS, research::refit::sweep_max_parallel());
-        assert!((1..backtest::manager::MAX_CONCURRENT_RUNS).contains(&slots), "{slots} slots would starve an interactive backtest");
+        let slots = research::refit::sweep_slots(
+            backtest::manager::MAX_CONCURRENT_RUNS,
+            research::refit::sweep_max_parallel(),
+        );
+        assert!(
+            (1..backtest::manager::MAX_CONCURRENT_RUNS).contains(&slots),
+            "{slots} slots would starve an interactive backtest"
+        );
     }
 
     #[test]
@@ -993,10 +1252,19 @@ mod tests {
 
     #[test]
     fn a_filter_that_excludes_everything_issues_no_semantic_query() {
-        assert!(!super::should_issue_semantic_query(0, Some("momentum in btc")), "nothing to rank");
+        assert!(
+            !super::should_issue_semantic_query(0, Some("momentum in btc")),
+            "nothing to rank"
+        );
         assert!(!super::should_issue_semantic_query(5, None), "no question");
-        assert!(!super::should_issue_semantic_query(5, Some("   ")), "a blank question");
-        assert!(super::should_issue_semantic_query(5, Some("momentum in btc")));
+        assert!(
+            !super::should_issue_semantic_query(5, Some("   ")),
+            "a blank question"
+        );
+        assert!(super::should_issue_semantic_query(
+            5,
+            Some("momentum in btc")
+        ));
     }
 
     #[test]
@@ -1006,9 +1274,14 @@ mod tests {
         let src = include_str!("knowledge_jobs.rs");
         let h = src.split("pub async fn search_insights").nth(1).unwrap();
         let h: String = h.chars().take(3500).collect();
-        let meta = h.find("store.search(&tenant, params.tier, limit)").expect("metadata search");
+        let meta = h
+            .find("store.search(&tenant, params.tier, limit)")
+            .expect("metadata search");
         let embed = h.find("OllamaEmbedder::from_env()").expect("embedder");
-        assert!(meta < embed, "the metadata filter must run before any embedding request");
+        assert!(
+            meta < embed,
+            "the metadata filter must run before any embedding request"
+        );
         assert!(h.contains("semantic_skipped"));
     }
 }

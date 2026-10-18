@@ -248,26 +248,51 @@ mod tests {
         )
         .unwrap();
         assert!(out.row_count() > 0 && out.row_count() < f.row_count() / 4);
-        assert!(out.ts_ns.contains(&(120 * STEP)), "the jump bar is an event");
+        assert!(
+            out.ts_ns.contains(&(120 * STEP)),
+            "the jump bar is an event"
+        );
         assert_eq!(out.sample_weight.len(), out.row_count());
         assert!(out.columns.iter().all(|c| c.len() == out.row_count()));
         // rows are a subset, in order, with the original labels
-        let orig: HashMap<i64, f64> = f.ts_ns.iter().copied().zip(f.label.iter().copied()).collect();
-        assert!(out.ts_ns.iter().zip(&out.label).all(|(t, l)| orig[t].to_bits() == l.to_bits()));
+        let orig: HashMap<i64, f64> = f
+            .ts_ns
+            .iter()
+            .copied()
+            .zip(f.label.iter().copied())
+            .collect();
+        assert!(out
+            .ts_ns
+            .iter()
+            .zip(&out.label)
+            .all(|(t, l)| orig[t].to_bits() == l.to_bits()));
     }
 
     #[test]
     fn the_high_low_path_sees_a_wick_the_close_path_does_not() {
         let obs = bars();
         let f = frame_of(&obs, 10);
-        let hl = apply(f.clone(), &obs, STEP, &spec(Some(BarrierPath::HighLow), None)).unwrap();
+        let hl = apply(
+            f.clone(),
+            &obs,
+            STEP,
+            &spec(Some(BarrierPath::HighLow), None),
+        )
+        .unwrap();
         let cl = apply(f, &obs, STEP, &spec(Some(BarrierPath::Close), None)).unwrap();
         let at = |fr: &TrainingFrame, bar: i64| {
-            fr.ts_ns.iter().position(|t| *t == bar * STEP).map(|i| fr.label[i])
+            fr.ts_ns
+                .iter()
+                .position(|t| *t == bar * STEP)
+                .map(|i| fr.label[i])
         };
         // Bar 195 looks forward across bar 200, whose range spans both barriers: the stop.
         assert_eq!(at(&hl, 195), Some(-1.0));
-        assert_eq!(at(&cl, 195), Some(0.0), "the close path never sees the wick");
+        assert_eq!(
+            at(&cl, 195),
+            Some(0.0),
+            "the close path never sees the wick"
+        );
     }
 
     #[test]
@@ -297,7 +322,10 @@ mod tests {
         );
         let mut b = spec(Some(BarrierPath::HighLow), None);
         b.pt_sl_multiples = vec![2.0];
-        assert_eq!(apply(f, &obs, STEP, &b).unwrap_err(), LabelError::BarrierMultiples);
+        assert_eq!(
+            apply(f, &obs, STEP, &b).unwrap_err(),
+            LabelError::BarrierMultiples
+        );
     }
 
     #[test]
@@ -306,6 +334,9 @@ mod tests {
         let json = serde_json::to_value(&s).unwrap();
         assert!(json.get("barrier_path").is_none() && json.get("sampling").is_none());
         let with = spec(Some(BarrierPath::HighLow), None).content_keyed();
-        assert_ne!(s.label_spec_id, with.label_spec_id, "the path is part of the hash");
+        assert_ne!(
+            s.label_spec_id, with.label_spec_id,
+            "the path is part of the hash"
+        );
     }
 }

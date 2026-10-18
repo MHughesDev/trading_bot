@@ -112,19 +112,26 @@ mod tests {
 
     #[test]
     fn an_epoch_frame_is_a_point() {
-        let p = point_from_metric(&json!({"epoch": 3, "train_loss": 0.5, "val_loss": 0.7})).unwrap();
+        let p =
+            point_from_metric(&json!({"epoch": 3, "train_loss": 0.5, "val_loss": 0.7})).unwrap();
         assert_eq!(
             p,
-            MetricPoint { epoch: 3, train_loss: Some(0.5), val_loss: Some(0.7) }
+            MetricPoint {
+                epoch: 3,
+                train_loss: Some(0.5),
+                val_loss: Some(0.7)
+            }
         );
     }
 
     #[test]
     fn an_unmeasured_loss_is_none_never_zero() {
         // serde_json parses `null`; NaN arrives as null or a string, never a number.
-        let p = point_from_metric(&json!({"epoch": 1, "train_loss": 0.4, "val_loss": null})).unwrap();
+        let p =
+            point_from_metric(&json!({"epoch": 1, "train_loss": 0.4, "val_loss": null})).unwrap();
         assert_eq!(p.val_loss, None);
-        let p = point_from_metric(&json!({"epoch": 1, "train_loss": 0.4, "val_loss": "NaN"})).unwrap();
+        let p =
+            point_from_metric(&json!({"epoch": 1, "train_loss": 0.4, "val_loss": "NaN"})).unwrap();
         assert_eq!(p.val_loss, None);
     }
 
@@ -133,6 +140,8 @@ mod tests {
         assert!(point_from_metric(&json!({"checkpoint": {"step": 2}})).is_none());
         assert!(point_from_metric(&json!({"epoch": -1, "train_loss": 0.1})).is_none());
         assert!(point_from_metric(&json!({"epoch": 2})).is_none());
-        assert!(point_from_metric(&json!({"epoch": 2, "train_loss": null, "val_loss": null})).is_none());
+        assert!(
+            point_from_metric(&json!({"epoch": 2, "train_loss": null, "val_loss": null})).is_none()
+        );
     }
 }

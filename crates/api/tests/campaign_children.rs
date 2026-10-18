@@ -32,8 +32,8 @@ use jobs::store::{JobStore, PgTrialCounter, Submission};
 use jobs::types::WorkerClass;
 use jobs::{JobKind, JobOutput, WorkerPool};
 use ledger::campaign::{Budget, CampaignDefinition, ExplorationFloor};
-use ledger::phase::{CampaignEvent, CampaignPhase};
 use ledger::pg::PgTrialLedger;
+use ledger::phase::{CampaignEvent, CampaignPhase};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -174,17 +174,41 @@ async fn world(slug_prefix: &str, search_space: Value, proposal: Option<Value>) 
     let store = Arc::new(JobStore::new(pg.clone(), Arc::new(PgTrialCounter)));
 
     // The driver's own job: every child names it as parent.
-    let mut driver = Submission::new(JobKind::Campaign, user, json!({ "campaign_id": campaign_id }));
+    let mut driver = Submission::new(
+        JobKind::Campaign,
+        user,
+        json!({ "campaign_id": campaign_id }),
+    );
     driver.project_id = Some(Uuid::new_v4());
     let driver_job = store.submit(driver).await.expect("driver job").job_id;
 
-    async fn append(led: &PgTrialLedger, tenant: &str, campaign: Uuid, phase: CampaignPhase, detail: Value) {
+    async fn append(
+        led: &PgTrialLedger,
+        tenant: &str,
+        campaign: Uuid,
+        phase: CampaignPhase,
+        detail: Value,
+    ) {
         led.append_campaign_event_async(tenant, campaign, &CampaignEvent::new(phase, detail))
             .await
             .expect("append");
     }
-    append(&led, &tenant, campaign_id, CampaignPhase::Baseline, json!({})).await;
-    append(&led, &tenant, campaign_id, CampaignPhase::Diagnose, json!({})).await;
+    append(
+        &led,
+        &tenant,
+        campaign_id,
+        CampaignPhase::Baseline,
+        json!({}),
+    )
+    .await;
+    append(
+        &led,
+        &tenant,
+        campaign_id,
+        CampaignPhase::Diagnose,
+        json!({}),
+    )
+    .await;
 
     // HYPOTHESIZE: a settled child carrying the proposal, recorded in the log.
     let hyp = {
@@ -195,7 +219,11 @@ async fn world(slug_prefix: &str, search_space: Value, proposal: Option<Value>) 
         );
         sub.parent_job_id = Some(driver_job.clone());
         sub.member_index = Some(3);
-        store.submit_child_once(sub).await.expect("hyp child").job_id
+        store
+            .submit_child_once(sub)
+            .await
+            .expect("hyp child")
+            .job_id
     };
     sqlx::query("UPDATE jobs SET state='succeeded', result=$2, finished_at=now() WHERE job_id=$1")
         .bind(&hyp)
@@ -203,7 +231,14 @@ async fn world(slug_prefix: &str, search_space: Value, proposal: Option<Value>) 
         .execute(&pg)
         .await
         .unwrap();
-    append(&led, &tenant, campaign_id, CampaignPhase::Hypothesize, json!({ "job_id": hyp })).await;
+    append(
+        &led,
+        &tenant,
+        campaign_id,
+        CampaignPhase::Hypothesize,
+        json!({ "job_id": hyp }),
+    )
+    .await;
 
     World {
         pg,
@@ -218,7 +253,14 @@ async fn world(slug_prefix: &str, search_space: Value, proposal: Option<Value>) 
 
 impl World {
     /// Submit the child the driver would for `phase`, claim it, run it.
-    async fn run_child(&self, kind: JobKind, class: WorkerClass, phase: &str, seq: i64, worker: Arc<dyn jobs::Worker>) -> String {
+    async fn run_child(
+        &self,
+        kind: JobKind,
+        class: WorkerClass,
+        phase: &str,
+        seq: i64,
+        worker: Arc<dyn jobs::Worker>,
+    ) -> String {
         let mut sub = Submission::new(
             kind,
             self.user,
@@ -236,7 +278,10 @@ impl World {
             .await
             .expect("claim")
             .expect("a queued child");
-        assert_eq!(claimed.job_id, submitted.job_id, "claimed the child just submitted");
+        assert_eq!(
+            claimed.job_id, submitted.job_id,
+            "claimed the child just submitted"
+        );
         WorkerPool::new(Arc::clone(&self.store), class, 1)
             .register(worker)
             .execute(claimed)
@@ -290,13 +335,23 @@ async fn experiment_runs_the_proposed_ranges_around_the_standing_incumbent() {
         ..Default::default()
     });
     let job = w
-        .run_child(JobKind::Study, WorkerClass::Backtest, "experiment", 4, study_worker(&w, Arc::clone(&fake)))
+        .run_child(
+            JobKind::Study,
+            WorkerClass::Backtest,
+            "experiment",
+            4,
+            study_worker(&w, Arc::clone(&fake)),
+        )
         .await;
     let result = w.result(&job).await;
 
     // The candidate is the sweep's carried-forward member, nothing else.
     assert_eq!(result["candidate_params"], json!({ "fast": 9 }));
-    assert_eq!(result["incumbent_params"], json!({ "fast": 12 }), "the declared start");
+    assert_eq!(
+        result["incumbent_params"],
+        json!({ "fast": 12 }),
+        "the declared start"
+    );
     // Ranges are applied; the structural half of the move is not, and says so.
     assert_eq!(result["structural_move_applied"], json!(false));
     assert_eq!(result["move"], json!("change_sizing"));
@@ -305,7 +360,11 @@ async fn experiment_runs_the_proposed_ranges_around_the_standing_incumbent() {
     assert_eq!(call.narrowing["fast"].min, Some(6.0));
     assert_eq!(call.narrowing["fast"].max, Some(14.0));
     assert_eq!(call.base_params, params(12));
-    assert_eq!(call.seed, replicate_seed(w.campaign_id, 4), "the platform's seed, not a caller's");
+    assert_eq!(
+        call.seed,
+        replicate_seed(w.campaign_id, 4),
+        "the platform's seed, not a caller's"
+    );
     assert_eq!(call.max_runs, 8);
 }
 
@@ -322,7 +381,12 @@ async fn a_campaign_without_an_evaluation_block_fails_its_experiment_naming_the_
     sub.member_index = Some(4);
     sub.experiment_id = Some(format!("campaign:{}:experiment", w.campaign_id));
     let submitted = w.store.submit_child_once(sub).await.unwrap();
-    let claimed = w.store.claim(WorkerClass::Backtest, "t").await.unwrap().unwrap();
+    let claimed = w
+        .store
+        .claim(WorkerClass::Backtest, "t")
+        .await
+        .unwrap()
+        .unwrap();
     WorkerPool::new(Arc::clone(&w.store), WorkerClass::Backtest, 1)
         .register(study_worker(&w, Arc::new(Fake::default())))
         .execute(claimed)
@@ -337,7 +401,12 @@ async fn a_campaign_without_an_evaluation_block_fails_its_experiment_naming_the_
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs DATABASE_URL with migrations through 0183"]
 async fn compare_promotes_a_clear_winner_and_it_becomes_the_incumbent() {
-    let w = world("cmp", json!({ "evaluation": evaluation() }), Some(Value::Null)).await;
+    let w = world(
+        "cmp",
+        json!({ "evaluation": evaluation() }),
+        Some(Value::Null),
+    )
+    .await;
     // A difference of 3.0 on a declared half-width of 4.0: the confidence
     // sequence over 29 identical windows needs most of the scale to clear delta.
     let fake = Arc::new(Fake {
@@ -347,12 +416,24 @@ async fn compare_promotes_a_clear_winner_and_it_becomes_the_incumbent() {
         ..Default::default()
     });
     let exp = w
-        .run_child(JobKind::Study, WorkerClass::Backtest, "experiment", 4, study_worker(&w, Arc::clone(&fake)))
+        .run_child(
+            JobKind::Study,
+            WorkerClass::Backtest,
+            "experiment",
+            4,
+            study_worker(&w, Arc::clone(&fake)),
+        )
         .await;
     record_experiment(&w, &exp).await;
 
     let cmp = w
-        .run_child(JobKind::EvalTask, WorkerClass::Eval, "compare", 5, compare_worker(&w, Arc::clone(&fake)))
+        .run_child(
+            JobKind::EvalTask,
+            WorkerClass::Eval,
+            "compare",
+            5,
+            compare_worker(&w, Arc::clone(&fake)),
+        )
         .await;
     let result = w.result(&cmp).await;
     assert_eq!(result["verdict"], json!("promote"));
@@ -361,16 +442,23 @@ async fn compare_promotes_a_clear_winner_and_it_becomes_the_incumbent() {
     // Both sides were measured on the same 29 windows.
     let reps = fake.replicates.lock().unwrap().clone();
     assert_eq!(reps.len(), 2);
-    assert_eq!(reps[0].windows, reps[1].windows, "paired on identical windows");
+    assert_eq!(
+        reps[0].windows, reps[1].windows,
+        "paired on identical windows"
+    );
     assert_eq!(reps[0].windows.len(), 29);
 
     // The decision is on the append-only log, scoped to the campaign.
-    let history = compare_history(&w.pg, &w.tenant, w.campaign_id).await.unwrap();
+    let history = compare_history(&w.pg, &w.tenant, w.campaign_id)
+        .await
+        .unwrap();
     assert_eq!(history.len(), 1);
     assert!(history[0].0.promoted);
     let spec = EvaluationSpec::from_search_space(&json!({ "evaluation": evaluation() })).unwrap();
     assert_eq!(
-        standing_incumbent(&w.pg, &w.tenant, w.campaign_id, &spec).await.unwrap(),
+        standing_incumbent(&w.pg, &w.tenant, w.campaign_id, &spec)
+            .await
+            .unwrap(),
         params(9),
         "a promoted candidate is the next generation's incumbent"
     );
@@ -387,7 +475,12 @@ async fn compare_promotes_a_clear_winner_and_it_becomes_the_incumbent() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs DATABASE_URL with migrations through 0183"]
 async fn identical_candidates_are_not_promoted_and_leave_the_incumbent_alone() {
-    let w = world("eq", json!({ "evaluation": evaluation() }), Some(Value::Null)).await;
+    let w = world(
+        "eq",
+        json!({ "evaluation": evaluation() }),
+        Some(Value::Null),
+    )
+    .await;
     let fake = Arc::new(Fake {
         candidate: Some(params(9)),
         candidate_value: 1.0,
@@ -395,18 +488,32 @@ async fn identical_candidates_are_not_promoted_and_leave_the_incumbent_alone() {
         ..Default::default()
     });
     let exp = w
-        .run_child(JobKind::Study, WorkerClass::Backtest, "experiment", 4, study_worker(&w, Arc::clone(&fake)))
+        .run_child(
+            JobKind::Study,
+            WorkerClass::Backtest,
+            "experiment",
+            4,
+            study_worker(&w, Arc::clone(&fake)),
+        )
         .await;
     record_experiment(&w, &exp).await;
     let cmp = w
-        .run_child(JobKind::EvalTask, WorkerClass::Eval, "compare", 5, compare_worker(&w, fake))
+        .run_child(
+            JobKind::EvalTask,
+            WorkerClass::Eval,
+            "compare",
+            5,
+            compare_worker(&w, fake),
+        )
         .await;
     let result = w.result(&cmp).await;
     assert_eq!(result["verdict"], json!("practically_equivalent"));
     assert_eq!(result["promoted"], json!(false));
     let spec = EvaluationSpec::from_search_space(&json!({ "evaluation": evaluation() })).unwrap();
     assert_eq!(
-        standing_incumbent(&w.pg, &w.tenant, w.campaign_id, &spec).await.unwrap(),
+        standing_incumbent(&w.pg, &w.tenant, w.campaign_id, &spec)
+            .await
+            .unwrap(),
         params(12)
     );
 }
@@ -414,37 +521,76 @@ async fn identical_candidates_are_not_promoted_and_leave_the_incumbent_alone() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs DATABASE_URL with migrations through 0183"]
 async fn a_sweep_with_no_feasible_candidate_is_recorded_as_a_rejection_not_a_failure() {
-    let w = world("none", json!({ "evaluation": evaluation() }), Some(Value::Null)).await;
+    let w = world(
+        "none",
+        json!({ "evaluation": evaluation() }),
+        Some(Value::Null),
+    )
+    .await;
     let fake = Arc::new(Fake::default()); // candidate: None
     let exp = w
-        .run_child(JobKind::Study, WorkerClass::Backtest, "experiment", 4, study_worker(&w, Arc::clone(&fake)))
+        .run_child(
+            JobKind::Study,
+            WorkerClass::Backtest,
+            "experiment",
+            4,
+            study_worker(&w, Arc::clone(&fake)),
+        )
         .await;
     record_experiment(&w, &exp).await;
     let cmp = w
-        .run_child(JobKind::EvalTask, WorkerClass::Eval, "compare", 5, compare_worker(&w, fake))
+        .run_child(
+            JobKind::EvalTask,
+            WorkerClass::Eval,
+            "compare",
+            5,
+            compare_worker(&w, fake),
+        )
         .await;
     let result = w.result(&cmp).await;
     assert_eq!(result["verdict"], json!("no_candidate"));
-    let history = compare_history(&w.pg, &w.tenant, w.campaign_id).await.unwrap();
+    let history = compare_history(&w.pg, &w.tenant, w.campaign_id)
+        .await
+        .unwrap();
     assert_eq!(history.len(), 1);
-    assert!(!history[0].0.could_exceed, "a search that found nothing cannot exceed delta");
+    assert!(
+        !history[0].0.could_exceed,
+        "a search that found nothing cannot exceed delta"
+    );
 }
 
 /// The stopping rules read what the COMPARE worker wrote.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs DATABASE_URL with migrations through 0183"]
 async fn a_dry_run_of_rejections_ends_the_campaign_as_diminishing_returns() {
-    let w = world("dry", json!({ "evaluation": evaluation() }), Some(Value::Null)).await;
+    let w = world(
+        "dry",
+        json!({ "evaluation": evaluation() }),
+        Some(Value::Null),
+    )
+    .await;
     let fake = Arc::new(Fake::default());
     // Ten generations that found nothing: the log the rule reads.
     for i in 0..10_i64 {
         let seq = 4 + 2 * i;
         let exp = w
-            .run_child(JobKind::Study, WorkerClass::Backtest, "experiment", seq, study_worker(&w, Arc::clone(&fake)))
+            .run_child(
+                JobKind::Study,
+                WorkerClass::Backtest,
+                "experiment",
+                seq,
+                study_worker(&w, Arc::clone(&fake)),
+            )
             .await;
         record_experiment(&w, &exp).await;
         let cmp = w
-            .run_child(JobKind::EvalTask, WorkerClass::Eval, "compare", seq + 1, compare_worker(&w, Arc::clone(&fake)))
+            .run_child(
+                JobKind::EvalTask,
+                WorkerClass::Eval,
+                "compare",
+                seq + 1,
+                compare_worker(&w, Arc::clone(&fake)),
+            )
             .await;
         // The rest of the cycle the driver records, so the next EXPERIMENT is a
         // legal transition: compare -> gate -> prune -> reallocate -> hypothesize.
@@ -456,7 +602,11 @@ async fn a_dry_run_of_rejections_ends_the_campaign_as_diminishing_returns() {
             (CampaignPhase::Hypothesize, json!({})),
         ] {
             w.led
-                .append_campaign_event_async(&w.tenant, w.campaign_id, &CampaignEvent::new(phase, detail))
+                .append_campaign_event_async(
+                    &w.tenant,
+                    w.campaign_id,
+                    &CampaignEvent::new(phase, detail),
+                )
                 .await
                 .expect("cycle event");
         }
@@ -468,11 +618,16 @@ async fn a_dry_run_of_rejections_ends_the_campaign_as_diminishing_returns() {
         .map(|(r, _)| r)
         .collect();
     assert_eq!(history.len(), 10);
-    let counted = campaign_trials_counted(&w.pg, &w.tenant, w.campaign_id).await.unwrap();
+    let counted = campaign_trials_counted(&w.pg, &w.tenant, w.campaign_id)
+        .await
+        .unwrap();
     match stop_check(&history, counted) {
         StopCheck::End(phase, why) => {
             assert!(
-                matches!(phase, CampaignPhase::Converged | CampaignPhase::DiminishingReturns),
+                matches!(
+                    phase,
+                    CampaignPhase::Converged | CampaignPhase::DiminishingReturns
+                ),
                 "{phase:?}: {why}"
             );
         }
@@ -486,17 +641,32 @@ async fn a_dry_run_of_rejections_ends_the_campaign_as_diminishing_returns() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs DATABASE_URL with migrations through 0183"]
 async fn children_are_counted_against_their_campaign() {
-    let w = world("count", json!({ "evaluation": evaluation() }), Some(Value::Null)).await;
+    let w = world(
+        "count",
+        json!({ "evaluation": evaluation() }),
+        Some(Value::Null),
+    )
+    .await;
     assert_eq!(
-        campaign_trials_counted(&w.pg, &w.tenant, w.campaign_id).await.unwrap(),
+        campaign_trials_counted(&w.pg, &w.tenant, w.campaign_id)
+            .await
+            .unwrap(),
         0,
         "nothing counted yet (the driver and the hypothesize child count no trial)"
     );
     let fake = Arc::new(Fake::default());
-    w.run_child(JobKind::Study, WorkerClass::Backtest, "experiment", 4, study_worker(&w, fake))
-        .await;
+    w.run_child(
+        JobKind::Study,
+        WorkerClass::Backtest,
+        "experiment",
+        4,
+        study_worker(&w, fake),
+    )
+    .await;
     assert_eq!(
-        campaign_trials_counted(&w.pg, &w.tenant, w.campaign_id).await.unwrap(),
+        campaign_trials_counted(&w.pg, &w.tenant, w.campaign_id)
+            .await
+            .unwrap(),
         1,
         "a Study child is a counted look, and it is this campaign's"
     );
@@ -525,7 +695,9 @@ async fn children_are_counted_against_their_campaign() {
     .await
     .expect("a suite trial");
     assert_eq!(
-        campaign_trials_counted(&w.pg, &w.tenant, w.campaign_id).await.unwrap(),
+        campaign_trials_counted(&w.pg, &w.tenant, w.campaign_id)
+            .await
+            .unwrap(),
         2
     );
 }
@@ -534,12 +706,26 @@ async fn children_are_counted_against_their_campaign() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs DATABASE_URL with migrations through 0183"]
 async fn gate_without_funnel_evidence_asks_for_the_funnel() {
-    let w = world("gate", json!({ "evaluation": evaluation() }), Some(Value::Null)).await;
+    let w = world(
+        "gate",
+        json!({ "evaluation": evaluation() }),
+        Some(Value::Null),
+    )
+    .await;
     let driver = api::campaign_driver::CampaignWorker::new(Arc::clone(&w.store), w.pg.clone());
-    let m = driver.gate_manifest(&w.tenant, w.campaign_id).await.unwrap();
+    let m = driver
+        .gate_manifest(&w.tenant, w.campaign_id)
+        .await
+        .unwrap();
     assert_eq!(m["run_funnel"], json!(true));
-    assert!(m.get("trial_id").is_none(), "no funnel trial exists yet: {m}");
-    assert_eq!(m["experiment_id"], json!(format!("campaign-{}", w.campaign_id)));
+    assert!(
+        m.get("trial_id").is_none(),
+        "no funnel trial exists yet: {m}"
+    );
+    assert_eq!(
+        m["experiment_id"],
+        json!(format!("campaign-{}", w.campaign_id))
+    );
     assert_eq!(m["instrument"], json!("BTC-USD"));
 }
 
@@ -560,7 +746,10 @@ impl api::campaign_driver::funnel_worker::CampaignFunnel for FakeFunnel {
         delta: f64,
         incumbent: &ParamMap,
     ) -> Result<api::campaign_driver::funnel_worker::FunnelRan, String> {
-        self.asked.lock().unwrap().push((campaign_id, delta, incumbent.clone()));
+        self.asked
+            .lock()
+            .unwrap()
+            .push((campaign_id, delta, incumbent.clone()));
         let tenant = user.to_string();
         let ctx = ledger::DispatchContext::human(&tenant, "t", delta)
             .with_experiment(format!("campaign-{campaign_id}"));
@@ -583,12 +772,22 @@ impl api::campaign_driver::funnel_worker::CampaignFunnel for FakeFunnel {
             .await
             .map_err(|e| e.to_string())?;
         self.led
-            .record_statistic_async(&tenant, ticket.trial_id(), "deflated_sharpe", 0.4, "funnel_advance")
+            .record_statistic_async(
+                &tenant,
+                ticket.trial_id(),
+                "deflated_sharpe",
+                0.4,
+                "funnel_advance",
+            )
             .await
             .map_err(|e| e.to_string())?;
         Ok(api::campaign_driver::funnel_worker::FunnelRan {
             experiment: Uuid::new_v4(),
-            axis: backtest::suite::SweepAxis { param: "fast".into(), center: 9.0, step: 1.0 },
+            axis: backtest::suite::SweepAxis {
+                param: "fast".into(),
+                center: 9.0,
+                step: 1.0,
+            },
         })
     }
 }
@@ -598,7 +797,12 @@ impl api::campaign_driver::funnel_worker::CampaignFunnel for FakeFunnel {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs DATABASE_URL with migrations through 0183"]
 async fn the_gate_child_runs_the_funnel_on_the_incumbent_and_judges_what_it_wrote() {
-    let w = world("gatefunnel", json!({ "evaluation": evaluation() }), Some(Value::Null)).await;
+    let w = world(
+        "gatefunnel",
+        json!({ "evaluation": evaluation() }),
+        Some(Value::Null),
+    )
+    .await;
     // A promoted candidate becomes the incumbent the funnel must be run on.
     let promoted = Fake {
         candidate: Some(params(9)),
@@ -608,36 +812,73 @@ async fn the_gate_child_runs_the_funnel_on_the_incumbent_and_judges_what_it_wrot
     };
     let fake = Arc::new(promoted);
     let exp = w
-        .run_child(JobKind::Study, WorkerClass::Backtest, "experiment", 4, study_worker(&w, Arc::clone(&fake)))
+        .run_child(
+            JobKind::Study,
+            WorkerClass::Backtest,
+            "experiment",
+            4,
+            study_worker(&w, Arc::clone(&fake)),
+        )
         .await;
     record_experiment(&w, &exp).await;
-    w.run_child(JobKind::EvalTask, WorkerClass::Eval, "compare", 5, compare_worker(&w, fake)).await;
+    w.run_child(
+        JobKind::EvalTask,
+        WorkerClass::Eval,
+        "compare",
+        5,
+        compare_worker(&w, fake),
+    )
+    .await;
 
-    let funnel = Arc::new(FakeFunnel { led: PgTrialLedger::new(w.pg.clone()), asked: Mutex::new(Vec::new()) });
+    let funnel = Arc::new(FakeFunnel {
+        led: PgTrialLedger::new(w.pg.clone()),
+        asked: Mutex::new(Vec::new()),
+    });
     let driver = api::campaign_driver::CampaignWorker::new(Arc::clone(&w.store), w.pg.clone());
-    let mut manifest = driver.gate_manifest(&w.tenant, w.campaign_id).await.unwrap();
+    let mut manifest = driver
+        .gate_manifest(&w.tenant, w.campaign_id)
+        .await
+        .unwrap();
     manifest["campaign_id"] = json!(w.campaign_id);
     let mut sub = Submission::new(JobKind::GateAdvance, w.user, manifest);
     sub.parent_job_id = Some(w.driver_job.clone());
     sub.member_index = Some(7);
     sub.experiment_id = Some(format!("campaign:{}:gate", w.campaign_id));
     let submitted = w.store.submit_child_once(sub).await.expect("gate child");
-    let claimed = w.store.claim(WorkerClass::Backtest, "t").await.unwrap().unwrap();
+    let claimed = w
+        .store
+        .claim(WorkerClass::Backtest, "t")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(claimed.job_id, submitted.job_id);
     let worker = api::gate_worker::GateAdvanceWorker::new(w.pg.clone())
-        .with_funnel(Arc::clone(&funnel) as Arc<dyn api::campaign_driver::funnel_worker::CampaignFunnel>);
+        .with_funnel(
+            Arc::clone(&funnel) as Arc<dyn api::campaign_driver::funnel_worker::CampaignFunnel>
+        );
     WorkerPool::new(Arc::clone(&w.store), WorkerClass::Backtest, 1)
         .register(Arc::new(worker))
         .execute(claimed)
         .await;
 
     let result = w.result(&submitted.job_id).await;
-    assert_eq!(result["of"], json!(16), "the whole stack was evaluated: {result}");
+    assert_eq!(
+        result["of"],
+        json!(16),
+        "the whole stack was evaluated: {result}"
+    );
     let asked = funnel.asked.lock().unwrap().clone();
     assert_eq!(asked.len(), 1);
     assert_eq!(asked[0].0, w.campaign_id);
-    assert!((asked[0].1 - 0.15).abs() < 1e-12, "the campaign's own delta");
-    assert_eq!(asked[0].2, params(9), "the funnel ran on the promoted incumbent, not the defaults");
+    assert!(
+        (asked[0].1 - 0.15).abs() < 1e-12,
+        "the campaign's own delta"
+    );
+    assert_eq!(
+        asked[0].2,
+        params(9),
+        "the funnel ran on the promoted incumbent, not the defaults"
+    );
     // And it judged the trial the funnel wrote.
     let (trial,): (Uuid,) = sqlx::query_as(
         "SELECT trial_id FROM mlops.trial WHERE experiment_id = $1 AND tenant_id = $2 LIMIT 1",
@@ -654,18 +895,33 @@ async fn the_gate_child_runs_the_funnel_on_the_incumbent_and_judges_what_it_wrot
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs DATABASE_URL with migrations through 0183"]
 async fn a_gate_that_needs_the_funnel_and_has_none_fails_by_name() {
-    let w = world("nofunnel", json!({ "evaluation": evaluation() }), Some(Value::Null)).await;
+    let w = world(
+        "nofunnel",
+        json!({ "evaluation": evaluation() }),
+        Some(Value::Null),
+    )
+    .await;
     let driver = api::campaign_driver::CampaignWorker::new(Arc::clone(&w.store), w.pg.clone());
-    let mut manifest = driver.gate_manifest(&w.tenant, w.campaign_id).await.unwrap();
+    let mut manifest = driver
+        .gate_manifest(&w.tenant, w.campaign_id)
+        .await
+        .unwrap();
     manifest["campaign_id"] = json!(w.campaign_id);
     let mut sub = Submission::new(JobKind::GateAdvance, w.user, manifest);
     sub.parent_job_id = Some(w.driver_job.clone());
     sub.member_index = Some(7);
     sub.experiment_id = Some(format!("campaign:{}:gate", w.campaign_id));
     let submitted = w.store.submit_child_once(sub).await.unwrap();
-    let claimed = w.store.claim(WorkerClass::Backtest, "t").await.unwrap().unwrap();
+    let claimed = w
+        .store
+        .claim(WorkerClass::Backtest, "t")
+        .await
+        .unwrap()
+        .unwrap();
     WorkerPool::new(Arc::clone(&w.store), WorkerClass::Backtest, 1)
-        .register(Arc::new(api::gate_worker::GateAdvanceWorker::new(w.pg.clone())))
+        .register(Arc::new(api::gate_worker::GateAdvanceWorker::new(
+            w.pg.clone(),
+        )))
         .execute(claimed)
         .await;
     let job = w.store.get(&submitted.job_id).await.unwrap();

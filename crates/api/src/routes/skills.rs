@@ -34,7 +34,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::auth::scopes;
-use crate::skills_store::{StoreError, SkillStore};
+use crate::skills_store::{SkillStore, StoreError};
 use crate::skills_verify::{self, ProposalInput};
 use crate::{auth::BearerToken, state::AppState};
 
@@ -42,16 +42,22 @@ use crate::{auth::BearerToken, state::AppState};
 pub const ADMIT: &str = "skills.admit";
 
 fn err(status: StatusCode, code: &str, message: impl Into<String>) -> Response {
-    (status, Json(json!({ "error": code, "message": message.into() }))).into_response()
+    (
+        status,
+        Json(json!({ "error": code, "message": message.into() })),
+    )
+        .into_response()
 }
 
 fn store_err(e: StoreError) -> Response {
     match e {
         StoreError::Refused(m) => err(StatusCode::UNPROCESSABLE_ENTITY, "refused", m),
         StoreError::NotFound(m) => err(StatusCode::NOT_FOUND, "not_found", m),
-        StoreError::Db(sqlx::Error::Database(d)) => {
-            err(StatusCode::CONFLICT, "registry_constraint", d.message().to_string())
-        }
+        StoreError::Db(sqlx::Error::Database(d)) => err(
+            StatusCode::CONFLICT,
+            "registry_constraint",
+            d.message().to_string(),
+        ),
         StoreError::Db(e) => err(StatusCode::INTERNAL_SERVER_ERROR, "database", e.to_string()),
     }
 }
@@ -76,7 +82,11 @@ fn require(token: &BearerToken, scope: &str) -> Result<(), Response> {
     if token.permits(scope) {
         Ok(())
     } else {
-        Err(err(StatusCode::FORBIDDEN, "missing_scope", format!("this route needs the `{scope}` scope")))
+        Err(err(
+            StatusCode::FORBIDDEN,
+            "missing_scope",
+            format!("this route needs the `{scope}` scope"),
+        ))
     }
 }
 
@@ -100,7 +110,11 @@ pub struct ProjectQuery {
 /// `GET /api/skills/glossary` — every skill this caller can see, and which of them a
 /// session would carry resident. Read from the `skill_glossary` view, so a quarantined
 /// skill is absent in the statement that quarantined it.
-pub async fn glossary(State(state): State<AppState>, token: BearerToken, Query(q): Query<ProjectQuery>) -> Response {
+pub async fn glossary(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Query(q): Query<ProjectQuery>,
+) -> Response {
     let store = SkillStore::new(state.pg.clone());
     let vis = match store.visible(token.user_id(), q.project).await {
         Ok(v) => v,
@@ -109,7 +123,15 @@ pub async fn glossary(State(state): State<AppState>, token: BearerToken, Query(q
     let refs: Vec<&skills::materialiser::RegistrySkill> = vis.iter().collect();
     let frozen = store.frozen_selection(q.project).await.unwrap_or_default();
     let resident = skills::materialiser::select(&refs, &frozen)
-        .map(|r| (r.resident.iter().map(|(_, s)| s.name.clone()).collect::<Vec<_>>(), r.cut))
+        .map(|r| {
+            (
+                r.resident
+                    .iter()
+                    .map(|(_, s)| s.name.clone())
+                    .collect::<Vec<_>>(),
+                r.cut,
+            )
+        })
         .unwrap_or_default();
     // The ids the registry's other routes (`/item/{id}`, quarantine, promote) are addressed by.
     // `visible` returns the materialiser's rows, which carry no id, so they are read here
@@ -125,7 +147,16 @@ pub async fn glossary(State(state): State<AppState>, token: BearerToken, Query(q
     .bind(q.project)
     .fetch_all(&state.pg)
     .await
-    .map(|rows| rows.iter().map(|r| ((r.get::<String, _>(0), r.get::<String, _>(1)), r.get::<Uuid, _>(2))).collect())
+    .map(|rows| {
+        rows.iter()
+            .map(|r| {
+                (
+                    (r.get::<String, _>(0), r.get::<String, _>(1)),
+                    r.get::<Uuid, _>(2),
+                )
+            })
+            .collect()
+    })
     .unwrap_or_default();
     Json(json!({
         "skills": vis
@@ -150,15 +181,22 @@ pub struct SearchQuery {
 }
 
 /// `GET /api/skills/search?q=` — full-text over the whole `SKILL.md` body.
-pub async fn search(State(state): State<AppState>, token: BearerToken, Query(q): Query<SearchQuery>) -> Response {
-    let words: Vec<String> = q
-        .q
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| w.len() > 1)
-        .map(str::to_ascii_lowercase)
-        .collect();
+pub async fn search(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Query(q): Query<SearchQuery>,
+) -> Response {
+    let words: Vec<String> =
+        q.q.split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() > 1)
+            .map(str::to_ascii_lowercase)
+            .collect();
     if words.is_empty() {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "empty_query", "give at least one word of two letters or more");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "empty_query",
+            "give at least one word of two letters or more",
+        );
     }
     let tsq = words.join(" | ");
     let rows = sqlx::query(
@@ -199,7 +237,11 @@ pub async fn search(State(state): State<AppState>, token: BearerToken, Query(q):
 }
 
 /// `GET /api/skills/item/{id}` — one skill, its versions and its usage statistics.
-pub async fn get_skill(State(state): State<AppState>, token: BearerToken, Path(id): Path<Uuid>) -> Response {
+pub async fn get_skill(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+) -> Response {
     let admin = token.permits(ADMIT);
     let row = sqlx::query(
         "SELECT name, scope, status, category, current_version, pinned, alias_of,
@@ -218,7 +260,8 @@ pub async fn get_skill(State(state): State<AppState>, token: BearerToken, Path(i
     let owner: Option<String> = row.get(7);
     let visible_to_caller = admin
         || (matches!(status.as_str(), "provisional" | "admitted")
-            && (matches!(scope.as_str(), "core" | "global") || owner.as_deref() == Some(&token.user_id().to_string())));
+            && (matches!(scope.as_str(), "core" | "global")
+                || owner.as_deref() == Some(&token.user_id().to_string())));
     if !visible_to_caller {
         return err(StatusCode::NOT_FOUND, "not_found", id.to_string());
     }
@@ -226,7 +269,9 @@ pub async fn get_skill(State(state): State<AppState>, token: BearerToken, Path(i
     let stats = store.stats(id).await.unwrap_or_default();
     // A deprecated skill says what replaced it (RB-2.6).
     let resolves_to = if status == "deprecated" {
-        store.resolve_alias(id).await.ok().flatten().map(|(sid, name, version)| json!({ "skill_id": sid, "name": name, "version": version }))
+        store.resolve_alias(id).await.ok().flatten().map(
+            |(sid, name, version)| json!({ "skill_id": sid, "name": name, "version": version }),
+        )
     } else {
         None
     };
@@ -276,11 +321,19 @@ pub struct ProposeBody {
 /// `POST /api/skills/proposals` — the agent proposes; the platform admits. A proposal
 /// with no cited trajectory is refused with nothing written; a near-duplicate becomes
 /// a patch of the existing skill (`skills.patch_threshold`).
-pub async fn propose(State(state): State<AppState>, token: BearerToken, Json(b): Json<ProposeBody>) -> Response {
+pub async fn propose(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(b): Json<ProposeBody>,
+) -> Response {
     if let Err(r) = require(&token, scopes::ARTIFACTS) {
         return r;
     }
-    let files = b.files.into_iter().map(|(k, v)| (k, v.into_bytes())).collect();
+    let files = b
+        .files
+        .into_iter()
+        .map(|(k, v)| (k, v.into_bytes()))
+        .collect();
     let input = ProposalInput {
         user: token.user_id(),
         project: b.project_id,
@@ -318,7 +371,11 @@ pub struct ListQuery {
 
 /// `GET /api/skills/proposals` — the promotion queue. A caller without `skills.admit`
 /// sees only their own proposals.
-pub async fn list_proposals(State(state): State<AppState>, token: BearerToken, Query(q): Query<ListQuery>) -> Response {
+pub async fn list_proposals(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Query(q): Query<ListQuery>,
+) -> Response {
     let admin = token.permits(ADMIT);
     let rows = sqlx::query(
         "SELECT proposal_id, proposed_name, project_id, proposer, reason, status, similarity, created_at
@@ -362,7 +419,12 @@ pub struct PairBody {
 /// `POST /api/skills/proposals/{id}/pairs` — a paired replay outcome from the
 /// evaluation harness. `skills.admit`: the numbers admission reads are never written
 /// by the session that proposed.
-pub async fn add_pair(State(state): State<AppState>, token: BearerToken, Path(id): Path<Uuid>, Json(b): Json<PairBody>) -> Response {
+pub async fn add_pair(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+    Json(b): Json<PairBody>,
+) -> Response {
     if let Err(r) = require_admit(&token) {
         return r;
     }
@@ -392,7 +454,12 @@ pub struct StepBody {
 
 /// `POST /api/skills/proposals/{id}/steps` — record a step the platform cannot compute
 /// itself (the Reviewer's verdict).
-pub async fn add_step(State(state): State<AppState>, token: BearerToken, Path(id): Path<Uuid>, Json(b): Json<StepBody>) -> Response {
+pub async fn add_step(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+    Json(b): Json<StepBody>,
+) -> Response {
     if let Err(r) = require_admit(&token) {
         return r;
     }
@@ -404,7 +471,11 @@ pub async fn add_step(State(state): State<AppState>, token: BearerToken, Path(id
 
 /// `POST /api/skills/proposals/{id}/verify` — run what the platform can run and
 /// report which step is still unmet.
-pub async fn verify(State(state): State<AppState>, token: BearerToken, Path(id): Path<Uuid>) -> Response {
+pub async fn verify(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+) -> Response {
     if let Err(r) = require_admit(&token) {
         return r;
     }
@@ -415,12 +486,20 @@ pub async fn verify(State(state): State<AppState>, token: BearerToken, Path(id):
 }
 
 /// `POST /api/skills/proposals/{id}/admit` — admit a verified proposal as provisional.
-pub async fn admit(State(state): State<AppState>, token: BearerToken, Path(id): Path<Uuid>) -> Response {
+pub async fn admit(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+) -> Response {
     if let Err(r) = require_admit(&token) {
         return r;
     }
     match skills_verify::admit_proposal(&state.pg, id, &token.user_id().to_string()).await {
-        Ok(skill) => (StatusCode::CREATED, Json(json!({ "skill_id": skill, "status": "provisional" }))).into_response(),
+        Ok(skill) => (
+            StatusCode::CREATED,
+            Json(json!({ "skill_id": skill, "status": "provisional" })),
+        )
+            .into_response(),
         Err(e) => store_err(e),
     }
 }
@@ -432,11 +511,19 @@ pub struct VoteBody {
 }
 
 /// `POST /api/skills/{id}/vote` — a helpfulness vote from a session that was exposed.
-pub async fn vote(State(state): State<AppState>, token: BearerToken, Path(id): Path<Uuid>, Json(b): Json<VoteBody>) -> Response {
+pub async fn vote(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+    Json(b): Json<VoteBody>,
+) -> Response {
     if let Err(r) = require(&token, scopes::MEMORY) {
         return r;
     }
-    match SkillStore::new(state.pg.clone()).vote(id, b.session_id, b.vote).await {
+    match SkillStore::new(state.pg.clone())
+        .vote(id, b.session_id, b.vote)
+        .await
+    {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => store_err(e),
     }
@@ -451,7 +538,13 @@ pub struct ReasonBody {
     pub alias_of: Option<Uuid>,
 }
 
-async fn retire_with(state: AppState, token: BearerToken, id: Uuid, b: ReasonBody, status: &'static str) -> Response {
+async fn retire_with(
+    state: AppState,
+    token: BearerToken,
+    id: Uuid,
+    b: ReasonBody,
+    status: &'static str,
+) -> Response {
     if let Err(r) = require_admit(&token) {
         return r;
     }
@@ -469,12 +562,22 @@ async fn retire_with(state: AppState, token: BearerToken, id: Uuid, b: ReasonBod
 
 /// `POST /api/skills/{id}/quarantine` — out of every glossary in one statement, with
 /// a `skill_notice` for live sessions.
-pub async fn quarantine(State(state): State<AppState>, token: BearerToken, Path(id): Path<Uuid>, Json(b): Json<ReasonBody>) -> Response {
+pub async fn quarantine(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+    Json(b): Json<ReasonBody>,
+) -> Response {
     retire_with(state, token, id, b, "quarantined").await
 }
 
 /// `POST /api/skills/{id}/deprecate`.
-pub async fn deprecate(State(state): State<AppState>, token: BearerToken, Path(id): Path<Uuid>, Json(b): Json<ReasonBody>) -> Response {
+pub async fn deprecate(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+    Json(b): Json<ReasonBody>,
+) -> Response {
     retire_with(state, token, id, b, "deprecated").await
 }
 
@@ -488,12 +591,25 @@ pub struct ConditionBody {
 
 /// `POST /api/skills/{id}/conditions` — record one of the six promotion conditions,
 /// attributed to the recording user.
-pub async fn record_condition(State(state): State<AppState>, token: BearerToken, Path(id): Path<Uuid>, Json(b): Json<ConditionBody>) -> Response {
+pub async fn record_condition(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+    Json(b): Json<ConditionBody>,
+) -> Response {
     if let Err(r) = require_admit(&token) {
         return r;
     }
     let Some(c) = Condition::parse(&b.condition) else {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "unknown_condition", format!("{:?} is not one of {:?}", b.condition, Condition::ALL.map(Condition::as_str)));
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unknown_condition",
+            format!(
+                "{:?} is not one of {:?}",
+                b.condition,
+                Condition::ALL.map(Condition::as_str)
+            ),
+        );
     };
     match SkillStore::new(state.pg.clone())
         .record_condition(id, c, b.passed, &token.user_id().to_string(), &b.evidence)
@@ -513,14 +629,25 @@ pub struct PromoteBody {
 /// `POST /api/skills/{id}/promote` — project to user is the owner's approval (audited
 /// in `skill_promotion_log`); to global it needs all six recorded conditions, and the
 /// refusal names each one that is not.
-pub async fn promote(State(state): State<AppState>, token: BearerToken, Path(id): Path<Uuid>, Json(b): Json<PromoteBody>) -> Response {
+pub async fn promote(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+    Json(b): Json<PromoteBody>,
+) -> Response {
     if let Err(r) = require_admit(&token) {
         return r;
     }
     let store = SkillStore::new(state.pg.clone());
     match b.to.as_str() {
-        "user" => match store.move_scope(id, "user", token.user_id(), token.user_id()).await {
-            Ok(()) => Json(json!({ "skill_id": id, "scope": "user", "approved_by": token.user_id() })).into_response(),
+        "user" => match store
+            .move_scope(id, "user", token.user_id(), token.user_id())
+            .await
+        {
+            Ok(()) => {
+                Json(json!({ "skill_id": id, "scope": "user", "approved_by": token.user_id() }))
+                    .into_response()
+            }
             Err(e) => store_err(e),
         },
         "global" => {
@@ -538,22 +665,38 @@ pub async fn promote(State(state): State<AppState>, token: BearerToken, Path(id)
                 )
                     .into_response();
             }
-            match store.move_scope(id, "global", token.user_id(), token.user_id()).await {
+            match store
+                .move_scope(id, "global", token.user_id(), token.user_id())
+                .await
+            {
                 Ok(()) => Json(json!({ "skill_id": id, "scope": "global" })).into_response(),
                 Err(e) => store_err(e),
             }
         }
-        other => err(StatusCode::UNPROCESSABLE_ENTITY, "bad_target", format!("{other:?}: promote to `user` or `global`")),
+        other => err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "bad_target",
+            format!("{other:?}: promote to `user` or `global`"),
+        ),
     }
 }
 
 /// `GET /api/skills/notices?after=` — what a live session appends as system messages
 /// when a resident skill changes standing (SK-14).
-pub async fn notices(State(state): State<AppState>, _token: BearerToken, Query(q): Query<NoticeQuery>) -> Response {
-    match SkillStore::new(state.pg.clone()).notices_since(q.after.unwrap_or(0)).await {
-        Ok(n) => Json(json!({ "notices": n.iter().map(|(id, name, kind, reason)| json!({
+pub async fn notices(
+    State(state): State<AppState>,
+    _token: BearerToken,
+    Query(q): Query<NoticeQuery>,
+) -> Response {
+    match SkillStore::new(state.pg.clone())
+        .notices_since(q.after.unwrap_or(0))
+        .await
+    {
+        Ok(n) => Json(
+            json!({ "notices": n.iter().map(|(id, name, kind, reason)| json!({
             "notice_id": id, "skill": name, "kind": kind, "reason": reason,
-        })).collect::<Vec<_>>() }))
+        })).collect::<Vec<_>>() }),
+        )
         .into_response(),
         Err(e) => store_err(e),
     }
@@ -566,8 +709,15 @@ pub struct NoticeQuery {
 
 /// `GET /api/skills/runs/{session}/bill` — the skills a run had exposed and activated,
 /// by version hash (RA-3.8).
-pub async fn bill_of_materials(State(state): State<AppState>, _token: BearerToken, Path(session): Path<Uuid>) -> Response {
-    match SkillStore::new(state.pg.clone()).bill_of_materials(session).await {
+pub async fn bill_of_materials(
+    State(state): State<AppState>,
+    _token: BearerToken,
+    Path(session): Path<Uuid>,
+) -> Response {
+    match SkillStore::new(state.pg.clone())
+        .bill_of_materials(session)
+        .await
+    {
         Ok(b) => Json(json!({ "session_id": session, "skills": b })).into_response(),
         Err(e) => store_err(e),
     }
@@ -585,13 +735,23 @@ pub async fn curator_run(State(state): State<AppState>, token: BearerToken) -> R
         Ok(i) => i,
         Err(e) => return store_err(e),
     };
-    let run = match harness::memory::curator::curate(&input, &harness::memory::curator::CuratorConfig::default()) {
+    let run = match harness::memory::curator::curate(
+        &input,
+        &harness::memory::curator::CuratorConfig::default(),
+    ) {
         Ok(r) => r,
-        Err(e) => return err(StatusCode::UNPROCESSABLE_ENTITY, "curator_input_refused", e.to_string()),
+        Err(e) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "curator_input_refused",
+                e.to_string(),
+            )
+        }
     };
     let run_id = Uuid::new_v4();
     match store.save_curator_items(run_id, &run.items).await {
-        Ok(n) => Json(json!({ "run_id": run_id, "items": run.items, "stored": n, "cut": run.cut })).into_response(),
+        Ok(n) => Json(json!({ "run_id": run_id, "items": run.items, "stored": n, "cut": run.cut }))
+            .into_response(),
         Err(e) => store_err(e),
     }
 }
@@ -601,7 +761,10 @@ pub async fn curator_items(State(state): State<AppState>, token: BearerToken) ->
     if let Err(r) = require_admit(&token) {
         return r;
     }
-    match SkillStore::new(state.pg.clone()).curator_items("open").await {
+    match SkillStore::new(state.pg.clone())
+        .curator_items("open")
+        .await
+    {
         Ok(v) => Json(json!({ "items": v })).into_response(),
         Err(e) => store_err(e),
     }
@@ -613,11 +776,19 @@ pub struct DecideBody {
 }
 
 /// `POST /api/skills/curator/items/{item_id}/decide`.
-pub async fn curator_decide(State(state): State<AppState>, token: BearerToken, Path(item_id): Path<i64>, Json(b): Json<DecideBody>) -> Response {
+pub async fn curator_decide(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(item_id): Path<i64>,
+    Json(b): Json<DecideBody>,
+) -> Response {
     if let Err(r) = require_admit(&token) {
         return r;
     }
-    match SkillStore::new(state.pg.clone()).decide_curator_item(item_id, b.accept, token.user_id()).await {
+    match SkillStore::new(state.pg.clone())
+        .decide_curator_item(item_id, b.accept, token.user_id())
+        .await
+    {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => store_err(e),
     }
@@ -634,20 +805,37 @@ mod tests {
         let prod = src.split("#[cfg(test)]").next().unwrap();
         // Handlers a non-admin may call, each guarded by a research scope or read-only.
         const OPEN: [&str; 10] = [
-            "glossary", "search", "get_skill", "propose", "list_proposals", "vote", "notices",
-            "bill_of_materials", "retire_with", "require",
+            "glossary",
+            "search",
+            "get_skill",
+            "propose",
+            "list_proposals",
+            "vote",
+            "notices",
+            "bill_of_materials",
+            "retire_with",
+            "require",
         ];
         let mut checked = 0;
         for chunk in prod.split("pub async fn ").skip(1) {
-            let name: String = chunk.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+            let name: String = chunk
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
             if OPEN.contains(&name.as_str()) {
                 continue;
             }
             let body_start = chunk.find('{').unwrap_or(0);
             let head: String = chunk[body_start..].chars().take(400).collect();
-            assert!(head.contains("require_admit(&token)") || head.contains("retire_with(state, token"), "{name} changes the registry but does not begin with require_admit");
+            assert!(
+                head.contains("require_admit(&token)") || head.contains("retire_with(state, token"),
+                "{name} changes the registry but does not begin with require_admit"
+            );
             checked += 1;
         }
-        assert!(checked >= 8, "only {checked} admin handlers were found; the scan is not reading the file");
+        assert!(
+            checked >= 8,
+            "only {checked} admin handlers were found; the scan is not reading the file"
+        );
     }
 }

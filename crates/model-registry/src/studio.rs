@@ -128,7 +128,9 @@ pub fn resolve(
                 },
                 output_prefix: output_prefix.to_string(),
             };
-            let lowered = v.lower_for_trainer(&ctx).map_err(StudioError::Unsupported)?;
+            let lowered = v
+                .lower_for_trainer(&ctx)
+                .map_err(StudioError::Unsupported)?;
             let j = declaration_json(&v, &lowered.trainer_fields);
             (Some(v), Some(lowered), Some(j))
         }
@@ -256,7 +258,9 @@ pub async fn uses_for_version(pg: &PgPool, model_id: &str, version: i32) -> Vec<
     .ok()
     .flatten();
     match row {
-        Some((def, fam, spec)) => crate::verdict::uses_for_definition(&def, fam.as_deref(), spec.as_ref()),
+        Some((def, fam, spec)) => {
+            crate::verdict::uses_for_definition(&def, fam.as_deref(), spec.as_ref())
+        }
         None => vec![ForecastUse::Return],
     }
 }
@@ -270,7 +274,10 @@ pub async fn uses_for_version(pg: &PgPool, model_id: &str, version: i32) -> Vec<
 /// function so the two cannot drift (the platform once read `trial_count` and the counter never moved).
 #[must_use]
 pub fn hpo_trials_reported(metrics: &Value) -> Option<i64> {
-    metrics.get("hpo_trials").and_then(Value::as_i64).filter(|n| *n >= 1)
+    metrics
+        .get("hpo_trials")
+        .and_then(Value::as_i64)
+        .filter(|n| *n >= 1)
 }
 
 pub async fn count_hpo_trials(pg: &PgPool, model_id: &str, n: i64) -> Result<i64, sqlx::Error> {
@@ -320,8 +327,14 @@ mod tests {
         let plan = resolve(Some(&d), None, "lightgbm", "./artifacts", now()).expect("resolves");
         let lowered = plan.lowered.as_ref().expect("lowered");
         let derived = &plan.validated.as_ref().unwrap().derived;
-        assert_eq!(lowered.request.split_spec.embargo_bars(), derived.embargo_bars);
-        assert_eq!(plan.family.map(|f| f.framework.clone()), Some(Some("lightgbm".to_string())));
+        assert_eq!(
+            lowered.request.split_spec.embargo_bars(),
+            derived.embargo_bars
+        );
+        assert_eq!(
+            plan.family.map(|f| f.framework.clone()),
+            Some(Some("lightgbm".to_string()))
+        );
         let j = plan.declaration_json.as_ref().unwrap();
         assert!(j["declaration_hash"].as_str().unwrap().len() >= 32);
         assert_eq!(j["derived"]["embargo_bars"], json!(derived.embargo_bars));
@@ -404,7 +417,8 @@ mod tests {
         let d = decl("");
         let plan = resolve(Some(&d), None, "lightgbm", "./a", now()).unwrap();
         let stored = plan.declaration_json.unwrap();
-        let back: DatasetDeclaration = serde_json::from_value(strip_derived(stored)).expect("round trips");
+        let back: DatasetDeclaration =
+            serde_json::from_value(strip_derived(stored)).expect("round trips");
         assert_eq!(back.window, plan.validated.unwrap().declaration.window);
     }
 }

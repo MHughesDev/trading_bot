@@ -744,7 +744,11 @@ mod tests {
         heavy[120].volume = 10.0 * 40.0;
         let r = bad_ticks(&heavy, &cfg());
         assert_eq!(r.outcome, Outcome::Pass, "{}", r.detail);
-        assert!(r.detail.contains("1 more excluded as traded"), "{}", r.detail);
+        assert!(
+            r.detail.contains("1 more excluded as traded"),
+            "{}",
+            r.detail
+        );
 
         // The exemption can be switched off.
         let mut off = cfg();

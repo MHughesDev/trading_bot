@@ -204,7 +204,9 @@ pub async fn record_scorecard(
 ) -> Result<ProfileHealth, ScorecardError> {
     let health = input.validate()?;
     if profile.trim().is_empty() {
-        return Err(ScorecardError::Invalid("a scorecard names its profile".into()));
+        return Err(ScorecardError::Invalid(
+            "a scorecard names its profile".into(),
+        ));
     }
     let mut tx = pg.begin().await?;
     for j in &input.judgement {
@@ -481,10 +483,14 @@ mod tests {
     /// The first time `autonomous` can be granted - and only on a measurement.
     #[test]
     fn autonomous_is_granted_on_a_recorded_passing_judgement_and_refused_below_the_line() {
-        use research_session::charter::{admit, Autonomy, Charter, ExplorationShare, Objective, Scope};
+        use research_session::charter::{
+            admit, Autonomy, Charter, ExplorationShare, Objective, Scope,
+        };
         let charter = Charter {
             scope: Scope::default(),
-            objective: Objective::BuildKnowledge { about: vec!["BTC-USD".into()] },
+            objective: Objective::BuildKnowledge {
+                about: vec!["BTC-USD".into()],
+            },
             seeds: vec![],
             permitted_workflows: vec!["investigate".into()],
             exclusions: vec![],
@@ -515,16 +521,34 @@ mod tests {
             charter::Profile {
                 measured: st.health == ProfileHealth::Measured,
                 autonomous_threshold: st.autonomous_threshold.unwrap_or(STRICTEST_THRESHOLD),
-                judgement: rows.iter().map(|j| (j.workflow.clone(), j.verdict())).collect(),
+                judgement: rows
+                    .iter()
+                    .map(|j| (j.workflow.clone(), j.verdict()))
+                    .collect(),
                 ..p
             }
         };
-        assert!(admit(&charter, Autonomy::Autonomous, &profile(0.95, ProfileHealth::Measured)).is_ok());
+        assert!(admit(
+            &charter,
+            Autonomy::Autonomous,
+            &profile(0.95, ProfileHealth::Measured)
+        )
+        .is_ok());
         assert!(
-            admit(&charter, Autonomy::Autonomous, &profile(0.85, ProfileHealth::Measured)).is_err(),
+            admit(
+                &charter,
+                Autonomy::Autonomous,
+                &profile(0.85, ProfileHealth::Measured)
+            )
+            .is_err(),
             "passes the suite's line (0.8) and not the profile's own autonomous line (0.9)"
         );
-        assert!(admit(&charter, Autonomy::Autonomous, &profile(0.95, ProfileHealth::Degraded)).is_err());
+        assert!(admit(
+            &charter,
+            Autonomy::Autonomous,
+            &profile(0.95, ProfileHealth::Degraded)
+        )
+        .is_err());
     }
 
     #[test]

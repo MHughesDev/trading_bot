@@ -192,9 +192,22 @@ mod quote_tests {
     #[test]
     fn an_unusable_answer_is_an_error_not_a_zero_price() {
         assert!(parse_price_response(&json!({"liquidityAvailable": false}), 18, 6).is_err());
-        assert!(parse_price_response(&json!({"sellAmount": "1", "buyAmount": "0", "totalNetworkFee": "0"}), 18, 6).is_err());
-        assert!(parse_price_response(&json!({"sellAmount": "1", "buyAmount": "2"}), 18, 6).is_err(), "no fee");
-        assert!(parse_price_response(&json!({"sellAmount": "1", "buyAmount": "2", "totalNetworkFee": "0"}), 19, 6).is_err());
+        assert!(parse_price_response(
+            &json!({"sellAmount": "1", "buyAmount": "0", "totalNetworkFee": "0"}),
+            18,
+            6
+        )
+        .is_err());
+        assert!(
+            parse_price_response(&json!({"sellAmount": "1", "buyAmount": "2"}), 18, 6).is_err(),
+            "no fee"
+        );
+        assert!(parse_price_response(
+            &json!({"sellAmount": "1", "buyAmount": "2", "totalNetworkFee": "0"}),
+            19,
+            6
+        )
+        .is_err());
     }
 
     #[test]
@@ -209,7 +222,10 @@ mod quote_tests {
             None,
         );
         let fill = sim.simulate_fill(&intent, Price::from_decimal(Decimal::from(2500)));
-        assert!(fill.fill_price.inner() > Decimal::from(2500), "a buy pays impact");
+        assert!(
+            fill.fill_price.inner() > Decimal::from(2500),
+            "a buy pays impact"
+        );
         assert!(fill.fee >= dec!(2));
     }
 }

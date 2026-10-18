@@ -147,7 +147,9 @@ pub enum ReplayFailure {
     /// The sequential rule did not reach the helps boundary.
     NotDemonstrated(Decision),
     /// Fewer than the two variants the verification needs (RA-3.4).
-    TooFewVariants { variants: usize },
+    TooFewVariants {
+        variants: usize,
+    },
 }
 
 /// The replay verdict for admission (RA-3.4): the source task plus at least two
@@ -186,9 +188,15 @@ pub fn replay_verdict(
 pub enum SavingsFailure {
     NoPairs,
     /// The with-skill arm succeeded less often: savings at lower success is not savings.
-    LowerSuccess { with: f64, without: f64 },
+    LowerSuccess {
+        with: f64,
+        without: f64,
+    },
     /// Cheaper by less than the required share.
-    TooSmall { saved: f64, required: f64 },
+    TooSmall {
+        saved: f64,
+        required: f64,
+    },
 }
 
 /// Tokens or tool calls reduced by at least `required` (default 0.20) **at equal
@@ -279,7 +287,9 @@ pub fn qualifies(e: &TriggerEvidence) -> Result<Reason, Vec<&'static str>> {
     if e.rejection_pitfall {
         return Ok(Reason::T3);
     }
-    Err(vec!["no trigger met: not repeated, not hard-won and verified, no pitfall, no request"])
+    Err(vec![
+        "no trigger met: not repeated, not hard-won and verified, no pitfall, no request",
+    ])
 }
 
 /// The single Stop-hook nudge (SK-15): at most one per session. A second `Stop` in the
@@ -494,7 +504,9 @@ mod tests {
         let d = SequentialDesign::default();
         let pairs: Vec<Pair> = (0..10).map(|_| pair(true, false)).collect();
         match d.decide(&pairs) {
-            Decision::Helps { pairs, .. } => assert!(pairs <= 6, "stops early, not at the cap: {pairs}"),
+            Decision::Helps { pairs, .. } => {
+                assert!(pairs <= 6, "stops early, not at the cap: {pairs}")
+            }
             other => panic!("{other:?}"),
         }
     }
@@ -512,7 +524,10 @@ mod tests {
         let losses: Vec<Pair> = (0..10).map(|_| pair(false, true)).collect();
         assert!(matches!(d.decide(&losses), Decision::NoContribution { pairs, .. } if pairs <= 4));
         // Too few pairs: keep going.
-        assert!(matches!(d.decide(&[pair(true, false)]), Decision::Continue { .. }));
+        assert!(matches!(
+            d.decide(&[pair(true, false)]),
+            Decision::Continue { .. }
+        ));
     }
 
     #[test]
@@ -522,9 +537,15 @@ mod tests {
         assert!(replay_verdict(&wins, 3, &d).is_ok());
         let mut idle = wins.clone();
         idle.iter_mut().for_each(|p| p.activated = false);
-        assert_eq!(replay_verdict(&idle, 3, &d), Err(ReplayFailure::NeverActivated));
+        assert_eq!(
+            replay_verdict(&idle, 3, &d),
+            Err(ReplayFailure::NeverActivated)
+        );
         let same: Vec<Pair> = (0..8).map(|_| pair(true, true)).collect();
-        assert_eq!(replay_verdict(&same, 3, &d), Err(ReplayFailure::ChangedNothing));
+        assert_eq!(
+            replay_verdict(&same, 3, &d),
+            Err(ReplayFailure::ChangedNothing)
+        );
         assert_eq!(
             replay_verdict(&wins, 2, &d),
             Err(ReplayFailure::TooFewVariants { variants: 2 })
@@ -616,7 +637,10 @@ mod tests {
             ..Default::default()
         };
         let mut n = StopNudge::default();
-        assert!(n.on_stop(&TriggerEvidence::default()).is_none(), "no trigger, no nudge, and it is not spent");
+        assert!(
+            n.on_stop(&TriggerEvidence::default()).is_none(),
+            "no trigger, no nudge, and it is not spent"
+        );
         assert!(n.on_stop(&e).is_some());
         assert!(n.on_stop(&e).is_none());
     }
@@ -660,20 +684,35 @@ mod tests {
     #[test]
     fn the_reviewer_may_not_be_the_author_and_taint_refuses_with_the_other_five() {
         let mut f = full_file();
-        f.recorded.get_mut(&Condition::IndependentReviewer).unwrap().by = "agent".into();
+        f.recorded
+            .get_mut(&Condition::IndependentReviewer)
+            .unwrap()
+            .by = "agent".into();
         let e = check_promotion(&f).unwrap_err();
         assert_eq!(e.0[0].0, Condition::IndependentReviewer);
         let mut f = full_file();
         f.provenance_tainted = true;
         let e = check_promotion(&f).unwrap_err();
-        assert_eq!(e.0, vec![(Condition::NoTaint, "provenance includes a tainted finding".to_string())]);
+        assert_eq!(
+            e.0,
+            vec![(
+                Condition::NoTaint,
+                "provenance includes a tainted finding".to_string()
+            )]
+        );
     }
 
     #[test]
     fn retirement_waits_for_n_and_then_follows_activation_and_contribution() {
         assert_eq!(retire_decision(5, 0, None, 20), Retirement::Keep);
-        assert!(matches!(retire_decision(20, 0, None, 20), Retirement::Archive(_)));
-        assert!(matches!(retire_decision(20, 6, Some(0.0), 20), Retirement::Archive(_)));
+        assert!(matches!(
+            retire_decision(20, 0, None, 20),
+            Retirement::Archive(_)
+        ));
+        assert!(matches!(
+            retire_decision(20, 6, Some(0.0), 20),
+            Retirement::Archive(_)
+        ));
         assert_eq!(retire_decision(20, 6, Some(0.1), 20), Retirement::Keep);
         assert_eq!(retire_decision(20, 6, None, 20), Retirement::Keep);
     }
@@ -681,11 +720,22 @@ mod tests {
     #[test]
     fn a_model_default_cannot_change_without_a_completed_reevaluation() {
         let recs = vec![
-            ReEvaluation { model: "m2".into(), completed: false, failing: vec![] },
-            ReEvaluation { model: "m3".into(), completed: true, failing: vec!["a".into()] },
+            ReEvaluation {
+                model: "m2".into(),
+                completed: false,
+                failing: vec![],
+            },
+            ReEvaluation {
+                model: "m3".into(),
+                completed: true,
+                failing: vec!["a".into()],
+            },
         ];
         assert!(check_model_change("m2", &recs).is_err());
         assert!(check_model_change("m9", &recs).is_err());
-        assert_eq!(check_model_change("m3", &recs).unwrap(), vec!["a".to_string()]);
+        assert_eq!(
+            check_model_change("m3", &recs).unwrap(),
+            vec!["a".to_string()]
+        );
     }
 }

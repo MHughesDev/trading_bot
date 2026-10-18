@@ -82,12 +82,17 @@ pub fn sign(m: &BTreeMap<String, String>, secret: &[u8; 32]) -> String {
 ///
 /// # Errors
 /// [`SignError`].
-pub fn verify(m: &BTreeMap<String, String>, sig_hex: &str, pubkey_hex: &str) -> Result<(), SignError> {
+pub fn verify(
+    m: &BTreeMap<String, String>,
+    sig_hex: &str,
+    pubkey_hex: &str,
+) -> Result<(), SignError> {
     let pk = VerifyingKey::from_bytes(&hex32(pubkey_hex).ok_or(SignError::BadPublicKey)?)
         .map_err(|_| SignError::BadPublicKey)?;
     let raw = hex::decode(sig_hex.trim()).map_err(|_| SignError::BadSignatureEncoding)?;
     let sig = Signature::from_slice(&raw).map_err(|_| SignError::BadSignatureEncoding)?;
-    pk.verify(&canonical_manifest(m), &sig).map_err(|_| SignError::Mismatch)
+    pk.verify(&canonical_manifest(m), &sig)
+        .map_err(|_| SignError::Mismatch)
 }
 
 /// The policy applied to a loaded core set: with no key, not required; with one, the
@@ -95,11 +100,16 @@ pub fn verify(m: &BTreeMap<String, String>, sig_hex: &str, pubkey_hex: &str) -> 
 ///
 /// # Errors
 /// [`SignError`] when a key is configured and the set is unsigned or does not verify.
-pub fn check_core(core: &[CoreSkill], core_dir: &Path, pubkey_hex: Option<&str>) -> Result<Status, SignError> {
+pub fn check_core(
+    core: &[CoreSkill],
+    core_dir: &Path,
+    pubkey_hex: Option<&str>,
+) -> Result<Status, SignError> {
     let Some(pk) = pubkey_hex.map(str::trim).filter(|k| !k.is_empty()) else {
         return Ok(Status::NotRequired);
     };
-    let sig = std::fs::read_to_string(core_dir.join(SIGNATURE_FILE)).map_err(|_| SignError::Unsigned)?;
+    let sig =
+        std::fs::read_to_string(core_dir.join(SIGNATURE_FILE)).map_err(|_| SignError::Unsigned)?;
     verify(&manifest(core), &sig, pk)?;
     Ok(Status::Verified)
 }
@@ -146,9 +156,16 @@ mod tests {
         assert_eq!(verify(&changed, &sig, &pk), Err(SignError::Mismatch));
         let mut extra = m.clone();
         extra.insert("sneaked-in".into(), "1".repeat(64));
-        assert_eq!(verify(&extra, &sig, &pk), Err(SignError::Mismatch), "an added skill invalidates it too");
+        assert_eq!(
+            verify(&extra, &sig, &pk),
+            Err(SignError::Mismatch),
+            "an added skill invalidates it too"
+        );
         // Another key's signature is refused.
-        assert_eq!(verify(&m, &sign(&m, &[9; 32]), &pk), Err(SignError::Mismatch));
+        assert_eq!(
+            verify(&m, &sign(&m, &[9; 32]), &pk),
+            Err(SignError::Mismatch)
+        );
         assert_eq!(verify(&m, "zz", &pk), Err(SignError::BadSignatureEncoding));
         assert_eq!(verify(&m, &sig, "short"), Err(SignError::BadPublicKey));
     }
@@ -160,7 +177,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         assert_eq!(check_core(&core, &dir, None), Ok(Status::NotRequired));
-        assert_eq!(check_core(&core, &dir, Some("  ")), Ok(Status::NotRequired), "a blank key is no key");
+        assert_eq!(
+            check_core(&core, &dir, Some("  ")),
+            Ok(Status::NotRequired),
+            "a blank key is no key"
+        );
         let pk = public_key_hex(&SECRET);
         assert_eq!(check_core(&core, &dir, Some(&pk)), Err(SignError::Unsigned));
         std::fs::write(dir.join(SIGNATURE_FILE), sign(&manifest(&core), &SECRET)).unwrap();
@@ -168,7 +189,10 @@ mod tests {
         // A tampered core skill no longer matches the signed manifest.
         let mut tampered = core.clone();
         tampered[0].digest = "f".repeat(64);
-        assert_eq!(check_core(&tampered, &dir, Some(&pk)), Err(SignError::Mismatch));
+        assert_eq!(
+            check_core(&tampered, &dir, Some(&pk)),
+            Err(SignError::Mismatch)
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

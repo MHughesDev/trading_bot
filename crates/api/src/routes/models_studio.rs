@@ -63,8 +63,18 @@ pub fn require_human(token: &BearerToken) -> Result<(), Response> {
 async fn owned(state: &AppState, id: &str, token: &BearerToken) -> Result<(), Response> {
     match state.models.get_model(id, token.user_id()).await {
         Ok(Some(_)) => Ok(()),
-        Ok(None) => Err(err(StatusCode::NOT_FOUND, "not_found", "no such model", "list models first")),
-        Err(e) => Err(err(StatusCode::INTERNAL_SERVER_ERROR, "db_error", e, "retry")),
+        Ok(None) => Err(err(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "no such model",
+            "list models first",
+        )),
+        Err(e) => Err(err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "db_error",
+            e,
+            "retry",
+        )),
     }
 }
 
@@ -89,10 +99,7 @@ pub struct ValidateBody {
 /// Validates, derives purge and embargo, and says what lowering would do, without writing
 /// anything. The embargo in the answer is the only embargo there is: the declaration has no
 /// field for one, and a body that sends one is refused by `deny_unknown_fields`.
-pub async fn validate_declaration(
-    _token: BearerToken,
-    Json(body): Json<ValidateBody>,
-) -> Response {
+pub async fn validate_declaration(_token: BearerToken, Json(body): Json<ValidateBody>) -> Response {
     let decl: DatasetDeclaration = match serde_json::from_value(body.declaration) {
         Ok(d) => d,
         Err(e) => {
@@ -104,16 +111,15 @@ pub async fn validate_declaration(
         }
     };
     let cutoff = body.cutoff.unwrap_or_else(Utc::now);
-    let validated = match decl.validate(Some(cutoff)) {
-        Ok(v) => v,
-        Err(e) => {
-            return (
+    let validated =
+        match decl.validate(Some(cutoff)) {
+            Ok(v) => v,
+            Err(e) => return (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Json(json!({ "ok": false, "errors": [{ "field": e.field, "message": e.reason }] })),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
     let ctx = LoweringContext {
         universe_spec_id: "validate".into(),
         output_prefix: "validate".into(),
@@ -184,14 +190,19 @@ pub async fn fleet(State(state): State<AppState>, token: BearerToken) -> Respons
     let (mut training, mut evaluating, mut stale, mut serving) = (0, 0, 0, 0);
     for r in rows {
         let (is_stale, why) = if r.requires_retrain.unwrap_or(false) {
-            (true, Some("a version is marked requires_retrain".to_string()))
+            (
+                true,
+                Some("a version is marked requires_retrain".to_string()),
+            )
         } else {
             match r.last_trained_at {
                 Some(t) if now - t > Duration::days(STALE_AFTER_DAYS) => (
                     true,
                     Some(format!("last trained {} days ago", (now - t).num_days())),
                 ),
-                None if r.latest_version.is_some() => (true, Some("no successful training run is recorded".into())),
+                None if r.latest_version.is_some() => {
+                    (true, Some("no successful training run is recorded".into()))
+                }
                 _ => (false, None),
             }
         };
@@ -272,8 +283,14 @@ async fn verdict_for(
 ) -> Result<verdict::VerdictReport, Response> {
     match uses {
         Some(u) => {
-            let parsed: Vec<ForecastUse> = verdict::parse_uses(u)
-                .map_err(|m| err(StatusCode::UNPROCESSABLE_ENTITY, "unknown_use", m, "return, vol or tail_risk"))?;
+            let parsed: Vec<ForecastUse> = verdict::parse_uses(u).map_err(|m| {
+                err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "unknown_use",
+                    m,
+                    "return, vol or tail_risk",
+                )
+            })?;
             Ok(state.models.usage_verdict_for(id, version, &parsed).await)
         }
         None => Ok(state.models.usage_verdict(id, version).await),
@@ -313,7 +330,14 @@ pub async fn promotion_evidence(
     let verdict = state.models.usage_verdict(&id, version).await;
     let (checks, gate_passed) = match state.models.gate_checks(&id, version, "paper").await {
         Ok(c) => c,
-        Err(e) => return err(StatusCode::UNPROCESSABLE_ENTITY, "no_such_version", e, "check the version"),
+        Err(e) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "no_such_version",
+                e,
+                "check the version",
+            )
+        }
     };
     let aliases = state
         .models
@@ -363,21 +387,40 @@ pub async fn propose_promotion(
     // proposer saw, not whatever the evaluation says later.
     let verdict = state.models.usage_verdict(&id, version).await.to_json();
     let evidence = json!({ "verdict": verdict, "proposed_by_scope": if token.permits(WEB_FULL) { "human" } else { "service" } });
-    match promotions::propose(&state.pg, &id, version, env, &body.rationale, token.user_id(), &evidence).await {
+    match promotions::propose(
+        &state.pg,
+        &id,
+        version,
+        env,
+        &body.rationale,
+        token.user_id(),
+        &evidence,
+    )
+    .await
+    {
         Ok(pid) => (
             StatusCode::CREATED,
             Json(json!({ "proposal_id": pid.to_string(), "status": "pending" })),
         )
             .into_response(),
-        Err(e @ promotions::PromotionError::AlreadyPending(_)) => {
-            err(StatusCode::CONFLICT, "already_pending", e, "decide the pending proposal first")
-        }
-        Err(e @ promotions::PromotionError::NoSuchVersion(_)) => {
-            err(StatusCode::NOT_FOUND, "no_such_version", e, "list versions first")
-        }
-        Err(e @ promotions::PromotionError::NoRationale) => {
-            err(StatusCode::UNPROCESSABLE_ENTITY, "no_rationale", e, "say why")
-        }
+        Err(e @ promotions::PromotionError::AlreadyPending(_)) => err(
+            StatusCode::CONFLICT,
+            "already_pending",
+            e,
+            "decide the pending proposal first",
+        ),
+        Err(e @ promotions::PromotionError::NoSuchVersion(_)) => err(
+            StatusCode::NOT_FOUND,
+            "no_such_version",
+            e,
+            "list versions first",
+        ),
+        Err(e @ promotions::PromotionError::NoRationale) => err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "no_rationale",
+            e,
+            "say why",
+        ),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, "db_error", e, "retry"),
     }
 }
@@ -415,15 +458,32 @@ pub async fn decide_promotion(
     if let Err(r) = require_human(&token) {
         return r;
     }
-    match promotions::decide(&state.models, &state.pg, proposal_id, token.user_id(), &body.decision, &body.note).await {
+    match promotions::decide(
+        &state.models,
+        &state.pg,
+        proposal_id,
+        token.user_id(),
+        &body.decision,
+        &body.note,
+    )
+    .await
+    {
         Ok(row) => Json(row).into_response(),
-        Err(e @ promotions::PromotionError::NotFound) => err(StatusCode::NOT_FOUND, "not_found", e, "list proposals"),
-        Err(e @ promotions::PromotionError::AlreadyDecided) => {
-            err(StatusCode::CONFLICT, "already_decided", e, "a decided proposal is final")
+        Err(e @ promotions::PromotionError::NotFound) => {
+            err(StatusCode::NOT_FOUND, "not_found", e, "list proposals")
         }
-        Err(e @ promotions::PromotionError::UnknownDecision(_)) => {
-            err(StatusCode::UNPROCESSABLE_ENTITY, "unknown_decision", e, "approved or rejected")
-        }
+        Err(e @ promotions::PromotionError::AlreadyDecided) => err(
+            StatusCode::CONFLICT,
+            "already_decided",
+            e,
+            "a decided proposal is final",
+        ),
+        Err(e @ promotions::PromotionError::UnknownDecision(_)) => err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unknown_decision",
+            e,
+            "approved or rejected",
+        ),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, "db_error", e, "retry"),
     }
 }
@@ -462,8 +522,10 @@ pub async fn get_importance(
     if let Some(why) = inputs.get("skipped").and_then(Value::as_str) {
         return Json(json!({ "available": false, "reason": why })).into_response();
     }
-    let clusters: Vec<Vec<usize>> = serde_json::from_value(inputs["clusters"].clone()).unwrap_or_default();
-    let per_fold: Vec<Vec<f64>> = serde_json::from_value(inputs["per_fold"].clone()).unwrap_or_default();
+    let clusters: Vec<Vec<usize>> =
+        serde_json::from_value(inputs["clusters"].clone()).unwrap_or_default();
+    let per_fold: Vec<Vec<f64>> =
+        serde_json::from_value(inputs["per_fold"].clone()).unwrap_or_default();
     let names: Vec<String> = serde_json::from_value(inputs["features"].clone()).unwrap_or_default();
     match importance::summarize_fold_importances(&clusters, &per_fold) {
         Ok(rows) => {
@@ -480,9 +542,13 @@ pub async fn get_importance(
                     })
                 })
                 .collect();
-            Json(json!({ "available": true, "importance": { "folds": folds, "clusters": out } })).into_response()
+            Json(json!({ "available": true, "importance": { "folds": folds, "clusters": out } }))
+                .into_response()
         }
-        Err(e) => Json(json!({ "available": false, "reason": format!("importance inputs are unusable: {e}") })).into_response(),
+        Err(e) => Json(
+            json!({ "available": false, "reason": format!("importance inputs are unusable: {e}") }),
+        )
+        .into_response(),
     }
 }
 
@@ -511,7 +577,12 @@ pub async fn calibrate(
         return r;
     }
     if !matches!(body.method.as_str(), "aci" | "aci_cusum") {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "unknown_method", body.method, "aci or aci_cusum");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unknown_method",
+            body.method,
+            "aci or aci_cusum",
+        );
     }
     let rows: Vec<(f64, f64)> = sqlx::query_as(
         "SELECT predicted_q50, realized FROM model_forecasts \
@@ -527,7 +598,10 @@ pub async fn calibrate(
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "too_few_realised_forecasts",
-            format!("{} realised forecasts for this version; calibration needs at least 50", rows.len()),
+            format!(
+                "{} realised forecasts for this version; calibration needs at least 50",
+                rows.len()
+            ),
             "serve and realise more forecasts first",
         );
     }
@@ -544,13 +618,22 @@ pub async fn calibrate(
     let sidecar = model_registry::sidecar::SidecarClient::from_env();
     let result = match sidecar.calibrate(&payload).await {
         Ok(r) => r,
-        Err(e) => return err(StatusCode::BAD_GATEWAY, "trainer_unavailable", e, "check the trainer sidecar"),
+        Err(e) => {
+            return err(
+                StatusCode::BAD_GATEWAY,
+                "trainer_unavailable",
+                e,
+                "check the trainer sidecar",
+            )
+        }
     };
-    let (next,): (i64,) = sqlx::query_as("SELECT COALESCE(MAX(version), 0) + 1 FROM model_versions WHERE model_id = $1")
-        .bind(&id)
-        .fetch_one(&state.pg)
-        .await
-        .unwrap_or((1,));
+    let (next,): (i64,) = sqlx::query_as(
+        "SELECT COALESCE(MAX(version), 0) + 1 FROM model_versions WHERE model_id = $1",
+    )
+    .bind(&id)
+    .fetch_one(&state.pg)
+    .await
+    .unwrap_or((1,));
     let config = json!({ "wraps": { "model_id": id, "version": version }, "method": body.method, "calibration": result });
     let inserted = sqlx::query(
         "INSERT INTO model_versions (model_id, version, status, config_json, created_by, family, family_variant, notes) \
@@ -565,7 +648,8 @@ pub async fn calibrate(
     .execute(&state.pg)
     .await;
     match inserted {
-        Ok(_) => Json(json!({ "wrapper_version": next, "wraps": version, "calibration": result })).into_response(),
+        Ok(_) => Json(json!({ "wrapper_version": next, "wraps": version, "calibration": result }))
+            .into_response(),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, "db_error", e, "retry"),
     }
 }
@@ -607,7 +691,10 @@ mod human_gate_tests {
         let refused = require_human(&agent).expect_err("an agent session is not a person");
         assert_eq!(refused.status(), StatusCode::FORBIDDEN);
         assert!(require_human(&token(&["web:full"])).is_ok());
-        assert!(require_human(&token(&[])).is_err(), "no scopes is not a person either");
+        assert!(
+            require_human(&token(&[])).is_err(),
+            "no scopes is not a person either"
+        );
     }
 
     /// N-4.3: every handler that moves an alias calls `require_human` first. A new alias-moving
@@ -635,6 +722,9 @@ mod human_gate_tests {
                 );
             }
         }
-        assert!(checked >= 2, "expected promote and rollback to be found, found {checked}");
+        assert!(
+            checked >= 2,
+            "expected promote and rollback to be found, found {checked}"
+        );
     }
 }

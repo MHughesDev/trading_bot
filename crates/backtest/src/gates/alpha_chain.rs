@@ -87,7 +87,9 @@ pub struct AlphaChain {
 
 /// The latest row per gate: the newest verdict is the standing one.
 fn latest(rows: &[GateRow], gate: i32) -> Option<&GateRow> {
-    rows.iter().filter(|r| r.gate_no == gate).max_by_key(|r| r.decided_at)
+    rows.iter()
+        .filter(|r| r.gate_no == gate)
+        .max_by_key(|r| r.decided_at)
 }
 
 /// Audit one experiment's rows.
@@ -100,7 +102,13 @@ pub fn audit(rows: &[GateRow]) -> AlphaChain {
         for &g in gates {
             match latest(rows, g) {
                 None => {
-                    read.push(RowRead { gate_no: g, state: "absent", passed: None, profile_id: None, decided_at: None });
+                    read.push(RowRead {
+                        gate_no: g,
+                        state: "absent",
+                        passed: None,
+                        profile_id: None,
+                        decided_at: None,
+                    });
                     unknown.push(format!("gate {g} has no row"));
                 }
                 Some(r) => {
@@ -116,7 +124,10 @@ pub fn audit(rows: &[GateRow]) -> AlphaChain {
                     } else if r.statistic.is_some() {
                         failed.push(format!("gate {g} ({}) failed: {}", r.gate_name, r.detail));
                     } else {
-                        unknown.push(format!("gate {g} ({}) could not run: {}", r.gate_name, r.detail));
+                        unknown.push(format!(
+                            "gate {g} ({}) could not run: {}",
+                            r.gate_name, r.detail
+                        ));
                     }
                 }
             }
@@ -126,13 +137,28 @@ pub fn audit(rows: &[GateRow]) -> AlphaChain {
         } else if !unknown.is_empty() {
             (StageVerdict::Unknown, unknown.join("; "))
         } else {
-            (StageVerdict::Pass, format!("all {passed} gate row(s) passed"))
+            (
+                StageVerdict::Pass,
+                format!("all {passed} gate row(s) passed"),
+            )
         };
-        stages.push(Stage { stage: name, verdict, rows_read: read, why });
+        stages.push(Stage {
+            stage: name,
+            verdict,
+            rows_read: read,
+            why,
+        });
     }
-    let first_unresolved = stages.iter().find(|s| s.verdict != StageVerdict::Pass).map(|s| s.stage);
+    let first_unresolved = stages
+        .iter()
+        .find(|s| s.verdict != StageVerdict::Pass)
+        .map(|s| s.stage);
     let complete = first_unresolved.is_none();
-    AlphaChain { stages, first_unresolved, complete }
+    AlphaChain {
+        stages,
+        first_unresolved,
+        complete,
+    }
 }
 
 #[cfg(test)]
@@ -153,7 +179,10 @@ mod tests {
     }
 
     fn all_pass() -> Vec<GateRow> {
-        [2, 7, 8, 13, 14, 12, 15, 3, 4].iter().map(|g| row(*g, true, Some(1.0), 0)).collect()
+        [2, 7, 8, 13, 14, 12, 15, 3, 4]
+            .iter()
+            .map(|g| row(*g, true, Some(1.0), 0))
+            .collect()
     }
 
     fn stage<'a>(c: &'a AlphaChain, name: &str) -> &'a Stage {
@@ -162,7 +191,10 @@ mod tests {
 
     #[test]
     fn an_experiment_with_no_gate_3_or_4_evidence_reports_stage_five_unknown() {
-        let rows: Vec<GateRow> = all_pass().into_iter().filter(|r| r.gate_no != 3 && r.gate_no != 4).collect();
+        let rows: Vec<GateRow> = all_pass()
+            .into_iter()
+            .filter(|r| r.gate_no != 3 && r.gate_no != 4)
+            .collect();
         let c = audit(&rows);
         let s5 = stage(&c, "net_alpha_after_costs");
         assert_eq!(s5.verdict, StageVerdict::Unknown);
@@ -180,7 +212,10 @@ mod tests {
         // One gate of a multi-gate stage missing is enough to withhold the pass.
         let mut rows = all_pass();
         rows.retain(|r| r.gate_no != 13);
-        assert_eq!(stage(&audit(&rows), "stable_signal").verdict, StageVerdict::Unknown);
+        assert_eq!(
+            stage(&audit(&rows), "stable_signal").verdict,
+            StageVerdict::Unknown
+        );
     }
 
     #[test]
@@ -189,9 +224,19 @@ mod tests {
         assert!(c.complete && c.first_unresolved.is_none());
         for s in &c.stages {
             assert!(!s.rows_read.is_empty(), "{}", s.stage);
-            assert!(s.rows_read.iter().all(|r| r.state == "present" && r.profile_id.is_some() && r.decided_at.is_some()));
+            assert!(s
+                .rows_read
+                .iter()
+                .all(|r| r.state == "present" && r.profile_id.is_some() && r.decided_at.is_some()));
         }
-        assert_eq!(stage(&c, "stable_signal").rows_read.iter().map(|r| r.gate_no).collect::<Vec<_>>(), vec![7, 8, 13, 14]);
+        assert_eq!(
+            stage(&c, "stable_signal")
+                .rows_read
+                .iter()
+                .map(|r| r.gate_no)
+                .collect::<Vec<_>>(),
+            vec![7, 8, 13, 14]
+        );
     }
 
     #[test]
@@ -201,24 +246,36 @@ mod tests {
         if let Some(r) = rows.iter_mut().find(|r| r.gate_no == 8) {
             r.passed = false;
         }
-        assert_eq!(stage(&audit(&rows), "stable_signal").verdict, StageVerdict::Fail);
+        assert_eq!(
+            stage(&audit(&rows), "stable_signal").verdict,
+            StageVerdict::Fail
+        );
         // A failure with no statistic is the stack's record of an inconclusive gate.
         let mut rows = all_pass();
         let g = rows.iter_mut().find(|r| r.gate_no == 15).unwrap();
         g.passed = false;
         g.statistic = None;
-        assert_eq!(stage(&audit(&rows), "executable_orders").verdict, StageVerdict::Unknown);
+        assert_eq!(
+            stage(&audit(&rows), "executable_orders").verdict,
+            StageVerdict::Unknown
+        );
     }
 
     #[test]
     fn the_newest_row_for_a_gate_is_the_standing_verdict() {
         let mut rows = all_pass();
         rows.push(row(2, false, Some(0.5), 30)); // later: the suite was re-run and failed
-        assert_eq!(stage(&audit(&rows), "pit_information").verdict, StageVerdict::Fail);
+        assert_eq!(
+            stage(&audit(&rows), "pit_information").verdict,
+            StageVerdict::Fail
+        );
         let mut rows = all_pass();
         rows.iter_mut().find(|r| r.gate_no == 2).unwrap().passed = false;
         rows.push(row(2, true, Some(1.0), 45)); // later: fixed
-        assert_eq!(stage(&audit(&rows), "pit_information").verdict, StageVerdict::Pass);
+        assert_eq!(
+            stage(&audit(&rows), "pit_information").verdict,
+            StageVerdict::Pass
+        );
     }
 
     #[test]

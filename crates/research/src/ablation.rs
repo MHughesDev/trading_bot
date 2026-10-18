@@ -72,7 +72,10 @@ pub fn variants(def: &Value) -> Vec<Variant> {
                 }
                 let mut d = def.clone();
                 d["nodes"][i]["expr"] = json!(TAUTOLOGY);
-                out.push(Variant { component: format!("node:{id}"), definition: d });
+                out.push(Variant {
+                    component: format!("node:{id}"),
+                    definition: d,
+                });
             }
         }
     }
@@ -96,7 +99,10 @@ pub fn variants(def: &Value) -> Vec<Variant> {
             } else {
                 json!({"mode": "rules", "rules": kept})
             };
-            out.push(Variant { component: format!("exit:{i}:{name}"), definition: d });
+            out.push(Variant {
+                component: format!("exit:{i}:{name}"),
+                definition: d,
+            });
         }
     }
     out
@@ -264,7 +270,15 @@ mod tests {
     fn each_condition_and_exit_rule_gets_one_variant_and_signals_are_left_alone() {
         let v = variants(&def());
         let names: Vec<&str> = v.iter().map(|x| x.component.as_str()).collect();
-        assert_eq!(names, ["node:n1", "node:n2", "exit:0:stop_loss", "exit:1:take_profit"]);
+        assert_eq!(
+            names,
+            [
+                "node:n1",
+                "node:n2",
+                "exit:0:stop_loss",
+                "exit:1:take_profit"
+            ]
+        );
         assert_eq!(v[0].definition["nodes"][0]["expr"], TAUTOLOGY);
         // The other condition and the signal are untouched.
         assert_eq!(v[0].definition["nodes"][1], def()["nodes"][1]);
@@ -298,9 +312,18 @@ mod tests {
     fn the_three_verdicts_each_need_a_delta_outside_the_noise() {
         let base: Vec<f64> = (0..600).map(|i| 0.0008 + noise(i)).collect();
         let helped: Vec<f64> = (0..600).map(noise).collect(); // base earns 0.0008 more
-        assert_eq!(classify(&base, &helped, 1).verdict, AblationVerdict::LoadBearing);
-        assert_eq!(classify(&base, &base, 1).verdict, AblationVerdict::Redundant);
-        assert_eq!(classify(&helped, &base, 1).verdict, AblationVerdict::Harmful);
+        assert_eq!(
+            classify(&base, &helped, 1).verdict,
+            AblationVerdict::LoadBearing
+        );
+        assert_eq!(
+            classify(&base, &base, 1).verdict,
+            AblationVerdict::Redundant
+        );
+        assert_eq!(
+            classify(&helped, &base, 1).verdict,
+            AblationVerdict::Harmful
+        );
     }
 
     /// A small point delta inside the interval is not a finding.
@@ -316,9 +339,15 @@ mod tests {
     #[test]
     fn mismatched_or_short_series_are_inconclusive_not_truncated() {
         let a = vec![0.0; 100];
-        assert_eq!(classify(&a, &a[..90], 1).verdict, AblationVerdict::Inconclusive);
+        assert_eq!(
+            classify(&a, &a[..90], 1).verdict,
+            AblationVerdict::Inconclusive
+        );
         let short = vec![0.0; 10];
-        assert_eq!(classify(&short, &short, 1).verdict, AblationVerdict::Inconclusive);
+        assert_eq!(
+            classify(&short, &short, 1).verdict,
+            AblationVerdict::Inconclusive
+        );
     }
 
     #[test]

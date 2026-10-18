@@ -166,10 +166,8 @@ impl Worker for DataQcWorker {
             (Some(pg), Some(venue)) => {
                 let secs = |k: &str| manifest.get(k).and_then(Value::as_i64);
                 let from = chrono::DateTime::from_timestamp(secs("from").unwrap_or(first_s), 0);
-                let to = chrono::DateTime::from_timestamp(
-                    secs("to").unwrap_or(last_s + period_s),
-                    0,
-                );
+                let to =
+                    chrono::DateTime::from_timestamp(secs("to").unwrap_or(last_s + period_s), 0);
                 let (Some(from), Some(to)) = (from, to) else {
                     return Err(JobError::logic(
                         ledger::TerminalReason::IntegrityRejected,
@@ -177,8 +175,8 @@ impl Worker for DataQcWorker {
                         "data_qc `from` / `to` are not valid instants",
                     ));
                 };
-                let expected = u64::try_from(((to - from).num_seconds() / period_s).max(0))
-                    .unwrap_or(0);
+                let expected =
+                    u64::try_from(((to - from).num_seconds() / period_s).max(0)).unwrap_or(0);
                 let (id, report) = storage::clickhouse::qc_reports::grade_and_persist(
                     pg,
                     &self.clickhouse_url,

@@ -74,7 +74,10 @@ impl JumpLabeller {
     }
 
     /// The scope's latest fit, if any: `(model_version, fitted_at, train_start, model)`.
-    async fn latest(&self, scope: &str) -> Result<Option<(String, DateTime<Utc>, DateTime<Utc>, JumpModel)>, sqlx::Error> {
+    async fn latest(
+        &self,
+        scope: &str,
+    ) -> Result<Option<(String, DateTime<Utc>, DateTime<Utc>, JumpModel)>, sqlx::Error> {
         let Some(r) = sqlx::query(
             "SELECT model_version, fitted_at, train_start, lambda, n_train, mean, sd, centroids, criterion
                FROM regime_causal.regime_jump_model WHERE market_scope = $1
@@ -86,8 +89,10 @@ impl JumpLabeller {
         else {
             return Ok(None);
         };
-        let centroids: Vec<Vec<f64>> = serde_json::from_value(r.get("centroids")).unwrap_or_default();
-        let criterion: Vec<(f64, f64)> = serde_json::from_value(r.get("criterion")).unwrap_or_default();
+        let centroids: Vec<Vec<f64>> =
+            serde_json::from_value(r.get("centroids")).unwrap_or_default();
+        let criterion: Vec<(f64, f64)> =
+            serde_json::from_value(r.get("criterion")).unwrap_or_default();
         Ok(Some((
             r.get("model_version"),
             r.get("fitted_at"),
@@ -109,7 +114,11 @@ impl JumpLabeller {
     ///
     /// # Errors
     /// The database, or a series too short to fit.
-    pub async fn run(&self, scope: &str, returns: &[(DateTime<Utc>, f64)]) -> Result<JumpRun, String> {
+    pub async fn run(
+        &self,
+        scope: &str,
+        returns: &[(DateTime<Utc>, f64)],
+    ) -> Result<JumpRun, String> {
         let now = Utc::now();
         let existing = self.latest(scope).await.map_err(|e| e.to_string())?;
         let due = existing.as_ref().is_none_or(|(_, fitted, _, _)| {
@@ -147,7 +156,10 @@ impl JumpLabeller {
         };
 
         // The filter's state depends on where it starts, so start where the fit did.
-        let from = returns.iter().position(|(t, _)| *t >= train_start).unwrap_or(0);
+        let from = returns
+            .iter()
+            .position(|(t, _)| *t >= train_start)
+            .unwrap_or(0);
         let labels = model.label(&rows[from..]);
         let mut written = 0usize;
         for ((event_time, series_return), idx) in returns[from..].iter().zip(&labels) {

@@ -71,11 +71,19 @@ pub enum FamilyError {
         variant: String,
         known: String,
     },
-    #[error("({family}, {variant}) consumes sequence windows and the declaration has no `sequence`")]
+    #[error(
+        "({family}, {variant}) consumes sequence windows and the declaration has no `sequence`"
+    )]
     NeedsSequence { family: String, variant: String },
     #[error("({family}, {variant}) is a {role} and cannot be the candidate")]
-    NotACandidate { family: String, variant: String, role: String },
-    #[error("({family}, {variant}) does not support the target `{target}`; it supports {supported}")]
+    NotACandidate {
+        family: String,
+        variant: String,
+        role: String,
+    },
+    #[error(
+        "({family}, {variant}) does not support the target `{target}`; it supports {supported}"
+    )]
     UnsupportedTarget {
         family: String,
         variant: String,
@@ -198,13 +206,19 @@ mod tests {
         let e = resolve("gbm", "no_such_variant").unwrap_err();
         let msg = e.to_string();
         assert!(msg.contains("unknown family (gbm, no_such_variant)"));
-        assert!(msg.contains("gbm/lightgbm"), "the known list is named: {msg}");
+        assert!(
+            msg.contains("gbm/lightgbm"),
+            "the known list is named: {msg}"
+        );
     }
 
     #[test]
     fn every_legacy_framework_is_reachable_through_the_registry() {
         for fw in ["lightgbm", "xgboost", "sklearn", "torch", "garch"] {
-            assert!(for_framework(fw).is_some(), "framework `{fw}` has no registry entry");
+            assert!(
+                for_framework(fw).is_some(),
+                "framework `{fw}` has no registry entry"
+            );
         }
     }
 
@@ -227,7 +241,10 @@ mod tests {
             .expect("the registry lists a foundation baseline");
         assert!(!fb.selectable_as_candidate);
         let refused = check_for_training(&fb.family, &fb.variant, None, true, true);
-        assert!(matches!(refused, Err(FamilyError::NotACandidate { .. })), "{refused:?}");
+        assert!(
+            matches!(refused, Err(FamilyError::NotACandidate { .. })),
+            "{refused:?}"
+        );
         // As a baseline (candidate = false) it is allowed.
         assert!(check_for_training(&fb.family, &fb.variant, None, true, false).is_ok());
     }
@@ -236,6 +253,9 @@ mod tests {
     fn a_target_the_family_does_not_list_is_refused() {
         let f = for_framework("lightgbm").unwrap();
         let refused = check_for_training(&f.family, &f.variant, Some("realized_vol"), false, true);
-        assert!(matches!(refused, Err(FamilyError::UnsupportedTarget { .. })), "{refused:?}");
+        assert!(
+            matches!(refused, Err(FamilyError::UnsupportedTarget { .. })),
+            "{refused:?}"
+        );
     }
 }

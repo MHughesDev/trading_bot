@@ -228,7 +228,13 @@ pub async fn current_stage(State(state): State<AppState>, token: BearerToken) ->
         )
             .into_response();
     };
-    type RunRow = (String, Option<String>, Option<String>, Option<String>, Option<String>);
+    type RunRow = (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
     let row: Result<Option<RunRow>, _> = sqlx::query_as(
         "SELECT status, mode, ring, workflow, stage FROM agent_runs WHERE run_id = $1",
     )
@@ -420,11 +426,12 @@ pub async fn create(
             // key for.
             let (provider, user_model) =
                 crate::agent::routes::default_engine_for_user(&state, token.user_id()).await;
-            let conv_model = if body.model.is_some() || provider == crate::agent::routes::default_provider() {
-                tier.clone()
-            } else {
-                user_model
-            };
+            let conv_model =
+                if body.model.is_some() || provider == crate::agent::routes::default_provider() {
+                    tier.clone()
+                } else {
+                    user_model
+                };
             // The model policy: a model the person named is refused, a default is
             // held to the provider's baseline.
             if body.model.is_some() && !crate::model_policy::is_allowed(&provider, &conv_model) {
@@ -434,8 +441,13 @@ pub async fn create(
                 );
             }
             let conv_model = crate::model_policy::or_baseline(&provider, conv_model);
-            match crate::agent::conversations::create(&state.pg, token.user_id(), &provider, &conv_model)
-                .await
+            match crate::agent::conversations::create(
+                &state.pg,
+                token.user_id(),
+                &provider,
+                &conv_model,
+            )
+            .await
             {
                 Ok(id) => id,
                 Err(e) => return db(e),
@@ -1785,7 +1797,10 @@ pub async fn profile_standing(
 /// `GET /api/research/contradictions` - the pairs a session's source 4.5 reads,
 /// resolved and not (0161). What a `diagnose` item raised from a contradiction
 /// opens in the desk: both entries and the question they raise.
-pub async fn contradictions(State(state): State<AppState>, token: BearerToken) -> impl IntoResponse {
+pub async fn contradictions(
+    State(state): State<AppState>,
+    token: BearerToken,
+) -> impl IntoResponse {
     match session_contradictions::list(&state.pg, token.user_id()).await {
         Ok(pairs) => (StatusCode::OK, Json(json!({ "contradictions": pairs }))).into_response(),
         Err(e) => db(e),
@@ -1877,11 +1892,18 @@ async fn resolve_ref(state: &AppState, user_id: Uuid, r: &str) -> Value {
     if r.starts_with("regime:") || r.starts_with("coverage:") {
         // An observation names itself: the fingerprint *is* the record (the
         // flip or the boundary crossed), and there is no row behind it to open.
-        let kind = if r.starts_with("regime:") { "regime_flip" } else { "coverage_extended" };
+        let kind = if r.starts_with("regime:") {
+            "regime_flip"
+        } else {
+            "coverage_extended"
+        };
         return json!({ "ref": r, "kind": kind, "found": true, "open": { "self_describing": true } });
     }
     // Otherwise a memory entry id.
-    match crate::memory_store::MemoryStore::new(state.pg.clone()).get(user_id, r).await {
+    match crate::memory_store::MemoryStore::new(state.pg.clone())
+        .get(user_id, r)
+        .await
+    {
         Ok(Some(e)) => {
             let bucket = match e.kind {
                 Kind::Finding => "findings",

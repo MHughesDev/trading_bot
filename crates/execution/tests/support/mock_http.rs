@@ -44,7 +44,12 @@ pub async fn serve(routes: Vec<(&str, Vec<(u16, &str)>)>) -> Mock {
     let table: Arc<Mutex<Routes>> = Arc::new(Mutex::new(
         routes
             .into_iter()
-            .map(|(k, v)| (k.to_owned(), v.into_iter().map(|(s, b)| (s, b.to_owned())).collect()))
+            .map(|(k, v)| {
+                (
+                    k.to_owned(),
+                    v.into_iter().map(|(s, b)| (s, b.to_owned())).collect(),
+                )
+            })
             .collect(),
     ));
     let heads = Arc::new(Mutex::new(Vec::new()));
@@ -53,7 +58,9 @@ pub async fn serve(routes: Vec<(&str, Vec<(u16, &str)>)>) -> Mock {
     let (t2, h2) = (Arc::clone(&table), Arc::clone(&heads));
     tokio::spawn(async move {
         loop {
-            let Ok((mut s, _)) = listener.accept().await else { continue };
+            let Ok((mut s, _)) = listener.accept().await else {
+                continue;
+            };
             let (table, heads) = (Arc::clone(&t2), Arc::clone(&h2));
             tokio::spawn(async move {
                 let mut buf = Vec::new();
@@ -110,4 +117,3 @@ pub async fn serve(routes: Vec<(&str, Vec<(u16, &str)>)>) -> Mock {
     });
     Mock { base, heads }
 }
-

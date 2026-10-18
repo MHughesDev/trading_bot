@@ -135,18 +135,31 @@ pub fn build(run_id: &str, a: &Layer1Artifact, run: &PositionRun) -> RunOutputs 
             ts_ns: p.ts_ns,
             slots: json!({ "target": p.target }).to_string(),
             signals: "{}".into(),
-            intents: if changed { json!([{ "kind": "target", "value": p.target }]) } else { json!([]) }.to_string(),
+            intents: if changed {
+                json!([{ "kind": "target", "value": p.target }])
+            } else {
+                json!([])
+            }
+            .to_string(),
             regime: String::new(),
             path: "position_series".into(),
         });
     }
 
-    for (i, (trade, legs)) in trades_and_legs(&a.instrument, &run.fills, &bars).iter().enumerate() {
+    for (i, (trade, legs)) in trades_and_legs(&a.instrument, &run.fills, &bars)
+        .iter()
+        .enumerate()
+    {
         out.trade_detail.push(TradeDetailRow {
             run_id: run_id.into(),
             trade_idx: u32::try_from(i).unwrap_or(u32::MAX),
             symbol: trade.symbol.clone(),
-            side: if trade.side == crate::run::Side::Long { "long" } else { "short" }.into(),
+            side: if trade.side == crate::run::Side::Long {
+                "long"
+            } else {
+                "short"
+            }
+            .into(),
             entry_ts_ns: trade.entry_time.timestamp_nanos_opt().unwrap_or(0),
             exit_ts_ns: trade.exit_time.timestamp_nanos_opt().unwrap_or(0),
             mae: trade.mae,
@@ -171,7 +184,10 @@ pub async fn ensure_schema(url: &str) -> anyhow::Result<()> {
     for stmt in DDL.split(';').map(str::trim).filter(|t| !t.is_empty()) {
         // Comment-only chunks are skipped; a chunk that starts with comments and then holds a
         // statement is sent whole, which ClickHouse accepts.
-        if stmt.lines().all(|l| l.trim().is_empty() || l.trim_start().starts_with("--")) {
+        if stmt
+            .lines()
+            .all(|l| l.trim().is_empty() || l.trim_start().starts_with("--"))
+        {
             continue;
         }
         client.query(stmt).execute().await?;
@@ -215,15 +231,27 @@ mod tests {
             .map(|i| {
                 #[allow(clippy::cast_precision_loss)]
                 let p = 100.0 + (f64::from(i) * 0.3).sin() * 4.0;
-                ArtifactBar { ts_ns: (i64::from(i) + 1) * 3_600_000_000_000, open: p, close: p + 0.1 }
+                ArtifactBar {
+                    ts_ns: (i64::from(i) + 1) * 3_600_000_000_000,
+                    open: p,
+                    close: p + 0.1,
+                }
             })
             .collect();
-        let points = bars.iter().enumerate().map(|(i, b)| PositionPoint::new(b.ts_ns, if (i / 12) % 2 == 0 { 1.0 } else { -1.0 })).collect();
+        let points = bars
+            .iter()
+            .enumerate()
+            .map(|(i, b)| PositionPoint::new(b.ts_ns, if (i / 12) % 2 == 0 { 1.0 } else { -1.0 }))
+            .collect();
         Layer1Artifact {
             code_sha256: "ab".repeat(32),
             instrument: "BTC-USD".into(),
             timeframe: "1h".into(),
-            series: PositionSeries { points, position_units: PositionUnits::Fraction, allow_short: true },
+            series: PositionSeries {
+                points,
+                position_units: PositionUnits::Fraction,
+                allow_short: true,
+            },
             bars,
             initial_equity: 10_000.0,
             fee_bps: 10.0,
@@ -231,7 +259,11 @@ mod tests {
             cost_model_ref: "cost:flat".into(),
             data_snapshot: "s".into(),
             lot_size: None,
-            impact: Some(crate::position_series::SqrtImpact { y: 1.0, sigma: 0.01, volume_usd: 1e6 }),
+            impact: Some(crate::position_series::SqrtImpact {
+                y: 1.0,
+                sigma: 0.01,
+                volume_usd: 1e6,
+            }),
             params: crate::run::ParamMap::new(),
             seed: 1,
         }
@@ -239,7 +271,9 @@ mod tests {
 
     fn built() -> (Layer1Artifact, RunOutputs) {
         let a = artifact();
-        let run = PositionRunExecutor::new(Arc::new(a.clone()), None).evaluate().unwrap();
+        let run = PositionRunExecutor::new(Arc::new(a.clone()), None)
+            .evaluate()
+            .unwrap();
         let out = build("run-1", &a, &run);
         (a, out)
     }
@@ -249,14 +283,22 @@ mod tests {
         let (a, out) = built();
         assert_eq!(out.decisions.len(), a.series.points.len());
         assert_eq!(out.positions.len(), a.bars.len());
-        assert!(out.decisions.iter().all(|d| d.run_id == "run-1" && d.path == "position_series"));
-        assert!(out.decisions.iter().any(|d| d.intents != "[]"), "a changed target is an intent");
+        assert!(out
+            .decisions
+            .iter()
+            .all(|d| d.run_id == "run-1" && d.path == "position_series"));
+        assert!(
+            out.decisions.iter().any(|d| d.intents != "[]"),
+            "a changed target is an intent"
+        );
     }
 
     #[test]
     fn the_costs_on_a_trade_equal_the_sum_of_its_legs_and_of_the_fills_it_came_from() {
         let (a, _) = built();
-        let run = PositionRunExecutor::new(Arc::new(a.clone()), None).evaluate().unwrap();
+        let run = PositionRunExecutor::new(Arc::new(a.clone()), None)
+            .evaluate()
+            .unwrap();
         let bars: Vec<Bar> = a.bars.iter().copied().map(Bar::from).collect();
         let pairs = trades_and_legs("BTC-USD", &run.fills, &bars);
         assert!(!pairs.is_empty());
@@ -267,24 +309,45 @@ mod tests {
         }
         // Every fill's cost is on some trade or on the position still open at the end.
         let on_trades: f64 = pairs.iter().map(|(_, l)| l.total()).sum();
-        let all_fills: f64 = run.fills.iter().map(|f| f.fee + f.spread_cost + f.impact_cost).sum();
+        let all_fills: f64 = run
+            .fills
+            .iter()
+            .map(|f| f.fee + f.spread_cost + f.impact_cost)
+            .sum();
         assert!(on_trades <= all_fills + 1e-9);
     }
 
     #[test]
     fn rebuilding_the_same_run_gives_identical_rows_so_a_rewrite_collapses_onto_them() {
         let (a, first) = built();
-        let run = PositionRunExecutor::new(Arc::new(a.clone()), None).evaluate().unwrap();
+        let run = PositionRunExecutor::new(Arc::new(a.clone()), None)
+            .evaluate()
+            .unwrap();
         assert_eq!(build("run-1", &a, &run), first);
-        assert_ne!(build("run-2", &a, &run).fills[0].run_id, first.fills[0].run_id);
+        assert_ne!(
+            build("run-2", &a, &run).fills[0].run_id,
+            first.fills[0].run_id
+        );
     }
 
     #[test]
     fn the_ddl_makes_every_table_replacing_on_its_full_key() {
-        for t in ["backtest_run_fills", "backtest_run_positions", "backtest_run_decisions", "backtest_run_trade_detail"] {
-            assert!(DDL.contains(&format!("CREATE TABLE IF NOT EXISTS {t}")), "{t}");
+        for t in [
+            "backtest_run_fills",
+            "backtest_run_positions",
+            "backtest_run_decisions",
+            "backtest_run_trade_detail",
+        ] {
+            assert!(
+                DDL.contains(&format!("CREATE TABLE IF NOT EXISTS {t}")),
+                "{t}"
+            );
         }
-        assert_eq!(DDL.matches("ENGINE = ReplacingMergeTree()").count(), 4, "idempotent by run_id");
+        assert_eq!(
+            DDL.matches("ENGINE = ReplacingMergeTree()").count(),
+            4,
+            "idempotent by run_id"
+        );
         assert!(!DDL.contains("ENGINE = MergeTree()"));
     }
 }

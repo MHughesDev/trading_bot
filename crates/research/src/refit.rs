@@ -108,7 +108,8 @@ pub fn coverage_drift(series: &[CoverageWindow], tol: &DriftTolerance) -> Option
         if w.n < tol.min_n {
             continue;
         }
-        let bad = (w.coverage_50 - 0.5).abs() > tol.tol_50 || (w.coverage_90 - 0.9).abs() > tol.tol_90;
+        let bad =
+            (w.coverage_50 - 0.5).abs() > tol.tol_50 || (w.coverage_90 - 0.9).abs() > tol.tol_90;
         if bad && prev_bad {
             return Some(Drift {
                 at_window: i,
@@ -137,7 +138,11 @@ pub struct CostVerdict {
 /// multiplier.
 #[must_use]
 pub fn cost_ladder_verdict(ladder: &[(f64, f64)], required: f64) -> CostVerdict {
-    let last_positive = ladder.iter().take_while(|(_, s)| *s > 0.0).last().map(|(m, _)| *m);
+    let last_positive = ladder
+        .iter()
+        .take_while(|(_, s)| *s > 0.0)
+        .last()
+        .map(|(m, _)| *m);
     let mut breakeven = None;
     for w in ladder.windows(2) {
         let ((m0, s0), (m1, s1)) = (w[0], w[1]);
@@ -147,9 +152,16 @@ pub fn cost_ladder_verdict(ladder: &[(f64, f64)], required: f64) -> CostVerdict 
         }
     }
     let passes = ladder.iter().any(|(m, _)| *m >= required)
-        && ladder.iter().filter(|(m, _)| *m <= required).all(|(_, s)| *s > 0.0)
+        && ladder
+            .iter()
+            .filter(|(m, _)| *m <= required)
+            .all(|(_, s)| *s > 0.0)
         && !ladder.is_empty();
-    CostVerdict { passes, last_positive, breakeven }
+    CostVerdict {
+        passes,
+        last_positive,
+        breakeven,
+    }
 }
 
 /// The racing report: which adjacent tiers may race and which may not, and why.
@@ -189,7 +201,11 @@ mod tests {
         assert_eq!(sweep_slots(16, 4), 4, "the cap binds");
         assert_eq!(sweep_slots(4, 4), 3, "one slot stays free");
         assert_eq!(sweep_slots(2, 4), 1);
-        assert_eq!(sweep_slots(1, 4), 1, "the floor is one: a campaign must be able to start");
+        assert_eq!(
+            sweep_slots(1, 4),
+            1,
+            "the floor is one: a campaign must be able to start"
+        );
         assert_eq!(sweep_slots(0, 4), 1);
         std::env::remove_var("SWEEP_MAX_PARALLEL");
         assert_eq!(sweep_max_parallel(), 4);
@@ -203,7 +219,11 @@ mod tests {
     }
 
     fn w(c50: f64, c90: f64, n: u32) -> CoverageWindow {
-        CoverageWindow { coverage_50: c50, coverage_90: c90, n }
+        CoverageWindow {
+            coverage_50: c50,
+            coverage_90: c90,
+            n,
+        }
     }
 
     #[test]
@@ -241,8 +261,18 @@ mod tests {
 
     #[test]
     fn the_racing_report_says_where_it_is_off_and_why() {
-        let on = FidelityCalibration::from_scores("a", "b", &[1.0, 2.0, 3.0, 4.0, 5.0], &[1.0, 2.0, 3.0, 4.0, 5.0]);
-        let off = FidelityCalibration::from_scores("b", "c", &[1.0, 2.0, 3.0, 4.0, 5.0], &[3.0, 1.0, 5.0, 2.0, 4.0]);
+        let on = FidelityCalibration::from_scores(
+            "a",
+            "b",
+            &[1.0, 2.0, 3.0, 4.0, 5.0],
+            &[1.0, 2.0, 3.0, 4.0, 5.0],
+        );
+        let off = FidelityCalibration::from_scores(
+            "b",
+            "c",
+            &[1.0, 2.0, 3.0, 4.0, 5.0],
+            &[3.0, 1.0, 5.0, 2.0, 4.0],
+        );
         let few = FidelityCalibration::from_scores("c", "d", &[1.0], &[1.0]);
         let r = racing_report(&[on, off, few]);
         assert!(r[0].contains("on"));

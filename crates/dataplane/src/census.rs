@@ -358,7 +358,8 @@ pub fn census(
     };
 
     let tolerance = no_trade_tolerance_periods(period_secs);
-    let (longest_gap_periods, longest_continuous_bars) = runs(&opens, period_ns, calendar, tolerance);
+    let (longest_gap_periods, longest_continuous_bars) =
+        runs(&opens, period_ns, calendar, tolerance);
     let longest_continuous_secs =
         longest_continuous_bars.saturating_mul(u64::from(period_secs.max(1)));
     let longest_continuous_secs = i64::try_from(longest_continuous_secs).unwrap_or(i64::MAX);

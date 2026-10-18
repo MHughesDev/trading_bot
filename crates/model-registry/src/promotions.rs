@@ -83,12 +83,13 @@ pub async fn propose(
     if rationale.trim().is_empty() {
         return Err(PromotionError::NoRationale);
     }
-    let exists: Option<i32> =
-        sqlx::query_scalar("SELECT version FROM model_versions WHERE model_id = $1 AND version = $2")
-            .bind(model_id)
-            .bind(version)
-            .fetch_optional(pg)
-            .await?;
+    let exists: Option<i32> = sqlx::query_scalar(
+        "SELECT version FROM model_versions WHERE model_id = $1 AND version = $2",
+    )
+    .bind(model_id)
+    .bind(version)
+    .fetch_optional(pg)
+    .await?;
     if exists.is_none() {
         return Err(PromotionError::NoSuchVersion(version));
     }
@@ -134,7 +135,11 @@ pub async fn list(pg: &PgPool, model_id: &str) -> Result<Vec<Value>, PromotionEr
 ///
 /// # Errors
 /// The database failing.
-pub async fn pending_for(pg: &PgPool, model_id: &str, version: i32) -> Result<Vec<Value>, PromotionError> {
+pub async fn pending_for(
+    pg: &PgPool,
+    model_id: &str,
+    version: i32,
+) -> Result<Vec<Value>, PromotionError> {
     let rows = sqlx::query(&format!(
         "SELECT {COLS} FROM model_promotion_proposals \
          WHERE model_id = $1 AND version = $2 AND status = 'pending' ORDER BY proposed_at DESC"
@@ -179,11 +184,12 @@ pub async fn decide(
     .fetch_optional(pg)
     .await?;
     let Some(row) = claimed else {
-        let exists: Option<Uuid> =
-            sqlx::query_scalar("SELECT proposal_id FROM model_promotion_proposals WHERE proposal_id = $1")
-                .bind(proposal_id)
-                .fetch_optional(pg)
-                .await?;
+        let exists: Option<Uuid> = sqlx::query_scalar(
+            "SELECT proposal_id FROM model_promotion_proposals WHERE proposal_id = $1",
+        )
+        .bind(proposal_id)
+        .fetch_optional(pg)
+        .await?;
         return Err(if exists.is_some() {
             PromotionError::AlreadyDecided
         } else {

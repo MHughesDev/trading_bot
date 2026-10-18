@@ -36,7 +36,8 @@ async fn a_selection_ranks_stored_instruments_by_their_bars_as_of_an_instant() {
       "select": {"score": "p", "top_n": 1, "attributes": {"close": "p"}}
     }))
     .unwrap();
-    let plan = std::sync::Arc::new(compile(&g, &StdRegistries::new(), &ParamValues::new()).unwrap());
+    let plan =
+        std::sync::Arc::new(compile(&g, &StdRegistries::new(), &ParamValues::new()).unwrap());
     let membership = Membership::fixed(members.clone());
 
     // The store as it stood at the instant, never anything later. (A 1m
@@ -72,6 +73,14 @@ async fn a_selection_ranks_stored_instruments_by_their_bars_as_of_an_instant() {
         .chain(s.excluded.iter().map(|x| x.instrument.as_str()))
         .collect();
     assert_eq!(accounted.len(), members.len(), "{s:#?}");
-    assert_eq!(s.selected.len(), 1, "a member with bars is selected: {s:#?}");
-    eprintln!("selected {} at close {:?}", s.selected[0].instrument, s.selected[0].attributes.get("close"));
+    assert_eq!(
+        s.selected.len(),
+        1,
+        "a member with bars is selected: {s:#?}"
+    );
+    eprintln!(
+        "selected {} at close {:?}",
+        s.selected[0].instrument,
+        s.selected[0].attributes.get("close")
+    );
 }

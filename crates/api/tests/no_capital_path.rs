@@ -77,7 +77,11 @@ fn every_deployment_table_constrains_its_venue_to_paper() {
             continue;
         }
         let sql = fs::read_to_string(entry.path()).unwrap();
-        for table in ["strategy_deployment", "deployment_proposal", "deployment_authorisation"] {
+        for table in [
+            "strategy_deployment",
+            "deployment_proposal",
+            "deployment_authorisation",
+        ] {
             if !sql.contains(table) {
                 continue;
             }
@@ -137,7 +141,11 @@ fn every_deployment_entry_point_is_reviewed_and_records_a_paper_deployment() {
     rust_sources(&root().join("apps"), &mut files);
     let mut found = Vec::new();
     for f in files {
-        let rel = f.strip_prefix(root()).unwrap().to_string_lossy().replace('\\', "/");
+        let rel = f
+            .strip_prefix(root())
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
         // This module's siblings stop deployments and read them; they start none.
         let src = fs::read_to_string(&f).unwrap_or_default();
         let n = calls(&src, "deployments::start(")
@@ -165,7 +173,8 @@ fn every_deployment_entry_point_is_reviewed_and_records_a_paper_deployment() {
     // The one recording statement fixes the venue; there is no parameter for it.
     let storage = read("crates/storage/src/postgres/deployments.rs");
     assert!(
-        storage.contains("VALUES ($1,$2,$3,$4,$5,$6,'paper','platform_paper',$7,$8,$9,$10,$11,$12)"),
+        storage
+            .contains("VALUES ($1,$2,$3,$4,$5,$6,'paper','platform_paper',$7,$8,$9,$10,$11,$12)"),
         "the recording statement no longer hardcodes paper / platform_paper"
     );
 }
@@ -174,7 +183,9 @@ fn every_deployment_entry_point_is_reviewed_and_records_a_paper_deployment() {
 #[test]
 fn the_deployment_record_has_no_venue_for_a_caller_to_choose() {
     let storage = read("crates/storage/src/postgres/deployments.rs");
-    let start = storage.find("pub struct NewDeployment").expect("NewDeployment");
+    let start = storage
+        .find("pub struct NewDeployment")
+        .expect("NewDeployment");
     let body = &storage[start..start + storage[start..].find("\n}").unwrap()];
     assert!(
         !body.contains("venue") && !body.contains("environment"),

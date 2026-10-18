@@ -87,13 +87,23 @@ fn column(result: &Value, key: &str) -> Result<Vec<Option<f64>>, QualityError> {
         .collect()
 }
 
-async fn run_series(skill: &Skill, cfg: &RunnerConfig, spec: &SeriesSpec, ts: &[i64], x: &[f64]) -> Result<Value, QualityError> {
+async fn run_series(
+    skill: &Skill,
+    cfg: &RunnerConfig,
+    spec: &SeriesSpec,
+    ts: &[i64],
+    x: &[f64],
+) -> Result<Value, QualityError> {
     let payload = json!({ spec.ts_key.as_str(): ts, spec.series_key.as_str(): x });
     let done = run(skill, &payload, cfg).await;
     if done.record.outcome != Outcome::Ok {
-        return Err(QualityError::DidNotRun(format!("{:?}", done.record.outcome)));
+        return Err(QualityError::DidNotRun(format!(
+            "{:?}",
+            done.record.outcome
+        )));
     }
-    done.result.ok_or_else(|| QualityError::DidNotRun("no result".into()))
+    done.result
+        .ok_or_else(|| QualityError::DidNotRun("no result".into()))
 }
 
 /// Cut points spread across the series, leaving a warm-up and a tail.
@@ -120,14 +130,19 @@ pub async fn truncation_check(
     cuts: &[usize],
 ) -> Result<TruncationReport, QualityError> {
     if ts.len() != x.len() || cuts.is_empty() || cuts.iter().any(|c| *c + 1 >= x.len()) {
-        return Err(QualityError::BadInput("the series and its cut points must be aligned and inside it".into()));
+        return Err(QualityError::BadInput(
+            "the series and its cut points must be aligned and inside it".into(),
+        ));
     }
     let full = column(&run_series(skill, cfg, spec, ts, x).await?, &spec.out_key)?;
     if full.len() != x.len() {
         return Err(QualityError::BadOutput(spec.out_key.clone()));
     }
     for &c in cuts {
-        let part = column(&run_series(skill, cfg, spec, &ts[..=c], &x[..=c]).await?, &spec.out_key)?;
+        let part = column(
+            &run_series(skill, cfg, spec, &ts[..=c], &x[..=c]).await?,
+            &spec.out_key,
+        )?;
         if part.len() != c + 1 {
             return Err(QualityError::BadOutput(spec.out_key.clone()));
         }
@@ -184,7 +199,11 @@ pub struct NoiseReport {
 /// The pass rule: at most 7% significant on noise at a 5% nominal level.
 #[must_use]
 pub fn noise_null_verdict(significant: u32, trials: u32) -> NoiseReport {
-    let rate = if trials == 0 { f64::NAN } else { f64::from(significant) / f64::from(trials) };
+    let rate = if trials == 0 {
+        f64::NAN
+    } else {
+        f64::from(significant) / f64::from(trials)
+    };
     NoiseReport {
         trials,
         significant,
@@ -197,7 +216,14 @@ pub fn noise_null_verdict(significant: u32, trials: u32) -> NoiseReport {
 ///
 /// # Errors
 /// [`QualityError`] when the skill does not run or returns no p-value.
-pub async fn noise_null(skill: &Skill, cfg: &RunnerConfig, spec: &SeriesSpec, trials: u32, n: usize, seed: u64) -> Result<NoiseReport, QualityError> {
+pub async fn noise_null(
+    skill: &Skill,
+    cfg: &RunnerConfig,
+    spec: &SeriesSpec,
+    trials: u32,
+    n: usize,
+    seed: u64,
+) -> Result<NoiseReport, QualityError> {
     let ts: Vec<i64> = (0..n as i64).collect();
     let mut significant = 0;
     for t in 0..trials {
@@ -232,7 +258,10 @@ mod tests {
     #[test]
     fn a_five_percent_test_passes_and_a_ten_percent_one_fails() {
         assert!(noise_null_verdict(25, 500).passed, "5.0%");
-        assert!(noise_null_verdict(35, 500).passed, "7.0% is at the limit and allowed");
+        assert!(
+            noise_null_verdict(35, 500).passed,
+            "7.0% is at the limit and allowed"
+        );
         assert!(!noise_null_verdict(36, 500).passed, "7.2%");
         let bad = noise_null_verdict(50, 500);
         assert!(!bad.passed);

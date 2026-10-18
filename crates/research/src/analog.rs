@@ -44,8 +44,17 @@ pub fn profile_vector(returns: &[f64]) -> Vec<f64> {
     let sd = var.sqrt();
     let (skew, kurt) = if sd > 0.0 {
         (
-            returns.iter().map(|r| ((r - mean) / sd).powi(3)).sum::<f64>() / nf,
-            returns.iter().map(|r| ((r - mean) / sd).powi(4)).sum::<f64>() / nf - 3.0,
+            returns
+                .iter()
+                .map(|r| ((r - mean) / sd).powi(3))
+                .sum::<f64>()
+                / nf,
+            returns
+                .iter()
+                .map(|r| ((r - mean) / sd).powi(4))
+                .sum::<f64>()
+                / nf
+                - 3.0,
         )
     } else {
         (0.0, 0.0)
@@ -111,13 +120,23 @@ impl Standardiser {
     #[must_use]
     pub fn fit(pool: &[Episode]) -> Self {
         let dim = pool.first().map_or(0, |e| e.vector.len());
-        let rows: Vec<&Vec<f64>> = pool.iter().map(|e| &e.vector).filter(|v| v.len() == dim).collect();
+        let rows: Vec<&Vec<f64>> = pool
+            .iter()
+            .map(|e| &e.vector)
+            .filter(|v| v.len() == dim)
+            .collect();
         let n = rows.len().max(1) as f64;
-        let mean: Vec<f64> = (0..dim).map(|d| rows.iter().map(|r| r[d]).sum::<f64>() / n).collect();
+        let mean: Vec<f64> = (0..dim)
+            .map(|d| rows.iter().map(|r| r[d]).sum::<f64>() / n)
+            .collect();
         let sd = (0..dim)
             .map(|d| {
                 let v = rows.iter().map(|r| (r[d] - mean[d]).powi(2)).sum::<f64>() / n;
-                if v.sqrt() > 1e-12 { v.sqrt() } else { 1.0 }
+                if v.sqrt() > 1e-12 {
+                    v.sqrt()
+                } else {
+                    1.0
+                }
             })
             .collect();
         Self { mean, sd }
@@ -127,7 +146,10 @@ impl Standardiser {
     pub fn apply(&self, v: &[f64]) -> Vec<f64> {
         v.iter()
             .enumerate()
-            .map(|(i, x)| (x - self.mean.get(i).copied().unwrap_or(0.0)) / self.sd.get(i).copied().unwrap_or(1.0))
+            .map(|(i, x)| {
+                (x - self.mean.get(i).copied().unwrap_or(0.0))
+                    / self.sd.get(i).copied().unwrap_or(1.0)
+            })
             .collect()
     }
 }
@@ -155,7 +177,12 @@ pub fn analogs(q: &Query, pool: &[Episode], k: usize, horizon: i64) -> Vec<Analo
         .filter(|e| e.vector.len() == q.vector.len() && !excluded(q, e, horizon))
         .map(|e| {
             let ev = st.apply(&e.vector);
-            let d = qv.iter().zip(&ev).map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt();
+            let d = qv
+                .iter()
+                .zip(&ev)
+                .map(|(a, b)| (a - b).powi(2))
+                .sum::<f64>()
+                .sqrt();
             Analog {
                 id: e.id.clone(),
                 instrument: e.instrument.clone(),
@@ -165,7 +192,11 @@ pub fn analogs(q: &Query, pool: &[Episode], k: usize, horizon: i64) -> Vec<Analo
             }
         })
         .collect();
-    out.sort_by(|a, b| a.distance.total_cmp(&b.distance).then_with(|| a.id.cmp(&b.id)));
+    out.sort_by(|a, b| {
+        a.distance
+            .total_cmp(&b.distance)
+            .then_with(|| a.id.cmp(&b.id))
+    });
     out.truncate(k);
     out
 }
@@ -175,20 +206,37 @@ mod tests {
     use super::*;
 
     fn ep(id: &str, inst: &str, s: i64, e: i64, v: &[f64]) -> Episode {
-        Episode { id: id.into(), instrument: inst.into(), start: s, end: e, vector: v.to_vec() }
+        Episode {
+            id: id.into(),
+            instrument: inst.into(),
+            start: s,
+            end: e,
+            vector: v.to_vec(),
+        }
     }
 
     fn q(s: i64, e: i64) -> Query {
-        Query { id: Some("self".into()), instrument: "A".into(), start: s, end: e, vector: vec![1.0, 1.0] }
+        Query {
+            id: Some("self".into()),
+            instrument: "A".into(),
+            start: s,
+            end: e,
+            vector: vec![1.0, 1.0],
+        }
     }
 
     #[test]
     fn the_profile_vector_is_explicit_and_named() {
-        let r: Vec<f64> = (0..40).map(|i| if i % 2 == 0 { 0.01 } else { -0.008 }).collect();
+        let r: Vec<f64> = (0..40)
+            .map(|i| if i % 2 == 0 { 0.01 } else { -0.008 })
+            .collect();
         let v = profile_vector(&r);
         assert_eq!(v.len(), PROFILE_FIELDS.len());
         assert!(v[0] > 0.0, "volatility");
-        assert!(v[4] < 0.0, "an alternating series has negative lag-1 autocorrelation");
+        assert!(
+            v[4] < 0.0,
+            "an alternating series has negative lag-1 autocorrelation"
+        );
         assert!(v[5] >= 0.0);
         assert!(profile_vector(&r[..5]).is_empty());
     }
@@ -209,8 +257,14 @@ mod tests {
         let ids: Vec<&str> = out.iter().map(|a| a.id.as_str()).collect();
         assert!(!ids.contains(&"self"));
         assert!(!ids.contains(&"overlap"));
-        assert!(!ids.contains(&"next_door"), "inside the horizon after the window");
-        assert!(!ids.contains(&"before"), "inside the horizon before the window");
+        assert!(
+            !ids.contains(&"next_door"),
+            "inside the horizon after the window"
+        );
+        assert!(
+            !ids.contains(&"before"),
+            "inside the horizon before the window"
+        );
         assert_eq!(ids, vec!["other_market_same_time", "far"]);
     }
 
@@ -224,7 +278,15 @@ mod tests {
         // the window and is how the guard would be removed: the overlap comes back first.
         let guarded = analogs(&q(100, 130), &pool, 1, 30);
         assert_eq!(guarded[0].id, "far");
-        let unguarded = analogs(&Query { id: None, ..q(100, 130) }, &pool, 1, -1000);
+        let unguarded = analogs(
+            &Query {
+                id: None,
+                ..q(100, 130)
+            },
+            &pool,
+            1,
+            -1000,
+        );
         assert_eq!(unguarded[0].id, "overlap");
     }
 
@@ -235,7 +297,13 @@ mod tests {
             ep("b", "B", 2, 3, &[1.0, 0.0]),
             ep("c", "B", 4, 5, &[0.0, -1000.0]),
         ];
-        let q2 = Query { id: None, instrument: "A".into(), start: 10, end: 11, vector: vec![0.9, 10.0] };
+        let q2 = Query {
+            id: None,
+            instrument: "A".into(),
+            start: 10,
+            end: 11,
+            vector: vec![0.9, 10.0],
+        };
         let out = analogs(&q2, &pool, 3, 5);
         // On raw units "a" and "c" are ~1000 away and "b" ~10; after standardising, "b" still wins
         // and the order is by the standardised distance.
@@ -244,7 +312,10 @@ mod tests {
 
     #[test]
     fn a_vector_of_another_length_is_skipped() {
-        let pool = vec![ep("short", "B", 0, 1, &[1.0]), ep("ok", "B", 2, 3, &[1.0, 1.0])];
+        let pool = vec![
+            ep("short", "B", 0, 1, &[1.0]),
+            ep("ok", "B", 2, 3, &[1.0, 1.0]),
+        ];
         let out = analogs(&q(100, 130), &pool, 5, 30);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].id, "ok");

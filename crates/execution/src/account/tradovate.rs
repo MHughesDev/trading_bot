@@ -294,10 +294,14 @@ pub(crate) fn parse_token_response(
 
 /// `/cashBalance/getcashbalancesnapshot` → a USD [`Balance`].
 pub(crate) fn parse_cash_snapshot(body: &Value) -> Result<Balance, AccountSourceError> {
-    let cash = dec(&body["totalCashValue"]).or_else(|| dec(&body["amount"])).ok_or_else(|| {
-        AccountSourceError::Parse("tradovate cash snapshot carries no cash figure".to_owned())
-    })?;
-    let locked = dec(&body["initialMargin"]).unwrap_or(Decimal::ZERO).max(Decimal::ZERO);
+    let cash = dec(&body["totalCashValue"])
+        .or_else(|| dec(&body["amount"]))
+        .ok_or_else(|| {
+            AccountSourceError::Parse("tradovate cash snapshot carries no cash figure".to_owned())
+        })?;
+    let locked = dec(&body["initialMargin"])
+        .unwrap_or(Decimal::ZERO)
+        .max(Decimal::ZERO);
     let equity = dec(&body["openPnL"]).map(|p| cash + p);
     Ok(Balance {
         asset: "USD".to_owned(),
@@ -317,9 +321,9 @@ pub(crate) struct RawPosition {
 
 /// `/position/list` → open positions (closed rows, `netPos == 0`, are dropped).
 pub(crate) fn parse_positions(body: &Value) -> Result<Vec<RawPosition>, AccountSourceError> {
-    let rows = body
-        .as_array()
-        .ok_or_else(|| AccountSourceError::Parse("tradovate position list is not an array".to_owned()))?;
+    let rows = body.as_array().ok_or_else(|| {
+        AccountSourceError::Parse("tradovate position list is not an array".to_owned())
+    })?;
     let mut out = Vec::new();
     for p in rows {
         let contract_id = p["contractId"].as_i64().ok_or_else(|| {
@@ -350,14 +354,14 @@ pub(crate) fn parse_fills(
     symbols: &HashMap<i64, String>,
     since: Option<DateTime<Utc>>,
 ) -> Result<Vec<VenueTransaction>, AccountSourceError> {
-    let rows = body
-        .as_array()
-        .ok_or_else(|| AccountSourceError::Parse("tradovate fill list is not an array".to_owned()))?;
+    let rows = body.as_array().ok_or_else(|| {
+        AccountSourceError::Parse("tradovate fill list is not an array".to_owned())
+    })?;
     let mut out = Vec::new();
     for f in rows {
-        let id = f["id"].as_i64().ok_or_else(|| {
-            AccountSourceError::Parse("tradovate fill has no id".to_owned())
-        })?;
+        let id = f["id"]
+            .as_i64()
+            .ok_or_else(|| AccountSourceError::Parse("tradovate fill has no id".to_owned()))?;
         let kind = match f["action"].as_str() {
             Some("Buy") => "fill_buy",
             Some("Sell") => "fill_sell",
@@ -367,9 +371,8 @@ pub(crate) fn parse_fills(
                 )))
             }
         };
-        let qty = dec(&f["qty"]).ok_or_else(|| {
-            AccountSourceError::Parse(format!("tradovate fill {id} has no qty"))
-        })?;
+        let qty = dec(&f["qty"])
+            .ok_or_else(|| AccountSourceError::Parse(format!("tradovate fill {id} has no qty")))?;
         let price = dec(&f["price"]).ok_or_else(|| {
             AccountSourceError::Parse(format!("tradovate fill {id} has no price"))
         })?;
@@ -406,7 +409,9 @@ impl AccountSource for TradovateAccountSource {
         creds: &VenueCredentials,
     ) -> Result<Vec<Balance>, AccountSourceError> {
         let c = Self::parse_creds(creds)?;
-        let accounts = self.call(&c, Method::GET, "/account/list", &[], None).await?;
+        let accounts = self
+            .call(&c, Method::GET, "/account/list", &[], None)
+            .await?;
         let mut out = Vec::new();
         for a in accounts.as_array().cloned().unwrap_or_default() {
             let Some(id) = a["id"].as_i64() else { continue };
@@ -429,7 +434,9 @@ impl AccountSource for TradovateAccountSource {
         creds: &VenueCredentials,
     ) -> Result<Vec<VenuePosition>, AccountSourceError> {
         let c = Self::parse_creds(creds)?;
-        let body = self.call(&c, Method::GET, "/position/list", &[], None).await?;
+        let body = self
+            .call(&c, Method::GET, "/position/list", &[], None)
+            .await?;
         let mut out = Vec::new();
         for p in parse_positions(&body)? {
             let symbol = self.symbol_for(&c, p.contract_id).await?;
@@ -481,7 +488,10 @@ mod tests {
         assert_eq!(c.app_id, "trading-platform");
         let c = TradovateAccountSource::parse_creds(&creds("alice:pw:myapp:123:secret")).unwrap();
         assert_eq!(c.app_id, "myapp");
-        assert_eq!((c.cid.as_deref(), c.sec.as_deref()), (Some("123"), Some("secret")));
+        assert_eq!(
+            (c.cid.as_deref(), c.sec.as_deref()),
+            (Some("123"), Some("secret"))
+        );
         for bad in ["", "alice", ":pw", "alice:"] {
             assert!(
                 matches!(
@@ -491,14 +501,20 @@ mod tests {
                 "{bad:?}"
             );
         }
-        assert!(!format!("{c:?}").contains("secret"), "Debug must not print credentials");
+        assert!(
+            !format!("{c:?}").contains("secret"),
+            "Debug must not print credentials"
+        );
     }
 
     #[test]
     fn a_throttled_login_is_an_error_not_an_empty_token() {
         let now = Utc::now();
         assert!(parse_token_response(&json!({"p-ticket": "t", "p-time": 30}), now).is_err());
-        assert!(parse_token_response(&json!({"errorText": "Incorrect username or password"}), now).is_err());
+        assert!(
+            parse_token_response(&json!({"errorText": "Incorrect username or password"}), now)
+                .is_err()
+        );
         assert!(parse_token_response(&json!({}), now).is_err());
         let (t, exp) = parse_token_response(
             &json!({"accessToken": "abc", "expirationTime": "2030-01-01T00:00:00Z"}),
@@ -519,7 +535,10 @@ mod tests {
         .unwrap();
         assert_eq!(b.available.inner(), Decimal::from(7500));
         assert_eq!(b.locked.inner(), Decimal::from(2500));
-        assert_eq!(b.usd_value.unwrap().inner(), Decimal::from_str("10120.5").unwrap());
+        assert_eq!(
+            b.usd_value.unwrap().inner(),
+            Decimal::from_str("10120.5").unwrap()
+        );
         assert!(parse_cash_snapshot(&json!({})).is_err());
     }
 

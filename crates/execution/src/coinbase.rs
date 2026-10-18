@@ -156,7 +156,9 @@ fn decode_pem(pem: &str) -> Result<(String, Vec<u8>), String> {
         .chars()
         .filter(|c| !c.is_whitespace())
         .collect();
-    let der = STANDARD.decode(b64).map_err(|e| format!("PEM body is not base64: {e}"))?;
+    let der = STANDARD
+        .decode(b64)
+        .map_err(|e| format!("PEM body is not base64: {e}"))?;
     Ok((label, der))
 }
 
@@ -187,8 +189,12 @@ impl CoinbaseCredentials {
             "PRIVATE KEY" => der,
             other => return Err(bad(format!("unsupported PEM label {other:?}"))),
         };
-        let key_pair = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &pkcs8, &SystemRandom::new())
-            .map_err(|e| bad(format!("not a usable P-256 key ({e})")))?;
+        let key_pair = EcdsaKeyPair::from_pkcs8(
+            &ECDSA_P256_SHA256_FIXED_SIGNING,
+            &pkcs8,
+            &SystemRandom::new(),
+        )
+        .map_err(|e| bad(format!("not a usable P-256 key ({e})")))?;
         let key_name = key_name.into();
         if key_name.is_empty() {
             return Err(bad("the key name is empty".into()));
@@ -241,12 +247,26 @@ impl CoinbaseCredentials {
             .key_pair
             .sign(&SystemRandom::new(), signing_input.as_bytes())
             .map_err(|_| BrokerError::Rejected("JWT signing failed".into()))?;
-        Ok(format!("{signing_input}.{}", URL_SAFE_NO_PAD.encode(sig.as_ref())))
+        Ok(format!(
+            "{signing_input}.{}",
+            URL_SAFE_NO_PAD.encode(sig.as_ref())
+        ))
     }
 
     /// [`Self::sign_jwt`] for "now" with a fresh nonce.
-    pub fn sign_jwt_now(&self, method: &str, host: &str, path: &str) -> Result<String, BrokerError> {
-        self.sign_jwt(method, host, path, chrono::Utc::now().timestamp(), &Self::nonce()?)
+    pub fn sign_jwt_now(
+        &self,
+        method: &str,
+        host: &str,
+        path: &str,
+    ) -> Result<String, BrokerError> {
+        self.sign_jwt(
+            method,
+            host,
+            path,
+            chrono::Utc::now().timestamp(),
+            &Self::nonce()?,
+        )
     }
 }
 
@@ -364,11 +384,17 @@ fn dec(v: &Value) -> Option<Decimal> {
 /// Anything unreadable.
 pub fn parse_order(o: &Value) -> Result<BrokerOrderStatus, BrokerError> {
     let bad = |m: String| BrokerError::Serialization(format!("coinbase order: {m}"));
-    let id = o["order_id"].as_str().ok_or_else(|| bad("no order_id".into()))?;
+    let id = o["order_id"]
+        .as_str()
+        .ok_or_else(|| bad("no order_id".into()))?;
     let side = match o["side"].as_str() {
         Some("BUY") => Side::Buy,
         Some("SELL") => Side::Sell,
-        other => return Err(bad(format!("side {other:?}; refusing to guess a direction"))),
+        other => {
+            return Err(bad(format!(
+                "side {other:?}; refusing to guess a direction"
+            )))
+        }
     };
     let order_type = match o["order_type"].as_str() {
         Some("MARKET") => OrderType::Market,
@@ -482,15 +508,26 @@ impl CoinbaseBroker {
     /// A signing failure.
     pub fn prepare_cancel(&self, broker_order_id: &str) -> Result<PreparedRequest, BrokerError> {
         let body = json!({ "order_ids": [broker_order_id] });
-        self.prepare("POST", "/api/v3/brokerage/orders/batch_cancel", &[], Some(&body))
+        self.prepare(
+            "POST",
+            "/api/v3/brokerage/orders/batch_cancel",
+            &[],
+            Some(&body),
+        )
     }
 
-    async fn send_get(&self, req: PreparedRequest) -> Result<(reqwest::StatusCode, Value), BrokerError> {
+    async fn send_get(
+        &self,
+        req: PreparedRequest,
+    ) -> Result<(reqwest::StatusCode, Value), BrokerError> {
         let mut r = self.client.get(&req.url);
         for (k, v) in &req.headers {
             r = r.header(k, v);
         }
-        let resp = r.send().await.map_err(|e| BrokerError::Http(e.to_string()))?;
+        let resp = r
+            .send()
+            .await
+            .map_err(|e| BrokerError::Http(e.to_string()))?;
         let status = resp.status();
         let body = resp
             .json::<Value>()
@@ -516,7 +553,9 @@ impl Broker for CoinbaseBroker {
 
     async fn query_order(&self, broker_order_id: &str) -> Result<BrokerOrderStatus, BrokerError> {
         let path = format!("/api/v3/brokerage/orders/historical/{broker_order_id}");
-        let (status, body) = self.send_get(self.prepare("GET", &path, &[], None)?).await?;
+        let (status, body) = self
+            .send_get(self.prepare("GET", &path, &[], None)?)
+            .await?;
         if status == reqwest::StatusCode::NOT_FOUND {
             return Err(BrokerError::OrderNotFound(broker_order_id.to_owned()));
         }
@@ -592,7 +631,13 @@ mod tests {
         let (pem, _) = test_key();
         let creds = CoinbaseCredentials::from_pem("organizations/o/apiKeys/k", &pem).unwrap();
         let jwt = creds
-            .sign_jwt("GET", "api.coinbase.com", "/api/v3/brokerage/accounts", 1_780_000_000, "abc123")
+            .sign_jwt(
+                "GET",
+                "api.coinbase.com",
+                "/api/v3/brokerage/accounts",
+                1_780_000_000,
+                "abc123",
+            )
             .unwrap();
         let (h, c) = verify(&jwt, &creds.public_key());
         assert_eq!(h["alg"], "ES256");
@@ -612,11 +657,14 @@ mod tests {
         let creds = CoinbaseCredentials::from_pem("k", &pem).unwrap();
         let jwt = creds.sign_jwt("GET", HOST, "/a", 1, "n").unwrap();
         let mut parts: Vec<String> = jwt.split('.').map(str::to_owned).collect();
-        parts[1] = URL_SAFE_NO_PAD.encode(r#"{"uri":"POST api.coinbase.com/api/v3/brokerage/orders"}"#);
+        parts[1] =
+            URL_SAFE_NO_PAD.encode(r#"{"uri":"POST api.coinbase.com/api/v3/brokerage/orders"}"#);
         let sig = URL_SAFE_NO_PAD.decode(&parts[2]).unwrap();
-        assert!(UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, creds.public_key())
-            .verify(format!("{}.{}", parts[0], parts[1]).as_bytes(), &sig)
-            .is_err());
+        assert!(
+            UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, creds.public_key())
+                .verify(format!("{}.{}", parts[0], parts[1]).as_bytes(), &sig)
+                .is_err()
+        );
     }
 
     #[test]
@@ -634,7 +682,10 @@ mod tests {
         let public_field = rest.to_vec(); // [1] publicKey
         let mut sec1_body = tlv(0x02, &[1]);
         sec1_body.extend(tlv(0x04, scalar));
-        sec1_body.extend(tlv(0xa0, &tlv(0x06, &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07])));
+        sec1_body.extend(tlv(
+            0xa0,
+            &tlv(0x06, &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]),
+        ));
         sec1_body.extend(public_field);
         let sec1 = tlv(0x30, &sec1_body);
         let pem = format!(
@@ -651,14 +702,24 @@ mod tests {
 
     #[test]
     fn bad_keys_are_refused_without_echoing_them() {
-        for bad in ["", "not a pem", "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----"] {
+        for bad in [
+            "",
+            "not a pem",
+            "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----",
+        ] {
             assert!(CoinbaseCredentials::from_pem("k", bad).is_err());
         }
         let (pem, _) = test_key();
-        assert!(CoinbaseCredentials::from_pem("", &pem).is_err(), "empty key name");
-        let err = CoinbaseCredentials::from_pem("k", "-----BEGIN PRIVATE KEY-----\nQUJD\n-----END PRIVATE KEY-----")
-            .unwrap_err()
-            .to_string();
+        assert!(
+            CoinbaseCredentials::from_pem("", &pem).is_err(),
+            "empty key name"
+        );
+        let err = CoinbaseCredentials::from_pem(
+            "k",
+            "-----BEGIN PRIVATE KEY-----\nQUJD\n-----END PRIVATE KEY-----",
+        )
+        .unwrap_err()
+        .to_string();
         assert!(!err.contains("QUJD"), "{err}");
         let (pem, _) = test_key();
         let c = CoinbaseCredentials::from_pem("k", &pem).unwrap();
@@ -685,16 +746,27 @@ mod tests {
         assert_eq!(b["client_order_id"], m.idempotency_key.to_string());
         assert_eq!(b["product_id"], "BTC-USD");
         assert_eq!(b["side"], "BUY");
-        assert_eq!(b["order_configuration"]["market_market_ioc"]["base_size"], "1.5");
+        assert_eq!(
+            b["order_configuration"]["market_market_ioc"]["base_size"],
+            "1.5"
+        );
 
         let l = intent(OrderType::Limit, Side::Sell, Some(60000), TimeInForce::Gtc);
         let b = build_create_order(&l).unwrap();
         assert_eq!(b["side"], "SELL");
-        assert_eq!(b["order_configuration"]["limit_limit_gtc"]["limit_price"], "60000");
-        assert_eq!(b["order_configuration"]["limit_limit_gtc"]["post_only"], false);
+        assert_eq!(
+            b["order_configuration"]["limit_limit_gtc"]["limit_price"],
+            "60000"
+        );
+        assert_eq!(
+            b["order_configuration"]["limit_limit_gtc"]["post_only"],
+            false
+        );
 
         let f = intent(OrderType::Limit, Side::Buy, Some(59000), TimeInForce::Fok);
-        assert!(build_create_order(&f).unwrap()["order_configuration"]["limit_limit_fok"].is_object());
+        assert!(
+            build_create_order(&f).unwrap()["order_configuration"]["limit_limit_fok"].is_object()
+        );
     }
 
     #[test]
@@ -705,8 +777,18 @@ mod tests {
             i
         };
         assert!(build_create_order(&stop).is_err());
-        assert!(build_create_order(&intent(OrderType::Limit, Side::Buy, Some(1), TimeInForce::Day)).is_err());
-        assert!(build_create_order(&intent(OrderType::Limit, Side::Buy, None, TimeInForce::Gtc)).is_err(), "no limit price");
+        assert!(build_create_order(&intent(
+            OrderType::Limit,
+            Side::Buy,
+            Some(1),
+            TimeInForce::Day
+        ))
+        .is_err());
+        assert!(
+            build_create_order(&intent(OrderType::Limit, Side::Buy, None, TimeInForce::Gtc))
+                .is_err(),
+            "no limit price"
+        );
         let mut oco = intent(OrderType::Limit, Side::Buy, Some(1), TimeInForce::Gtc);
         oco.oco_group = Some("g".into());
         assert!(build_create_order(&oco).is_err());
@@ -727,7 +809,11 @@ mod tests {
             "order_configuration": {"limit_limit_gtc": {"base_size": "1.5", "limit_price": "60000"}}
         });
         let s = parse_order(&o).unwrap();
-        assert_eq!(s.state, BrokerOrderState::PartiallyFilled, "partial is decided by filled_size");
+        assert_eq!(
+            s.state,
+            BrokerOrderState::PartiallyFilled,
+            "partial is decided by filled_size"
+        );
         assert_eq!(s.submitted_qty, Decimal::new(15, 1));
         assert_eq!(s.commission, Some(Decimal::new(125, 2)));
         for bad in ["", "buy", "LONG"] {
@@ -736,6 +822,10 @@ mod tests {
         }
         o["side"] = json!("SELL");
         o.as_object_mut().unwrap().remove("total_fees");
-        assert_eq!(parse_order(&o).unwrap().commission, None, "absent fees are None, not zero");
+        assert_eq!(
+            parse_order(&o).unwrap().commission,
+            None,
+            "absent fees are None, not zero"
+        );
     }
 }

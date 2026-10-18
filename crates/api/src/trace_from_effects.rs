@@ -110,10 +110,7 @@ pub struct ReplaySample {
 ///
 /// # Errors
 /// [`TrajectoryError::Sqlx`] if the log cannot be read.
-pub async fn sample_replayable(
-    pool: &PgPool,
-    limit: i64,
-) -> Result<ReplaySample, TrajectoryError> {
+pub async fn sample_replayable(pool: &PgPool, limit: i64) -> Result<ReplaySample, TrajectoryError> {
     let runs: Vec<Uuid> = sqlx::query_scalar(
         "SELECT run_id FROM agent_effect_log GROUP BY run_id           ORDER BY max(created_at) DESC LIMIT $1",
     )
@@ -356,8 +353,8 @@ mod tests {
 #[cfg(test)]
 mod projection_matches_the_log {
     use super::*;
-    use serde_json::json;
     use harness::drive::{Effect, Note};
+    use serde_json::json;
 
     /// The projection reads what the log actually writes.
     ///
@@ -379,7 +376,9 @@ mod projection_matches_the_log {
         let event = event_for("effect", kind, &payload)
             .expect("the row the log writes is a row the projection reads");
         match &event {
-            Event::CoreTool { name, reply, args, .. } => {
+            Event::CoreTool {
+                name, reply, args, ..
+            } => {
                 assert_eq!(name, "record_finding");
                 assert!(reply.contains("suggestive"));
                 assert_eq!(args["evidence"], "exp_1", "the arguments reach the trace");
@@ -395,8 +394,12 @@ mod projection_matches_the_log {
                 "t:1",
                 "orchestrator",
                 1,
-                event_for("effect", "CallModel", &json!({"prompt_bytes": 4096, "step": 1}))
-                    .expect("a model call maps"),
+                event_for(
+                    "effect",
+                    "CallModel",
+                    &json!({"prompt_bytes": 4096, "step": 1}),
+                )
+                .expect("a model call maps"),
             ),
             Span::new("t", "t:2", "orchestrator", 1, event),
         ];

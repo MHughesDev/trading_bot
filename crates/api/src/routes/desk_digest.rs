@@ -816,8 +816,7 @@ pub async fn kill_switch_events(
     use axum::response::sse::{Event, KeepAlive, Sse};
 
     let store = monitor::store::MonitorStore::new(state.pg.clone());
-    let (tx, rx) =
-        tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(16);
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(16);
     tokio::spawn(async move {
         let mut seq: i64 = 1;
         // Listen first, then read: a trip that lands between the two is then

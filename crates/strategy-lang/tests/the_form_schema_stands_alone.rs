@@ -59,8 +59,14 @@ fn the_per_family_schema_is_too_large_for_a_tool_and_the_compact_one_is_not() {
     let full = form::document_schema_inlined().to_string().len();
     let compact = form::document_schema_compact().to_string().len();
     eprintln!("per-family schema: {full} bytes; compact schema: {compact} bytes");
-    assert!(compact < 40_000, "{compact} bytes is too large to list to every client");
-    assert!(full > 10 * compact, "the compact schema is no longer much smaller");
+    assert!(
+        compact < 40_000,
+        "{compact} bytes is too large to list to every client"
+    );
+    assert!(
+        full > 10 * compact,
+        "the compact schema is no longer much smaller"
+    );
 }
 
 /// What the compact schema keeps is the property the acceptance names: a feature

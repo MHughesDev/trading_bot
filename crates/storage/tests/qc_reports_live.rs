@@ -46,7 +46,10 @@ async fn a_graded_series_is_persisted_with_its_reasons_and_read_back() {
     let url = with_database(&base, &db);
     migrate::run_migrations(&url).await.unwrap();
     let c = connect(&url);
-    c.query("INSERT INTO venue_dim VALUES (1, 'coinbase', 1)").execute().await.unwrap();
+    c.query("INSERT INTO venue_dim VALUES (1, 'coinbase', 1)")
+        .execute()
+        .await
+        .unwrap();
     c.query(&format!("INSERT INTO instrument_symbol_dim VALUES (1005, 1, '{sym}', '2000-01-01', NULL, '2000-01-01')"))
         .execute()
         .await
@@ -67,10 +70,13 @@ async fn a_graded_series_is_persisted_with_its_reasons_and_read_back() {
             k = s + 120
         ));
     }
-    c.query(&format!("INSERT INTO market_bar VALUES {}", values.join(",")))
-        .execute()
-        .await
-        .expect("seed bars");
+    c.query(&format!(
+        "INSERT INTO market_bar VALUES {}",
+        values.join(",")
+    ))
+    .execute()
+    .await
+    .expect("seed bars");
 
     let pg = sqlx::PgPool::connect(&pg_url).await.unwrap();
     let cfg = QcConfig::default();
@@ -89,27 +95,54 @@ async fn a_graded_series_is_persisted_with_its_reasons_and_read_back() {
     .await
     .expect("graded and persisted");
     assert_eq!(report.bars_examined, 1240);
-    assert_eq!(report.graded.grade.as_str(), "D", "{:?}", report.graded.reasons);
+    assert_eq!(
+        report.graded.grade.as_str(),
+        "D",
+        "{:?}",
+        report.graded.reasons
+    );
 
     // Idempotent under one config version: the same window returns the same id.
     let (again, _) = qc_reports::grade_and_persist(
-        &pg, &url, &sym, "coinbase", "1m", 60, t0, t0 + Duration::days(1), 1440, &cfg,
+        &pg,
+        &url,
+        &sym,
+        "coinbase",
+        "1m",
+        60,
+        t0,
+        t0 + Duration::days(1),
+        1440,
+        &cfg,
     )
     .await
     .unwrap();
     assert_eq!(again, id);
 
     // Read back as the manifest reads it, reasons included.
-    let g = qc_reports::latest_grade(&pg, &sym, "1m").await.unwrap().unwrap();
+    let g = qc_reports::latest_grade(&pg, &sym, "1m")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(g.report_id, id);
     assert_eq!(g.grade, "D");
-    assert!(g.reasons.as_array().is_some_and(|r| !r.is_empty()), "{:?}", g.reasons);
+    assert!(
+        g.reasons.as_array().is_some_and(|r| !r.is_empty()),
+        "{:?}",
+        g.reasons
+    );
     assert_eq!(g.config_version, cfg.version());
-    assert!(qc_reports::latest_grade(&pg, "NEVER-GRADED", "1m").await.unwrap().is_none());
+    assert!(qc_reports::latest_grade(&pg, "NEVER-GRADED", "1m")
+        .await
+        .unwrap()
+        .is_none());
 
     // The platform's role can write and read the table.
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     sqlx::query("SELECT count(*) FROM data_qc_reports")
         .execute(&mut *tx)
         .await

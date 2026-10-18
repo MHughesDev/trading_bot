@@ -58,8 +58,14 @@ pub enum ExternalFeatureError {
     Feature(FeatureError),
     /// The input had nothing knowable at the decision instant (or its newest
     /// vintage reports missing). **Not zero**: the feature is absent for that bar.
-    InputMissing { input: String, at: DateTime<Utc> },
-    NotRepresentable { input: String, value: String },
+    InputMissing {
+        input: String,
+        at: DateTime<Utc>,
+    },
+    NotRepresentable {
+        input: String,
+        value: String,
+    },
 }
 
 impl std::fmt::Display for ExternalFeatureError {
@@ -127,13 +133,14 @@ impl ExternalFeature for Level {
                 input: input.name.clone(),
                 at: decision_time,
             }),
-            Resolved::Value { value, .. } => value
-                .to_f64()
-                .filter(|v| v.is_finite())
-                .ok_or_else(|| ExternalFeatureError::NotRepresentable {
-                    input: input.name.clone(),
-                    value: value.to_string(),
-                }),
+            Resolved::Value { value, .. } => {
+                value.to_f64().filter(|v| v.is_finite()).ok_or_else(|| {
+                    ExternalFeatureError::NotRepresentable {
+                        input: input.name.clone(),
+                        value: value.to_string(),
+                    }
+                })
+            }
         }
     }
 }
@@ -196,15 +203,22 @@ pub fn resolve_external(
         reason,
     };
     // One bar of window of its own, plus the source's lag in bars.
-    let lookback = required_lookback_bars(1, bar_secs, &inputs).map_err(|e| refuse(e.to_string()))?;
+    let lookback =
+        required_lookback_bars(1, bar_secs, &inputs).map_err(|e| refuse(e.to_string()))?;
     let def = FeatureDef {
         feature_id: name.to_owned(),
         version: VERSION,
-        code_hash: dataplane::content_hash(&("external_level", VERSION, SOURCE)).unwrap_or_default(),
+        code_hash: dataplane::content_hash(&("external_level", VERSION, SOURCE))
+            .unwrap_or_default(),
         lookback_bars: lookback,
         knowledge_lag_ms: u64::try_from(lag.as_millis()).unwrap_or(u64::MAX),
         output_dtype: "f64".into(),
-        asset_classes: vec!["equity".into(), "crypto".into(), "futures".into(), "fx".into()],
+        asset_classes: vec![
+            "equity".into(),
+            "crypto".into(),
+            "futures".into(),
+            "fx".into(),
+        ],
         deflators: vec![],
         info_class: InfoClass::MarketPublic,
     };
@@ -309,7 +323,9 @@ mod tests {
     }
 
     fn feat(name: &str, bar_secs: u32) -> Arc<dyn ExternalFeature> {
-        resolve_external(name, bar_secs).expect("declaration").expect("an external name")
+        resolve_external(name, bar_secs)
+            .expect("declaration")
+            .expect("an external name")
     }
 
     #[test]
@@ -325,7 +341,9 @@ mod tests {
         let f = feat("macro_dgs10", 3600);
         assert_eq!(
             f.inputs()[0].series,
-            ExternalSeries::Macro { series_id: "DGS10".into() }
+            ExternalSeries::Macro {
+                series_id: "DGS10".into()
+            }
         );
     }
 
@@ -337,7 +355,10 @@ mod tests {
         assert_eq!(feat("macro_dgs10", 3600).def().lookback_bars, 25);
         assert_eq!(feat("macro_dgs10", 86_400).def().lookback_bars, 2);
         assert_eq!(feat("macro_dgs10", 3600).def().knowledge_lag_ms, 86_399_000);
-        assert!(resolve_external("macro_dgs10", 0).is_err(), "a zero bar cannot carry a lag");
+        assert!(
+            resolve_external("macro_dgs10", 0).is_err(),
+            "a zero bar cannot carry a lag"
+        );
     }
 
     /// The registration check the module exists for: a feature that omits the lag is
@@ -357,7 +378,10 @@ mod tests {
     #[test]
     fn the_value_is_the_vintage_current_at_each_bars_decision_instant() {
         let rows_macro = dgs10();
-        let ext = ExternalInputs { macro_rows: &rows_macro, facts: &[] };
+        let ext = ExternalInputs {
+            macro_rows: &rows_macro,
+            facts: &[],
+        };
         let f = feat("macro_dgs10", 3600);
         // Bars from 11 June 00:00 for 3 days: before 12 June's revision is knowable
         // (end of the 12th) the original vintage, after it the revised one.
@@ -386,17 +410,26 @@ mod tests {
         let backtest = backfill_column_external(
             f.as_ref(),
             &rows,
-            &ExternalInputs { macro_rows: &all, facts: &[] },
+            &ExternalInputs {
+                macro_rows: &all,
+                facts: &[],
+            },
         );
         for (i, expected) in backtest.iter().enumerate() {
             let at = DateTime::from_timestamp_nanos(rows[i].ts_ns);
-            let live_rows: Vec<MacroObservation> =
-                all.iter().filter(|r| r.knowledge_time() <= at).cloned().collect();
+            let live_rows: Vec<MacroObservation> = all
+                .iter()
+                .filter(|r| r.knowledge_time() <= at)
+                .cloned()
+                .collect();
             let live = value_at_external(
                 f.as_ref(),
                 &rows,
                 i,
-                &ExternalInputs { macro_rows: &live_rows, facts: &[] },
+                &ExternalInputs {
+                    macro_rows: &live_rows,
+                    facts: &[],
+                },
             );
             assert_eq!(live, *expected, "bar {i}");
         }
@@ -405,11 +438,16 @@ mod tests {
     /// The windowed runtime must not compute an external feature from bars alone.
     #[test]
     fn the_windowed_runtime_refuses_an_external_name_and_says_where_it_lives() {
-        let err = crate::runtime::feature("macro_dgs10").err().expect("refused");
+        let err = crate::runtime::feature("macro_dgs10")
+            .err()
+            .expect("refused");
         let msg = err.to_string();
         assert!(msg.contains("external input"), "{msg}");
         assert!(msg.contains("resolve_external"), "{msg}");
-        assert!(!matches!(err, FeatureError::Unknown(_)), "it is known, just not windowed");
+        assert!(
+            !matches!(err, FeatureError::Unknown(_)),
+            "it is known, just not windowed"
+        );
     }
 
     /// Missing is absent, never zero.
@@ -418,7 +456,10 @@ mod tests {
         let f = feat("macro_dgs10", 3600);
         let rows = bars(Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(), 48);
         let err = evaluate_external(f.as_ref(), &rows, 40, &ExternalInputs::default()).unwrap_err();
-        assert!(matches!(err, ExternalFeatureError::InputMissing { .. }), "{err:?}");
+        assert!(
+            matches!(err, ExternalFeatureError::InputMissing { .. }),
+            "{err:?}"
+        );
     }
 
     /// The warm-up refusal is the same shape as a windowed feature's.
@@ -431,9 +472,15 @@ mod tests {
             f.as_ref(),
             &rows,
             10,
-            &ExternalInputs { macro_rows: &rows_macro, facts: &[] },
+            &ExternalInputs {
+                macro_rows: &rows_macro,
+                facts: &[],
+            },
         )
         .unwrap_err();
-        assert!(matches!(err, ExternalFeatureError::Feature(FeatureError::Insufficient { .. })));
+        assert!(matches!(
+            err,
+            ExternalFeatureError::Feature(FeatureError::Insufficient { .. })
+        ));
     }
 }

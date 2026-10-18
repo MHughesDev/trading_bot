@@ -87,7 +87,14 @@ pub fn newey_west_se(x: &[f64]) -> Option<f64> {
     let lags = ((4.0 * (nf / 100.0).powf(2.0 / 9.0)).floor() as usize).min(n - 2);
     let mean = x.iter().sum::<f64>() / nf;
     let e: Vec<f64> = x.iter().map(|v| v - mean).collect();
-    let gamma = |lag: usize| e[..n - lag].iter().zip(&e[lag..]).map(|(a, b)| a * b).sum::<f64>() / nf;
+    let gamma = |lag: usize| {
+        e[..n - lag]
+            .iter()
+            .zip(&e[lag..])
+            .map(|(a, b)| a * b)
+            .sum::<f64>()
+            / nf
+    };
     let mut total = gamma(0);
     for lag in 1..=lags {
         #[allow(clippy::cast_precision_loss)]
@@ -105,7 +112,10 @@ pub fn newey_west_se(x: &[f64]) -> Option<f64> {
 /// # Errors
 /// A family too small to have a theme, a candidate that is not usable, or a
 /// member whose error is not positive.
-pub fn theme_posterior(family: &[Vec<f64>], candidate: usize) -> Result<ThemePosterior, PosteriorError> {
+pub fn theme_posterior(
+    family: &[Vec<f64>],
+    candidate: usize,
+) -> Result<ThemePosterior, PosteriorError> {
     let mut means = Vec::new();
     let mut ses = Vec::new();
     let mut at = None;
@@ -114,7 +124,9 @@ pub fn theme_posterior(family: &[Vec<f64>], candidate: usize) -> Result<ThemePos
         if finite.len() < MIN_PERIODS {
             continue;
         }
-        let Some(se) = newey_west_se(&finite) else { continue };
+        let Some(se) = newey_west_se(&finite) else {
+            continue;
+        };
         if i == candidate {
             at = Some(means.len());
         }
@@ -134,7 +146,11 @@ pub fn theme_posterior(family: &[Vec<f64>], candidate: usize) -> Result<ThemePos
     #[allow(clippy::cast_precision_loss)]
     let m = usable as f64;
     let mean_of_means = means.iter().sum::<f64>() / m;
-    let var_means = means.iter().map(|x| (x - mean_of_means).powi(2)).sum::<f64>() / (m - 1.0);
+    let var_means = means
+        .iter()
+        .map(|x| (x - mean_of_means).powi(2))
+        .sum::<f64>()
+        / (m - 1.0);
     let mean_se2 = ses.iter().map(|s| s * s).sum::<f64>() / m;
     let tau2 = (var_means - mean_se2).max(0.0);
     let w: Vec<f64> = ses.iter().map(|s| 1.0 / (s * s + tau2)).collect();
@@ -199,7 +215,13 @@ pub fn apply(mut outcome: GateOutcome, family: &[Vec<f64>], candidate: usize) ->
                 "{}; theme posterior {:.6} [{:.6}, {:.6}] includes zero or is negative (raw mean \
                  {:.6} shrunk toward the family's {:.6} across {} candidates): the edge does not \
                  survive the winner's curse",
-                outcome.detail, p.post_mean, p.ci_lo, p.ci_hi, p.raw_mean, p.prior_mean, p.n_candidates
+                outcome.detail,
+                p.post_mean,
+                p.ci_lo,
+                p.ci_hi,
+                p.raw_mean,
+                p.prior_mean,
+                p.n_candidates
             );
             outcome.passed = false;
         }
@@ -241,9 +263,21 @@ mod tests {
         let fam = family(&[0.0, 0.0004, -0.0003, 0.0012, 0.0001], 400);
         let p = theme_posterior(&fam, 3).unwrap();
         assert_eq!(p.n_candidates, 5);
-        assert!((p.raw_mean - 0.001_131_236_473).abs() < 1e-11, "raw {}", p.raw_mean);
-        assert!((p.prior_mean - GOLDEN.0).abs() < 1e-9, "prior {}", p.prior_mean);
-        assert!((p.post_mean - GOLDEN.1).abs() < 1e-9, "post {}", p.post_mean);
+        assert!(
+            (p.raw_mean - 0.001_131_236_473).abs() < 1e-11,
+            "raw {}",
+            p.raw_mean
+        );
+        assert!(
+            (p.prior_mean - GOLDEN.0).abs() < 1e-9,
+            "prior {}",
+            p.prior_mean
+        );
+        assert!(
+            (p.post_mean - GOLDEN.1).abs() < 1e-9,
+            "post {}",
+            p.post_mean
+        );
         assert!((p.ci_lo - GOLDEN.2).abs() < 1e-8, "lo {}", p.ci_lo);
         assert!((p.ci_hi - GOLDEN.3).abs() < 1e-8, "hi {}", p.ci_hi);
     }
@@ -258,10 +292,17 @@ mod tests {
 
     #[test]
     fn a_planted_winner_among_noise_is_pulled_toward_the_theme_and_never_past_it() {
-        let mut fam = family(&[0.0, 0.0001, -0.0001, 0.00005, 0.0, -0.00005, 0.0001, 0.0], 300);
+        let mut fam = family(
+            &[0.0, 0.0001, -0.0001, 0.00005, 0.0, -0.00005, 0.0001, 0.0],
+            300,
+        );
         fam[2] = member(0.0006, 2.0, 300);
         let p = theme_posterior(&fam, 2).unwrap();
-        let (lo, hi) = if p.prior_mean < p.raw_mean { (p.prior_mean, p.raw_mean) } else { (p.raw_mean, p.prior_mean) };
+        let (lo, hi) = if p.prior_mean < p.raw_mean {
+            (p.prior_mean, p.raw_mean)
+        } else {
+            (p.raw_mean, p.prior_mean)
+        };
         assert!(p.post_mean >= lo - 1e-15 && p.post_mean <= hi + 1e-15);
         assert!((p.post_mean - p.prior_mean).abs() <= (p.raw_mean - p.prior_mean).abs());
     }
@@ -269,7 +310,10 @@ mod tests {
     #[test]
     fn a_family_too_small_for_a_theme_is_not_applicable_rather_than_failing() {
         let fam = family(&[0.001, 0.0], 300);
-        assert!(matches!(theme_posterior(&fam, 0), Err(PosteriorError::FamilyTooSmall { usable: 2 })));
+        assert!(matches!(
+            theme_posterior(&fam, 0),
+            Err(PosteriorError::FamilyTooSmall { usable: 2 })
+        ));
         assert!(matches!(clause(&fam, 0), Clause::NotApplicable(_)));
     }
 
@@ -278,28 +322,52 @@ mod tests {
         let mut fam = family(&[0.0, 0.0001, -0.0001, 0.0002], 300);
         fam.push(member(0.01, 0.0, MIN_PERIODS - 1));
         let p = theme_posterior(&fam, 0).unwrap();
-        assert_eq!(p.n_candidates, 4, "the 59-period member did not enter the family");
-        assert!(matches!(theme_posterior(&fam, 4), Err(PosteriorError::CandidateNotUsable(4))));
+        assert_eq!(
+            p.n_candidates, 4,
+            "the 59-period member did not enter the family"
+        );
+        assert!(matches!(
+            theme_posterior(&fam, 4),
+            Err(PosteriorError::CandidateNotUsable(4))
+        ));
     }
 
     fn passing_gate() -> GateOutcome {
-        GateOutcome::decided_pub(8, "deflated_sharpe", true, 0.97, 0.95, "deflated Sharpe ratio 0.9700 (needs ≥ 0.9500)")
+        GateOutcome::decided_pub(
+            8,
+            "deflated_sharpe",
+            true,
+            0.97,
+            0.95,
+            "deflated Sharpe ratio 0.9700 (needs ≥ 0.9500)",
+        )
     }
 
     #[test]
     fn the_clause_can_fail_a_passing_gate_naming_the_interval_and_never_rescues_a_failing_one() {
         // Noise everywhere: the best member's shrunk interval includes zero.
-        let fam = family(&[0.0001, 0.0, -0.0001, 0.00005, 0.0, -0.00005, 0.00002, 0.0], 300);
+        let fam = family(
+            &[0.0001, 0.0, -0.0001, 0.00005, 0.0, -0.00005, 0.00002, 0.0],
+            300,
+        );
         let failed = apply(passing_gate(), &fam, 0);
         assert!(!failed.passed);
         assert!(failed.detail.contains("includes zero"), "{}", failed.detail);
-        assert!(failed.detail.contains("0.9700"), "the original DSR reading is kept: {}", failed.detail);
+        assert!(
+            failed.detail.contains("0.9700"),
+            "the original DSR reading is kept: {}",
+            failed.detail
+        );
 
         let mut already_failing = passing_gate();
         already_failing.passed = false;
         assert!(!apply(already_failing, &fam, 0).passed);
 
-        let mut inconclusive = GateOutcome::inconclusive_pub(8, "deflated_sharpe", "no deflated Sharpe ratio was computed");
+        let mut inconclusive = GateOutcome::inconclusive_pub(
+            8,
+            "deflated_sharpe",
+            "no deflated Sharpe ratio was computed",
+        );
         inconclusive = apply(inconclusive, &fam, 0);
         assert!(inconclusive.inconclusive && !inconclusive.passed);
     }
@@ -309,7 +377,11 @@ mod tests {
         let fam = family(&[0.001, 0.0], 300);
         let out = apply(passing_gate(), &fam, 0);
         assert!(out.passed, "DSR alone decides when there is no theme");
-        assert!(out.detail.contains("theme posterior not applied"), "{}", out.detail);
+        assert!(
+            out.detail.contains("theme posterior not applied"),
+            "{}",
+            out.detail
+        );
     }
 
     #[test]

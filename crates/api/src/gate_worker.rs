@@ -113,10 +113,18 @@ impl GateAdvanceWorker {
             .trial
             .as_ref()
             .map(|t| t.tenant_id().to_string())
-            .ok_or_else(|| logic("unregistered_trial", "gate_advance needs a registered trial".into()))?;
-        let user: Uuid = tenant
-            .parse()
-            .map_err(|_| logic("tenant_is_not_a_user", format!("tenant `{tenant}` is not a user id")))?;
+            .ok_or_else(|| {
+                logic(
+                    "unregistered_trial",
+                    "gate_advance needs a registered trial".into(),
+                )
+            })?;
+        let user: Uuid = tenant.parse().map_err(|_| {
+            logic(
+                "tenant_is_not_a_user",
+                format!("tenant `{tenant}` is not a user id"),
+            )
+        })?;
         let campaign_id: Uuid = manifest
             .get("campaign_id")
             .and_then(Value::as_str)
@@ -317,10 +325,12 @@ pub fn paper_from_rows(
     kill_criteria: &str,
 ) -> Option<backtest::gates::evaluators::PaperInputs> {
     let evidence = domain::forward::Gate15Evidence::from_observations(rows).ok()?;
-    Some(backtest::gates::evaluators::PaperInputs::from_forward_evidence(
-        &evidence,
-        !kill_criteria.trim().is_empty(),
-    ))
+    Some(
+        backtest::gates::evaluators::PaperInputs::from_forward_evidence(
+            &evidence,
+            !kill_criteria.trim().is_empty(),
+        ),
+    )
 }
 
 /// How far before a series' first observation the labeller's history is read.
@@ -851,13 +861,21 @@ impl Worker for GateAdvanceWorker {
         // `research::random_arm::gate_check` (through `arm_gate`); the gate stack only applies
         // the answer, because `backtest` cannot depend on the crates that own the arm.
         let arm_requirement = match req.campaign_id {
-            Some(campaign) => Some(match crate::knowledge_routes::arm_gate(&self.pg, campaign).await {
-                Ok(()) => backtest::gates::random_arm_gate::ArmRequirement::met(campaign.to_string()),
-                Err(why) => backtest::gates::random_arm_gate::ArmRequirement::refused(campaign.to_string(), why),
-            }),
+            Some(campaign) => Some(
+                match crate::knowledge_routes::arm_gate(&self.pg, campaign).await {
+                    Ok(()) => {
+                        backtest::gates::random_arm_gate::ArmRequirement::met(campaign.to_string())
+                    }
+                    Err(why) => backtest::gates::random_arm_gate::ArmRequirement::refused(
+                        campaign.to_string(),
+                        why,
+                    ),
+                },
+            ),
             None => None,
         };
-        let verdict = backtest::gates::random_arm_gate::apply_to_stack(verdict, arm_requirement.as_ref());
+        let verdict =
+            backtest::gates::random_arm_gate::apply_to_stack(verdict, arm_requirement.as_ref());
         let ids = record_stack(&led, &tenant, &profile, &evidence, &verdict)
             .map_err(|e| JobError::infrastructure(format!("recording the gate stack: {e}")))?;
 
@@ -1067,10 +1085,16 @@ mod tests {
             m
         };
         assert!(parse(&base(Value::Null)).unwrap().model_bindings.is_empty());
-        let ok = parse(&base(json!([{"model_id": "vol", "version": 2, "uses": ["vol", "tail_risk"]}]))).unwrap();
+        let ok = parse(&base(
+            json!([{"model_id": "vol", "version": 2, "uses": ["vol", "tail_risk"]}]),
+        ))
+        .unwrap();
         assert_eq!(ok.model_bindings[0].label(), "vol@2");
         assert_eq!(ok.model_bindings[0].uses.len(), 2);
-        assert!(parse(&base(json!([{"model_id": "vol", "version": 2, "uses": ["magic"]}]))).is_err());
+        assert!(parse(&base(
+            json!([{"model_id": "vol", "version": 2, "uses": ["magic"]}])
+        ))
+        .is_err());
         assert!(parse(&base(json!("vol@2"))).is_err());
     }
 

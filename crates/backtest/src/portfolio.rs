@@ -246,11 +246,8 @@ pub fn run_portfolio(
         at(first_open),
         r.fill_policy,
     );
-    let limits: BTreeMap<String, InstrumentLimits> = r
-        .specs
-        .iter()
-        .map(|(m, (_, l))| (m.clone(), *l))
-        .collect();
+    let limits: BTreeMap<String, InstrumentLimits> =
+        r.specs.iter().map(|(m, (_, l))| (m.clone(), *l)).collect();
     let risk = SimulatedRisk::new(r.limits.clone(), limits, Some(r.strategy_id.clone()));
     let mut orders = SimOrders::portfolio(venue, risk, r.asset_class, r.strategy_id.clone());
 

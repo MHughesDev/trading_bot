@@ -260,7 +260,12 @@ fn describe_input(i: &Input) -> (&'static str, Value) {
 /// finished and its answer is the result (S-2.11).
 #[must_use]
 pub fn long_job_handle(name: &str, arguments: &Map<String, Value>, raw: &Value) -> Option<String> {
-    let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).filter(|x| !x.is_empty()).map(str::to_string);
+    let s = |v: &Value, k: &str| {
+        v.get(k)
+            .and_then(Value::as_str)
+            .filter(|x| !x.is_empty())
+            .map(str::to_string)
+    };
     match name {
         "run_sweep" if raw.get("timed_out").and_then(Value::as_bool) == Some(true) => {
             s(raw, "sweep_id").map(|id| format!("sweep:{id}"))
@@ -272,11 +277,17 @@ pub fn long_job_handle(name: &str, arguments: &Map<String, Value>, raw: &Value) 
                 .map(|id| format!("backtest:{id}"))
         }
         "train_model" if raw.get("status").and_then(Value::as_str) == Some("still_running") => {
-            Some(format!("training:{}:{}", s(raw, "model_id")?, s(raw, "run_id")?))
+            Some(format!(
+                "training:{}:{}",
+                s(raw, "model_id")?,
+                s(raw, "run_id")?
+            ))
         }
-        "run_study" if raw.get("detached").and_then(Value::as_bool) == Some(true) => {
-            Some(format!("study:{}:{}", s(raw, "experiment_id")?, s(raw, "study_id")?))
-        }
+        "run_study" if raw.get("detached").and_then(Value::as_bool) == Some(true) => Some(format!(
+            "study:{}:{}",
+            s(raw, "experiment_id")?,
+            s(raw, "study_id")?
+        )),
         _ => None,
     }
 }
@@ -534,7 +545,14 @@ impl Recorder {
 
     /// Record which retrieved entries this call's evidence names (S-6.10).
     async fn record_citations(&self, tool: &str, args: &Value) {
-        crate::retrieval_store::record_citations(&self.pg, self.run_id, &self.retrieved, tool, args).await;
+        crate::retrieval_store::record_citations(
+            &self.pg,
+            self.run_id,
+            &self.retrieved,
+            tool,
+            args,
+        )
+        .await;
     }
 
     /// Pick the counters back up after a restart (S-2.6).
@@ -791,8 +809,11 @@ impl Recorder {
         self.prompt_tokens += i64::try_from(usage.prompt_tokens()).unwrap_or(i64::MAX);
         self.est_prompt_tokens += i64::from(estimated);
         self.cache_read_tokens += i64::try_from(usage.cache_read_input_tokens).unwrap_or(i64::MAX);
-        self.append("usage", usage_note(step, usage, estimated, latency_ms, usd_tenth_cents, layers))
-            .await;
+        self.append(
+            "usage",
+            usage_note(step, usage, estimated, latency_ms, usd_tenth_cents, layers),
+        )
+        .await;
         let _ = sqlx::query(
             "UPDATE agent_runs SET iterations = $2, tokens_in = $3, tokens_out = $4
              WHERE run_id = $1",
@@ -1882,9 +1903,12 @@ impl Pump {
             self.delivered_directive = now;
         }
         if !self.skills_resident.is_empty() {
-            let (cursor, notices) =
-                skills_mount::pending_notices(&self.pg, self.skill_notice_cursor, &self.skills_resident)
-                    .await;
+            let (cursor, notices) = skills_mount::pending_notices(
+                &self.pg,
+                self.skill_notice_cursor,
+                &self.skills_resident,
+            )
+            .await;
             self.skill_notice_cursor = cursor;
             for text in notices {
                 self.push_turn(harness::transcript::Turn::User {
@@ -1902,7 +1926,10 @@ impl Pump {
         if !self.native || text.len() <= 200 {
             return None;
         }
-        let n = self.transcript.as_ref().map_or(0, harness::transcript::Transcript::len);
+        let n = self
+            .transcript
+            .as_ref()
+            .map_or(0, harness::transcript::Transcript::len);
         let path = format!("work/transcript/{}-{n}-{name}.txt", self.run_id);
         let args = Map::from_iter([
             ("path".to_string(), json!(path)),
@@ -2114,7 +2141,9 @@ impl Pump {
             match self.cancel.hold_at_boundary().await {
                 super::control::Hold::Proceed => {}
                 super::control::Hold::Resumed => {
-                    self.rec.append("status", json!({ "phase": "resumed" })).await;
+                    self.rec
+                        .append("status", json!({ "phase": "resumed" }))
+                        .await;
                 }
                 super::control::Hold::Stop(reason) => {
                     self.rec
@@ -2188,7 +2217,10 @@ impl Pump {
                     arguments,
                     risk,
                     ..
-                } => self.execute_tool(step, name, namespace, arguments, risk).await,
+                } => {
+                    self.execute_tool(step, name, namespace, arguments, risk)
+                        .await
+                }
                 Effect::AskHuman {
                     step,
                     tool,
@@ -2274,9 +2306,7 @@ impl Pump {
         // The no-progress watchdog (AGENT-010 §6; S-2.12). Idle, not elapsed: a
         // run suspended on a sweep is not here at all, so only a call that is
         // genuinely hung reaches the limit.
-        let idle = Duration::from_secs(
-            self.spec.profile.orchestration.idle_timeout_s.max(1),
-        );
+        let idle = Duration::from_secs(self.spec.profile.orchestration.idle_timeout_s.max(1));
         let reply = match tokio::time::timeout(idle, self.client.chat(&req)).await {
             Ok(r) => r,
             Err(_) => {
@@ -2451,7 +2481,12 @@ impl Pump {
 
         // A write the run already made is answered from its record (S-1.19).
         let key = (risk != harness::registry::Risk::Read).then(|| {
-            mcp_server_lib::idempotency::key(self.run_id, step, &name, &Value::Object(arguments.clone()))
+            mcp_server_lib::idempotency::key(
+                self.run_id,
+                step,
+                &name,
+                &Value::Object(arguments.clone()),
+            )
         });
         let recorded = match &key {
             Some(k) => self.recorded_result(k).await,
@@ -2620,8 +2655,7 @@ impl Pump {
         } else if name == "define_campaign" {
             let mut with_brief = arguments;
             with_brief.insert("run_id".into(), json!(self.run_id));
-            let query =
-                harness::context::select::Query::from_state(self.governor.working(), step);
+            let query = harness::context::select::Query::from_state(self.governor.working(), step);
             let brief = subrun::assemble(
                 self.governor.context_store(),
                 &query,
@@ -2855,7 +2889,15 @@ pub async fn run(
         .await
         .unwrap_or(0);
 
-    let mcp_ctx = run_context(&pg, &params.api_base, &params.service_token, params.run_id, params.demand, params.workflow).await;
+    let mcp_ctx = run_context(
+        &pg,
+        &params.api_base,
+        &params.service_token,
+        params.run_id,
+        params.demand,
+        params.workflow,
+    )
+    .await;
 
     // ── The run's spec: what replay rebuilds it from ────────────────────────
     let brief = load_brief(
@@ -3054,14 +3096,18 @@ fn input_from_row(kind: &str, p: &Value) -> Option<Input> {
             output: s("output")?,
             source: s("source")?,
         },
-        "ToolError" => Input::ToolError { detail: s("detail")? },
+        "ToolError" => Input::ToolError {
+            detail: s("detail")?,
+        },
         "Approval" => Input::Approval {
             granted: b("granted")?,
             note: s("note").unwrap_or_default(),
         },
         "Steer" => Input::Steer { text: s("text")? },
         "Pin" => Input::Pin { tool: s("tool")? },
-        "JobAccepted" => Input::JobAccepted { job_id: s("job_id")? },
+        "JobAccepted" => Input::JobAccepted {
+            job_id: s("job_id")?,
+        },
         "JobDone" => Input::JobDone {
             job_id: s("job_id")?,
             output: s("output")?,
@@ -3082,10 +3128,7 @@ fn input_from_row(kind: &str, p: &Value) -> Option<Input> {
 /// had. A divergence returns the row it happened at and nothing is executed.
 ///
 /// Returns the loop, the native transcript, and the last batch (the pending one).
-pub(crate) fn replay(
-    spec: &RunSpec,
-    rows: &[super::resume::LogRow],
-) -> Result<Replayed, String> {
+pub(crate) fn replay(spec: &RunSpec, rows: &[super::resume::LogRow]) -> Result<Replayed, String> {
     let registry = bridge::registry_with_workspace().map_err(|e| e.to_string())?;
     let mut governor = build_governor(spec, registry);
     let mut transcript: Option<harness::transcript::Transcript> = None;
@@ -3111,9 +3154,8 @@ pub(crate) fn replay(
                     transcript = Some(harness::transcript::Transcript::new(text));
                 }
                 "Turn" => {
-                    let turn: harness::transcript::Turn =
-                        serde_json::from_value(r.payload.clone())
-                            .map_err(|e| format!("transcript turn at seq {} unreadable: {e}", r.seq))?;
+                    let turn: harness::transcript::Turn = serde_json::from_value(r.payload.clone())
+                        .map_err(|e| format!("transcript turn at seq {} unreadable: {e}", r.seq))?;
                     if let Some(t) = transcript.as_mut() {
                         t.push_turn(turn);
                     }
@@ -3151,9 +3193,7 @@ pub(crate) fn replay(
                 // The one legitimate gap: a crash after the input was logged and
                 // before its batch was. Nothing after it ran, so the rebuilt
                 // batch is simply the next thing to do — and it is not logged yet.
-                let at_end = rows[i..]
-                    .iter()
-                    .all(|x| x.direction == "state");
+                let at_end = rows[i..].iter().all(|x| x.direction == "state");
                 if recorded.is_empty() && at_end {
                     last = produced;
                     last_logged = false;
@@ -3214,7 +3254,15 @@ pub async fn resume(
 ) -> Resumed {
     let rows = match load_log(&pg, params.run_id).await {
         Ok(r) => r,
-        Err(e) => return interrupt(&pg, params.run_id, &format!("the effect log could not be read: {e}"), params.job_done.as_ref()).await,
+        Err(e) => {
+            return interrupt(
+                &pg,
+                params.run_id,
+                &format!("the effect log could not be read: {e}"),
+                params.job_done.as_ref(),
+            )
+            .await
+        }
     };
     let decision = super::resume::decide_for_resume(&rows, HARNESS_VERSION, EFFECT_LOG_SCHEMA);
     let (inputs, pending, version_changed) = match decision {
@@ -3260,7 +3308,12 @@ pub async fn resume(
         }
     };
 
-    let mut rec = Recorder::new(pg.clone(), params.run_id, params.user_id, params.exposure_out.clone());
+    let mut rec = Recorder::new(
+        pg.clone(),
+        params.run_id,
+        params.user_id,
+        params.exposure_out.clone(),
+    );
     rec.restore(&rows).await;
     rec.retrieved = spec
         .brief
@@ -3394,9 +3447,23 @@ pub async fn resume(
         // A write that may or may not have landed. Answered from the durable
         // record if it did; never re-run.
         Some(p) if p.kind == "ExecuteTool" && !p.idempotent => {
-            let name = p.payload.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
-            let step = p.payload.get("step").and_then(Value::as_u64).and_then(|s| u32::try_from(s).ok()).unwrap_or(0);
-            let args = p.payload.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let name = p
+                .payload
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let step = p
+                .payload
+                .get("step")
+                .and_then(Value::as_u64)
+                .and_then(|s| u32::try_from(s).ok())
+                .unwrap_or(0);
+            let args = p
+                .payload
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
             let key = mcp_server_lib::idempotency::key(params.run_id, step, &name, &args);
             let input = answer_interrupted_write(&p, pump.recorded_result(&key).await);
             if pump.transcript.is_some() {
@@ -3468,13 +3535,15 @@ pub(crate) async fn load_log(
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(seq, direction, kind, payload, harness_version)| super::resume::LogRow {
-            seq,
-            direction,
-            kind,
-            payload,
-            harness_version,
-        })
+        .map(
+            |(seq, direction, kind, payload, harness_version)| super::resume::LogRow {
+                seq,
+                direction,
+                kind,
+                payload,
+                harness_version,
+            },
+        )
         .collect())
 }
 
@@ -3959,7 +4028,11 @@ mod tests {
         assert_eq!(layers["body"], 200);
         assert_eq!(layers["output"], 512);
         assert!(layers["schemas"].as_u64().is_some());
-        let u = llm::Usage { input_tokens: 10, output_tokens: 5, ..Default::default() };
+        let u = llm::Usage {
+            input_tokens: 10,
+            output_tokens: 5,
+            ..Default::default()
+        };
         let n = usage_note(3, &u, 300, 42, Some(7), layers.clone());
         assert_eq!(n["usd_tenth_cents"], 7);
         assert_eq!(n["layers"], layers);
@@ -4063,7 +4136,6 @@ mod tests {
         }
     }
 
-
     // ── Resume (S-2.6) ──────────────────────────────────────────────────────
 
     fn frontier_spec(goal: &str) -> RunSpec {
@@ -4107,7 +4179,12 @@ mod tests {
     /// the batch it produced. Returns the rows and the live loop.
     fn scripted(spec: &RunSpec, inputs: Vec<Input>) -> (Vec<super::super::resume::LogRow>, Loop) {
         let mut l = build_governor(spec, bridge::registry_with_workspace().unwrap());
-        let mut rows = vec![row(1, "state", "RunSpec", serde_json::to_value(spec).unwrap())];
+        let mut rows = vec![row(
+            1,
+            "state",
+            "RunSpec",
+            serde_json::to_value(spec).unwrap(),
+        )];
         for input in inputs {
             let n = i32::try_from(rows.len()).unwrap() + 1;
             rows.push(row(
@@ -4178,7 +4255,10 @@ mod tests {
             .iter()
             .filter(|r| r.kind == "ExecuteTool" && r.payload["name"] == "create_experiment")
             .count();
-        assert_eq!(before, 1, "the run decided the write once before it died: {rows:?}");
+        assert_eq!(
+            before, 1,
+            "the run decided the write once before it died: {rows:?}"
+        );
 
         let super::super::resume::Resume::Replay { pending, .. } =
             super::super::resume::decide(&rows, HARNESS_VERSION)
@@ -4193,7 +4273,9 @@ mod tests {
         let mut replayed = replay(&spec, &rows).expect("the log replays");
         assert!(replayed.logged, "the trailing batch is already in the log");
         let input = answer_interrupted_write(&pending, None);
-        assert!(matches!(&input, Input::ToolError { detail } if detail.contains("because it writes")));
+        assert!(
+            matches!(&input, Input::ToolError { detail } if detail.contains("because it writes"))
+        );
         let after = replayed.governor.next(input);
         assert_eq!(executes(&after, "create_experiment"), 0, "{after:?}");
 
@@ -4228,12 +4310,18 @@ mod tests {
             .find(|r| r.kind == "WorkingState")
             .unwrap();
         tampered.payload["hash"] = json!("not-the-state");
-        let err = replay(&spec, &rows).err().expect("a divergent state is refused");
+        let err = replay(&spec, &rows)
+            .err()
+            .expect("a divergent state is refused");
         assert!(err.contains("diverged"), "{err}");
 
         // And an effect the log recorded that this harness would not produce.
         let (mut rows, _) = scripted(&spec, vec![Input::Admission(hardware::Admission::Admit)]);
-        let last = rows.iter_mut().rev().find(|r| r.direction == "effect").unwrap();
+        let last = rows
+            .iter_mut()
+            .rev()
+            .find(|r| r.direction == "effect")
+            .unwrap();
         last.kind = "ExecuteTool".into();
         assert!(replay(&spec, &rows).is_err());
     }
@@ -4274,7 +4362,9 @@ mod tests {
                 granted: true,
                 note: "ok".into(),
             },
-            Input::Steer { text: "only 1h".into() },
+            Input::Steer {
+                text: "only 1h".into(),
+            },
             Input::Pin {
                 tool: "get_bars".into(),
             },
@@ -4302,19 +4392,38 @@ mod tests {
     fn a_long_tool_still_running_names_the_job_the_watcher_polls() {
         let none = Map::new();
         let training = json!({"status": "still_running", "model_id": "m1", "run_id": "r9"});
-        assert_eq!(long_job_handle("train_model", &none, &training).as_deref(), Some("training:m1:r9"));
+        assert_eq!(
+            long_job_handle("train_model", &none, &training).as_deref(),
+            Some("training:m1:r9")
+        );
         // A finished training run is a result, not a handle.
         let done = json!({"status": "succeeded", "model_id": "m1", "run_id": "r9"});
         assert_eq!(long_job_handle("train_model", &none, &done), None);
-        let study = json!({"detached": true, "experiment_id": "e1", "study_id": "s2", "status": "running"});
-        assert_eq!(long_job_handle("run_study", &none, &study).as_deref(), Some("study:e1:s2"));
-        assert_eq!(long_job_handle("run_study", &none, &json!({"study_id": "s2"})), None);
+        let study =
+            json!({"detached": true, "experiment_id": "e1", "study_id": "s2", "status": "running"});
+        assert_eq!(
+            long_job_handle("run_study", &none, &study).as_deref(),
+            Some("study:e1:s2")
+        );
+        assert_eq!(
+            long_job_handle("run_study", &none, &json!({"study_id": "s2"})),
+            None
+        );
         let sweep = json!({"timed_out": true, "sweep_id": "w"});
-        assert_eq!(long_job_handle("run_sweep", &none, &sweep).as_deref(), Some("sweep:w"));
-        assert_eq!(long_job_handle("run_sweep", &none, &json!({"sweep_id": "w"})), None);
+        assert_eq!(
+            long_job_handle("run_sweep", &none, &sweep).as_deref(),
+            Some("sweep:w")
+        );
+        assert_eq!(
+            long_job_handle("run_sweep", &none, &json!({"sweep_id": "w"})),
+            None
+        );
         let mut args = Map::new();
         args.insert("backtest_id".into(), json!("b1"));
-        assert_eq!(long_job_handle("wait_for_backtest", &args, &json!({"timed_out": true})).as_deref(), Some("backtest:b1"));
+        assert_eq!(
+            long_job_handle("wait_for_backtest", &args, &json!({"timed_out": true})).as_deref(),
+            Some("backtest:b1")
+        );
         // A tool that is not long never suspends a run.
         assert_eq!(long_job_handle("get_bars", &none, &training), None);
     }
@@ -4322,11 +4431,28 @@ mod tests {
     #[test]
     fn only_a_started_campaign_suspends_its_run() {
         let ok = json!({"campaign_id": "7d1c", "job_id": "job_1"});
-        assert_eq!(campaign_handle("define_campaign", false, &ok).as_deref(), Some("campaign:7d1c"));
-        assert_eq!(campaign_handle("define_campaign", true, &ok), None, "an error started nothing");
-        assert_eq!(campaign_handle("get_campaign", false, &ok), None, "a read is not a start");
-        assert_eq!(campaign_handle("define_campaign", false, &json!({"error": "x"})), None);
-        assert_eq!(campaign_handle("define_campaign", false, &json!({"campaign_id": " "})), None);
+        assert_eq!(
+            campaign_handle("define_campaign", false, &ok).as_deref(),
+            Some("campaign:7d1c")
+        );
+        assert_eq!(
+            campaign_handle("define_campaign", true, &ok),
+            None,
+            "an error started nothing"
+        );
+        assert_eq!(
+            campaign_handle("get_campaign", false, &ok),
+            None,
+            "a read is not a start"
+        );
+        assert_eq!(
+            campaign_handle("define_campaign", false, &json!({"error": "x"})),
+            None
+        );
+        assert_eq!(
+            campaign_handle("define_campaign", false, &json!({"campaign_id": " "})),
+            None
+        );
     }
 
     /// A rate limit waits what the provider asked, capped; anything else backs
@@ -4561,7 +4687,9 @@ mod tests {
         let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
             "postgres://postgres:postgres@127.0.0.1:5433/s_runtime_scratch".into()
         });
-        PgPool::connect(&url).await.expect("the scratch database is up")
+        PgPool::connect(&url)
+            .await
+            .expect("the scratch database is up")
     }
 
     /// A user, a conversation and an `agent_runs` row, and the rows of a log
@@ -4665,11 +4793,20 @@ mod tests {
         let (_, rows) = a_log_cut_after_the_approved_write();
         let (user, convo, run) = a_logged_run(&pg, &rows, HARNESS_VERSION).await;
 
-        let out = resume(pg.clone(), client(&f), params(&f, user, convo, run, None), control()).await;
+        let out = resume(
+            pg.clone(),
+            client(&f),
+            params(&f, user, convo, run, None),
+            control(),
+        )
+        .await;
         assert!(matches!(out, Resumed::Ran(_)), "{out:?}");
 
         let sent = f.provider_bodies.lock().unwrap().clone();
-        assert!(!sent.is_empty(), "the model was asked what to do about the interruption");
+        assert!(
+            !sent.is_empty(),
+            "the model was asked what to do about the interruption"
+        );
         let all = serde_json::to_string(&sent).unwrap();
         assert!(
             all.contains("because it writes"),
@@ -4715,7 +4852,13 @@ mod tests {
         .await
         .unwrap();
 
-        let out = resume(pg.clone(), client(&f), params(&f, user, convo, run, None), control()).await;
+        let out = resume(
+            pg.clone(),
+            client(&f),
+            params(&f, user, convo, run, None),
+            control(),
+        )
+        .await;
         assert!(matches!(out, Resumed::Ran(_)), "{out:?}");
         let all = serde_json::to_string(&*f.provider_bodies.lock().unwrap()).unwrap();
         assert!(
@@ -4723,7 +4866,12 @@ mod tests {
             "the recorded answer did not reach the model: {all}"
         );
         assert!(!all.contains("because it writes"));
-        assert!(!f.platform_paths.lock().unwrap().iter().any(|p| p.contains("experiments")));
+        assert!(!f
+            .platform_paths
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| p.contains("experiments")));
     }
 
     /// A mid-step run written by another harness version is interrupted, with its
@@ -4735,7 +4883,13 @@ mod tests {
         let f = fakes().await;
         let (_, rows) = a_log_cut_after_the_approved_write();
         let (user, convo, run) = a_logged_run(&pg, &rows, "0.0.0-older").await;
-        let out = resume(pg.clone(), client(&f), params(&f, user, convo, run, None), control()).await;
+        let out = resume(
+            pg.clone(),
+            client(&f),
+            params(&f, user, convo, run, None),
+            control(),
+        )
+        .await;
         assert!(matches!(out, Resumed::Interrupted(_)), "{out:?}");
         let (status, error): (String, Option<String>) =
             sqlx::query_as("SELECT status, error FROM agent_runs WHERE run_id = $1")
@@ -4745,13 +4899,22 @@ mod tests {
                 .unwrap();
         assert_eq!(status, "interrupted");
         assert!(error.unwrap_or_default().starts_with("interrupted:"));
-        assert_eq!(f.provider_calls.load(Ordering::SeqCst), 0, "an interrupted run asked the model");
-        let kept: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_effect_log WHERE run_id = $1")
-            .bind(run)
-            .fetch_one(&pg)
-            .await
-            .unwrap();
-        assert_eq!(kept as usize, rows.len(), "the log is the evidence and it is kept");
+        assert_eq!(
+            f.provider_calls.load(Ordering::SeqCst),
+            0,
+            "an interrupted run asked the model"
+        );
+        let kept: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM agent_effect_log WHERE run_id = $1")
+                .bind(run)
+                .fetch_one(&pg)
+                .await
+                .unwrap();
+        assert_eq!(
+            kept as usize,
+            rows.len(),
+            "the log is the evidence and it is kept"
+        );
     }
 
     /// A log with no `RunSpec` (written before resume existed) cannot be rebuilt:
@@ -4773,7 +4936,13 @@ mod tests {
             output: r#"{"status":"completed","best":1.4}"#.into(),
             ok: true,
         };
-        let out = resume(pg.clone(), client(&f), params(&f, user, convo, run, Some(done)), control()).await;
+        let out = resume(
+            pg.clone(),
+            client(&f),
+            params(&f, user, convo, run, Some(done)),
+            control(),
+        )
+        .await;
         assert!(matches!(out, Resumed::Interrupted(_)), "{out:?}");
         let attached: Option<Value> = sqlx::query_scalar(
             "SELECT content_json FROM agent_messages WHERE run_id = $1 AND kind = 'job_result'",
@@ -4807,14 +4976,22 @@ mod tests {
             vec![
                 Input::Admission(hardware::Admission::Admit),
                 Input::ModelReply { raw: sweep },
-                Input::Approval { granted: true, note: String::new() },
-                Input::JobAccepted { job_id: "sweep:7".into() },
+                Input::Approval {
+                    granted: true,
+                    note: String::new(),
+                },
+                Input::JobAccepted {
+                    job_id: "sweep:7".into(),
+                },
             ],
         );
         assert!(
             rows.iter().any(|r| r.kind == "Await"),
             "the loop did not suspend on the handle: {:?}",
-            rows.iter().filter(|r| r.kind == "Note").map(|r| r.payload.to_string().chars().take(300).collect::<String>()).collect::<Vec<_>>()
+            rows.iter()
+                .filter(|r| r.kind == "Note")
+                .map(|r| r.payload.to_string().chars().take(300).collect::<String>())
+                .collect::<Vec<_>>()
         );
         let n = i32::try_from(rows.len()).unwrap();
         rows.push(row(
@@ -4825,19 +5002,41 @@ mod tests {
         ));
         let (user, convo, run) = a_logged_run(&pg, &rows, "0.0.0-older").await;
 
-        let still = resume(pg.clone(), client(&f), params(&f, user, convo, run, None), control()).await;
+        let still = resume(
+            pg.clone(),
+            client(&f),
+            params(&f, user, convo, run, None),
+            control(),
+        )
+        .await;
         assert!(matches!(still, Resumed::StillWaiting), "{still:?}");
-        assert_eq!(f.provider_calls.load(Ordering::SeqCst), 0, "waiting costs no model call");
+        assert_eq!(
+            f.provider_calls.load(Ordering::SeqCst),
+            0,
+            "waiting costs no model call"
+        );
 
         let done = JobDone {
             job_id: "sweep:7".into(),
             output: r#"{"status":"completed"}"#.into(),
             ok: true,
         };
-        let out = resume(pg.clone(), client(&f), params(&f, user, convo, run, Some(done)), control()).await;
+        let out = resume(
+            pg.clone(),
+            client(&f),
+            params(&f, user, convo, run, Some(done)),
+            control(),
+        )
+        .await;
         assert!(matches!(out, Resumed::Ran(_)), "{out:?}");
-        assert!(f.provider_calls.load(Ordering::SeqCst) >= 1, "the run thought about the result");
+        assert!(
+            f.provider_calls.load(Ordering::SeqCst) >= 1,
+            "the run thought about the result"
+        );
         let all = serde_json::to_string(&*f.provider_bodies.lock().unwrap()).unwrap();
-        assert!(all.contains("completed"), "the job result reached the model: {all}");
+        assert!(
+            all.contains("completed"),
+            "the job result reached the model: {all}"
+        );
     }
 }

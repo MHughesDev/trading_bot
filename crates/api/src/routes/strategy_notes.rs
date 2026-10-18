@@ -38,7 +38,9 @@ pub struct PutBody {
 }
 
 fn valid_hash(h: &str) -> bool {
-    h.len() == 64 && h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    h.len() == 64
+        && h.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// Replace the notes of `(user, revision)` with `notes`, in one transaction. An
@@ -98,7 +100,11 @@ pub async fn replace(
 ///
 /// # Errors
 /// The database error.
-pub async fn load(pool: &PgPool, user: Uuid, revision_hash: &str) -> Result<Vec<Note>, sqlx::Error> {
+pub async fn load(
+    pool: &PgPool,
+    user: Uuid,
+    revision_hash: &str,
+) -> Result<Vec<Note>, sqlx::Error> {
     let rows = sqlx::query(
         "SELECT clause, lines FROM strategy_revision_notes \
           WHERE user_id = $1 AND revision_hash = $2 ORDER BY position, clause",
@@ -123,7 +129,10 @@ pub async fn put(
     Json(body): Json<PutBody>,
 ) -> impl IntoResponse {
     match replace(&state.pg, token.user_id(), &body.revision_hash, &body.notes).await {
-        Ok(n) => (StatusCode::OK, Json(json!({ "stored": n, "revision_hash": body.revision_hash }))),
+        Ok(n) => (
+            StatusCode::OK,
+            Json(json!({ "stored": n, "revision_hash": body.revision_hash })),
+        ),
         Err(why) => (
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(json!({ "error": "notes_refused", "why": why })),

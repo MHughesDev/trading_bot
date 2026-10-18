@@ -1037,16 +1037,18 @@ mod tests {
     /// does not, and an unmeasured one is not a failure.
     #[test]
     fn a_token_estimate_that_under_estimates_blocks_and_an_unmeasured_one_does_not() {
-        let suites = || vec![SuiteScore {
-            suite: "routing".into(),
-            kind: SuiteKind::Replay,
-            passed: 2,
-            n: 2,
-            flakiness: 0.0,
-            attribution: BTreeMap::new(),
-            failed_cases: vec![],
-            sealed: false,
-        }];
+        let suites = || {
+            vec![SuiteScore {
+                suite: "routing".into(),
+                kind: SuiteKind::Replay,
+                passed: 2,
+                n: 2,
+                flakiness: 0.0,
+                attribution: BTreeMap::new(),
+                failed_cases: vec![],
+                sealed: false,
+            }]
+        };
         let base = card("qwen", "degraded", suites());
         let with = |rate: Option<f64>| {
             let mut c = card("qwen", "degraded", suites());
@@ -1055,9 +1057,16 @@ mod tests {
         };
         let bad = gate(std::slice::from_ref(&base), &[with(Some(0.90))]);
         assert!(bad.blocked, "{}", bad.summary());
-        assert!(bad.summary().contains("over-estimated only 90.0%"), "{}", bad.summary());
+        assert!(
+            bad.summary().contains("over-estimated only 90.0%"),
+            "{}",
+            bad.summary()
+        );
         assert!(!gate(std::slice::from_ref(&base), &[with(Some(0.97))]).blocked);
-        assert!(!gate(&[base], &[with(None)]).blocked, "unmeasured is not a failure");
+        assert!(
+            !gate(&[base], &[with(None)]).blocked,
+            "unmeasured is not a failure"
+        );
         // And with no baseline at all the number still stands on its own.
         assert!(gate(&[], &[with(Some(0.5))]).blocked);
     }

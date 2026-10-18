@@ -11,7 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::run::{Flag, FillModel, RunConfig};
+use crate::run::{FillModel, Flag, RunConfig};
 
 /// The flag code a `CurrentClose` run carries into the verdicts it feeds.
 pub const OPTIMISTIC_CLOSE: &str = "execution_policy.optimistic_close";
@@ -35,7 +35,12 @@ impl ExecutionPolicy {
             fill_model: cfg.fill_model,
             fill_delay_bars: cfg.fill_delay_bars,
             cost_model_ref: cfg.cost_model_ref.clone(),
-            label: if cfg.fill_model == FillModel::CurrentClose { "optimistic_close" } else { "standard" }.into(),
+            label: if cfg.fill_model == FillModel::CurrentClose {
+                "optimistic_close"
+            } else {
+                "standard"
+            }
+            .into(),
         }
     }
 
@@ -75,7 +80,9 @@ pub fn flags_for(cfg: &RunConfig) -> Vec<Flag> {
 /// # Errors
 /// A report body with no `execution_policy` object naming all four fields.
 pub fn require_block(report: &serde_json::Value) -> Result<(), String> {
-    let block = report.get("execution_policy").ok_or("the report has no execution_policy block")?;
+    let block = report
+        .get("execution_policy")
+        .ok_or("the report has no execution_policy block")?;
     for k in ["fill_model", "fill_delay_bars", "cost_model_ref", "label"] {
         if block.get(k).is_none() {
             return Err(format!("the execution_policy block has no `{k}`"));
@@ -127,6 +134,8 @@ mod tests {
         let with = serde_json::json!({"execution_policy": ExecutionPolicy::of(&cfg(FillModel::NextBarOpen, 0)).block()});
         assert!(require_block(&with).is_ok());
         assert!(require_block(&serde_json::json!({})).is_err());
-        assert!(require_block(&serde_json::json!({"execution_policy": {"fill_model": "x"}})).is_err());
+        assert!(
+            require_block(&serde_json::json!({"execution_policy": {"fill_model": "x"}})).is_err()
+        );
     }
 }

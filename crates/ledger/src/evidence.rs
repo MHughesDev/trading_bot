@@ -479,7 +479,11 @@ mod tests {
     #[test]
     fn the_closed_vocabulary_is_far_inside_the_key_budget() {
         let distinct: std::collections::BTreeSet<&&str> = crate::TRIAL_STATISTICS.iter().collect();
-        assert_eq!(distinct.len(), crate::TRIAL_STATISTICS.len(), "no duplicate names");
+        assert_eq!(
+            distinct.len(),
+            crate::TRIAL_STATISTICS.len(),
+            "no duplicate names"
+        );
         assert!(
             crate::TRIAL_STATISTICS.len() * 100 < METRIC_KEY_BUDGET_PER_TENANT,
             "the vocabulary ({}) should be orders of magnitude inside the {METRIC_KEY_BUDGET_PER_TENANT}-key budget",
@@ -489,7 +493,8 @@ mod tests {
         // series per instrument, which is the failure the budget exists for.
         for name in crate::TRIAL_STATISTICS {
             assert!(
-                name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                name.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
                 "{name} is not a plain snake_case metric name"
             );
         }

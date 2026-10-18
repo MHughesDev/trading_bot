@@ -86,7 +86,9 @@ mod tests {
 
     fn closes() -> Vec<f64> {
         // Newest first.
-        (0..80).map(|i| 100.0 + (f64::from(i) * 0.7).sin() * 3.0 - f64::from(i) * 0.05).collect()
+        (0..80)
+            .map(|i| 100.0 + (f64::from(i) * 0.7).sin() * 3.0 - f64::from(i) * 0.05)
+            .collect()
     }
 
     #[test]

@@ -211,7 +211,9 @@ pub async fn get_bars(
     // The grade travels with the data (DATA-005 §6; P-2.2): the newest persisted
     // `data_qc_reports` row for this series, with its id and reasons. A series that
     // has never been graded says "ungraded" -- never a letter it did not earn.
-    let qc = match storage::clickhouse::qc_reports::latest_grade(&state.pg, &q.instrument, &q.tf).await {
+    let qc = match storage::clickhouse::qc_reports::latest_grade(&state.pg, &q.instrument, &q.tf)
+        .await
+    {
         Ok(Some(g)) => json!({
             "grade": g.grade,
             "report_id": g.report_id,
@@ -768,10 +770,8 @@ pub fn floor_sentence(
             "{floor} ({floor_days}-day floor): not satisfiable; the series holds no rows."
         );
     }
-    let short = shortfall_days.map_or_else(
-        || "an unmeasured number of".to_string(),
-        |d| d.to_string(),
-    );
+    let short =
+        shortfall_days.map_or_else(|| "an unmeasured number of".to_string(), |d| d.to_string());
     if accruing {
         format!(
             "{floor} ({floor_days}-day floor): short by {short} days; at the current collection rate \
@@ -1085,13 +1085,13 @@ pub async fn get_universe(
     .await
     {
         Ok(m) => m,
-        Err(backtest::env::universe::UniverseLoadError::UnknownUniverse(n)) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "unknown_universe", "message": format!("no universe named {n:?}")})),
-            )
-                .into_response()
-        }
+        Err(backtest::env::universe::UniverseLoadError::UnknownUniverse(n)) => return (
+            StatusCode::NOT_FOUND,
+            Json(
+                json!({"error": "unknown_universe", "message": format!("no universe named {n:?}")}),
+            ),
+        )
+            .into_response(),
         Err(e) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1203,7 +1203,10 @@ pub async fn get_macro(
         Err(e) => return map_project_err(e),
     };
     if q.start > q.end {
-        return bad_request("empty_window", format!("start {} is after end {}", q.start, q.end));
+        return bad_request(
+            "empty_window",
+            format!("start {} is after end {}", q.start, q.end),
+        );
     }
     let (as_of, cutoff_applied) = project.clip(q.as_of.unwrap_or_else(Utc::now));
     match alt::macro_as_of(&state.clickhouse_url, &q.series, q.start, q.end, as_of).await {
@@ -1259,7 +1262,10 @@ pub async fn get_prediction_markets(
     let (end, cutoff_applied) = project.clip(q.end);
     let (as_of, _) = project.clip(q.as_of.unwrap_or(end));
     if q.start >= end {
-        return bad_request("empty_window", format!("start {} is at or after the effective end {end}", q.start));
+        return bad_request(
+            "empty_window",
+            format!("start {} is at or after the effective end {end}", q.start),
+        );
     }
     match alt::probabilities_as_of(&state.clickhouse_url, &q.venue, &q.ticker, q.start, end, as_of).await {
         Ok(rows) => (
@@ -1325,7 +1331,16 @@ pub async fn get_text(
     let (end, cutoff_applied) = project.clip(q.end);
     let (as_of, _) = project.clip(q.as_of.unwrap_or(end));
     let limit = q.limit.unwrap_or(200).clamp(1, 1_000);
-    match alt::text_as_of(&state.clickhouse_url, q.instrument.as_deref(), q.start, end, as_of, limit).await {
+    match alt::text_as_of(
+        &state.clickhouse_url,
+        q.instrument.as_deref(),
+        q.start,
+        end,
+        as_of,
+        limit,
+    )
+    .await
+    {
         Ok(items) => (
             StatusCode::OK,
             Json(json!({
@@ -1363,7 +1378,13 @@ mod alt_route_tests {
                 "scope {s} must not read raw text"
             );
         }
-        for s in ["research:data.read", "research:features", "llm:proxy", "monitor.control", ""] {
+        for s in [
+            "research:data.read",
+            "research:features",
+            "llm:proxy",
+            "monitor.control",
+            "",
+        ] {
             assert!(!may_read_text(&[s.to_string()]), "{s}");
         }
         assert!(may_read_text(&[TEXT_READER_SCOPE.to_string()]));
@@ -1442,15 +1463,25 @@ pub fn derivation_of(q: &DerivedBarsQuery) -> Result<Derivation, String> {
                 "volume" => InformationBarKind::Volume,
                 "dollar" => InformationBarKind::Dollar,
                 "tick" => InformationBarKind::Tick,
-                other => return Err(format!("unknown bar kind {other:?}; volume, dollar or tick")),
+                other => {
+                    return Err(format!(
+                        "unknown bar kind {other:?}; volume, dollar or tick"
+                    ))
+                }
             };
             let threshold = q
                 .threshold
                 .ok_or("an information-driven bar needs a threshold, and none is assumed")?;
-            Ok(Derivation::Information(InformationBarSpec::new(kind, threshold)))
+            Ok(Derivation::Information(InformationBarSpec::new(
+                kind, threshold,
+            )))
         }
-        (Some(_), Some(_)) => Err("give `tf` (resample) or `kind` (information bars), not both".into()),
-        (None, None) => Err("give `tf` (resample to a coarser clock) or `kind` (volume|dollar|tick)".into()),
+        (Some(_), Some(_)) => {
+            Err("give `tf` (resample) or `kind` (information bars), not both".into())
+        }
+        (None, None) => {
+            Err("give `tf` (resample to a coarser clock) or `kind` (volume|dollar|tick)".into())
+        }
     }
 }
 
@@ -1475,12 +1506,18 @@ pub async fn get_derived_bars(
         Err(m) => return bad_request("invalid_derivation", m),
     };
     let Some(from_secs) = tf_secs(&q.from_tf) else {
-        return bad_request("unknown_timeframe", format!("unknown timeframe {:?}", q.from_tf));
+        return bad_request(
+            "unknown_timeframe",
+            format!("unknown timeframe {:?}", q.from_tf),
+        );
     };
     let (end, cutoff_applied) = project.clip(q.end);
     let (as_of, _) = project.clip(q.as_of.unwrap_or(end));
     if q.start >= end {
-        return bad_request("empty_window", format!("start {} is at or after the effective end {end}", q.start));
+        return bad_request(
+            "empty_window",
+            format!("start {} is at or after the effective end {end}", q.start),
+        );
     }
 
     let bars = match storage::clickhouse::canonical_read::canonical_bars_as_of(
@@ -1497,14 +1534,18 @@ pub async fn get_derived_bars(
         Ok(b) => b,
         Err(e) => return query_failed(e),
     };
-    let grade = match storage::clickhouse::qc_reports::latest_grade(&state.pg, &q.instrument, &q.from_tf).await {
-        Ok(g) => g.and_then(|g| storage::clickhouse::canonical_read::parse_grade(&g.grade)),
-        Err(e) => return query_failed(e),
-    };
-    let provenance = match storage::clickhouse::canonical_read::provenance(&state.pg, &bars, grade).await {
-        Ok(p) => p,
-        Err(e) => return query_failed(e),
-    };
+    let grade =
+        match storage::clickhouse::qc_reports::latest_grade(&state.pg, &q.instrument, &q.from_tf)
+            .await
+        {
+            Ok(g) => g.and_then(|g| storage::clickhouse::canonical_read::parse_grade(&g.grade)),
+            Err(e) => return query_failed(e),
+        };
+    let provenance =
+        match storage::clickhouse::canonical_read::provenance(&state.pg, &bars, grade).await {
+            Ok(p) => p,
+            Err(e) => return query_failed(e),
+        };
 
     let manifest = json!({
         "type": "derived_bars",
@@ -1564,7 +1605,10 @@ mod derived_tests {
 
     #[test]
     fn a_request_names_exactly_one_derivation() {
-        assert_eq!(derivation_of(&q(Some("1h"), None, None)), Ok(Derivation::Resample { to_secs: 3600 }));
+        assert_eq!(
+            derivation_of(&q(Some("1h"), None, None)),
+            Ok(Derivation::Resample { to_secs: 3600 })
+        );
         assert!(derivation_of(&q(Some("1h"), Some("volume"), Some(5))).is_err());
         assert!(derivation_of(&q(None, None, None)).is_err());
         assert!(derivation_of(&q(Some("7m"), None, None)).is_err());
@@ -1618,7 +1662,10 @@ pub enum PqCol {
 ///
 /// # Errors
 /// A decimal that will not parse or does not fit `decimal128(38,10)`, or the writer.
-pub fn rows_to_parquet(cols: &[(&str, PqCol)], rows: &[serde_json::Value]) -> anyhow::Result<Vec<u8>> {
+pub fn rows_to_parquet(
+    cols: &[(&str, PqCol)],
+    rows: &[serde_json::Value],
+) -> anyhow::Result<Vec<u8>> {
     use arrow::array::{
         ArrayRef, Decimal128Array, Float64Array, Int64Array, StringArray, TimestampNanosecondArray,
     };
@@ -1637,17 +1684,28 @@ pub fn rows_to_parquet(cols: &[(&str, PqCol)], rows: &[serde_json::Value]) -> an
                     DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into())),
                     true,
                 ));
-                let v: Vec<Option<i64>> = rows.iter().map(|r| cell(r).and_then(|c| c.as_i64())).collect();
-                arrays.push(Arc::new(TimestampNanosecondArray::from(v).with_timezone("UTC")));
+                let v: Vec<Option<i64>> = rows
+                    .iter()
+                    .map(|r| cell(r).and_then(|c| c.as_i64()))
+                    .collect();
+                arrays.push(Arc::new(
+                    TimestampNanosecondArray::from(v).with_timezone("UTC"),
+                ));
             }
             PqCol::I64 => {
                 fields.push(Field::new(*name, DataType::Int64, true));
-                let v: Vec<Option<i64>> = rows.iter().map(|r| cell(r).and_then(|c| c.as_i64())).collect();
+                let v: Vec<Option<i64>> = rows
+                    .iter()
+                    .map(|r| cell(r).and_then(|c| c.as_i64()))
+                    .collect();
                 arrays.push(Arc::new(Int64Array::from(v)));
             }
             PqCol::F64 => {
                 fields.push(Field::new(*name, DataType::Float64, true));
-                let v: Vec<Option<f64>> = rows.iter().map(|r| cell(r).and_then(|c| c.as_f64())).collect();
+                let v: Vec<Option<f64>> = rows
+                    .iter()
+                    .map(|r| cell(r).and_then(|c| c.as_f64()))
+                    .collect();
                 arrays.push(Arc::new(Float64Array::from(v)));
             }
             PqCol::Dec => {
@@ -1657,12 +1715,17 @@ pub fn rows_to_parquet(cols: &[(&str, PqCol)], rows: &[serde_json::Value]) -> an
                     v.push(match cell(r) {
                         None => None,
                         Some(c) => {
-                            let text = c.as_str().map(str::to_owned).unwrap_or_else(|| c.to_string());
+                            let text = c
+                                .as_str()
+                                .map(str::to_owned)
+                                .unwrap_or_else(|| c.to_string());
                             Some(decimal_to_i128_scale10(&text)?)
                         }
                     });
                 }
-                arrays.push(Arc::new(Decimal128Array::from(v).with_precision_and_scale(38, 10)?));
+                arrays.push(Arc::new(
+                    Decimal128Array::from(v).with_precision_and_scale(38, 10)?,
+                ));
             }
             PqCol::Str => {
                 fields.push(Field::new(*name, DataType::Utf8, true));
@@ -1775,7 +1838,13 @@ async fn deliver(
                 .collect::<Vec<_>>());
             manifest["format"] = json!("parquet");
             match registry
-                .put("parquet_extract", Some(project.project_id), &bytes, manifest.clone(), None)
+                .put(
+                    "parquet_extract",
+                    Some(project.project_id),
+                    &bytes,
+                    manifest.clone(),
+                    None,
+                )
                 .await
             {
                 Ok(artifact) => {
@@ -1783,7 +1852,10 @@ async fn deliver(
                         format!("{endpoint}: {} rows", rows.len()),
                         format!("window: {}", manifest["window"]),
                         format!("cutoff_applied: {}", manifest["cutoff_applied"]),
-                        format!("qc_grade: {}", manifest.get("qc_grade").unwrap_or(&json!("n/a"))),
+                        format!(
+                            "qc_grade: {}",
+                            manifest.get("qc_grade").unwrap_or(&json!("n/a"))
+                        ),
                         format!("data_snapshot_id: {snapshot_id}"),
                         format!("handle: {}", artifact.handle),
                     ]
@@ -1826,7 +1898,11 @@ async fn log_data_read(
                 project_id: project.project_id,
                 user_id,
                 session_id: None,
-                source: if project.is_desk() { "desk" } else { "data_api" },
+                source: if project.is_desk() {
+                    "desk"
+                } else {
+                    "data_api"
+                },
                 instruments,
                 timeframe: None,
                 window_start: Some(window.0),
@@ -1878,10 +1954,16 @@ fn ch_esc(s: &str) -> String {
 /// A ClickHouse error that means the table does not exist in this database. An
 /// absent series is reported as unmeasured, never as an empty one (see `get_funding`).
 fn is_missing_table(message: &str) -> bool {
-    message.contains("UNKNOWN_TABLE") || message.contains("doesn't exist") || message.contains("Code: 60")
+    message.contains("UNKNOWN_TABLE")
+        || message.contains("doesn't exist")
+        || message.contains("Code: 60")
 }
 
-fn unmeasured_body(mut manifest: serde_json::Value, rows_key: &str, table: &str) -> serde_json::Value {
+fn unmeasured_body(
+    mut manifest: serde_json::Value,
+    rows_key: &str,
+    table: &str,
+) -> serde_json::Value {
     manifest["measured"] = json!(false);
     manifest["unmeasured"] = json!({
         "reason": "no_such_series",
@@ -1931,10 +2013,11 @@ pub async fn get_open_interest(
         Ok(p) => p,
         Err(e) => return map_project_err(e),
     };
-    let (effective_to, effective_as_of, cutoff_applied) = match clip_window(&project, q.from, q.to, q.as_of) {
-        Ok(w) => w,
-        Err(resp) => return resp,
-    };
+    let (effective_to, effective_as_of, cutoff_applied) =
+        match clip_window(&project, q.from, q.to, q.as_of) {
+            Ok(w) => w,
+            Err(resp) => return resp,
+        };
     let sq = forward::SeriesQuery::new(
         q.venue.clone(),
         q.instrument.clone(),
@@ -1958,7 +2041,11 @@ pub async fn get_open_interest(
     });
     let rows = match read {
         forward::SeriesRead::NoSuchSeries { table, .. } => {
-            return (StatusCode::OK, Json(unmeasured_body(manifest, "open_interest", table))).into_response()
+            return (
+                StatusCode::OK,
+                Json(unmeasured_body(manifest, "open_interest", table)),
+            )
+                .into_response()
         }
         forward::SeriesRead::Present { rows } => rows,
     };
@@ -1982,7 +2069,10 @@ pub async fn get_open_interest(
         vec![q.instrument.clone()],
         (q.from, effective_to),
         &["open_interest"],
-        format!("open_interest {} {} [{}, {})", q.venue, q.instrument, q.from, effective_to),
+        format!(
+            "open_interest {} {} [{}, {})",
+            q.venue, q.instrument, q.from, effective_to
+        ),
     )
     .await;
     deliver(
@@ -2092,11 +2182,21 @@ pub async fn get_trades(
         "qc_grade": "ungraded",
     });
     let client = storage::clickhouse::connect(&state.clickhouse_url);
-    let sql = trades_sql(&q.instrument, q.start, effective_end, effective_as_of, limit);
+    let sql = trades_sql(
+        &q.instrument,
+        q.start,
+        effective_end,
+        effective_as_of,
+        limit,
+    );
     let mut wire: Vec<TradeWire> = match client.query(&sql).fetch_all().await {
         Ok(w) => w,
         Err(e) if is_missing_table(&e.to_string()) => {
-            return (StatusCode::OK, Json(unmeasured_body(manifest, "trades", "market_trades"))).into_response()
+            return (
+                StatusCode::OK,
+                Json(unmeasured_body(manifest, "trades", "market_trades")),
+            )
+                .into_response()
         }
         Err(e) => return query_failed(e),
     };
@@ -2284,7 +2384,11 @@ pub async fn get_option_chain(
         Err(e) if is_missing_table(&e.to_string()) => {
             return (
                 StatusCode::OK,
-                Json(unmeasured_body(manifest, "contracts", "option_chain_snapshots")),
+                Json(unmeasured_body(
+                    manifest,
+                    "contracts",
+                    "option_chain_snapshots",
+                )),
             )
                 .into_response()
         }
@@ -2569,14 +2673,17 @@ pub async fn get_search(
                 .collect(),
             Err(_) => std::collections::HashMap::new(),
         };
-    let mut best: std::collections::HashMap<String, SearchCandidate> = std::collections::HashMap::new();
+    let mut best: std::collections::HashMap<String, SearchCandidate> =
+        std::collections::HashMap::new();
     for c in coverage {
-        let e = best.entry(c.instrument_id.clone()).or_insert_with(|| SearchCandidate {
-            instrument_id: c.instrument_id.clone(),
-            asset_class: classes.get(&c.instrument_id).cloned(),
-            bars: 0,
-            last_ns: 0,
-        });
+        let e = best
+            .entry(c.instrument_id.clone())
+            .or_insert_with(|| SearchCandidate {
+                instrument_id: c.instrument_id.clone(),
+                asset_class: classes.get(&c.instrument_id).cloned(),
+                bars: 0,
+                last_ns: 0,
+            });
         e.bars = e.bars.max(c.bars);
         e.last_ns = e.last_ns.max(c.last_ns);
     }
@@ -2679,7 +2786,10 @@ pub async fn get_features(
         .filter(|n| !n.is_empty())
         .collect();
     if names.is_empty() || names.len() > 32 {
-        return bad_request("bad_feature_list", "give 1 to 32 comma-separated feature names".into());
+        return bad_request(
+            "bad_feature_list",
+            "give 1 to 32 comma-separated feature names".into(),
+        );
     }
     // A name that declares an external input (`macro_<series>`, `fundamental_<cik>_<tag>`,
     // P-3.6) is not a windowed feature: it resolves against point-in-time rows handed
@@ -2699,19 +2809,26 @@ pub async fn get_features(
             Err(e) => return bad_request("unknown_feature", e.to_string()),
         }
     }
-    let Some(timeframe) = <domain::payloads::bar::Timeframe as backtest::types::TimeframeExt>::from_key(&q.tf)
+    let Some(timeframe) =
+        <domain::payloads::bar::Timeframe as backtest::types::TimeframeExt>::from_key(&q.tf)
     else {
         return bad_request("unknown_timeframe", format!("unknown timeframe {:?}", q.tf));
     };
     let warmup = i64::from(q.warmup.unwrap_or(500).min(5_000));
     let read_from = q.start - chrono::Duration::seconds(warmup * i64::from(step_secs));
     let store = backtest::store::BarStore::connect(&state.clickhouse_url).as_of(effective_as_of);
-    let bars = match store.load_bars(&q.instrument, timeframe, read_from, effective_end).await {
+    let bars = match store
+        .load_bars(&q.instrument, timeframe, read_from, effective_end)
+        .await
+    {
         Ok(b) => b,
         Err(e) => return query_failed(e),
     };
     let clock = features::densify_bars(
-        &bars.iter().map(backtest::warmup::bar_obs).collect::<Vec<_>>(),
+        &bars
+            .iter()
+            .map(backtest::warmup::bar_obs)
+            .collect::<Vec<_>>(),
         i64::from(step_secs) * 1_000_000_000,
     );
     let start_ns = q.start.timestamp_nanos_opt().unwrap_or(i64::MIN);
@@ -2742,7 +2859,9 @@ pub async fn get_features(
     let columns: Vec<Vec<Option<f64>>> = feats
         .iter()
         .map(|(_, f)| match f {
-            FeatureColumn::Windowed(f) => features::runtime::backfill_column(f.as_ref(), &clock.rows),
+            FeatureColumn::Windowed(f) => {
+                features::runtime::backfill_column(f.as_ref(), &clock.rows)
+            }
             FeatureColumn::External(f) => features::external_features::backfill_column_external(
                 f.as_ref(),
                 &clock.rows,
@@ -2793,7 +2912,10 @@ pub async fn get_features(
         vec![q.instrument.clone()],
         (q.start, effective_end),
         &names.iter().map(String::as_str).collect::<Vec<_>>(),
-        format!("features {} {} {:?} [{}, {})", q.instrument, q.tf, names, q.start, effective_end),
+        format!(
+            "features {} {} {:?} [{}, {})",
+            q.instrument, q.tf, names, q.start, effective_end
+        ),
     )
     .await;
     deliver(
@@ -2826,8 +2948,19 @@ mod data_v2_tests {
         // A restated row, a different window, a different as_of and a different
         // endpoint each move the id.
         assert_ne!(a, data_snapshot_id("bars", &p, as_of, "bbbb"));
-        assert_ne!(a, data_snapshot_id("bars", &json!({"instrument": "ETH-USD", "tf": "1m"}), as_of, "aaaa"));
-        assert_ne!(a, data_snapshot_id("bars", &p, as_of + chrono::Duration::seconds(1), "aaaa"));
+        assert_ne!(
+            a,
+            data_snapshot_id(
+                "bars",
+                &json!({"instrument": "ETH-USD", "tf": "1m"}),
+                as_of,
+                "aaaa"
+            )
+        );
+        assert_ne!(
+            a,
+            data_snapshot_id("bars", &p, as_of + chrono::Duration::seconds(1), "aaaa")
+        );
         assert_ne!(a, data_snapshot_id("trades", &p, as_of, "aaaa"));
         // Key order in the params does not.
         let reordered = json!({"tf": "1m", "instrument": "BTC-USD"});
@@ -2890,7 +3023,10 @@ mod data_v2_tests {
         let sql = trades_sql("BTC-USD", t, t + chrono::Duration::hours(1), t, 10);
         assert!(sql.contains("available_time <="), "{sql}");
         assert!(sql.contains("LIMIT 1 BY dedup_key"), "{sql}");
-        assert!(sql.contains("LIMIT 11"), "one extra row detects truncation: {sql}");
+        assert!(
+            sql.contains("LIMIT 11"),
+            "one extra row detects truncation: {sql}"
+        );
         let evil = trades_sql("x' OR '1'='1", t, t, t, 1);
         assert!(evil.contains("x\\' OR \\'1\\'=\\'1"), "{evil}");
     }
@@ -2918,7 +3054,11 @@ mod data_v2_tests {
             iv_div: Some(0.0),
         };
         let g = chain_greeks(&w).expect("inputs are complete");
-        assert!(g.delta > 0.4 && g.delta < 0.7, "an at-the-money call's delta: {}", g.delta);
+        assert!(
+            g.delta > 0.4 && g.delta < 0.7,
+            "an at-the-money call's delta: {}",
+            g.delta
+        );
         assert!(g.gamma > 0.0 && g.vega > 0.0);
         w.iv = None;
         assert!(chain_greeks(&w).is_none());
@@ -2955,7 +3095,9 @@ mod data_v2_tests {
 
     #[test]
     fn a_table_that_does_not_exist_is_unmeasured_not_empty() {
-        assert!(is_missing_table("Code: 60. DB::Exception: Table trading.market_trades doesn't exist"));
+        assert!(is_missing_table(
+            "Code: 60. DB::Exception: Table trading.market_trades doesn't exist"
+        ));
         assert!(!is_missing_table("Code: 62. Syntax error"));
         let body = unmeasured_body(json!({"type": "trades"}), "trades", "market_trades");
         assert!(body["trades"].is_null());

@@ -28,7 +28,13 @@ pub fn periods_per_year(res: EvalResolution, cal: Calendar) -> f64 {
         EvalResolution::Min15 => 15.0,
         EvalResolution::Min30 => 30.0,
         EvalResolution::Hour1 => 60.0,
-        EvalResolution::Day1 => return if cal == Calendar::Continuous { 365.0 } else { 252.0 },
+        EvalResolution::Day1 => {
+            return if cal == Calendar::Continuous {
+                365.0
+            } else {
+                252.0
+            }
+        }
     };
     let minutes_per_year = match cal {
         Calendar::Continuous => 365.0 * 24.0 * 60.0,
@@ -46,7 +52,11 @@ pub fn is_fine(res: EvalResolution) -> bool {
 /// The metric an objective defaults to at this resolution.
 #[must_use]
 pub fn default_objective(res: EvalResolution) -> &'static str {
-    if is_fine(res) { "expectancy" } else { "sharpe" }
+    if is_fine(res) {
+        "expectancy"
+    } else {
+        "sharpe"
+    }
 }
 
 /// Warnings a report must carry for an annualised metric at this resolution.
@@ -70,11 +80,26 @@ mod tests {
     #[allow(clippy::float_cmp)] // exact constants
     #[test]
     fn one_minute_and_one_hour_runs_annualise_by_their_own_period_counts() {
-        assert_eq!(periods_per_year(EvalResolution::Min1, Calendar::Continuous), 525_600.0);
-        assert_eq!(periods_per_year(EvalResolution::Hour1, Calendar::Continuous), 8_760.0);
-        assert_eq!(periods_per_year(EvalResolution::Day1, Calendar::Continuous), 365.0);
-        assert_eq!(periods_per_year(EvalResolution::Day1, Calendar::EquitySession), 252.0);
-        assert!((periods_per_year(EvalResolution::Hour1, Calendar::EquitySession) - 252.0 * 6.5).abs() < 1e-9);
+        assert_eq!(
+            periods_per_year(EvalResolution::Min1, Calendar::Continuous),
+            525_600.0
+        );
+        assert_eq!(
+            periods_per_year(EvalResolution::Hour1, Calendar::Continuous),
+            8_760.0
+        );
+        assert_eq!(
+            periods_per_year(EvalResolution::Day1, Calendar::Continuous),
+            365.0
+        );
+        assert_eq!(
+            periods_per_year(EvalResolution::Day1, Calendar::EquitySession),
+            252.0
+        );
+        assert!(
+            (periods_per_year(EvalResolution::Hour1, Calendar::EquitySession) - 252.0 * 6.5).abs()
+                < 1e-9
+        );
     }
 
     #[test]

@@ -23,7 +23,9 @@
 use crate::position_series::TruncationVerdict;
 use crate::run::{Flag, RunResult, RunStatus};
 
-pub use crate::position_series::{TRUNCATION_CODE as CODE, TRUNCATION_NOT_RUN_CODE as NOT_RUN_CODE};
+pub use crate::position_series::{
+    TRUNCATION_CODE as CODE, TRUNCATION_NOT_RUN_CODE as NOT_RUN_CODE,
+};
 
 /// An experiment whose `strategy_family` starts with this is a Layer 1 experiment: its
 /// Gate 0 needs a truncation verdict.
@@ -74,7 +76,10 @@ mod tests {
         assert!(check(Some(&TruncationVerdict::Pass { cuts_checked: 8 })).is_none());
         let missing = check(None).expect("no verdict is a flag");
         assert_eq!(missing.code, NOT_RUN_CODE);
-        let not_computable = check(Some(&TruncationVerdict::NotComputable { reason: "no case".into() })).unwrap();
+        let not_computable = check(Some(&TruncationVerdict::NotComputable {
+            reason: "no case".into(),
+        }))
+        .unwrap();
         assert_eq!(not_computable.code, NOT_RUN_CODE);
     }
 
@@ -88,7 +93,11 @@ mod tests {
         });
         let flag = check(Some(&v)).unwrap();
         assert_eq!(flag.code, CODE);
-        assert!(flag.detail.contains("1970-01-01T00:00:03"), "{}", flag.detail);
+        assert!(
+            flag.detail.contains("1970-01-01T00:00:03"),
+            "{}",
+            flag.detail
+        );
     }
 
     #[test]

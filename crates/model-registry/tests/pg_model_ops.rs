@@ -90,9 +90,20 @@ async fn used_by_lists_the_strategies_that_reference_the_model_and_only_those() 
         Arc::new(model_registry::datasets::DatasetManager::new(pg.clone())),
     );
     let used = manager.get_used_by(&m).await.unwrap();
-    let ids: Vec<&str> = used.iter().filter_map(|u| u["strategy_id"].as_str()).collect();
-    assert_eq!(ids, vec![sid.as_str()], "only the strategy that references this model");
-    assert!(manager.get_used_by("no-such-model").await.unwrap().is_empty());
+    let ids: Vec<&str> = used
+        .iter()
+        .filter_map(|u| u["strategy_id"].as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![sid.as_str()],
+        "only the strategy that references this model"
+    );
+    assert!(manager
+        .get_used_by("no-such-model")
+        .await
+        .unwrap()
+        .is_empty());
 }
 
 // ---- H-4.6 traces and rollups ----------------------------------------------
@@ -102,7 +113,12 @@ async fn used_by_lists_the_strategies_that_reference_the_model_and_only_those() 
 async fn the_trace_rollup_counts_outcomes_and_reports_latency() {
     let pg = pool().await;
     let m = model(&pg, serde_json::json!({}), "draft").await;
-    for (result, ms) in [("hit", 10), ("hit", 30), ("error", 100), ("rate_limited", 0)] {
+    for (result, ms) in [
+        ("hit", 10),
+        ("hit", 30),
+        ("error", 100),
+        ("rate_limited", 0),
+    ] {
         sqlx::query(
             "INSERT INTO model_events (model_id, kind, payload, actor) VALUES ($1, 'inference_trace', $2, $3)",
         )
@@ -114,11 +130,19 @@ async fn the_trace_rollup_counts_outcomes_and_reports_latency() {
         .unwrap();
     }
     let rollup = gateway(&pg, 10).trace_rollup(&m).await.unwrap();
-    let hit = rollup.iter().find(|r| r["result"] == "hit").expect("hit row");
+    let hit = rollup
+        .iter()
+        .find(|r| r["result"] == "hit")
+        .expect("hit row");
     assert_eq!(hit["count"], 2);
     assert_eq!(hit["latency_ms_p50"], 20.0);
-    assert!(rollup.iter().any(|r| r["result"] == "rate_limited" && r["count"] == 1));
-    assert_eq!(rollup[0]["result"], "hit", "ordered by count, largest first");
+    assert!(rollup
+        .iter()
+        .any(|r| r["result"] == "rate_limited" && r["count"] == 1));
+    assert_eq!(
+        rollup[0]["result"], "hit",
+        "ordered by count, largest first"
+    );
 }
 
 // ---- H-4.7 rate limit ------------------------------------------------------
@@ -212,7 +236,15 @@ async fn the_calibrated_spread_comes_from_the_newest_wrapper_of_that_version() {
     wrapper(3, 1, serde_json::json!([null, null, 0.05, null])).await;
     wrapper(4, 7, serde_json::json!([0.9])).await; // wraps a different version
     let gw = gateway(&pg, 10);
-    assert_eq!(gw.calibrated_spread(&m, 1).await, Some(0.05), "newest wrapper, latest finite band");
+    assert_eq!(
+        gw.calibrated_spread(&m, 1).await,
+        Some(0.05),
+        "newest wrapper, latest finite band"
+    );
     assert_eq!(gw.calibrated_spread(&m, 7).await, Some(0.9));
-    assert_eq!(gw.calibrated_spread(&m, 99).await, None, "a version nobody calibrated has none");
+    assert_eq!(
+        gw.calibrated_spread(&m, 99).await,
+        None,
+        "a version nobody calibrated has none"
+    );
 }

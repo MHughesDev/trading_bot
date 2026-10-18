@@ -497,12 +497,17 @@ mod tests {
     /// and one per sampled Run, and it is not in what is serialised.
     #[test]
     fn sample_scores_are_kept_in_process_and_never_serialised() {
-        let fake = Fake { calls: Mutex::new(Vec::new()) };
+        let fake = Fake {
+            calls: Mutex::new(Vec::new()),
+        };
         let report = run_sweep(&fake, &request(), &NoopObserver).unwrap();
         assert_eq!(report.sample_scores.len(), report.n_sampled as usize);
         assert!(report.sample_scores.iter().any(|s| s.is_finite()));
         let json = serde_json::to_string(&report).unwrap();
-        assert!(!json.contains("sample_scores"), "the per-sample scores leaked into the serialised report");
+        assert!(
+            !json.contains("sample_scores"),
+            "the per-sample scores leaked into the serialised report"
+        );
     }
 
     /// INV-2 property: the serialized report carries no per-sample score and no

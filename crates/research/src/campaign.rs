@@ -96,7 +96,11 @@ impl Archive {
         if !self.seen.insert(c.config_hash.clone()) {
             return Offer::Duplicate;
         }
-        let Some(cell) = self.grid.cell(&c.descriptor).filter(|_| c.score.is_finite()) else {
+        let Some(cell) = self
+            .grid
+            .cell(&c.descriptor)
+            .filter(|_| c.score.is_finite())
+        else {
             return Offer::Unplaceable;
         };
         match self.elites.get(&cell) {
@@ -124,7 +128,9 @@ impl Archive {
 
     #[must_use]
     pub fn best(&self) -> Option<&Candidate> {
-        self.elites.values().max_by(|a, b| a.score.total_cmp(&b.score))
+        self.elites
+            .values()
+            .max_by(|a, b| a.score.total_cmp(&b.score))
     }
 
     #[must_use]
@@ -160,14 +166,18 @@ impl Islands {
             return Vec::new();
         }
         let n = self.archives.len();
-        let best: Vec<Option<Candidate>> = self.archives.iter().map(|a| a.best().cloned()).collect();
+        let best: Vec<Option<Candidate>> =
+            self.archives.iter().map(|a| a.best().cloned()).collect();
         let mut moved = Vec::new();
         for (from, b) in best.into_iter().enumerate() {
             if let Some(c) = b {
                 let to = (from + 1) % n;
                 // A migrant is offered like any candidate: it can fill a cell or be
                 // refused as a duplicate, and either way nothing is evaluated twice.
-                if matches!(self.archives[to].offer(c.clone()), Offer::NewCell(_) | Offer::Replaced(_)) {
+                if matches!(
+                    self.archives[to].offer(c.clone()),
+                    Offer::NewCell(_) | Offer::Replaced(_)
+                ) {
                     moved.push((from, to, c.id));
                 }
             }
@@ -199,7 +209,9 @@ pub fn next_arm(arms: &[ArmStat], c: f64, rng: &mut Rng) -> Option<usize> {
     let total: f64 = arms.iter().map(|a| f64::from(a.pulls)).sum();
     let scores: Vec<f64> = arms
         .iter()
-        .map(|a| a.reward_sum / f64::from(a.pulls) + c * (2.0 * total.ln() / f64::from(a.pulls)).sqrt())
+        .map(|a| {
+            a.reward_sum / f64::from(a.pulls) + c * (2.0 * total.ln() / f64::from(a.pulls)).sqrt()
+        })
         .collect();
     let best = scores.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let tied: Vec<usize> = (0..arms.len())
@@ -220,25 +232,51 @@ mod tests {
     use super::*;
 
     fn grid() -> GridSpec {
-        GridSpec { dims: vec![(0.0, 1.0, 4), (0.0, 1.0, 4)] }
+        GridSpec {
+            dims: vec![(0.0, 1.0, 4), (0.0, 1.0, 4)],
+        }
     }
 
     fn cand(id: &str, hash: &str, score: f64, d: [f64; 2]) -> Candidate {
-        Candidate { id: id.into(), config_hash: hash.into(), score, descriptor: d.to_vec() }
+        Candidate {
+            id: id.into(),
+            config_hash: hash.into(),
+            score,
+            descriptor: d.to_vec(),
+        }
     }
 
     #[test]
     fn the_archive_keeps_one_elite_per_cell_and_a_duplicate_never_competes() {
         let mut a = Archive::new(grid());
-        assert!(matches!(a.offer(cand("a", "h1", 1.0, [0.1, 0.1])), Offer::NewCell(_)));
-        assert!(matches!(a.offer(cand("b", "h2", 0.5, [0.1, 0.1])), Offer::Rejected(_)));
-        assert!(matches!(a.offer(cand("c", "h3", 2.0, [0.1, 0.1])), Offer::Replaced(_)));
-        assert_eq!(a.offer(cand("d", "h3", 9.0, [0.9, 0.9])), Offer::Duplicate, "same config hash, even with a better score");
+        assert!(matches!(
+            a.offer(cand("a", "h1", 1.0, [0.1, 0.1])),
+            Offer::NewCell(_)
+        ));
+        assert!(matches!(
+            a.offer(cand("b", "h2", 0.5, [0.1, 0.1])),
+            Offer::Rejected(_)
+        ));
+        assert!(matches!(
+            a.offer(cand("c", "h3", 2.0, [0.1, 0.1])),
+            Offer::Replaced(_)
+        ));
+        assert_eq!(
+            a.offer(cand("d", "h3", 9.0, [0.9, 0.9])),
+            Offer::Duplicate,
+            "same config hash, even with a better score"
+        );
         assert_eq!(a.occupied(), 1);
         assert_eq!(a.best().unwrap().id, "c");
         assert_eq!(a.evaluated(), 3);
-        assert_eq!(a.offer(cand("e", "h4", f64::NAN, [0.5, 0.5])), Offer::Unplaceable);
-        assert_eq!(a.offer(cand("f", "h5", 1.0, [f64::NAN, 0.5])), Offer::Unplaceable);
+        assert_eq!(
+            a.offer(cand("e", "h4", f64::NAN, [0.5, 0.5])),
+            Offer::Unplaceable
+        );
+        assert_eq!(
+            a.offer(cand("f", "h5", 1.0, [f64::NAN, 0.5])),
+            Offer::Unplaceable
+        );
     }
 
     #[test]
@@ -256,11 +294,17 @@ mod tests {
         isl.archives[1].offer(cand("b", "hb", 1.0, [0.9, 0.9]));
         assert!(isl.end_generation().is_empty(), "generation 1 of period 2");
         let moved = isl.end_generation();
-        assert_eq!(moved, vec![(0, 1, "a".to_string()), (1, 2, "b".to_string())]);
+        assert_eq!(
+            moved,
+            vec![(0, 1, "a".to_string()), (1, 2, "b".to_string())]
+        );
         // Next migration: island 0's best is already known to island 1 (duplicate).
         isl.end_generation();
         let again = isl.end_generation();
-        assert!(!again.iter().any(|(f, t, _)| (*f, *t) == (0, 1)), "{again:?}");
+        assert!(
+            !again.iter().any(|(f, t, _)| (*f, *t) == (0, 1)),
+            "{again:?}"
+        );
     }
 
     #[test]
@@ -278,7 +322,20 @@ mod tests {
         assert!(pulls.iter().all(|p| *p >= 5), "no arm starved: {pulls:?}");
         assert!(pulls[1] > pulls[0] && pulls[1] > pulls[2], "{pulls:?}");
         assert_eq!(next_arm(&[], 1.0, &mut rng), None);
-        assert_eq!(next_arm(&[ArmStat::default(), ArmStat { pulls: 4, reward_sum: 1.0 }], 1.0, &mut rng), Some(0));
+        assert_eq!(
+            next_arm(
+                &[
+                    ArmStat::default(),
+                    ArmStat {
+                        pulls: 4,
+                        reward_sum: 1.0
+                    }
+                ],
+                1.0,
+                &mut rng
+            ),
+            Some(0)
+        );
     }
 
     /// The acceptance fixture: a 200-backtest campaign occupies at least five distinct
@@ -288,10 +345,16 @@ mod tests {
         let mut rng = Rng::new(11);
         let periods = 240usize;
         let mut perf: Vec<Vec<f64>> = Vec::new();
-        let mut arch = Archive::new(GridSpec { dims: vec![(0.0, 1.0, 5), (0.0, 1.0, 5)] });
+        let mut arch = Archive::new(GridSpec {
+            dims: vec![(0.0, 1.0, 5), (0.0, 1.0, 5)],
+        });
         for i in 0..200 {
             // 30 configurations carry a genuine per-period edge; the rest are noise.
-            let edge = if i % 7 == 0 { 0.04 + 0.0004 * (i as f64) } else { 0.0 };
+            let edge = if i % 7 == 0 {
+                0.04 + 0.0004 * (i as f64)
+            } else {
+                0.0
+            };
             let row: Vec<f64> = (0..periods).map(|_| edge + rng.next_normal()).collect();
             let score = row.iter().sum::<f64>() / periods as f64;
             let descriptor = [rng.next_f64(), rng.next_f64()];

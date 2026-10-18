@@ -99,7 +99,11 @@ mod tests {
     fn surf(name: &str, plateau: bool, cliffs: usize, s: Sensitivity) -> ParamSurface {
         ParamSurface {
             name: name.into(),
-            bins: vec![Bin { label: "a".into(), mean: 1.0, n: 3 }],
+            bins: vec![Bin {
+                label: "a".into(),
+                mean: 1.0,
+                n: 3,
+            }],
             plateau: plateau.then(|| ("a".into(), "b".into())),
             cliffs: (0..cliffs).map(|i| format!("c{i}")).collect(),
             sensitivity: s,
@@ -107,7 +111,12 @@ mod tests {
     }
 
     fn summary(params: Vec<ParamSurface>) -> SurfaceSummary {
-        SurfaceSummary { n_samples: 10, n_finite: 10, per_param: params, text: String::new() }
+        SurfaceSummary {
+            n_samples: 10,
+            n_finite: 10,
+            per_param: params,
+            text: String::new(),
+        }
     }
 
     fn dist(values: Vec<f64>) -> Distribution {
@@ -137,7 +146,11 @@ mod tests {
 
     #[test]
     fn the_dispersion_ratio_is_the_one_the_plateau_verdict_uses() {
-        let f = fragility(&summary(vec![surf("a", true, 0, Sensitivity::Low)]), Some(true), &dist(vec![1.0, 1.0, 1.0, 1.2]));
+        let f = fragility(
+            &summary(vec![surf("a", true, 0, Sensitivity::Low)]),
+            Some(true),
+            &dist(vec![1.0, 1.0, 1.0, 1.2]),
+        );
         let r = f.neighbourhood_dispersion_ratio.unwrap();
         assert!(r > 0.0 && r < 0.5, "{r}");
     }

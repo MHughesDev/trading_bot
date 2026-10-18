@@ -32,7 +32,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::core::{body_lines_over, description_tokens_over, MAX_BODY_LINES, MAX_DESCRIPTION_TOKENS};
+use crate::core::{
+    body_lines_over, description_tokens_over, MAX_BODY_LINES, MAX_DESCRIPTION_TOKENS,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Finding {
@@ -257,7 +259,9 @@ pub fn lint_bundle(files: &BTreeMap<String, Vec<u8>>) -> LintReport {
                             file: path.clone(),
                             line: *no,
                             rule: "description_tokens",
-                            text: format!("about {n} tokens; the limit is {MAX_DESCRIPTION_TOKENS}"),
+                            text: format!(
+                                "about {n} tokens; the limit is {MAX_DESCRIPTION_TOKENS}"
+                            ),
                         });
                     }
                 }

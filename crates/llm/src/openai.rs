@@ -386,7 +386,13 @@ async fn post_chat(
     api_key: &str,
     body: &Value,
 ) -> Result<(u16, Option<u64>, String), LlmError> {
-    post_json(http, &format!("{base_url}/v1/chat/completions"), api_key, body).await
+    post_json(
+        http,
+        &format!("{base_url}/v1/chat/completions"),
+        api_key,
+        body,
+    )
+    .await
 }
 
 /// Models whose chat-completions endpoint refused function tools, so every call

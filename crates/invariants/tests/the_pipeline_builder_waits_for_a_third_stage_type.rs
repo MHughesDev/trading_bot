@@ -32,11 +32,17 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let p = e.path();
         let name = e.file_name().to_string_lossy().into_owned();
         if p.is_dir() {
-            if matches!(name.as_str(), "target" | "node_modules" | "dist" | ".git" | "__pycache__" | "tests") {
+            if matches!(
+                name.as_str(),
+                "target" | "node_modules" | "dist" | ".git" | "__pycache__" | "tests"
+            ) {
                 continue;
             }
             walk(&p, out);
-        } else if matches!(p.extension().and_then(|x| x.to_str()), Some("rs" | "py" | "ts" | "tsx" | "sql")) {
+        } else if matches!(
+            p.extension().and_then(|x| x.to_str()),
+            Some("rs" | "py" | "ts" | "tsx" | "sql")
+        ) {
             out.push(p);
         }
     }
@@ -46,7 +52,10 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
 /// in a pipeline context. Distinctness is by the identifier's normalised spelling, so one
 /// type used in fifty places counts once.
 fn stage_type_identifiers() -> Vec<(String, String)> {
-    let re = Regex::new(r"(?i)\b(pipeline_?stage_?(?:type|kind)s?|stage_?(?:type|kind)s?_of_pipeline)\b").unwrap();
+    let re = Regex::new(
+        r"(?i)\b(pipeline_?stage_?(?:type|kind)s?|stage_?(?:type|kind)s?_of_pipeline)\b",
+    )
+    .unwrap();
     let mut files = Vec::new();
     for d in ["crates", "apps", "frontend/src", "migrations"] {
         walk(&root().join(d), &mut files);
@@ -57,9 +66,14 @@ fn stage_type_identifiers() -> Vec<(String, String)> {
         if f.ends_with("the_pipeline_builder_waits_for_a_third_stage_type.rs") {
             continue;
         }
-        let Ok(text) = fs::read_to_string(&f) else { continue };
+        let Ok(text) = fs::read_to_string(&f) else {
+            continue;
+        };
         for m in re.find_iter(&text) {
-            found.push((m.as_str().to_ascii_lowercase().replace('_', ""), f.display().to_string()));
+            found.push((
+                m.as_str().to_ascii_lowercase().replace('_', ""),
+                f.display().to_string(),
+            ));
         }
     }
     found.sort();
@@ -85,6 +99,12 @@ fn the_scan_reads_the_trees_it_claims_to() {
     for d in ["crates", "apps", "frontend/src", "migrations"] {
         walk(&root().join(d), &mut files);
     }
-    assert!(files.len() > 500, "only {} source files found; the walk has broken", files.len());
-    assert!(files.iter().any(|f| f.ends_with("crates/api/src/lib.rs") || f.ends_with("crates\\api\\src\\lib.rs")));
+    assert!(
+        files.len() > 500,
+        "only {} source files found; the walk has broken",
+        files.len()
+    );
+    assert!(files
+        .iter()
+        .any(|f| f.ends_with("crates/api/src/lib.rs") || f.ends_with("crates\\api\\src\\lib.rs")));
 }

@@ -72,7 +72,10 @@ async fn every_worked_skeleton_fires_on_btc_usd_hourly_bars() {
                 }
             }
             Err(e) => {
-                table.push_str(&format!("{:<16} valid={valid} REFUSED: {e}\n", s.family.to_string()));
+                table.push_str(&format!(
+                    "{:<16} valid={valid} REFUSED: {e}\n",
+                    s.family.to_string()
+                ));
                 failures.push(format!("{}: refused: {e}", s.family));
             }
         }

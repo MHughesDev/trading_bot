@@ -84,7 +84,9 @@ pub async fn ramp_pass(pg: &sqlx::PgPool, kill: &std::sync::Arc<risk::KillSwitch
     .await
     {
         Ok(p) => p,
-        Err(e) => return error!(error = %e, "ramp review: no readable ramp_policy — nothing judged"),
+        Err(e) => {
+            return error!(error = %e, "ramp review: no readable ramp_policy — nothing judged")
+        }
     };
     let effects = api::ramp_worker::MonitorEffects {
         pg: pg.clone(),
@@ -125,8 +127,14 @@ async fn fleet_pass(pg: &sqlx::PgPool) {
     };
     let store = reconciliation::monitor::store::MonitorStore::new(pg.clone());
     for tenant in tenants {
-        match reconciliation::fleet_job::assess_tenant(pg, &store, &tenant, chrono::Utc::now(), true)
-            .await
+        match reconciliation::fleet_job::assess_tenant(
+            pg,
+            &store,
+            &tenant,
+            chrono::Utc::now(),
+            true,
+        )
+        .await
         {
             Ok(a) => info!(%tenant, verdict = ?a.report.verdict, filed = ?a.filed,
                 "fleet reconciliation"),
@@ -142,18 +150,26 @@ async fn drill_pass(pg: &sqlx::PgPool) {
     let store = reconciliation::monitor::store::MonitorStore::new(pg.clone());
     let last = match store.last_drill_runs().await {
         Ok(l) => l,
-        Err(e) => return error!(error = %e, "drill schedule: last runs unreadable — drills not run"),
+        Err(e) => {
+            return error!(error = %e, "drill schedule: last runs unreadable — drills not run")
+        }
     };
     if !reconciliation::drills::suite_is_due(&last, chrono::Utc::now()) {
         return;
     }
-    match reconciliation::drills::run_all(&store, true, reconciliation::drills::SCHEDULE_ACTOR).await {
+    match reconciliation::drills::run_all(&store, true, reconciliation::drills::SCHEDULE_ACTOR)
+        .await
+    {
         Ok(runs) => {
             let failed = runs.iter().filter(|r| !r.passed).count();
             if failed == 0 {
                 info!(drills = runs.len(), "scheduled fail-closed drills passed");
             } else {
-                error!(failed, drills = runs.len(), "scheduled fail-closed drills FAILED — defects filed");
+                error!(
+                    failed,
+                    drills = runs.len(),
+                    "scheduled fail-closed drills FAILED — defects filed"
+                );
             }
         }
         Err(e) => error!(error = %e, "scheduled fail-closed drills could not run"),
@@ -407,11 +423,12 @@ mod feed_tests {
         let src = include_str!("pipeline_manager.rs");
         for class in ["crypto_spot_cex", "equity", "etf"] {
             let arm = format!("\"{class}\" => Some(Self {{");
-            let at = src
-                .find(&arm)
-                .unwrap_or_else(|| panic!("pipeline_manager no longer binds {class}; update live_feed_venue"));
+            let at = src.find(&arm).unwrap_or_else(|| {
+                panic!("pipeline_manager no longer binds {class}; update live_feed_venue")
+            });
             let rest = &src[at..];
-            let v = rest.find("venue_id: \"").expect("a venue_id in the arm") + "venue_id: \"".len();
+            let v =
+                rest.find("venue_id: \"").expect("a venue_id in the arm") + "venue_id: \"".len();
             let venue = &rest[v..v + rest[v..].find('"').expect("closing quote")];
             assert_eq!(
                 live_feed_venue(class),
@@ -426,7 +443,9 @@ mod feed_tests {
         // Wednesday 2026-10-07: 15:00 UTC is 11:00 New York, 23:00 UTC is 19:00.
         let midday = chrono::Utc.with_ymd_and_hms(2026, 10, 7, 15, 0, 0).unwrap();
         let evening = chrono::Utc.with_ymd_and_hms(2026, 10, 7, 23, 0, 0).unwrap();
-        let saturday = chrono::Utc.with_ymd_and_hms(2026, 10, 10, 15, 0, 0).unwrap();
+        let saturday = chrono::Utc
+            .with_ymd_and_hms(2026, 10, 10, 15, 0, 0)
+            .unwrap();
         assert!(session_open("crypto_spot_cex", evening));
         assert!(session_open("crypto_spot_cex", saturday));
         assert!(session_open("equity", midday));
@@ -440,20 +459,36 @@ mod feed_tests {
         let src = include_str!("health_jobs.rs");
         let body = &src[src.find("pub fn spawn(").expect("spawn")..];
         let body = &body[..body.find("\n}\n").expect("end of spawn")];
-        assert!(body.contains("spawn_feed_freshness("), "the feed producer is built and unreached");
+        assert!(
+            body.contains("spawn_feed_freshness("),
+            "the feed producer is built and unreached"
+        );
         let main = include_str!("main.rs");
-        assert!(main.contains("health_jobs::spawn("), "main no longer starts health_jobs");
+        assert!(
+            main.contains("health_jobs::spawn("),
+            "main no longer starts health_jobs"
+        );
     }
 
     #[test]
     fn the_fleet_and_drill_passes_run_from_the_loop_that_runs() {
         let src = include_str!("health_jobs.rs");
         let body = &src[src.find("pub async fn run_once(").expect("run_once")..];
-        let body = &body[..body.find("
+        let body = &body[..body
+            .find(
+                "
 }
-").expect("end of run_once")];
-        assert!(body.contains("fleet_pass(pg)"), "fleet reconciliation is built and unreached");
-        assert!(body.contains("drill_pass(pg)"), "the drill schedule is built and unreached");
+",
+            )
+            .expect("end of run_once")];
+        assert!(
+            body.contains("fleet_pass(pg)"),
+            "fleet reconciliation is built and unreached"
+        );
+        assert!(
+            body.contains("drill_pass(pg)"),
+            "the drill schedule is built and unreached"
+        );
         assert!(
             body.contains("legacy_marker_pass(pg)"),
             "the legacy_ungated sweep is built and unreached"
@@ -468,9 +503,15 @@ mod feed_tests {
         let src = include_str!("health_jobs.rs");
         let body = &src[src.find("pub fn spawn_ramp(").expect("spawn_ramp")..];
         let body = &body[..body.find("\n}\n").expect("end of spawn_ramp")];
-        assert!(body.contains("ramp_pass(&pg, &kill)"), "the loop does not run the pass");
+        assert!(
+            body.contains("ramp_pass(&pg, &kill)"),
+            "the loop does not run the pass"
+        );
         let pass = &src[src.find("pub async fn ramp_pass(").expect("ramp_pass")..];
-        assert!(pass.contains("api::ramp_worker::run_pass("), "the ramp worker is built and unreached");
+        assert!(
+            pass.contains("api::ramp_worker::run_pass("),
+            "the ramp worker is built and unreached"
+        );
         let main = include_str!("main.rs");
         assert!(
             main.contains("health_jobs::spawn_ramp("),

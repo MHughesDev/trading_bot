@@ -47,16 +47,24 @@ async fn forty_hpo_trials_raise_the_counter_by_forty_and_a_run_by_one() {
     let pg = pool().await;
     let m = model(&pg).await;
     run(&pg, &m).await;
-    assert_eq!(studio::trial_count(&pg, &m).await, 1, "a run counts itself, in its own insert");
+    assert_eq!(
+        studio::trial_count(&pg, &m).await,
+        1,
+        "a run counts itself, in its own insert"
+    );
     let total = studio::count_hpo_trials(&pg, &m, 40).await.unwrap();
     assert_eq!(total, 41);
-    let (hpo,): (i64,) = sqlx::query_as("SELECT hpo_trial_count FROM model_experiments WHERE model_id = $1")
-        .bind(&m)
-        .fetch_one(&pg)
-        .await
-        .unwrap();
+    let (hpo,): (i64,) =
+        sqlx::query_as("SELECT hpo_trial_count FROM model_experiments WHERE model_id = $1")
+            .bind(&m)
+            .fetch_one(&pg)
+            .await
+            .unwrap();
     assert_eq!(hpo, 40);
-    assert!(studio::count_hpo_trials(&pg, &m, 0).await.is_err(), "an increment below 1 is refused");
+    assert!(
+        studio::count_hpo_trials(&pg, &m, 0).await.is_err(),
+        "an increment below 1 is refused"
+    );
 }
 
 #[tokio::test]
@@ -72,26 +80,41 @@ async fn the_counter_cannot_be_lowered_by_the_owner_or_written_by_the_platform_r
         .bind(&m)
         .execute(&pg)
         .await;
-    assert!(lowered.is_err(), "a direct UPDATE that lowers the counter must be refused");
+    assert!(
+        lowered.is_err(),
+        "a direct UPDATE that lowers the counter must be refused"
+    );
 
     // The platform role: SELECT yes, UPDATE no, the hook yes.
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
-    let (n,): (i64,) = sqlx::query_as("SELECT trial_count FROM model_experiments WHERE model_id = $1")
-        .bind(&m)
-        .fetch_one(&mut *tx)
-        .await
-        .expect("app_role can read the counter");
-    assert_eq!(n, 6);
-    let raised = sqlx::query("UPDATE model_experiments SET trial_count = trial_count + 100 WHERE model_id = $1")
-        .bind(&m)
+    sqlx::query("SET LOCAL ROLE app_role")
         .execute(&mut *tx)
-        .await;
-    assert!(raised.is_err(), "app_role has no UPDATE on the counter, not even upward");
+        .await
+        .unwrap();
+    let (n,): (i64,) =
+        sqlx::query_as("SELECT trial_count FROM model_experiments WHERE model_id = $1")
+            .bind(&m)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("app_role can read the counter");
+    assert_eq!(n, 6);
+    let raised = sqlx::query(
+        "UPDATE model_experiments SET trial_count = trial_count + 100 WHERE model_id = $1",
+    )
+    .bind(&m)
+    .execute(&mut *tx)
+    .await;
+    assert!(
+        raised.is_err(),
+        "app_role has no UPDATE on the counter, not even upward"
+    );
     tx.rollback().await.unwrap();
 
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     let (t,): (i64,) = sqlx::query_as("SELECT model_experiment_count($1, 2, FALSE)")
         .bind(&m)
         .fetch_one(&mut *tx)
@@ -106,11 +129,12 @@ async fn the_counter_cannot_be_lowered_by_the_owner_or_written_by_the_platform_r
         .execute(&mut *tx)
         .await
         .expect("app_role can insert a training run");
-    let (after,): (i64,) = sqlx::query_as("SELECT trial_count FROM model_experiments WHERE model_id = $1")
-        .bind(&m)
-        .fetch_one(&mut *tx)
-        .await
-        .unwrap();
+    let (after,): (i64,) =
+        sqlx::query_as("SELECT trial_count FROM model_experiments WHERE model_id = $1")
+            .bind(&m)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
     assert_eq!(after, 9);
     tx.rollback().await.unwrap();
 }
@@ -120,11 +144,13 @@ async fn the_counter_cannot_be_lowered_by_the_owner_or_written_by_the_platform_r
 async fn a_failing_leakage_report_cannot_be_stored_on_a_dataset_version() {
     let pg = pool().await;
     let id = format!("ds-{}", Uuid::new_v4().simple());
-    sqlx::query("INSERT INTO datasets (dataset_id, feature_set_ref, created_at) VALUES ($1, 'fs', now())")
-        .bind(&id)
-        .execute(&pg)
-        .await
-        .ok();
+    sqlx::query(
+        "INSERT INTO datasets (dataset_id, feature_set_ref, created_at) VALUES ($1, 'fs', now())",
+    )
+    .bind(&id)
+    .execute(&pg)
+    .await
+    .ok();
     // The full column set of dataset_versions varies by migration history, so assert the
     // constraint directly on a minimal row via a savepoint-free CHECK probe.
     let probe = sqlx::query(
@@ -157,7 +183,10 @@ async fn a_promotion_proposal_is_pending_until_a_person_decides_and_app_role_can
     let agent = Uuid::new_v4();
 
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     sqlx::query(
         "INSERT INTO model_promotion_proposals (model_id, version, rationale, proposed_by) VALUES ($1, 1, 'why', $2)",
     )
@@ -185,7 +214,10 @@ async fn a_promotion_proposal_is_pending_until_a_person_decides_and_app_role_can
     .bind(agent)
     .execute(&pg)
     .await;
-    assert!(incomplete.is_err(), "an approval with no decider is refused");
+    assert!(
+        incomplete.is_err(),
+        "an approval with no decider is refused"
+    );
     let performed = sqlx::query(
         "INSERT INTO model_promotion_proposals (model_id, version, rationale, proposed_by, performed_at) VALUES ($1, 1, 'x', $2, now())",
     )
@@ -193,7 +225,10 @@ async fn a_promotion_proposal_is_pending_until_a_person_decides_and_app_role_can
     .bind(agent)
     .execute(&pg)
     .await;
-    assert!(performed.is_err(), "nothing is performed that was not approved");
+    assert!(
+        performed.is_err(),
+        "nothing is performed that was not approved"
+    );
 }
 
 #[tokio::test]
@@ -221,14 +256,24 @@ async fn specifications_only_rise_and_an_unknown_experiment_is_refused() {
         .await
         .unwrap();
     assert_eq!(n, 2, "a removal adds zero and never subtracts");
-    let lowered = sqlx::query("UPDATE backtest_experiments SET specification_count = 0 WHERE experiment_id = $1")
-        .bind(&exp)
-        .execute(&pg)
-        .await;
+    let lowered = sqlx::query(
+        "UPDATE backtest_experiments SET specification_count = 0 WHERE experiment_id = $1",
+    )
+    .bind(&exp)
+    .execute(&pg)
+    .await;
     assert!(lowered.is_err());
-    assert!(sqlx::query("SELECT experiment_add_specifications('no-such', 1)").fetch_one(&pg).await.is_err());
+    assert!(
+        sqlx::query("SELECT experiment_add_specifications('no-such', 1)")
+            .fetch_one(&pg)
+            .await
+            .is_err()
+    );
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     sqlx::query("SELECT experiment_add_specifications($1, 1)")
         .bind(&exp)
         .fetch_one(&mut *tx)
@@ -243,22 +288,29 @@ async fn the_quality_monitors_tables_exist_and_the_platform_role_can_reach_them(
     let pg = pool().await;
     let m = model(&pg).await;
     let mut tx = pg.begin().await.unwrap();
-    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     // The exact reads quality_monitor.rs and model_call.rs make.
     sqlx::query("SELECT m.model_id FROM ai_models m JOIN ai_model_aliases a ON a.model_id = m.model_id WHERE a.alias = 'production'")
         .fetch_all(&mut *tx)
         .await
         .expect("ai_model_aliases resolves");
-    sqlx::query("SELECT finished_at FROM ai_model_runs WHERE model_id = $1 AND status = 'succeeded'")
-        .bind(&m)
-        .fetch_all(&mut *tx)
-        .await
-        .expect("ai_model_runs resolves");
-    sqlx::query("INSERT INTO model_forecasts (model_id, predicted_q50, realized) VALUES ($1, 0.1, 0.2)")
-        .bind(&m)
-        .execute(&mut *tx)
-        .await
-        .expect("model_forecasts is writable by app_role");
+    sqlx::query(
+        "SELECT finished_at FROM ai_model_runs WHERE model_id = $1 AND status = 'succeeded'",
+    )
+    .bind(&m)
+    .fetch_all(&mut *tx)
+    .await
+    .expect("ai_model_runs resolves");
+    sqlx::query(
+        "INSERT INTO model_forecasts (model_id, predicted_q50, realized) VALUES ($1, 0.1, 0.2)",
+    )
+    .bind(&m)
+    .execute(&mut *tx)
+    .await
+    .expect("model_forecasts is writable by app_role");
     sqlx::query("INSERT INTO model_quality_series (model_id, window_end, n_forecasts) VALUES ($1, now(), 1)")
         .bind(&m)
         .execute(&mut *tx)

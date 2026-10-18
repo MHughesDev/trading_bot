@@ -192,7 +192,10 @@ fn yang_zhang_agrees_across_the_language_barrier() {
         &Bars::newest_first(&b.close),
     );
     let template_variance = t["yang_zhang_variance"].as_f64().expect("a variance");
-    assert!(template_variance > 0.0, "the estimator is not being exercised");
+    assert!(
+        template_variance > 0.0,
+        "the estimator is not being exercised"
+    );
     // The engine reports a per-bar deviation, the template a variance.
     assert_close("yang_zhang_vol", sd * sd, template_variance);
 }
@@ -264,11 +267,17 @@ fn the_ensembles_are_the_mean_of_the_registered_single_window_families() {
 
     let want = (at("zscore_10") + at("zscore_20") + at("zscore_40")) / 3.0;
     let got = families::ensemble::mean_zscore(&newest_first, &[10, 20, 40]);
-    assert!((got - want).abs() < 1e-12, "zscore ensemble {got} vs {want}");
+    assert!(
+        (got - want).abs() < 1e-12,
+        "zscore ensemble {got} vs {want}"
+    );
 
     let want = (at("returns_1") + at("returns_5") + at("returns_20")) / 3.0;
     let got = families::ensemble::mean_return(&newest_first, &[1, 5, 20]);
-    assert!((got - want).abs() < 1e-12, "returns ensemble {got} vs {want}");
+    assert!(
+        (got - want).abs() < 1e-12,
+        "returns ensemble {got} vs {want}"
+    );
 }
 
 /// What each family needs to be a *registered* one, derived rather than

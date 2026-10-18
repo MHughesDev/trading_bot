@@ -122,7 +122,11 @@ pub async fn restore(engine: &PaperTradingEngine, pg: &PgPool) -> Result<usize, 
             })?;
         deployments += 1;
     }
-    tracing::info!(accounts = restored, deployments, "paper account state restored");
+    tracing::info!(
+        accounts = restored,
+        deployments,
+        "paper account state restored"
+    );
     Ok(restored + deployments)
 }
 

@@ -161,11 +161,17 @@ pub enum FitError {
 fn standardise_fit(rows: &[Vec<f64>]) -> (Vec<f64>, Vec<f64>) {
     let d = rows[0].len();
     let n = rows.len() as f64;
-    let mean: Vec<f64> = (0..d).map(|j| rows.iter().map(|r| r[j]).sum::<f64>() / n).collect();
+    let mean: Vec<f64> = (0..d)
+        .map(|j| rows.iter().map(|r| r[j]).sum::<f64>() / n)
+        .collect();
     let sd: Vec<f64> = (0..d)
         .map(|j| {
             let v = rows.iter().map(|r| (r[j] - mean[j]).powi(2)).sum::<f64>() / n;
-            if v.sqrt() > 1e-12 { v.sqrt() } else { 1.0 }
+            if v.sqrt() > 1e-12 {
+                v.sqrt()
+            } else {
+                1.0
+            }
         })
         .collect();
     (mean, sd)
@@ -216,7 +222,11 @@ fn fit_at(std_rows: &[Vec<f64>], lambda: f64, vol_col: usize) -> (Vec<Vec<f64>>,
         }
     }
     let labels = label_series(std_rows, &cent, lambda);
-    let sse: f64 = std_rows.iter().zip(&labels).map(|(r, l)| dist2(r, &cent[*l])).sum();
+    let sse: f64 = std_rows
+        .iter()
+        .zip(&labels)
+        .map(|(r, l)| dist2(r, &cent[*l]))
+        .sum();
     let jumps = labels.windows(2).filter(|w| w[0] != w[1]).count();
     let n = std_rows.len() as f64;
     let ic = n * d as f64 * (sse / (n * d as f64) + 1e-12).ln()
@@ -241,7 +251,12 @@ pub fn fit(raw_rows: &[Vec<f64>], vol_col: usize) -> Result<JumpModel, FitError>
     let (mean, sd) = standardise_fit(raw_rows);
     let std_rows: Vec<Vec<f64>> = raw_rows
         .iter()
-        .map(|r| r.iter().enumerate().map(|(j, v)| (v - mean[j]) / sd[j]).collect())
+        .map(|r| {
+            r.iter()
+                .enumerate()
+                .map(|(j, v)| (v - mean[j]) / sd[j])
+                .collect()
+        })
         .collect();
     // Candidates: every penalty on the grid, each with its information criterion and the
     // median regime length it produces on the training window. Persistence is a requirement
@@ -337,7 +352,11 @@ mod tests {
         let (r, _) = regime_returns(200, 1);
         let full = features(&r, 5.0, 10.0);
         let part = features(&r[..120], 5.0, 10.0);
-        assert_eq!(&full[..120], &part[..], "row t depends on returns up to t only");
+        assert_eq!(
+            &full[..120],
+            &part[..],
+            "row t depends on returns up to t only"
+        );
     }
 
     #[test]
@@ -348,7 +367,11 @@ mod tests {
         let all = model.label(&rows);
         for t in [60, 150, 299, 450] {
             let prefix = model.label(&rows[..=t]);
-            assert_eq!(prefix, all[..=t].to_vec(), "labels up to {t} changed after bars {t}.. arrived");
+            assert_eq!(
+                prefix,
+                all[..=t].to_vec(),
+                "labels up to {t} changed after bars {t}.. arrived"
+            );
             assert_eq!(prefix[t], all[t]);
         }
         // And the streaming filter says the same as the batch call, bar by bar.
@@ -365,7 +388,11 @@ mod tests {
         let model = fit(&rows, 2).unwrap();
         let labels = model.label(&rows);
         // Median regime length at least 5 observations (RB-4.2's persistence bar).
-        assert!(median_run_length(&labels) >= 5.0, "{}", median_run_length(&labels));
+        assert!(
+            median_run_length(&labels) >= 5.0,
+            "{}",
+            median_run_length(&labels)
+        );
         // The labels track the true regimes better than chance (1/3), after burn-in.
         let agree = labels
             .iter()
@@ -389,20 +416,31 @@ mod tests {
         assert!(LAMBDA_GRID.contains(&model.lambda));
         // The chosen fit persists, and no eligible penalty had a smaller criterion.
         assert!(median_run_length(&model.label(&rows)) >= MIN_MEDIAN_RUN);
-        let chosen_ic = model.criterion.iter().find(|(l, _)| *l == model.lambda).unwrap().1;
+        let chosen_ic = model
+            .criterion
+            .iter()
+            .find(|(l, _)| *l == model.lambda)
+            .unwrap()
+            .1;
         for (lambda, ic) in &model.criterion {
             let (_, std_rows) = (0, model.standardise(&rows));
             let (cent, _) = fit_at(&std_rows, *lambda, 2);
             let run = median_run_length(&label_series(&std_rows, &cent, *lambda));
             if run >= MIN_MEDIAN_RUN {
-                assert!(chosen_ic <= *ic + 1e-9, "lambda {lambda} was eligible with a smaller criterion");
+                assert!(
+                    chosen_ic <= *ic + 1e-9,
+                    "lambda {lambda} was eligible with a smaller criterion"
+                );
             }
         }
     }
 
     #[test]
     fn too_little_data_and_ragged_rows_are_refused() {
-        assert!(matches!(fit(&vec![vec![0.0; 3]; 10], 2), Err(FitError::TooShort(10, _))));
+        assert!(matches!(
+            fit(&vec![vec![0.0; 3]; 10], 2),
+            Err(FitError::TooShort(10, _))
+        ));
         let mut rows = vec![vec![0.0; 3]; 100];
         rows[5] = vec![0.0];
         assert_eq!(fit(&rows, 2), Err(FitError::Ragged));
@@ -414,9 +452,14 @@ mod tests {
         // `Filter`, `label_series`, `fit`, `median_run_length`, `refit_due`.
         let src = include_str!("regime_engine.rs");
         let prod = src.split("#[cfg(test)]").next().unwrap();
-        for line in prod.lines().filter(|l| l.trim_start().starts_with("pub fn") || l.trim_start().starts_with("pub struct")) {
+        for line in prod.lines().filter(|l| {
+            l.trim_start().starts_with("pub fn") || l.trim_start().starts_with("pub struct")
+        }) {
             let l = line.to_ascii_lowercase();
-            assert!(!l.contains("smooth") && !l.contains("viterbi") && !l.contains("backward"), "{line}");
+            assert!(
+                !l.contains("smooth") && !l.contains("viterbi") && !l.contains("backward"),
+                "{line}"
+            );
         }
     }
 

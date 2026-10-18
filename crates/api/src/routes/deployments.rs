@@ -99,7 +99,9 @@ async fn record_forward(
         return Err(bad(format!("unknown numeraire '{}'", f.numeraire)));
     }
     if f.kill_criteria.trim().is_empty() {
-        return Err(bad("kill criteria are declared before the first fill".into()));
+        return Err(bad(
+            "kill criteria are declared before the first fill".into()
+        ));
     }
     let mut tx = ledger::pg::tenant_tx(pg, tenant)
         .await
@@ -127,7 +129,9 @@ async fn record_forward(
         refuse(
             StatusCode::UNPROCESSABLE_ENTITY,
             "forward_not_recorded",
-            format!("the forward-evidence record was refused (is `trial_id` a registered trial?): {e}"),
+            format!(
+                "the forward-evidence record was refused (is `trial_id` a registered trial?): {e}"
+            ),
         )
     })?;
     tx.commit()
@@ -383,8 +387,7 @@ pub async fn create_deployment(
     let forward_deployment_id = match &forward {
         None => None,
         Some(f) => {
-            match record_forward(&state.pg, &user, deployment_id, plan.timeframe.seconds(), f)
-                .await
+            match record_forward(&state.pg, &user, deployment_id, plan.timeframe.seconds(), f).await
             {
                 Ok(id) => Some(id),
                 Err(r) => return r,

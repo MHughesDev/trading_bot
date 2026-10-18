@@ -681,11 +681,17 @@ async fn the_spanning_test_separates_a_repackaged_market_from_an_edge() {
     }
     let (span, edge) = (&results[0], &results[1]);
     let beta = span["beta"].as_f64().unwrap();
-    assert!((beta - 0.9).abs() < 0.05, "planted beta 0.9, measured {beta}");
+    assert!(
+        (beta - 0.9).abs() < 0.05,
+        "planted beta 0.9, measured {beta}"
+    );
     assert_eq!(span["verdict"], "spanned_by_btc_beta", "{span}");
     assert!(span["r2"].as_f64().unwrap() > 0.8, "{span}");
     assert!(edge["alpha_t"].as_f64().unwrap() > 2.0, "{edge}");
-    assert_eq!(edge["verdict"], "alpha_beyond_btc_beta_carry_untested", "{edge}");
+    assert_eq!(
+        edge["verdict"], "alpha_beyond_btc_beta_carry_untested",
+        "{edge}"
+    );
     // The one-factor honesty: the missing factor is named in every answer.
     assert_eq!(span["factors_missing"][0], "funding_rate_carry");
 }
@@ -702,13 +708,19 @@ async fn the_half_life_is_recovered_from_a_planted_decay() {
     assert_eq!(outcome, Outcome::Ok, "{outcome:?}");
     let d = result.expect("a result")["detail"].clone();
     let hl = d["half_life_bars"].as_f64().expect("a half-life");
-    assert!((7.0..=17.0).contains(&hl), "planted 12 bars, measured {hl}: {d}");
+    assert!(
+        (7.0..=17.0).contains(&hl),
+        "planted 12 bars, measured {hl}: {d}"
+    );
     assert_eq!(d["verdict"], "decays", "{d}");
     // A rebalance floor slower than the half-life is flagged.
     let mut flagged = payload_for(t, &fixture);
     flagged["breakeven_rebalance_bars"] = json!(100);
     let (_, r2) = run_once(t, &flagged).await;
-    assert_eq!(r2.unwrap()["detail"]["verdict"], "rebalance_faster_than_costs_allow");
+    assert_eq!(
+        r2.unwrap()["detail"]["verdict"],
+        "rebalance_faster_than_costs_allow"
+    );
 }
 
 /// ACI holds its target through the fixture's variance doubling, reports it by
@@ -725,5 +737,8 @@ async fn adaptive_intervals_hold_coverage_through_a_regime_change() {
     let cov = d["realized_coverage"].as_f64().unwrap();
     assert!((cov - 0.9).abs() < 0.05, "target 0.9, realised {cov}: {d}");
     assert_eq!(d["coverage_by_block"].as_array().unwrap().len(), 5, "{d}");
-    assert!(d["warmup_decisions_without_interval"].as_u64().unwrap() >= 50, "{d}");
+    assert!(
+        d["warmup_decisions_without_interval"].as_u64().unwrap() >= 50,
+        "{d}"
+    );
 }

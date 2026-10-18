@@ -712,10 +712,7 @@ pub fn probes(def: &StrategyDefinition) -> Result<Vec<ProbeSet>, Diagnostic> {
 /// # Errors
 ///
 /// As [`probes()`].
-pub fn probes_with(
-    def: &StrategyDefinition,
-    cat: &Catalogue,
-) -> Result<Vec<ProbeSet>, Diagnostic> {
+pub fn probes_with(def: &StrategyDefinition, cat: &Catalogue) -> Result<Vec<ProbeSet>, Diagnostic> {
     let entries = entry_clauses_with(def, cat)?;
 
     // Every feature the strategy declares, once each, in declaration order.

@@ -160,8 +160,16 @@ pub async fn decide(
         Err(e) => return render(&e),
     };
     let actor = format!("human:{}", token.user_id);
-    match gate::decide_proposal(&state.pg, &token.scopes, &actor, id, approve, &body.note, head.as_deref())
-        .await
+    match gate::decide_proposal(
+        &state.pg,
+        &token.scopes,
+        &actor,
+        id,
+        approve,
+        &body.note,
+        head.as_deref(),
+    )
+    .await
     {
         Ok(d) => Json(json!({
             "proposal_id": d.proposal_id,
@@ -200,7 +208,15 @@ pub async fn revoke(
         Err(e) => return render(&GateError::Db(e)),
     }
     let actor = format!("human:{}", token.user_id);
-    match gate::revoke_one(&state.pg, &state.kill_switch, id, &actor, "revoked by its owner").await {
+    match gate::revoke_one(
+        &state.pg,
+        &state.kill_switch,
+        id,
+        &actor,
+        "revoked by its owner",
+    )
+    .await
+    {
         Ok(r) => Json(json!({ "deployment_id": id, "withdrawn": r.withdrawn, "closed": r.closed }))
             .into_response(),
         Err(e) => render(&e),
@@ -237,7 +253,9 @@ pub async fn stop_all(
     }
     let actor = format!("human:{}", token.user_id);
     match gate::revoke_all(&state.pg, &state.kill_switch, &actor, &body.reason).await {
-        Ok(ids) => Json(json!({ "scope": "global", "state": "halted", "stopped": ids })).into_response(),
+        Ok(ids) => {
+            Json(json!({ "scope": "global", "state": "halted", "stopped": ids })).into_response()
+        }
         Err(e) => render(&e),
     }
 }
@@ -278,7 +296,16 @@ pub async fn declare_ceiling(
     Json(body): Json<CeilingBody>,
 ) -> Response {
     let actor = format!("human:{}", token.user_id);
-    match gate::declare_ceiling(&state.pg, &token.scopes, &actor, &body.name, &body.value, &body.note).await {
+    match gate::declare_ceiling(
+        &state.pg,
+        &token.scopes,
+        &actor,
+        &body.name,
+        &body.value,
+        &body.note,
+    )
+    .await
+    {
         Ok(()) => (StatusCode::CREATED, Json(json!({ "declared": body.name }))).into_response(),
         Err(e) => render(&e),
     }

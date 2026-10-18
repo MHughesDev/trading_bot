@@ -61,11 +61,19 @@ async fn a_restart_restores_each_deployments_own_account() {
 
     // ── process 1 ──
     let before = PaperTradingEngine::new();
-    before.open_deployment_account(a, ac, Decimal::from(10_000)).unwrap();
-    before.open_deployment_account(b, ac, Decimal::from(5_000)).unwrap();
+    before
+        .open_deployment_account(a, ac, Decimal::from(10_000))
+        .unwrap();
+    before
+        .open_deployment_account(b, ac, Decimal::from(5_000))
+        .unwrap();
     before.on_mark("BTC-USD", Price::from_str("100").unwrap());
-    before.submit(ac, &market("BTC-USD", Side::Buy, "3", a)).unwrap();
-    before.submit(ac, &market("BTC-USD", Side::Buy, "1", b)).unwrap();
+    before
+        .submit(ac, &market("BTC-USD", Side::Buy, "3", a))
+        .unwrap();
+    before
+        .submit(ac, &market("BTC-USD", Side::Buy, "1", b))
+        .unwrap();
     let mut last = HashMap::new();
     let written = persist::save_dirty_deployments(&before, &pg, &mut last)
         .await
@@ -73,7 +81,9 @@ async fn a_restart_restores_each_deployments_own_account() {
     assert!(written >= 2, "both accounts written ({written})");
     // Nothing changed: nothing rewritten.
     assert_eq!(
-        persist::save_dirty_deployments(&before, &pg, &mut last).await.unwrap(),
+        persist::save_dirty_deployments(&before, &pg, &mut last)
+            .await
+            .unwrap(),
         0
     );
 
@@ -81,7 +91,9 @@ async fn a_restart_restores_each_deployments_own_account() {
     let after = PaperTradingEngine::new();
     persist::restore(&after, &pg).await.unwrap();
     // The runner opens its account at start: the restored one stays.
-    assert!(!after.open_deployment_account(a, ac, Decimal::from(10_000)).unwrap());
+    assert!(!after
+        .open_deployment_account(a, ac, Decimal::from(10_000))
+        .unwrap());
     for (id, qty) in [(a, "3"), (b, "1")] {
         let s = id.to_string();
         let pos = after

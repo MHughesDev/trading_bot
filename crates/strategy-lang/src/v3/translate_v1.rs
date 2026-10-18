@@ -271,7 +271,11 @@ pub fn translate(def: &StrategyDefinition, timeframe: &str) -> Result<Translatio
             NodeKind::Condition { expr } => {
                 let v = expression(expr, &outputs, &at)?;
                 let Value::Object(mut o) = v else {
-                    return Err(refuse("condition", &at, format!("`{expr}` is a bare value, not a comparison")));
+                    return Err(refuse(
+                        "condition",
+                        &at,
+                        format!("`{expr}` is a bare value, not a comparison"),
+                    ));
                 };
                 o.insert("id".into(), json!(n.id));
                 nodes.push(Value::Object(o));
@@ -279,19 +283,39 @@ pub fn translate(def: &StrategyDefinition, timeframe: &str) -> Result<Translatio
             NodeKind::Signal { when, emit } => {
                 signals.entry(emit.clone()).or_default().push(when.clone());
             }
-            NodeKind::ModelForecast { model_ref: m, alias, direction, min_confidence, .. } => {
+            NodeKind::ModelForecast {
+                model_ref: m,
+                alias,
+                direction,
+                min_confidence,
+                ..
+            } => {
                 models = true;
                 let model = format!("{}__model", n.id);
-                nodes.push(json!({"id": model, "op": "model", "args": {"ref": model_ref(m, alias)}}));
+                nodes.push(
+                    json!({"id": model, "op": "model", "args": {"ref": model_ref(m, alias)}}),
+                );
                 nodes.push(json!({"id": n.id, "op": "and", "args": {
                     "a": {"op": "is", "args": {"x": format!("{model}.direction"), "label": {"str": direction}}},
                     "b": {"op": "ge", "args": {"a": format!("{model}.confidence"), "b": min_confidence}}
                 }}));
             }
-            NodeKind::Inference { model_ref: m, alias, outputs: binds, condition, .. } => {
+            NodeKind::Inference {
+                model_ref: m,
+                alias,
+                outputs: binds,
+                condition,
+                ..
+            } => {
                 models = true;
-                let model = if condition.is_some() { format!("{}__model", n.id) } else { n.id.clone() };
-                nodes.push(json!({"id": model, "op": "model", "args": {"ref": model_ref(m, alias)}}));
+                let model = if condition.is_some() {
+                    format!("{}__model", n.id)
+                } else {
+                    n.id.clone()
+                };
+                nodes.push(
+                    json!({"id": model, "op": "model", "args": {"ref": model_ref(m, alias)}}),
+                );
                 for b in binds {
                     outputs.insert(b.as_.clone(), format!("{model}.{}", b.field));
                 }
@@ -302,25 +326,45 @@ pub fn translate(def: &StrategyDefinition, timeframe: &str) -> Result<Translatio
                     }}));
                 }
             }
-            NodeKind::Sizing { model_ref: m, alias, clamp, fallback, .. } => {
+            NodeKind::Sizing {
+                model_ref: m,
+                alias,
+                clamp,
+                fallback,
+                ..
+            } => {
                 models = true;
                 let model = format!("{}__model", n.id);
-                nodes.push(json!({"id": model, "op": "model", "args": {"ref": model_ref(m, alias)}}));
+                nodes.push(
+                    json!({"id": model, "op": "model", "args": {"ref": model_ref(m, alias)}}),
+                );
                 let mut x = json!(format!("{model}.size_fraction"));
                 if let Some([lo, hi]) = clamp {
                     let (lo, hi) = (lo.parse::<f64>(), hi.parse::<f64>());
                     let (Ok(lo), Ok(hi)) = (lo, hi) else {
-                        return Err(refuse("sizing.clamp", &at, "the clamp bounds are not numbers"));
+                        return Err(refuse(
+                            "sizing.clamp",
+                            &at,
+                            "the clamp bounds are not numbers",
+                        ));
                     };
                     x = json!({"op": "clip", "args": {"x": x, "lo": lo, "hi": hi}});
                 }
                 if let Some(f) = fallback {
                     let Ok(f) = f.parse::<f64>() else {
-                        return Err(refuse("sizing.fallback", &at, "the fallback is not a number"));
+                        return Err(refuse(
+                            "sizing.fallback",
+                            &at,
+                            "the fallback is not a number",
+                        ));
                     };
                     x = json!({"op": "coalesce", "args": {"x": x, "default": f}});
                 }
-                let Value::Object(mut o) = (if x.is_object() { x } else { json!({"op": "add", "args": {"a": x, "b": 0}}) }) else {
+                let Value::Object(mut o) = (if x.is_object() {
+                    x
+                } else {
+                    json!({"op": "add", "args": {"a": x, "b": 0}})
+                }) else {
                     unreachable!("built as an object");
                 };
                 o.insert("id".into(), json!(n.id));
@@ -332,7 +376,9 @@ pub fn translate(def: &StrategyDefinition, timeframe: &str) -> Result<Translatio
                     .map(|i| json!(outputs.get(i).cloned().unwrap_or_else(|| i.clone())))
                     .collect();
                 let body = match op {
-                    CombineOp::WeightedAverage { weights } => json!({"op": "weighted_mean", "args": {"xs": xs, "weights": weights}}),
+                    CombineOp::WeightedAverage { weights } => {
+                        json!({"op": "weighted_mean", "args": {"xs": xs, "weights": weights}})
+                    }
                     CombineOp::Max | CombineOp::Min | CombineOp::Sum => {
                         let name = match op {
                             CombineOp::Max => "max",
@@ -340,12 +386,21 @@ pub fn translate(def: &StrategyDefinition, timeframe: &str) -> Result<Translatio
                             _ => "add",
                         };
                         let mut it = xs.into_iter();
-                        let first = it.next().ok_or_else(|| refuse("combine", &at, "it combines nothing"))?;
-                        it.fold(first, |acc, x| json!({"op": name, "args": {"a": acc, "b": x}}))
+                        let first = it
+                            .next()
+                            .ok_or_else(|| refuse("combine", &at, "it combines nothing"))?;
+                        it.fold(
+                            first,
+                            |acc, x| json!({"op": name, "args": {"a": acc, "b": x}}),
+                        )
                     }
                 };
                 let Value::Object(mut o) = body else {
-                    return Err(refuse("combine", &at, "a combine of one input is that input; remove the node"));
+                    return Err(refuse(
+                        "combine",
+                        &at,
+                        "a combine of one input is that input; remove the node",
+                    ));
                 };
                 o.insert("id".into(), json!(n.id));
                 nodes.push(Value::Object(o));
@@ -354,7 +409,14 @@ pub fn translate(def: &StrategyDefinition, timeframe: &str) -> Result<Translatio
             // A decision model's class map: each class it may predict emits its
             // signal when the model names that class with enough confidence.
             // An abstaining model is a missing value, which holds — v1's `flat`.
-            NodeKind::Decision { model_ref: m, alias, class_map, min_confidence, abstain, .. } => {
+            NodeKind::Decision {
+                model_ref: m,
+                alias,
+                class_map,
+                min_confidence,
+                abstain,
+                ..
+            } => {
                 if *abstain != AbstainPolicy::Flat {
                     return Err(refuse(
                         "decision.abstain hold_last",
@@ -364,7 +426,9 @@ pub fn translate(def: &StrategyDefinition, timeframe: &str) -> Result<Translatio
                 }
                 models = true;
                 let model = format!("{}__model", n.id);
-                nodes.push(json!({"id": model, "op": "model", "args": {"ref": model_ref(m, alias)}}));
+                nodes.push(
+                    json!({"id": model, "op": "model", "args": {"ref": model_ref(m, alias)}}),
+                );
                 let mut classes: Vec<(&String, &String)> = class_map.iter().collect();
                 classes.sort();
                 for (class, emit) in classes {
@@ -376,10 +440,30 @@ pub fn translate(def: &StrategyDefinition, timeframe: &str) -> Result<Translatio
                     signals.entry(emit.clone()).or_default().push(id);
                 }
             }
-            NodeKind::LlmInference { .. } => return Err(refuse("llm_inference", &at, "its prompt and parse mode must become an LLM model version's contract first")),
-            NodeKind::ModelRank { .. } => return Err(refuse("model_rank", &at, "ranking belongs in a selection strategy")),
-            NodeKind::DataSource { .. } | NodeKind::Rank { .. } | NodeKind::Filter { .. } | NodeKind::TakeTopN { .. } | NodeKind::SurfaceAction { .. } => {
-                return Err(refuse("universe pipeline", &at, "a v1.5 universe pipeline becomes a selection strategy; write it as one"));
+            NodeKind::LlmInference { .. } => {
+                return Err(refuse(
+                    "llm_inference",
+                    &at,
+                    "its prompt and parse mode must become an LLM model version's contract first",
+                ))
+            }
+            NodeKind::ModelRank { .. } => {
+                return Err(refuse(
+                    "model_rank",
+                    &at,
+                    "ranking belongs in a selection strategy",
+                ))
+            }
+            NodeKind::DataSource { .. }
+            | NodeKind::Rank { .. }
+            | NodeKind::Filter { .. }
+            | NodeKind::TakeTopN { .. }
+            | NodeKind::SurfaceAction { .. } => {
+                return Err(refuse(
+                    "universe pipeline",
+                    &at,
+                    "a v1.5 universe pipeline becomes a selection strategy; write it as one",
+                ));
             }
         }
     }

@@ -146,7 +146,10 @@ async fn a_model_refusing_tools_moves_to_responses_and_is_remembered() {
     let first = client.chat(&req).await.expect("answered on /v1/responses");
     assert_eq!(first.stop_reason, StopReason::ToolUse);
     assert_eq!(first.tool_calls.len(), 1);
-    assert_eq!(first.tool_calls[0].id, "call_abc", "the call_id, not the item id");
+    assert_eq!(
+        first.tool_calls[0].id, "call_abc",
+        "the call_id, not the item id"
+    );
     assert_eq!(first.tool_calls[0].name, "lookup");
     assert_eq!(first.tool_calls[0].arguments["q"], "btc");
     assert_eq!(first.usage.input_tokens, 20);
@@ -163,7 +166,10 @@ async fn a_model_refusing_tools_moves_to_responses_and_is_remembered() {
         assert_eq!(body["max_output_tokens"], 256);
         assert_eq!(body["reasoning"]["effort"], "low");
         assert_eq!(body["store"], false);
-        assert!(body.get("temperature").is_none(), "reasoning models refuse it");
+        assert!(
+            body.get("temperature").is_none(),
+            "reasoning models refuse it"
+        );
         assert!(body.get("messages").is_none());
         // Responses' flat function-tool shape.
         assert_eq!(
@@ -171,7 +177,10 @@ async fn a_model_refusing_tools_moves_to_responses_and_is_remembered() {
             json!({"type": "function", "name": "lookup", "description": "look things up",
                    "parameters": {"type": "object", "properties": {"q": {"type": "string"}}}})
         );
-        assert_eq!(body["input"][0], json!({"role": "user", "content": "price of btc?"}));
+        assert_eq!(
+            body["input"][0],
+            json!({"role": "user", "content": "price of btc?"})
+        );
     }
 
     client.chat(&req).await.expect("second call");
@@ -206,7 +215,10 @@ async fn vllm_is_never_routed_to_responses() {
     })
     .await;
     let client = LlmClient::new(Provider::Vllm, None, Some(base));
-    client.chat(&request("gpt-6-local")).await.expect("answered");
+    client
+        .chat(&request("gpt-6-local"))
+        .await
+        .expect("answered");
     assert_eq!(seen.lock().unwrap()[0].0, "/v1/chat/completions");
 }
 
@@ -241,7 +253,10 @@ async fn a_tool_call_round_trips_with_its_call_id() {
 
     let seen = seen.lock().unwrap();
     let input = seen[1].1["input"].as_array().expect("input").clone();
-    assert_eq!(input[0], json!({"role": "user", "content": "price of btc?"}));
+    assert_eq!(
+        input[0],
+        json!({"role": "user", "content": "price of btc?"})
+    );
     assert_eq!(
         input[1],
         json!({"role": "assistant", "content": "Looking it up."})
@@ -250,8 +265,8 @@ async fn a_tool_call_round_trips_with_its_call_id() {
     assert_eq!(input[2]["call_id"], "call_abc");
     assert_eq!(input[2]["name"], "lookup");
     // Arguments are a JSON string on the wire.
-    let args: Value = serde_json::from_str(input[2]["arguments"].as_str().expect("string"))
-        .expect("json");
+    let args: Value =
+        serde_json::from_str(input[2]["arguments"].as_str().expect("string")).expect("json");
     assert_eq!(args, json!({"q": "btc"}));
     assert_eq!(
         input[3],
@@ -282,7 +297,10 @@ async fn a_text_answer_is_end_turn_with_usage() {
     })
     .await;
     let client = LlmClient::new(Provider::OpenAi, Some(KEY.into()), Some(base));
-    let resp = client.chat(&request("o5-mini-text")).await.expect("answered");
+    let resp = client
+        .chat(&request("o5-mini-text"))
+        .await
+        .expect("answered");
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
     assert_eq!(resp.content.as_deref(), Some("BTC is 64000."));
     assert!(resp.tool_calls.is_empty());
@@ -303,10 +321,7 @@ async fn the_key_never_appears_in_an_error() {
     })
     .await;
     let client = LlmClient::new(Provider::OpenAi, Some(KEY.into()), Some(base));
-    let err = client
-        .chat(&request("gpt-6-auth"))
-        .await
-        .expect_err("401");
+    let err = client.chat(&request("gpt-6-auth")).await.expect_err("401");
     assert!(matches!(err, LlmError::Auth(_)), "{err:?}");
     let shown = format!("{err} {err:?}");
     assert!(!shown.contains(KEY), "key leaked: {shown}");

@@ -128,7 +128,12 @@ fn run_goal(i: usize, goal: &'static str) -> Outcome {
     let mut fills = 0;
     let mut say = |tag: &str, user: String, schema: &str| -> Result<Value, String> {
         fills += 1;
-        fill(&system, &user, &clause_schema(schema), &format!("{i}_{tag}"))
+        fill(
+            &system,
+            &user,
+            &clause_schema(schema),
+            &format!("{i}_{tag}"),
+        )
     };
 
     let ctx = format!("Goal: {goal}\n");
@@ -153,7 +158,9 @@ fn run_goal(i: usize, goal: &'static str) -> Outcome {
         .map_err(|e| e.to_string())?;
         let exit1: Exit = serde_json::from_value(say(
             "exit1",
-            format!("{ctx}Fill the first exit, a protective one such as a stop or a trailing stop."),
+            format!(
+                "{ctx}Fill the first exit, a protective one such as a stop or a trailing stop."
+            ),
             "exit",
         )?)
         .map_err(|e| e.to_string())?;

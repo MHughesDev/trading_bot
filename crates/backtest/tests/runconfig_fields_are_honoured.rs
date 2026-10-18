@@ -30,17 +30,29 @@ fn artifact() -> Layer1Artifact {
         .map(|i| {
             #[allow(clippy::cast_precision_loss)]
             let p = 100.0 + (f64::from(i) * 0.37).sin() * 4.0;
-            ArtifactBar { ts_ns: (i64::from(i) + 1) * 3_600_000_000_000, open: p, close: p + 0.2 }
+            ArtifactBar {
+                ts_ns: (i64::from(i) + 1) * 3_600_000_000_000,
+                open: p,
+                close: p + 0.2,
+            }
         })
         .collect();
-    let points = bars.iter().enumerate().map(|(i, b)| PositionPoint::new(b.ts_ns, if (i / 15) % 2 == 0 { 1.0 } else { 0.0 })).collect();
+    let points = bars
+        .iter()
+        .enumerate()
+        .map(|(i, b)| PositionPoint::new(b.ts_ns, if (i / 15) % 2 == 0 { 1.0 } else { 0.0 }))
+        .collect();
     let mut params = ParamMap::new();
     params.insert("lb".into(), serde_json::json!(5));
     Layer1Artifact {
         code_sha256: "ab".repeat(32),
         instrument: "BTC-USD".into(),
         timeframe: "1h".into(),
-        series: PositionSeries { points, position_units: PositionUnits::Fraction, allow_short: false },
+        series: PositionSeries {
+            points,
+            position_units: PositionUnits::Fraction,
+            allow_short: false,
+        },
         bars,
         initial_equity: 10_000.0,
         fee_bps: 10.0,
@@ -100,7 +112,9 @@ fn table() -> Vec<(&'static str, Proof)> {
 /// The field names of `pub struct RunConfig`, read from its source.
 fn struct_fields() -> BTreeSet<String> {
     let src = include_str!("../src/run/config.rs");
-    let start = src.find("pub struct RunConfig {").expect("RunConfig is declared in config.rs");
+    let start = src
+        .find("pub struct RunConfig {")
+        .expect("RunConfig is declared in config.rs");
     let body = &src[start..];
     let end = body.find("\n}").expect("the struct closes");
     body[..end]
@@ -127,7 +141,12 @@ fn each_field_changes_the_run_or_refuses_it_by_name() {
     let a = Arc::new(artifact());
     let base = a.run_config().expect("the artifact has a config");
     let baseline = run(&a, &base);
-    assert_eq!(baseline.status, RunStatus::Ok, "{:?}", baseline.integrity_flags);
+    assert_eq!(
+        baseline.status,
+        RunStatus::Ok,
+        "{:?}",
+        baseline.integrity_flags
+    );
 
     let mutate = |field: &str, cfg: &mut RunConfig| match field {
         "strategy_version" => cfg.strategy_version.push_str("-edited"),
@@ -143,14 +162,20 @@ fn each_field_changes_the_run_or_refuses_it_by_name() {
         "unsafe_" => cfg.unsafe_ = true,
         "null_world" => {
             cfg.null_world = Some(backtest::run::NullWorld {
-                null: backtest::nulls::Null::new(backtest::nulls::NullKind::BlockPermutation, backtest::nulls::NullParams::default()).unwrap(),
+                null: backtest::nulls::Null::new(
+                    backtest::nulls::NullKind::BlockPermutation,
+                    backtest::nulls::NullParams::default(),
+                )
+                .unwrap(),
                 seed: 1,
             });
         }
         "target" => {
-            cfg.target = Some(domain::strategy_graph::deployment::DeploymentTarget::Instrument {
-                instrument: "BTC-USD".into(),
-            });
+            cfg.target = Some(
+                domain::strategy_graph::deployment::DeploymentTarget::Instrument {
+                    instrument: "BTC-USD".into(),
+                },
+            );
         }
         "fill_delay_bars" => cfg.fill_delay_bars = 1,
         other => panic!("no mutation for {other}"),
@@ -163,9 +188,16 @@ fn each_field_changes_the_run_or_refuses_it_by_name() {
                 let mut cfg = base.clone();
                 mutate(field, &mut cfg);
                 let r = run(&a, &cfg);
-                assert!(matches!(r.status, RunStatus::Failed(_)), "{field}: expected a refusal, got {:?}", r.status);
                 assert!(
-                    r.integrity_flags.iter().any(|f| f.code.starts_with("layer1.config.") && f.code.contains(&name.replace('/', "_"))),
+                    matches!(r.status, RunStatus::Failed(_)),
+                    "{field}: expected a refusal, got {:?}",
+                    r.status
+                );
+                assert!(
+                    r.integrity_flags
+                        .iter()
+                        .any(|f| f.code.starts_with("layer1.config.")
+                            && f.code.contains(&name.replace('/', "_"))),
                     "{field}: the refusal must name it: {:?}",
                     r.integrity_flags
                 );
@@ -175,14 +207,20 @@ fn each_field_changes_the_run_or_refuses_it_by_name() {
                 cfg.cost_scale_bp = 5_000;
                 let r = run(&a, &cfg);
                 assert_eq!(r.status, RunStatus::Ok);
-                assert!(r.equity_curve.last().unwrap().1 < baseline.equity_curve.last().unwrap().1, "{field}: dearer costs, lower equity");
+                assert!(
+                    r.equity_curve.last().unwrap().1 < baseline.equity_curve.last().unwrap().1,
+                    "{field}: dearer costs, lower equity"
+                );
                 assert_ne!(cfg.compute_id(), base.run_id);
             }
             Proof::ChangesResult => {
                 let mut cfg = base.clone();
                 mutate(field, &mut cfg);
                 let r = run(&a, &cfg);
-                assert_ne!(r.unsafe_, baseline.unsafe_, "{field}: the result carries the changed bit");
+                assert_ne!(
+                    r.unsafe_, baseline.unsafe_,
+                    "{field}: the result carries the changed bit"
+                );
             }
         }
     }
@@ -190,8 +228,14 @@ fn each_field_changes_the_run_or_refuses_it_by_name() {
 
 #[test]
 fn a_field_that_is_inert_says_why_and_the_honoured_ones_outnumber_them() {
-    let inert: Vec<_> = table().into_iter().filter(|(_, p)| matches!(p, Proof::Inert(_))).collect();
-    assert!(inert.len() <= 3, "inert fields need a reason each, and there should be few");
+    let inert: Vec<_> = table()
+        .into_iter()
+        .filter(|(_, p)| matches!(p, Proof::Inert(_)))
+        .collect();
+    assert!(
+        inert.len() <= 3,
+        "inert fields need a reason each, and there should be few"
+    );
     for (_, p) in inert {
         if let Proof::Inert(why) = p {
             assert!(why.len() > 20, "a reason, not a shrug");

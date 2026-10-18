@@ -102,24 +102,22 @@ async fn a_written_checkpoint_is_what_a_re_queued_job_resumes_from() {
     let seen = Arc::new(Mutex::new(Vec::new()));
 
     let job = submit_and_claim(&store, project).await;
-    let first = WorkerPool::new(Arc::clone(&store), WorkerClass::Data, 1).register(Arc::new(
-        Resuming {
+    let first =
+        WorkerPool::new(Arc::clone(&store), WorkerClass::Data, 1).register(Arc::new(Resuming {
             seen: Arc::clone(&seen),
             write_step: Some(900),
             code: "sha256:code",
-        },
-    ));
+        }));
     first.execute(job.clone()).await;
 
     // The same job, picked up again (a lost lease re-queues it; the checkpoint
     // is keyed by job, not by attempt).
-    let second = WorkerPool::new(Arc::clone(&store), WorkerClass::Data, 1).register(Arc::new(
-        Resuming {
+    let second =
+        WorkerPool::new(Arc::clone(&store), WorkerClass::Data, 1).register(Arc::new(Resuming {
             seen: Arc::clone(&seen),
             write_step: None,
             code: "sha256:code",
-        },
-    ));
+        }));
     second.execute(job.clone()).await;
 
     let plans = seen.lock().unwrap().clone();

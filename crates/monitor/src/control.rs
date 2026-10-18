@@ -103,9 +103,9 @@ impl ResetRequest {
     /// agree.
     pub fn validate_venue(&self, venue_reconciled: bool) -> Result<(), ResetRefusal> {
         match &self.scope {
-            Scope::Venue(v) if !venue_reconciled => Err(ResetRefusal::VenueNotReconciled {
-                venue: v.clone(),
-            }),
+            Scope::Venue(v) if !venue_reconciled => {
+                Err(ResetRefusal::VenueNotReconciled { venue: v.clone() })
+            }
             _ => Ok(()),
         }
     }

@@ -44,9 +44,7 @@ impl Rng {
 }
 
 fn dec(x: f64) -> Decimal {
-    Decimal::from_f64_retain(x)
-        .unwrap_or_default()
-        .round_dp(4)
+    Decimal::from_f64_retain(x).unwrap_or_default().round_dp(4)
 }
 
 /// `n` hourly bars. Regimes of 150 bars alternate between an up-drift, a

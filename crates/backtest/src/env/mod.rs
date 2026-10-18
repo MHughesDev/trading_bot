@@ -481,7 +481,11 @@ impl SimOrders {
     }
 
     /// What the selection said about `instrument`'s member (U-6.6).
-    pub fn set_selection(&mut self, instrument: &str, selection: strategy_engine::SelectionContext) {
+    pub fn set_selection(
+        &mut self,
+        instrument: &str,
+        selection: strategy_engine::SelectionContext,
+    ) {
         if let Some(s) = self.sleeves.get_mut(instrument) {
             s.selection = Some(selection);
         }

@@ -25,7 +25,13 @@ use serde_json::{json, Value};
 use crate::ApiClient;
 
 const METRICS: &[&str] = &[
-    "sharpe", "sortino", "calmar", "cagr", "total_return", "detrended_sharpe", "expectancy",
+    "sharpe",
+    "sortino",
+    "calmar",
+    "cagr",
+    "total_return",
+    "detrended_sharpe",
+    "expectancy",
 ];
 
 fn text(params: &Value, key: &str) -> Option<String> {
@@ -80,9 +86,15 @@ pub fn plan(params: &Value, metric: &str) -> Result<(Vec<Member>, Vec<&'static s
         None => not_run.push("cost_ladder"),
     }
 
-    let delay = params.get("max_delay_bars").and_then(Value::as_u64).unwrap_or(1);
+    let delay = params
+        .get("max_delay_bars")
+        .and_then(Value::as_u64)
+        .unwrap_or(1);
     if delay != 1 {
-        return Err(bad("max_delay_bars", "this suite reads exactly one bar of delay; use timing_jitter_sensitivity for more"));
+        return Err(bad(
+            "max_delay_bars",
+            "this suite reads exactly one bar of delay; use timing_jitter_sensitivity for more",
+        ));
     }
     members.push(Member {
         name: "one_bar_delay",
@@ -98,7 +110,9 @@ pub fn plan(params: &Value, metric: &str) -> Result<(Vec<Member>, Vec<&'static s
                 .iter()
                 .map(|w| Some(json!([w.get("start")?.as_str()?, w.get("end")?.as_str()?])))
                 .collect();
-            let Some(windows) = windows else { return Err(bad("sub_periods", "each needs a start and an end")) };
+            let Some(windows) = windows else {
+                return Err(bad("sub_periods", "each needs a start and an end"));
+            };
             members.push(Member {
                 name: "sub_periods",
                 body: json!({"study_id": "robust-sub-periods", "kind": "walk_forward",
@@ -148,9 +162,17 @@ pub fn plan(params: &Value, metric: &str) -> Result<(Vec<Member>, Vec<&'static s
         Some(a) if a.len() >= 2 => {
             let windows: Option<Vec<Value>> = a
                 .iter()
-                .map(|w| Some(json!([w.get("start")?.as_str()?, w.get("end")?.as_str()?, w.get("label")?.as_str()?])))
+                .map(|w| {
+                    Some(json!([
+                        w.get("start")?.as_str()?,
+                        w.get("end")?.as_str()?,
+                        w.get("label")?.as_str()?
+                    ]))
+                })
                 .collect();
-            let Some(windows) = windows else { return Err(bad("regimes", "each needs start, end and label")) };
+            let Some(windows) = windows else {
+                return Err(bad("regimes", "each needs start, end and label"));
+            };
             members.push(Member {
                 name: "regimes",
                 body: json!({"study_id": "robust-regimes", "kind": "regime_conditional",
@@ -184,9 +206,20 @@ pub fn read_member(reading: Reading, view: &Value) -> (Option<bool>, Option<f64>
 
 /// Fold the member readings into the suite result.
 #[must_use]
-pub fn summarise(results: &[(&'static str, Option<bool>, Option<f64>, usize)], not_run: &[&'static str]) -> Value {
-    let failed: Vec<&str> = results.iter().filter(|r| r.1 == Some(false)).map(|r| r.0).collect();
-    let unread: Vec<&str> = results.iter().filter(|r| r.1.is_none()).map(|r| r.0).collect();
+pub fn summarise(
+    results: &[(&'static str, Option<bool>, Option<f64>, usize)],
+    not_run: &[&'static str],
+) -> Value {
+    let failed: Vec<&str> = results
+        .iter()
+        .filter(|r| r.1 == Some(false))
+        .map(|r| r.0)
+        .collect();
+    let unread: Vec<&str> = results
+        .iter()
+        .filter(|r| r.1.is_none())
+        .map(|r| r.0)
+        .collect();
     let runs: usize = results.iter().map(|r| r.3).sum();
     json!({
         "failed": failed,
@@ -227,7 +260,10 @@ pub async fn run_robustness_suite(api: &ApiClient, params: &Value) -> Value {
     let stamp = chrono::Utc::now().timestamp();
     for m in &members {
         let mut body = m.body.clone();
-        body["study_id"] = json!(format!("{}-{stamp}", m.body["study_id"].as_str().unwrap_or("robust")));
+        body["study_id"] = json!(format!(
+            "{}-{stamp}",
+            m.body["study_id"].as_str().unwrap_or("robust")
+        ));
         match api.post(&path, body).await {
             Ok(view) => {
                 let (passed, number, runs) = read_member(m.reading, &view);
@@ -305,19 +341,52 @@ mod tests {
     #[test]
     fn all_six_members_are_planned_when_all_six_are_asked_for_and_each_is_a_known_study() {
         let (m, not_run) = plan(&full(), "sharpe").unwrap();
-        assert_eq!(m.iter().map(|x| x.name).collect::<Vec<_>>(), vec!["cost_ladder", "one_bar_delay", "sub_periods", "neighbourhood", "perturbed_paths", "regimes"]);
+        assert_eq!(
+            m.iter().map(|x| x.name).collect::<Vec<_>>(),
+            vec![
+                "cost_ladder",
+                "one_bar_delay",
+                "sub_periods",
+                "neighbourhood",
+                "perturbed_paths",
+                "regimes"
+            ]
+        );
         assert!(not_run.is_empty());
         let kinds: Vec<&str> = m.iter().map(|x| x.body["kind"].as_str().unwrap()).collect();
-        assert_eq!(kinds, vec!["cost_sweep", "timing_jitter", "walk_forward", "neighborhood", "synthetic_paths", "regime_conditional"]);
+        assert_eq!(
+            kinds,
+            vec![
+                "cost_sweep",
+                "timing_jitter",
+                "walk_forward",
+                "neighborhood",
+                "synthetic_paths",
+                "regime_conditional"
+            ]
+        );
     }
 
     #[test]
     fn a_one_bar_delay_study_runs_the_baseline_and_one_bar_so_a_delay_changes_the_fills() {
         let (m, _) = plan(&json!({"experiment_id": "e"}), "sharpe").unwrap();
         assert_eq!(m.len(), 1);
-        assert_eq!(m[0].body["vary"]["bars"], json!([0, 1]), "the baseline is member 0 and one bar late is member 1");
+        assert_eq!(
+            m[0].body["vary"]["bars"],
+            json!([0, 1]),
+            "the baseline is member 0 and one bar late is member 1"
+        );
         let (_, not_run) = plan(&json!({"experiment_id": "e"}), "sharpe").unwrap();
-        assert_eq!(not_run, vec!["cost_ladder", "sub_periods", "neighbourhood", "perturbed_paths", "regimes"]);
+        assert_eq!(
+            not_run,
+            vec![
+                "cost_ladder",
+                "sub_periods",
+                "neighbourhood",
+                "perturbed_paths",
+                "regimes"
+            ]
+        );
     }
 
     #[test]
@@ -333,27 +402,64 @@ mod tests {
         assert_eq!(s["not_run"], json!(["sub_periods"]));
         assert_eq!(s["complete"], json!(false));
         assert_eq!(s["passed_all_that_ran"], json!(false));
-        assert_eq!(s["runs_counted"], json!(5), "the counter rises by exactly the runs the studies report");
-        let all = summarise(&[("a", Some(true), Some(1.0), 4), ("b", Some(true), Some(1.0), 2)], &[]);
+        assert_eq!(
+            s["runs_counted"],
+            json!(5),
+            "the counter rises by exactly the runs the studies report"
+        );
+        let all = summarise(
+            &[
+                ("a", Some(true), Some(1.0), 4),
+                ("b", Some(true), Some(1.0), 2),
+            ],
+            &[],
+        );
         assert_eq!(all["complete"], json!(true));
     }
 
     #[test]
     fn a_member_reads_the_number_its_definition_names() {
         let view = json!({"distribution": {"dist": [0.5, 0.3, -0.1], "median": 0.3}});
-        assert_eq!(read_member(Reading::Median, &view), (Some(true), Some(0.3), 3));
-        assert_eq!(read_member(Reading::LastMember, &view), (Some(false), Some(-0.1), 3), "the pessimistic rung decides the ladder");
+        assert_eq!(
+            read_member(Reading::Median, &view),
+            (Some(true), Some(0.3), 3)
+        );
+        assert_eq!(
+            read_member(Reading::LastMember, &view),
+            (Some(false), Some(-0.1), 3),
+            "the pessimistic rung decides the ladder"
+        );
         assert_eq!(read_member(Reading::SecondMember, &view).0, Some(true));
-        assert_eq!(read_member(Reading::Median, &json!({})).0, None, "no distribution is unreadable, never a pass");
+        assert_eq!(
+            read_member(Reading::Median, &json!({})).0,
+            None,
+            "no distribution is unreadable, never a pass"
+        );
     }
 
     #[test]
     fn malformed_members_are_refused_and_the_descriptor_fits_the_budget() {
-        assert!(plan(&json!({"experiment_id": "e", "cost_model_refs": ["only-one"]}), "sharpe").is_err());
-        assert!(plan(&json!({"experiment_id": "e", "perturbed_paths": 2}), "sharpe").is_err());
-        assert!(plan(&json!({"experiment_id": "e", "max_delay_bars": 3}), "sharpe").is_err());
+        assert!(plan(
+            &json!({"experiment_id": "e", "cost_model_refs": ["only-one"]}),
+            "sharpe"
+        )
+        .is_err());
+        assert!(plan(
+            &json!({"experiment_id": "e", "perturbed_paths": 2}),
+            "sharpe"
+        )
+        .is_err());
+        assert!(plan(
+            &json!({"experiment_id": "e", "max_delay_bars": 3}),
+            "sharpe"
+        )
+        .is_err());
         let s = &specs()[0];
-        let bytes = serde_json::to_string(&json!({"name": s.name, "description": s.description, "inputSchema": s.input_schema})).unwrap().len();
+        let bytes = serde_json::to_string(
+            &json!({"name": s.name, "description": s.description, "inputSchema": s.input_schema}),
+        )
+        .unwrap()
+        .len();
         assert!(bytes <= 1_200, "{bytes}");
     }
 }

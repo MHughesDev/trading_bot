@@ -198,7 +198,10 @@ fn negative_lookahead(args: &str) -> bool {
         .map(|r| r.trim_start().trim_start_matches('=').trim())
         .unwrap_or(first);
     let mut cs = value.chars();
-    cs.next() == Some('-') && cs.next().is_some_and(|c| c.is_ascii_digit() || is_ident(c) || c == ' ')
+    cs.next() == Some('-')
+        && cs
+            .next()
+            .is_some_and(|c| c.is_ascii_digit() || is_ident(c) || c == ' ')
 }
 
 fn label_like(name: &str) -> bool {
@@ -206,9 +209,11 @@ fn label_like(name: &str) -> bool {
     n == "y"
         || n.starts_with("y_")
         || n.ends_with("_y")
-        || ["label", "target", "fwd", "forward", "future", "ahead", "outcome"]
-            .iter()
-            .any(|k| n.contains(k))
+        || [
+            "label", "target", "fwd", "forward", "future", "ahead", "outcome",
+        ]
+        .iter()
+        .any(|k| n.contains(k))
 }
 
 /// `NAME` in `NAME = ...` or `NAME[...] = ...`, for a plain assignment statement.
@@ -228,7 +233,11 @@ fn assigned_name(masked: &str) -> Option<String> {
             .collect();
         // Quotes are kept by `mask` but their contents blanked, so recover the name
         // from the raw line in the caller; here an empty inner means "a string key".
-        return if inner.is_empty() { Some(String::new()) } else { Some(inner) };
+        return if inner.is_empty() {
+            Some(String::new())
+        } else {
+            Some(inner)
+        };
     }
     let name: String = lhs.chars().take_while(|c| is_ident(*c)).collect();
     (!name.is_empty() && name.len() == lhs.len()).then_some(name)
@@ -245,7 +254,14 @@ fn assigned_column(raw: &str) -> Option<String> {
 }
 
 const STATS: [&str; 8] = [
-    ".mean(", ".std(", ".var(", ".median(", ".min(", ".max(", ".quantile(", ".sum(",
+    ".mean(",
+    ".std(",
+    ".var(",
+    ".median(",
+    ".min(",
+    ".max(",
+    ".quantile(",
+    ".sum(",
 ];
 const SCALERS: [&str; 5] = [
     "StandardScaler",
@@ -271,7 +287,8 @@ fn receiver_before(masked: &str, dot: usize) -> &str {
                 depth -= 1;
             }
             _ if depth > 0 => {}
-            b if b.is_ascii_alphanumeric() || b == b'_' || b == b'.' || b == b'\'' || b == b'"' => {}
+            b if b.is_ascii_alphanumeric() || b == b'_' || b == b'.' || b == b'\'' || b == b'"' => {
+            }
             _ => break,
         }
         start -= 1;
@@ -329,7 +346,9 @@ pub fn scan(source: &str) -> Scan {
                 let open = p + call.len() - 1;
                 let args = call_args(m, open);
                 let negative = if call == "np.roll(" {
-                    args.split(',').nth(1).is_some_and(|a| a.trim_start().starts_with('-'))
+                    args.split(',')
+                        .nth(1)
+                        .is_some_and(|a| a.trim_start().starts_with('-'))
                 } else {
                     negative_lookahead(args)
                 };
@@ -441,8 +460,14 @@ pub fn scan(source: &str) -> Scan {
         }
 
         // 5. A scaler or ranker fitted on the whole frame.
-        if SCALERS.iter().any(|s| m.contains(s)) || m.contains("zscore(") || m.contains(".fit_transform(") {
-            for p in find_all(m, ".fit_transform(").into_iter().chain(find_all(m, ".fit(")) {
+        if SCALERS.iter().any(|s| m.contains(s))
+            || m.contains("zscore(")
+            || m.contains(".fit_transform(")
+        {
+            for p in find_all(m, ".fit_transform(")
+                .into_iter()
+                .chain(find_all(m, ".fit("))
+            {
                 let open = m[p..].find('(').map(|k| p + k).unwrap_or(p);
                 let a = call_args(m, open).trim_start().to_ascii_lowercase();
                 let on_train = a.starts_with("x_train")
@@ -508,11 +533,13 @@ pub fn scan(source: &str) -> Scan {
                 let rhs = m.split_once('=').map_or("", |(_, r)| r);
                 let hit = tainted
                     .iter()
-                    .find(|t| find_all(rhs, t).into_iter().any(|p| {
-                        let b = rhs[..p].chars().last();
-                        let a = rhs[p + t.len()..].chars().next();
-                        !b.is_some_and(is_ident) && !a.is_some_and(is_ident)
-                    }))
+                    .find(|t| {
+                        find_all(rhs, t).into_iter().any(|p| {
+                            let b = rhs[..p].chars().last();
+                            let a = rhs[p + t.len()..].chars().next();
+                            !b.is_some_and(is_ident) && !a.is_some_and(is_ident)
+                        })
+                    })
                     .cloned();
                 if hit.is_some() {
                     push(
@@ -528,7 +555,10 @@ pub fn scan(source: &str) -> Scan {
         }
         if let Some(r) = raw.get(i) {
             let lower = r.to_ascii_lowercase();
-            if (lower.contains("feature") || lower.contains("x =") || lower.contains("x=") || lower.contains("columns"))
+            if (lower.contains("feature")
+                || lower.contains("x =")
+                || lower.contains("x=")
+                || lower.contains("columns"))
                 && !labels.is_empty()
             {
                 for l in &labels {
@@ -561,7 +591,11 @@ mod tests {
     use super::*;
 
     fn rules(src: &str) -> Vec<(&'static str, usize)> {
-        scan(src).findings.iter().map(|f| (f.rule, f.line)).collect()
+        scan(src)
+            .findings
+            .iter()
+            .map(|f| (f.rule, f.line))
+            .collect()
     }
 
     /// The acceptance clause: a full-dataset normalisation is flagged.
@@ -581,14 +615,24 @@ mod tests {
         let neg_named = "feat = close.pct_change(-horizon)\n";
         assert_eq!(rules(neg_named), vec![("future_shift", 1)]);
         let clean = "z = (close - close.rolling(50).mean()) / close.rolling(50).std()\nlag = close.shift(1)\n";
-        assert!(scan(clean).findings.is_empty(), "{:?}", scan(clean).findings);
+        assert!(
+            scan(clean).findings.is_empty(),
+            "{:?}",
+            scan(clean).findings
+        );
     }
 
     #[test]
     fn a_centred_window_and_a_backward_fill_are_blocking() {
-        assert_eq!(rules("m = x.rolling(5, center=True).mean()\n"), vec![("centered_window", 1)]);
+        assert_eq!(
+            rules("m = x.rolling(5, center=True).mean()\n"),
+            vec![("centered_window", 1)]
+        );
         assert_eq!(rules("x = x.bfill()\n"), vec![("backward_fill", 1)]);
-        assert_eq!(rules("x = x.fillna(method='bfill')\n"), vec![("backward_fill", 1)]);
+        assert_eq!(
+            rules("x = x.fillna(method='bfill')\n"),
+            vec![("backward_fill", 1)]
+        );
         assert_eq!(rules("x = x.interpolate()\n"), vec![("interpolation", 1)]);
     }
 
@@ -614,9 +658,17 @@ mod tests {
 
     #[test]
     fn a_shuffled_split_is_flagged_and_an_ordered_one_is_not() {
-        assert_eq!(rules("a = train_test_split(X, y)\n"), vec![("shuffled_split", 1)]);
-        assert!(scan("a = train_test_split(X, y, shuffle=False)\n").findings.is_empty());
-        assert_eq!(rules("k = KFold(5, shuffle=True)\n"), vec![("shuffled_split", 1)]);
+        assert_eq!(
+            rules("a = train_test_split(X, y)\n"),
+            vec![("shuffled_split", 1)]
+        );
+        assert!(scan("a = train_test_split(X, y, shuffle=False)\n")
+            .findings
+            .is_empty());
+        assert_eq!(
+            rules("k = KFold(5, shuffle=True)\n"),
+            vec![("shuffled_split", 1)]
+        );
     }
 
     /// Comments and strings are blanked: a leak that is only described is not a leak.

@@ -21,7 +21,11 @@ fn missing(field: &str) -> Value {
 }
 
 fn s<'a>(params: &'a Value, key: &str) -> Option<&'a str> {
-    params.get(key).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty())
+    params
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
 }
 
 /// `check_move_history` — has this shape of move a record of failure?
@@ -29,7 +33,13 @@ pub async fn check_move_history(api: &ApiClient, params: &Value) -> Value {
     let Some(candidate) = params.get("candidate").filter(|c| c.is_object()) else {
         return missing("candidate");
     };
-    match api.post("/api/knowledge/moves/veto", json!({ "candidate": candidate })).await {
+    match api
+        .post(
+            "/api/knowledge/moves/veto",
+            json!({ "candidate": candidate }),
+        )
+        .await
+    {
         Ok(v) => v,
         Err(e) => e.to_tool_error(),
     }
@@ -58,7 +68,13 @@ pub async fn find_analog_windows(api: &ApiClient, params: &Value) -> Value {
 
 /// `tag_hypothesis_source` — say where a hypothesis came from.
 pub async fn tag_hypothesis_source(api: &ApiClient, params: &Value) -> Value {
-    for f in ["hypothesis_id", "source", "instrument", "window_start", "window_end"] {
+    for f in [
+        "hypothesis_id",
+        "source",
+        "instrument",
+        "window_start",
+        "window_end",
+    ] {
         if params.get(f).is_none() {
             return missing(f);
         }
@@ -119,7 +135,13 @@ pub async fn compare_to_random(api: &ApiClient, params: &Value) -> Value {
     let Some(id) = s(params, "campaign_id") else {
         return missing("campaign_id");
     };
-    match api.get(&format!("/api/knowledge/campaigns/{}/compare-to-random", urlencode(id))).await {
+    match api
+        .get(&format!(
+            "/api/knowledge/campaigns/{}/compare-to-random",
+            urlencode(id)
+        ))
+        .await
+    {
         Ok(v) => v,
         Err(e) => e.to_tool_error(),
     }
@@ -260,7 +282,10 @@ mod tests {
             "/random-arm",
             "/scores",
         ] {
-            assert!(!prod.contains(forbidden), "a knowledge tool mentions {forbidden}, a platform-write route");
+            assert!(
+                !prod.contains(forbidden),
+                "a knowledge tool mentions {forbidden}, a platform-write route"
+            );
         }
         // The only POSTs are the veto question and the source tag.
         assert_eq!(prod.matches(".post(").count(), 2);
@@ -272,7 +297,14 @@ mod tests {
         assert_eq!(sp.len(), 6);
         for t in &sp {
             assert_eq!(t.namespace, "memory");
-            assert!(t.input_schema.get("properties").and_then(Value::as_object).is_some_and(|p| !p.is_empty()), "{}", t.name);
+            assert!(
+                t.input_schema
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .is_some_and(|p| !p.is_empty()),
+                "{}",
+                t.name
+            );
         }
     }
 }

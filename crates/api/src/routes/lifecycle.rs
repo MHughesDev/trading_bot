@@ -627,9 +627,7 @@ pub struct SimilarHypothesisBody {
 pub fn normalise_statement(s: &str) -> String {
     let lowered = s.trim().to_lowercase();
     let collapsed: String = lowered.split_whitespace().collect::<Vec<_>>().join(" ");
-    collapsed
-        .trim_end_matches(['.', '?', '!'])
-        .to_string()
+    collapsed.trim_end_matches(['.', '?', '!']).to_string()
 }
 
 /// `POST /api/lifecycle/hypotheses/similar` — has this been asked before?
@@ -1507,8 +1505,8 @@ pub async fn compare_candidates(
     token: BearerToken,
     Json(body): Json<crate::compare_candidates::CompareBody>,
 ) -> impl IntoResponse {
-    use crate::compare_candidates::{run, CompareFail, Inputs};
     use crate::campaign_driver::study_worker::{SuiteEvaluator, Window as CmpWindow};
+    use crate::compare_candidates::{run, CompareFail, Inputs};
 
     let user = token.user_id();
     let Some(view) = state.suite.get_experiment(user, body.experiment) else {
@@ -1569,7 +1567,8 @@ pub async fn compare_candidates(
     match run(inputs, &body).await {
         Ok(v) => Json(v).into_response(),
         Err(CompareFail::Request(m)) => {
-            bad_request("bad_comparison", m, "name at least two distinct candidates").into_response()
+            bad_request("bad_comparison", m, "name at least two distinct candidates")
+                .into_response()
         }
         Err(CompareFail::NotFound) => (
             StatusCode::NOT_FOUND,

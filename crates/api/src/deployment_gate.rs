@@ -101,9 +101,9 @@ impl GateError {
     pub fn http(&self) -> (u16, &'static str) {
         match self {
             Self::NotHuman => (403, "not_a_human_session"),
-            Self::Refused(ProposalRefusal::StaleAgainstHead { .. } | ProposalRefusal::StaleVerdict { .. }) => {
-                (409, "stale_verdict")
-            }
+            Self::Refused(
+                ProposalRefusal::StaleAgainstHead { .. } | ProposalRefusal::StaleVerdict { .. },
+            ) => (409, "stale_verdict"),
             Self::Refused(_) => (422, "invalid_proposal"),
             Self::Ceiling(_) => (409, "ceiling"),
             Self::NotFound => (404, "unknown_proposal"),
@@ -182,10 +182,11 @@ pub async fn load_proposal(
     .fetch_optional(pg)
     .await?
     .ok_or(GateError::NotFound)?;
-    let verdict: Vec<GateVerdictEntry> =
-        serde_json::from_value(row.get::<Value, _>("verdict")).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+    let verdict: Vec<GateVerdictEntry> = serde_json::from_value(row.get::<Value, _>("verdict"))
+        .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
     let thresholds: DivergenceThresholds =
-        serde_json::from_value(row.get::<Value, _>("thresholds")).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+        serde_json::from_value(row.get::<Value, _>("thresholds"))
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
     let capital: String = row.get("capital");
     Ok((
         row.get("owner_user_id"),
@@ -450,7 +451,8 @@ pub async fn revoke_one(
     reason: &str,
 ) -> Result<Revoked, GateError> {
     let registry = strategy_runtime::live::global();
-    let withdrawn = registry.deregister_v3(deployment_id) | registry.deregister_selection(deployment_id);
+    let withdrawn =
+        registry.deregister_v3(deployment_id) | registry.deregister_selection(deployment_id);
     let scope = risk::Scope::strategy(deployment_id.to_string());
     trip(pg, kill, scope, monitor::family::Family::Pnl, actor, reason).await?;
     let closed = storage::postgres::deployments::stop(pg, deployment_id, reason)
@@ -473,7 +475,15 @@ pub async fn revoke_all(
     actor: &str,
     reason: &str,
 ) -> Result<Vec<Uuid>, GateError> {
-    trip(pg, kill, risk::Scope::Global, monitor::family::Family::Platform, actor, reason).await?;
+    trip(
+        pg,
+        kill,
+        risk::Scope::Global,
+        monitor::family::Family::Platform,
+        actor,
+        reason,
+    )
+    .await?;
     let running: Vec<(Uuid,)> =
         sqlx::query_as("SELECT deployment_id FROM strategy_deployment WHERE stopped_at IS NULL")
             .fetch_all(pg)
@@ -552,7 +562,9 @@ pub async fn overview(pg: &PgPool, user_id: &str) -> Result<Vec<Value>, GateErro
         let id: Uuid = r.get("deployment_id");
         let forward: Option<Uuid> = r.get("forward_deployment_id");
         let (halts, series) = match forward {
-            Some(f) => forward_record(pg, user_id, f).await.unwrap_or((None, Vec::new())),
+            Some(f) => forward_record(pg, user_id, f)
+                .await
+                .unwrap_or((None, Vec::new())),
             None => (None, Vec::new()),
         };
         let halvings: Option<i16> = r.get("halvings");
@@ -597,12 +609,11 @@ async fn forward_record(
         .bind(tenant_id)
         .execute(&mut *tx)
         .await?;
-    let halts: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM mlops.divergence_halt WHERE deployment_id = $1",
-    )
-    .bind(forward_deployment_id)
-    .fetch_one(&mut *tx)
-    .await?;
+    let halts: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM mlops.divergence_halt WHERE deployment_id = $1")
+            .bind(forward_deployment_id)
+            .fetch_one(&mut *tx)
+            .await?;
     let rows = sqlx::query(
         "SELECT bar, realised_return, expected_return FROM mlops.forward_observation
           WHERE deployment_id = $1 AND source = 'observed' ORDER BY bar DESC LIMIT 200",

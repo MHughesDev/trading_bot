@@ -61,8 +61,8 @@ pub fn hurst_rs(returns: &[f64]) -> f64 {
                 hi = hi.max(running);
             }
             let spread = hi - lo;
-            let var = chunk.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>()
-                / (size - 1) as f64;
+            let var =
+                chunk.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / (size - 1) as f64;
             let s = var.sqrt();
             if s > 0.0 && spread > 0.0 {
                 rescaled.push(spread / s);
@@ -102,7 +102,9 @@ mod tests {
             let mut acc = 0.0;
             let mut t = s;
             for _ in 0..12 {
-                t = t.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+                t = t
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
                 acc += (t >> 11) as f64 / (1u64 << 53) as f64;
             }
             acc - 6.0
