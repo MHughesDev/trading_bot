@@ -142,7 +142,14 @@ pub fn charter_for(kind: GoalKind) -> String {
 /// silence reads as "this does not apply".
 #[must_use]
 pub fn run_constraints(constraints: &Value) -> String {
-    let get = |k: &str| constraints.get(k).and_then(|v| v.as_str());
+    // A blank value is an absent one, exactly as `has_any_constraint` reads it:
+    // `{"instrument_id": ""}` must not render `- instrument:  (required — use this)`.
+    let get = |k: &str| {
+        constraints
+            .get(k)
+            .and_then(|v| v.as_str())
+            .filter(|v| !v.trim().is_empty())
+    };
     let mut s = String::with_capacity(512);
     s.push_str("RUN CONSTRAINTS\n");
     s.push_str("- asset_class: crypto_spot_cex (this platform's v1 focus)\n");
@@ -234,6 +241,16 @@ pub fn opening_message(prior: Option<&str>, constraints: &Value, goal: &str) -> 
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A blank constraint is no constraint: it is not rendered as a required
+    /// value, and the "your choice" line takes its place.
+    #[test]
+    fn a_blank_constraint_renders_as_absent() {
+        let s = run_constraints(&json!({ "instrument_id": "", "timeframe": " " }));
+        assert!(!s.contains("required"), "{s}");
+        assert!(s.contains("- instrument: your choice"), "{s}");
+        assert!(s.contains("- timeframe: your choice"), "{s}");
+    }
 
     /// A lookup does not pay for the edge protocol (§21).
     #[test]
