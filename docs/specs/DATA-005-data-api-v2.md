@@ -1,7 +1,33 @@
 # DATA-005: Data API v2, Point-in-Time Access, Data Quality, and Free Sources
 
-**Status:** Proposed (Phase 0 contract; not implemented)
+**Status:** Partially implemented. Header corrected 2026-10-03; it used to say "Proposed
+(Phase 0 contract; not implemented)", which stopped being true in September.
 **Version:** 0.1
+
+> **What is built (checked against the tree 2026-10-03).**
+> - **Bar schema v2:** `market_bars_v2` and the verified cutover (Set L Phase 0).
+> - **PIT read with the research cutoff:** `GET /api/data/bars` clips to the project's
+>   cutoff, returns a JSON manifest that says where the line was drawn, and logs every
+>   read to the exploration ledger (`crates/api/src/routes/data.rs`, Set L Phase 2).
+>   Agent preview and template reads reuse the same clip.
+> - **Other endpoints:** `GET /api/data/catalog`, `GET /api/data/live/{instrument}`
+>   (Desk only, DA-15), `GET /api/data/funding` (source S6, with an explicit "unmeasured"
+>   shape), and the synthetic venue (`POST/GET /api/data/synthetic`,
+>   `GET /api/data/synthetic/{instrument}/truth`, §9).
+> - **Storage behind §7/§8:** `data_qc_reports` (migration 0100) and the `cost_class` plus
+>   as-of universe event log (migration 0104).
+>
+> **What is not built.** Responses are JSON, not the Parquet-artifact
+> `{handle, manifest, summary}` form in §5. These §5 endpoints have no route: `coverage`,
+> `search`, `trades`, `quotes`/`book`, `open_interest`, `option_chain`,
+> `prediction_markets`, `fundamentals`, `macro`, `universe/{name}`, `features` and the
+> `text/*` pair. Most §11 free-source adapters are also missing.
+>
+> **Where the live state is kept.** Don't restate counts here. Per-task state for the API
+> core, cutoff and Desk is in
+> [Set L Phase 2](../plans/plan-sets/set-L/phase-2-data-api-and-cutoff.md). For `data_qc`,
+> universes and every new source it is in [Set P](../plans/plan-sets/set-P/MASTER.md),
+> whose MASTER carries the authoritative completion line.
 **ADR(s):** ADR-0025 (research cutoff, Desk, scopes), ADR-0027 (free-only sources);
 builds on ADR-0008 (available_time ordering), ADR-0004 (storage split)
 **Derived from:** BS-007 [06_DATA](../BRAINSTORM/BS-007_QUANT_RESEARCH_AGENT/06_DATA.MD)

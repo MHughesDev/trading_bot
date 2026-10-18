@@ -101,3 +101,24 @@ fn account_source_error_display_is_not_empty() {
     let e3 = AccountSourceError::Parse("invalid json".to_owned());
     assert!(!e3.to_string().is_empty());
 }
+
+/// Set E 3.6: no adapter reports "not implemented". The sentinel variant was
+/// removed when Tradier and Tradovate landed; this keeps a stub from coming
+/// back under another spelling.
+#[test]
+fn no_account_adapter_is_a_stub() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/account");
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|e| e == "rs") {
+            let text = std::fs::read_to_string(&path).unwrap();
+            for needle in ["NotImplemented", "not yet implemented", "stub —", "stub -"] {
+                assert!(
+                    !text.contains(needle),
+                    "{} still contains {needle:?}: an AccountSource adapter must not be a stub",
+                    path.display()
+                );
+            }
+        }
+    }
+}

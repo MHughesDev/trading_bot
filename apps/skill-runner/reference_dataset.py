@@ -312,6 +312,65 @@ def build_concentrated_family(rng: np.random.Generator) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["run_id", "period", "ts", "ret"])
 
 
+def build_spanning(primary: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
+    """Two strategies against the primary series' own returns, for
+    `attribution.factor_spanning_test`.
+
+    `run_span` is the market with noise: 0.9 of the factor's return and no alpha,
+    so the test must find a beta near 0.9 and an alpha it cannot tell from zero.
+    `run_alpha` has no loading and a constant per-period edge several times its
+    noise, so the test must find a significant alpha. A tool that reported every
+    strategy as spanned, or none, fails one of the two.
+
+    Aligned by construction to the factor's own bar timestamps (period i is the
+    return into bar i+1), the key the materialiser uses for both series.
+    """
+    close = primary["close"].to_numpy(dtype=float)
+    factor = np.diff(np.log(close))
+    stamps = pd.DatetimeIndex(primary["ts"]).to_numpy()[1:]
+    n = min(len(factor), 1500)
+    factor, stamps = factor[:n], stamps[:n]
+    noise_sd = float(np.std(factor)) * 0.3
+    rows = []
+    span = 0.9 * factor + rng.standard_normal(n) * noise_sd
+    alpha = 0.0003 + rng.standard_normal(n) * float(np.std(factor)) * 0.5
+    for name, series in (("run_span", span), ("run_alpha", alpha)):
+        for period in range(n):
+            rows.append((name, period, pd.Timestamp(stamps[period]), float(series[period])))
+    return pd.DataFrame(rows, columns=["run_id", "period", "ts", "ret"])
+
+
+# The predictions fixture, for `kind: predictions` (signal_half_life, conformal_calibrate).
+PRED_ROWS = 2000
+PRED_IC0 = 0.30
+PRED_HALF_LIFE = 12.0
+PRED_HORIZONS = (1, 2, 4, 8, 16, 24, 48, 96)
+
+
+def build_predictions(rng: np.random.Generator) -> pd.DataFrame:
+    """A model's answers beside realised forward returns, with a KNOWN decay.
+
+    `y_hat` is a unit-variance signal. For each horizon `h` the label is built so
+    its correlation with `y_hat` is exactly `PRED_IC0 * 2 ** (-h / PRED_HALF_LIFE)`
+    (`y = rho * z + sqrt(1 - rho**2) * noise`), so `signal_half_life` has a true
+    half-life of 12 bars to recover and a tool that reported the horizon grid's
+    own spacing would be wrong. `y_h6` is a separate column for the conformal
+    test: same construction, but its noise doubles in the second half, so a
+    quantile fitted on the calm half under-covers the storm and an adaptive
+    interval has something to adapt to.
+    """
+    z = rng.standard_normal(PRED_ROWS)
+    stamps = pd.date_range("2024-01-01T00:00:00Z", periods=PRED_ROWS, freq="h")
+    cols = {"ts": stamps, "y_hat": z}
+    for h in PRED_HORIZONS:
+        rho = PRED_IC0 * 2.0 ** (-h / PRED_HALF_LIFE)
+        cols[f"y_h{h}"] = rho * z + math.sqrt(1.0 - rho**2) * rng.standard_normal(PRED_ROWS)
+    rho6 = PRED_IC0 * 2.0 ** (-6 / PRED_HALF_LIFE)
+    noise = rng.standard_normal(PRED_ROWS) * np.where(np.arange(PRED_ROWS) < PRED_ROWS // 2, 1.0, 2.0)
+    cols["y_h6"] = rho6 * z + math.sqrt(1.0 - rho6**2) * noise
+    return pd.DataFrame(cols)
+
+
 def main(out_dir: str) -> int:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -323,6 +382,14 @@ def main(out_dir: str) -> int:
     fast.to_parquet(out / "fast.parquet", index=False)
     slow.to_parquet(out / "slow.parquet", index=False)
     leaky.to_parquet(out / "slow_leaky.parquet", index=False)
+
+    build_spanning(primary, np.random.default_rng(SEED + 4)).to_parquet(
+        out / "spanning.parquet", index=False
+    )
+
+    build_predictions(np.random.default_rng(SEED + 5)).to_parquet(
+        out / "predictions.parquet", index=False
+    )
 
     family = build_family(np.random.default_rng(SEED + 2))
     family.to_parquet(out / "family.parquet", index=False)

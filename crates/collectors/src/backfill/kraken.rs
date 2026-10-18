@@ -45,6 +45,9 @@ use super::{raw_number, raw_u64, HttpGet, Limited};
 
 /// `dataplane.source.name` — selects the 60 s declared vendor lag.
 pub const SOURCE: &str = "kraken_rest";
+/// `dataplane.source.name` for the archive path (row 23, migration 0156). Distinct
+/// from [`SOURCE`] so the backfill router can route both.
+pub const ARCHIVE_SOURCE: &str = "kraken_archive";
 pub const VENUE: &str = "kraken";
 const API: &str = "https://api.kraken.com/0/public/OHLC";
 /// The venue's own page cap.
@@ -196,6 +199,10 @@ impl KrakenOhlcBackfill {
 impl BackfillSource for KrakenOhlcBackfill {
     fn source_name(&self) -> &str {
         SOURCE
+    }
+
+    fn max_page_span(&self, period_secs: u32) -> Option<chrono::Duration> {
+        Some(chrono::Duration::seconds(Self::page_span_secs(period_secs)))
     }
 
     fn declared_limit(&self) -> RateLimit {
@@ -357,6 +364,58 @@ impl KrakenArchiveBackfill {
         }
     }
 
+    /// Load the archive path from its configuration file (P-1.3).
+    ///
+    /// `Ok(None)` when the file is absent or declares no checksums: an archive
+    /// path with nothing it can verify is **off**, which is the safe default and
+    /// is what the platform registers until an operator places files and records
+    /// their hashes. A file that exists but will not parse is an error, not "off" —
+    /// a typo must not silently disable the deep-history path.
+    ///
+    /// ```toml
+    /// dir = "D:/kraken_ohlcvt"
+    /// [checksums]
+    /// "XBTUSD_1.csv" = "<sha256 hex>"
+    /// ```
+    ///
+    /// # Errors
+    /// An unreadable or malformed configuration file.
+    pub fn from_config_file(path: impl AsRef<Path>) -> Result<Option<Self>, String> {
+        let path = path.as_ref();
+        let text = match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(format!("{}: {e}", path.display())),
+        };
+        Self::from_config_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+    }
+
+    /// As [`Self::from_config_file`], from the file's text.
+    ///
+    /// # Errors
+    /// Malformed TOML, a missing `dir`, or a checksum that is not 64 hex digits.
+    pub fn from_config_str(text: &str) -> Result<Option<Self>, String> {
+        #[derive(serde::Deserialize)]
+        struct Cfg {
+            dir: Option<String>,
+            #[serde(default)]
+            checksums: BTreeMap<String, String>,
+        }
+        let cfg: Cfg = toml::from_str(text).map_err(|e| e.to_string())?;
+        if cfg.checksums.is_empty() {
+            return Ok(None);
+        }
+        let dir = cfg
+            .dir
+            .ok_or("checksums are declared but no `dir` says where the files are")?;
+        for (name, sha) in &cfg.checksums {
+            if sha.len() != 64 || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Err(format!("checksum for {name} is not a sha256 hex digest"));
+            }
+        }
+        Ok(Some(Self::new(dir, cfg.checksums)))
+    }
+
     /// Kraken's naming: `XBTUSD_1.csv` — pair alt-name, then interval minutes.
     #[must_use]
     pub fn file_name(symbol: &str, interval_min: u32) -> String {
@@ -382,7 +441,7 @@ impl KrakenArchiveBackfill {
 #[async_trait]
 impl BackfillSource for KrakenArchiveBackfill {
     fn source_name(&self) -> &str {
-        SOURCE
+        ARCHIVE_SOURCE
     }
 
     fn declared_limit(&self) -> RateLimit {
@@ -415,6 +474,59 @@ impl BackfillSource for KrakenArchiveBackfill {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// P-1.3: the archive path is off until it can verify something, a malformed
+    /// file is an error rather than "off", and it answers its own source name so
+    /// the router can carry it beside the OHLC path.
+    #[test]
+    fn the_archive_path_is_configured_off_by_default_and_never_by_accident() {
+        assert!(KrakenArchiveBackfill::from_config_str("")
+            .unwrap()
+            .is_none());
+        assert!(KrakenArchiveBackfill::from_config_str(
+            "dir = \"x\"
+[checksums]
+"
+        )
+        .unwrap()
+        .is_none());
+        assert!(
+            KrakenArchiveBackfill::from_config_file("definitely/not/here.toml")
+                .unwrap()
+                .is_none()
+        );
+        assert!(KrakenArchiveBackfill::from_config_str("dir = [").is_err());
+        assert!(KrakenArchiveBackfill::from_config_str(
+            "[checksums]
+\"XBTUSD_1.csv\" = \"ab\"
+"
+        )
+        .is_err());
+        let sha = "a".repeat(64);
+        let on = KrakenArchiveBackfill::from_config_str(&format!(
+            "dir = \"d\"
+[checksums]
+\"XBTUSD_1.csv\" = \"{sha}\"
+"
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(on.source_name(), ARCHIVE_SOURCE);
+        assert_ne!(
+            ARCHIVE_SOURCE, SOURCE,
+            "two adapters on one name cannot both be routed"
+        );
+        assert!(on.file_for("XBT-USD", 1).is_ok());
+    }
+
+    /// The shipped configuration keeps the path off.
+    #[test]
+    fn the_shipped_archive_config_parses_and_is_off() {
+        let text = include_str!("../../../../config/kraken_archive.toml");
+        assert!(KrakenArchiveBackfill::from_config_str(text)
+            .unwrap()
+            .is_none());
+    }
 
     const OHLC: &[u8] = br#"{"error":[],"result":{"XXBTZUSD":[
       [1700000000,"73850.0","73899.9","73800.0","73861.99","73860.1","2.00000000",7],

@@ -1,6 +1,6 @@
 # Phase 0 — Ground rules
 
-**Completion: 33% (2 / 6 tasks). 4 partial.**
+**Completion: 50% (3 / 6 tasks). 4 partial.**
 
 > **2026-09-27.** S-0.6 closed (the governance register's only CRITICAL was stale,
 > the Set S migration ranges are recorded, and both dead-code entries are written
@@ -27,7 +27,10 @@ sections.
 ## Tasks
 
 ### S-0.1 Sort the working tree with the user — S
-`PARTIAL` — **the human gate is discharged as of 2026-09-21; one mechanical clause
+`PARTIAL` 2026-10-04 (F-LIFECYCLE track) - No commit was made (owner instruction). Observed: the tree is not quiet, so the "main builds and unit suite is green" clause cannot be evidenced. `cargo xtask check-bars-v1-frozen` passes; `cargo xtask check-money-f64` fails with 47 sites in 22 files (keyword heuristic hits such as `size as f64`, statistics `pnl: f64`), nine of them in files of this track's territory. Triage is a decision on the lint, not a defect fix.
+`PARTIAL` 2026-10-03 (MEMORY track) - The owner declared no commits until the whole backlog is finished, so the remaining clause (`main` builds and the unit suite is green at one quiet commit) cannot be evidenced yet and no `git add` or commit was run. It is one clean run at the end of the backlog, not a decision. Observed while working: `cargo test -p harness --test conformance` fails on `subrun.rs:197` (a swallowed line break, another track's file) and `mcp-server-lib` did not compile for a while mid-session (`tools/market.rs:520`, another track), so a clean suite today would not be green.
+
+Previous marker `PARTIAL`, — **the human gate is discharged as of 2026-09-21; one mechanical clause
 is left.** The triage below describes a tree with ~20 modified files and several
 untracked. That tree is gone: every one of them has been landed in a commit over
 the course of this programme, and `git status --short` now shows exactly one file
@@ -57,7 +60,7 @@ not `git add -A`.
 
 #### Triage, 2026-09-15
 
-Produced by track 1 from the working tree of `C:/Users/Mason/Desktop/coding_projects/trading_bot`
+Produced by track 1 from the working tree of `D:/coding_projects/trading_bot`
 at `HEAD = 62e0165`. Method: hash every tracked blob against the file on disk, normalising
 CRLF (a naive comparison reports 1,313 of 1,432 tracked files as modified, all line endings —
 that is noise, not change), then walk the tree for paths git does not track. The result is
@@ -251,7 +254,10 @@ no longer matches anything.
 **Traces:** AGENT-006 §0 defect 1, §2.6, acceptance §10.2.
 
 ### S-0.3 Commit the untracked catalogue, under the tracked path casing — S
-`PARTIAL` — documentation landed; **code `BLOCKED:HUMAN`, roadmap gate H-1**.
+`PARTIAL` 2026-10-04 (F-LIFECYCLE track) - The code half is no longer blocked: `webfetch` and `skills` are workspace members, `falsification.rs`, `research_tools.rs` and `.gitattributes` are tracked, and `git ls-files docs/specs/AGENT-0*.md` lists 14. What remains is the acceptance's `check-money-f64` pass (see S-0.1) and a green suite at a quiet commit.
+`PARTIAL` 2026-10-03 (MEMORY track) - No change possible without a human: the code half is still gate H-1 (`Cargo.toml` members for `webfetch`/`skills`) and committing is paused by the owner's no-commit instruction. Nothing was staged.
+
+Previous marker `PARTIAL`, — documentation landed; **code `BLOCKED:HUMAN`, roadmap gate H-1**.
 
 **Landed on `claude/set-s-phase-0-ground-rules`:** the eleven Set S specs, the four ADRs and
 the whole Set S plan set, all under **lowercase** `docs/specs/`, `docs/adr/`,
@@ -305,7 +311,9 @@ green.
 **Traces:** AGENT-006 §0 ("untracked in git"), MASTER §5 hazards.
 
 ### S-0.4 Give the eleven specs the acceptance form the evidence chain needs — M
-`PARTIAL` 2026-09-15 — three of eleven converted: AGENT-005, AGENT-006, AGENT-008.
+`DONE` 2026-10-03 (MEMORY track) - Converted the remaining acceptance sections to the `- [ ] AC-n: ... - Verified by: [--]` form with a form note: AGENT-007 (9 criteria), AGENT-009 (8), AGENT-010 (10), AGENT-011 (9, incl. `5a`), AGENT-012 (11, incl. `1a`), AGENT-013 (15), AGENT-014 (12), joining AGENT-005, 006 and 008. No criterion added, removed or reworded: the converter joined only continuation lines, and the counts match the source lists. COMP-007 already carries numbered criteria with `Verified by:` evidence from the MONITOR track and was left in that form. All 11 Set S specs now have addressable ids.
+
+Previous marker `PARTIAL`, 2026-09-15 — three of eleven converted: AGENT-005, AGENT-006, AGENT-008.
 
 Those three are the specs this track's tasks trace to, so converting them is what let the
 `Verified by:` slots actually be filled rather than left empty. AGENT-007, AGENT-009…014 and
@@ -339,7 +347,10 @@ wording unchanged. No criterion is added, removed or softened in the conversion.
 **Traces:** `docs/procedures/execute-plan.md` §3c, `add-spec.md` §6.
 
 ### S-0.5 Update every index that now points at nothing — S
-`PARTIAL` 2026-09-21 - the stale indexes are fixed and the link acceptance is met; the duplicate `README` is blocked twice over
+`PARTIAL` 2026-10-04 (F-LIFECYCLE track) - No change possible without the owner: the `README.MD`/`README.md` duplicate is the standing no-touch file.
+`PARTIAL` 2026-10-03 (MEMORY track) - Re-checked 2026-10-03: no change. The duplicate `README.MD`/`README.md` remains blocked on a case-sensitive checkout and on the standing instruction not to touch `docs/specs/README.MD`; the index links still resolve.
+
+Previous marker `PARTIAL`, 2026-09-21 - the stale indexes are fixed and the link acceptance is met; the duplicate `README` is blocked twice over
 
 `docs/specs/README.MD` **and** `docs/specs/README.md` are both tracked and both point at the
 same blob; on this Windows checkout they are one file on disk. That is not in this task's file

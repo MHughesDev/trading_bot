@@ -13,6 +13,8 @@ thiserror = { workspace = true }
 features = { workspace = true }
 backtest = { workspace = true }
 ledger = { workspace = true }
+# Resumption: `jobs::checkpoint::plan_resume` is the one resume rule (ADR-C-08).
+jobs = { workspace = true }
 dataplane = { workspace = true }
 
 anyhow = { workspace = true }

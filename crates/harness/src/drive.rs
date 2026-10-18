@@ -417,12 +417,30 @@ fn repeat_key(name: &str, arguments: &Map<String, Value>) -> String {
     )
 }
 
+/// What the evidence list calls an id that arrived in the task brief rather than in
+/// a tool's result.
+pub const TASK_BRIEF_SOURCE: &str = "task_brief";
+
 /// Consecutive barren steps before the loop stops and reports what it has.
 ///
 /// Three, not one: a step can legitimately learn nothing while recovering — a tool
 /// error read and corrected, a routing miss fixed by `search_tools`. Three in a row
 /// is not recovery, it is a loop. The run measured on the degraded tier had eleven.
 const MAX_BARREN_STEPS: u32 = 3;
+
+/// The run's context tape for attribution (AGENT-005 section 19; S-9.10).
+///
+/// The selection *note* keeps id, reason and score for at most twenty records per
+/// step; attribution needs every rendered id and the per-signal breakdown each
+/// record was scored on, so those are kept here rather than reconstructed from a
+/// capped note.
+#[derive(Debug, Clone, Default)]
+pub struct ContextTape {
+    pub renders: Vec<context::utility::Render>,
+    pub actions: Vec<context::utility::Action>,
+    /// The signals a record carried the last time it was rendered.
+    pub signals: BTreeMap<context::store::RecordId, context::select::Signals>,
+}
 
 /// How many per-record clauses a selection note carries.
 ///
@@ -566,7 +584,14 @@ pub enum Note {
     /// violation; on its own when it is merely a downgrade.
     Degraded(Degradation),
     /// The harness answered a core tool itself.
-    CoreTool { name: String, detail: String },
+    CoreTool {
+        name: String,
+        detail: String,
+        /// What the model called it with. Without it a trajectory that used
+        /// `record_finding` or `finish_task` has a tool name and no arguments,
+        /// which `trace::is_replayable` correctly calls unreplayable (S-4.8).
+        args: Value,
+    },
     /// A plan was accepted.
     Planned { steps: Vec<PlanStep> },
 }
@@ -605,6 +630,9 @@ pub enum Input {
     /// loop is working* and what it means depends on what the loop is doing: the
     /// same sentence is a constraint on one plan and a redirection of another.
     Steer { text: String },
+    /// The user pinned a tool for this run from the desk (S-6.11). Accepted in any
+    /// non-terminal state; the router reads it at the next step.
+    Pin { tool: String },
     /// A tool finished. `source` feeds provenance classification.
     ToolResult { output: String, source: String },
     /// A tool failed. Handed to the model — a failing tool is information, not a
@@ -665,6 +693,13 @@ pub enum Degradation {
     /// model. Folding it into `Stuck` would send an operator looking in the wrong
     /// place.
     OutputTruncated { reserve_for_output: u32 },
+    /// A token or dollar cap was reached and the report turn it bought was not
+    /// used to report (AGENT-010 §6; S-2.12). `axis` is `tokens` or `dollars`.
+    ///
+    /// Its own name rather than `StepsExhausted`: a spent step budget says the
+    /// task ran long, a spent money budget says the task cost more than was
+    /// allowed, and the operator's fix differs.
+    BudgetExhausted { axis: String },
 }
 
 /// How the task ended.
@@ -679,16 +714,33 @@ pub enum Outcome {
     Finished {
         result: String,
         evidence: String,
+        /// The report was given on the turn a spent budget bought (AGENT-010 §6;
+        /// S-2.12).
+        ///
+        /// A field on `Finished` rather than a separate outcome, because the run
+        /// *did* finish — it reported, with evidence the ladder checked — and an
+        /// outcome that called it something else would make "how many runs ended
+        /// with an answer" undercount. But the reader needs to know the answer was
+        /// written under a cap rather than when the work was done, so it says so.
+        budget_exhausted: bool,
     },
     /// Admission said no and there was nowhere to send it.
     Refused {
         reason: String,
         fix: String,
     },
-    /// Admission said no and a more capable profile is configured.
+    /// This tier cannot finish the task and a more capable profile is configured.
+    ///
+    /// At admission `state` is `None`: nothing has happened yet, so there is
+    /// nothing to carry. Mid-run (`Stuck` on a profile with `escalate_to`) it
+    /// carries the whole working state, so the next tier **resumes** rather than
+    /// restarts (AGENT-008 §4, AGENT-010 §6; S-2.12) — the steps already done
+    /// stay done, and the trials already spent are not spent again.
     Escalated {
         reason: String,
         to: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        state: Option<Box<WorkingState>>,
     },
     Fenced(Degradation),
     /// The run is waiting on a platform job and holds nothing (AGENT-010 §8).
@@ -848,6 +900,13 @@ pub struct Loop {
     /// Kept as well as the namespace because the namespace alone loses which tool was
     /// wanted, and the budget then hands the slot to whichever sibling sorts first.
     discovered_tools: Vec<String>,
+    /// Tools a human pinned for this run from the desk's Tools tab (S-6.11).
+    ///
+    /// Read first by [`Loop::route`], ahead of anything the model searched for or
+    /// the planner guessed: a person who pinned a tool named it on purpose.
+    /// Arrives as [`Input::Pin`], so it is in the effect log and a resumed run
+    /// still has it.
+    human_pins: Vec<String>,
     /// The turn's exposure slice, in order, on a `Session`-scoped profile
     /// (§5.2, S-2.4).
     ///
@@ -1018,6 +1077,10 @@ pub struct Loop {
     /// attribution and the ablation all need the record to exist whichever path
     /// rendered the prompt.
     store: context::store::RunStore,
+    /// What each assembly rendered and what each call did next, kept for the
+    /// attribution corpus (S-9.10): `attribute` needs both and neither survives
+    /// the step otherwise.
+    tape: ContextTape,
     /// Which context policy this run is under, recorded in every trajectory.
     context_policy: context::policy::ContextPolicy,
     /// What the model said it is working on (§18's `focus`). Cleared when the
@@ -1057,8 +1120,62 @@ pub struct Loop {
     /// The tool the previous step called, for §20's repeat discount.
     previous_tool: Option<String>,
 
+    /// What this run has spent, as the driver reported it (AGENT-010 §6; S-2.12).
+    ///
+    /// The loop is sans-IO and never sees a provider's usage, so the driver tells
+    /// it through [`Loop::record_spend`] — and records that it did in the effect
+    /// log, so a replay reaches the same wrap-up at the same step.
+    spend: Spend,
+    /// The dollar cap in tenths of a cent, **only when a fresh price row exists**
+    /// for this model (ADR-D-03). `None` is "not enforceable here", never "free":
+    /// a cap enforced against an absent price would pass unconditionally and look
+    /// exactly like the gate working.
+    usd_cap_tenth_cents: Option<i64>,
+    /// Set when a budget cap brought the run into its wrap-up turn. Carried onto
+    /// `Outcome::Finished` so the report says it was written under a cap.
+    budget_exhausted: bool,
+    /// A cost estimator the driver supplies (AGENT-008 §4; S-2.16).
+    ///
+    /// A pure function over `(tool, arguments)` built from a snapshot the driver
+    /// took at run start (a measured throughput and a price row), so the cost axis
+    /// can fire without the loop doing I/O. `None` is "no estimator", which the
+    /// policy reads as "not estimated" — never as free.
+    cost_estimator: Option<CostEstimator>,
+    /// A redirection steer cleared the plan on a planner-executor profile, so the
+    /// next step boundary asks for a new one (§3.4a, §3.7; S-1.20).
+    replan_requested: bool,
+    /// The calibrated bytes-per-token this run budgets with (S-4.12). `None` is
+    /// the 4.0 prior.
+    bytes_per_token: Option<f64>,
+
     outcome: Option<Outcome>,
 }
+
+/// Estimates a call's cost in dollars, or says it cannot (S-2.16).
+///
+/// Boxed and `Send + Sync` so a `Loop` stays movable across a driver's task
+/// boundary. Deliberately a plain function of its arguments: it is called inside
+/// `next`, and anything it read from the world would make the loop's decisions
+/// depend on when it was asked.
+pub type CostEstimator = std::sync::Arc<dyn Fn(&str, &Map<String, Value>) -> Option<f64> + Send + Sync>;
+
+/// What a run has spent, summed (S-2.12).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Spend {
+    tokens: u64,
+    /// `None` until a priced call is reported, and back to `None` for good the
+    /// first time an unpriced one is: a total with a hole in it is not a total.
+    usd_tenth_cents: Option<i64>,
+    /// Whether any call has been reported at all, so the first priced one can
+    /// start the total and an unpriced one after it can poison it.
+    reported: bool,
+}
+
+/// The share of a cap at which the run is told to wrap up (AGENT-010 §6).
+///
+/// Ninety percent, because the report turn itself costs something, and a run
+/// that waits for 100% has no budget left to say what it found.
+const BUDGET_WRAP_PERCENT: u64 = 90;
 
 /// The assembled body, and the charter that was assembled *with* it.
 ///
@@ -1180,6 +1297,7 @@ impl Loop {
             directive: None,
             discovered: BTreeSet::new(),
             discovered_tools: Vec::new(),
+            human_pins: Vec::new(),
             session_exposure: Vec::new(),
             evidence_candidates: Vec::new(),
             exposed: BTreeSet::new(),
@@ -1211,6 +1329,7 @@ impl Loop {
             pending_provenance: Provenance::System,
             gated_actions: BTreeMap::new(),
             store: context::store::RunStore::new(),
+            tape: ContextTape::default(),
             context_policy: context::policy::ContextPolicy::v1(),
             focus: None,
             last_rendered: BTreeSet::new(),
@@ -1219,8 +1338,193 @@ impl Loop {
             trial_spending_tools: BTreeSet::new(),
             paper_tools: BTreeSet::new(),
             previous_tool: None,
+            spend: Spend::default(),
+            usd_cap_tenth_cents: None,
+            budget_exhausted: false,
+            cost_estimator: None,
+            replan_requested: false,
+            bytes_per_token: None,
             outcome: None,
         }
+    }
+
+    /// The dollar cap this run is held to, in tenths of a cent (S-2.12).
+    ///
+    /// The driver passes it **only** when a fresh price row exists for the model
+    /// (ADR-D-03). `None` leaves dollars unenforced here and tokens binding, which
+    /// is the honest reading of an unpriced model rather than a zero.
+    #[must_use]
+    pub fn with_usd_cap(mut self, cap_tenth_cents: Option<i64>) -> Self {
+        self.usd_cap_tenth_cents = cap_tenth_cents.filter(|c| *c > 0);
+        self.working.budget.usd_tenth_cents_cap = self.usd_cap_tenth_cents;
+        // Nothing spent yet, so all of it remains. Known, not guessed: the cap was
+        // set only against a fresh price, and zero spend is a fact about a run
+        // that has not started.
+        self.working.budget.usd_tenth_cents_remaining = self.usd_cap_tenth_cents;
+        self
+    }
+
+    /// Budget with this model's calibrated bytes-per-token instead of the 4.0
+    /// prior (S-4.12). The driver reads the row from the eval store and passes it;
+    /// the loop does no I/O. `None` keeps the prior, which is the fallback for a
+    /// model nobody has calibrated.
+    #[must_use]
+    pub fn with_bytes_per_token(mut self, bytes_per_token: Option<f64>) -> Self {
+        self.bytes_per_token = bytes_per_token;
+        self
+    }
+
+    /// The estimator the cost axis reads (S-2.16). See [`CostEstimator`].
+    #[must_use]
+    pub fn with_cost_estimator(mut self, estimator: CostEstimator) -> Self {
+        self.cost_estimator = Some(estimator);
+        self
+    }
+
+    /// Seed a run with the working state a lower tier escalated with
+    /// (AGENT-008 §4, AGENT-010 §6; S-2.12).
+    ///
+    /// The plan, the findings, the decisions and the trials already spent come
+    /// across whole; the step budget, the correction slot and the wrap-up flag do
+    /// not, because they describe the old tier's run rather than the task. A step
+    /// marked `Done` stays done, which is what stops the new tier re-running it —
+    /// and the trials count travels with it, so the run's total is one number and
+    /// not two runs that each think they started at zero.
+    #[must_use]
+    pub fn resuming_from(mut self, mut state: WorkingState) -> Self {
+        state.last_error = None;
+        state.budget = BudgetView {
+            trials_spent: state.budget.trials_spent,
+            n_eff: state.budget.n_eff,
+            ..self.working.budget
+        };
+        // Whatever the old tier was doing is where this one starts.
+        if state.active_step().is_none() {
+            if let Some(next) = state
+                .plan
+                .iter_mut()
+                .find(|s| s.status == StepStatus::Pending)
+            {
+                next.status = StepStatus::Active;
+            }
+        }
+        // The plan came from a planner, so it counts against the re-plan bound:
+        // a tier that escalates mid-plan and then re-plans has re-planned once.
+        if !state.plan.is_empty() {
+            self.plans_accepted = 1;
+        }
+        self.working = state;
+        self
+    }
+
+    /// Tell the loop what the last model call cost (AGENT-010 §6; S-2.12).
+    ///
+    /// Not an [`Input`]: spend arrives beside a reply rather than instead of one,
+    /// and making it an input would put it in the state machine's transition
+    /// table where every state would have to accept it. The driver records it in
+    /// the effect log as a `state` row before calling this, so a replay applies
+    /// the same spend at the same point and reaches the same wrap-up.
+    ///
+    /// `usd_tenth_cents` is `None` when the call could not be priced. One unpriced
+    /// call makes the dollar total unknown for the rest of the run — a sum with a
+    /// hole in it would under-report, which is the direction that lets a cap pass.
+    pub fn record_spend(&mut self, tokens: u64, usd_tenth_cents: Option<i64>) {
+        self.spend.tokens = self.spend.tokens.saturating_add(tokens);
+        self.spend.usd_tenth_cents = match (self.spend.reported, self.spend.usd_tenth_cents, usd_tenth_cents) {
+            (false, _, Some(u)) => Some(u),
+            (true, Some(total), Some(u)) => Some(total.saturating_add(u)),
+            _ => None,
+        };
+        self.spend.reported = true;
+        let b = &mut self.working.budget;
+        b.tokens_remaining = b.tokens_cap.map(|cap| cap.saturating_sub(self.spend.tokens));
+        b.usd_tenth_cents_remaining = match (self.usd_cap_tenth_cents, self.spend.usd_tenth_cents) {
+            (Some(cap), Some(spent)) => Some((cap - spent).max(0)),
+            _ => None,
+        };
+    }
+
+    /// The standing instruction the loop has decided on, if any.
+    ///
+    /// The native transport replays the provider thread rather than the loop's
+    /// rendered body, so an instruction the loop decides between calls — wrap up,
+    /// the re-plan bound, a steer's reading — reaches a native model only if the
+    /// driver hands it over. This is what it hands over (S-2.9).
+    #[must_use]
+    pub fn directive(&self) -> Option<&str> {
+        self.directive.as_deref()
+    }
+
+    /// Cap the trials this run may spend (a session child's lease; S-11.6).
+    ///
+    /// Counted by the loop at dispatch, from the catalogue's own `spends_trial`
+    /// declaration (`with_trial_spending_tools`), and reaching the cap buys the
+    /// same one report turn a spent token budget does: the run stops searching and
+    /// says what it found, rather than being cut off mid-step. `None` is no cap.
+    #[must_use]
+    pub fn with_trial_cap(mut self, cap: Option<u32>) -> Self {
+        self.working.budget.trials_cap = cap;
+        self
+    }
+
+    /// Run under a sub-run's lease (AGENT-010 §9; S-2.12).
+    ///
+    /// Takes the lease **by value**, so it is spent by exactly this loop: the
+    /// step ceiling, the token cap and the trial cap all become the lease's, each
+    /// no larger than the profile's own. A lease can narrow a run and never widen
+    /// it — the profile is still the ceiling.
+    #[must_use]
+    pub fn with_budget_lease(mut self, lease: crate::subrun::BudgetLease) -> Self {
+        let steps = lease.steps().min(self.profile.orchestration.max_steps);
+        if steps > 0 {
+            self.profile.orchestration.max_steps = steps;
+            self.working.budget.steps_total = steps;
+            self.working.budget.steps_remaining = steps;
+        }
+        let tokens = lease.tokens();
+        if tokens > 0 {
+            let cap = self
+                .working
+                .budget
+                .tokens_cap
+                .map_or(tokens, |c| c.min(tokens));
+            self.working.budget.tokens_cap = Some(cap);
+            self.working.budget.tokens_remaining = Some(cap.saturating_sub(self.spend.tokens));
+        }
+        if lease.trials() > 0 {
+            self.working.budget.trials_cap = Some(lease.trials());
+        }
+        self
+    }
+
+    /// Whether a spent budget brought this run into its wrap-up (S-2.12).
+    #[must_use]
+    pub fn budget_exhausted(&self) -> bool {
+        self.budget_exhausted
+    }
+
+    /// Which cap, if any, has reached `percent` of itself.
+    fn budget_axis_at(&self, percent: u64) -> Option<&'static str> {
+        // Trials are whole numbers a lease hands out one at a time, so the cap is
+        // reached, not approached: a 90% rule on a cap of three would wrap up
+        // after the third trial's worth of nothing.
+        if let Some(cap) = self.working.budget.trials_cap {
+            if self.working.budget.trials_spent >= cap {
+                return Some("trials");
+            }
+        }
+        if let Some(cap) = self.working.budget.tokens_cap {
+            if cap > 0 && self.spend.tokens.saturating_mul(100) >= cap.saturating_mul(percent) {
+                return Some("tokens");
+            }
+        }
+        if let (Some(cap), Some(spent)) = (self.usd_cap_tenth_cents, self.spend.usd_tenth_cents) {
+            let (cap, spent) = (cap.unsigned_abs(), spent.max(0).unsigned_abs());
+            if cap > 0 && spent.saturating_mul(100) >= cap.saturating_mul(percent) {
+                return Some("dollars");
+            }
+        }
+        None
     }
 
     /// Declare the actions that require a human approval, **each with the
@@ -1299,6 +1603,17 @@ impl Loop {
     /// stay the ordinary construction.
     #[must_use]
     pub fn with_brief(mut self, brief: crate::memory::Brief) -> Self {
+        // What the brief showed is something the run has read, so it is something it
+        // may cite. Without this a finding that answers an open question by naming it
+        // is refused as "no tool returned that" -- the question's id arrived in the
+        // brief, not in a tool result -- and the platform's closing rule ("a later
+        // finding that cites a question closes it", S-10.12) can never fire in a live
+        // run. Recorded against `task_brief` at step 0, so the state card says where
+        // the id came from rather than attributing it to a tool.
+        for r in &brief.retrievals {
+            self.working
+                .record_evidence(r.entry_id.clone(), TASK_BRIEF_SOURCE, 0);
+        }
         self.brief = Some(brief);
         self
     }
@@ -1412,6 +1727,50 @@ impl Loop {
     {
         self.paper_tools = names.into_iter().map(Into::into).collect();
         self
+    }
+
+    /// Note a call the model made as evidence about what it used (S-9.10): every
+    /// string in its arguments, and the record it asked to expand.
+    fn record_action(&mut self, call: &ToolCall) {
+        fn strings(v: &Value, out: &mut BTreeSet<String>) {
+            match v {
+                Value::String(s) => {
+                    out.insert(s.clone());
+                }
+                Value::Array(a) => a.iter().for_each(|x| strings(x, out)),
+                Value::Object(o) => o.values().for_each(|x| strings(x, out)),
+                _ => {}
+            }
+        }
+        let mut action = context::utility::Action::new(self.step, call.name.clone());
+        for (_, v) in &call.arguments {
+            strings(v, &mut action.mentions);
+        }
+        if call.name == EXPAND {
+            if let Some(id) = call
+                .arguments
+                .get("record_id")
+                .and_then(Value::as_str)
+                .and_then(context::store::RecordId::parse)
+            {
+                action.expanded.push(id);
+            }
+        }
+        self.tape.actions.push(action);
+    }
+
+    /// The tape the run kept, for the attribution corpus.
+    #[must_use]
+    pub fn context_tape(&self) -> &ContextTape {
+        &self.tape
+    }
+
+    /// Attribution over this run: which rendered records the model went on to
+    /// use. Empty (and `rendered_tokens == 0`) for a run under the buffer policy,
+    /// which renders no retrieval records.
+    #[must_use]
+    pub fn context_attribution(&self) -> context::utility::Attribution {
+        context::utility::attribute(&self.store, &self.tape.renders, &self.tape.actions)
     }
 
     /// This run's context store, for the trajectory and the offline A/B.
@@ -1578,6 +1937,13 @@ impl Loop {
         // What this call rendered, for §24.5's stickiness on the next one. Kept
         // here rather than recomputed later: a second `select` to find out what
         // the first chose would be a second answer to one question.
+        self.tape.renders.push(context::utility::Render {
+            step: self.step,
+            ids: shown.iter().copied().collect(),
+        });
+        for line in selection.report.scores.iter().filter(|l| l.selected) {
+            self.tape.signals.insert(line.id, line.signals.clone());
+        }
         self.last_rendered = shown;
         blocks
     }
@@ -1632,7 +1998,7 @@ impl Loop {
         // The body cannot be larger than what is actually free this step,
         // whatever the account allows — and the difference goes back to the run
         // rather than being charged to a step that could not use it.
-        let free = u32::try_from(self.remaining_body_bytes() / 4).unwrap_or(u32::MAX);
+        let free = u32::try_from(self.remaining_body_tokens()).unwrap_or(u32::MAX);
         let spend = granted.min(free.max(floor));
         self.run_budget.record(spend, granted);
         spend
@@ -1642,10 +2008,24 @@ impl Loop {
     ///
     /// Estimated from the same arithmetic the assembler uses — the window, less
     /// what leaves it on the wire, less what the blocks already hold — and then
-    /// converted back to bytes at the estimator's four-bytes-per-token. It is an
+    /// converted back to bytes at the estimator's own bytes-per-token. It is an
     /// estimate either way; the point is that it moves with the run instead of
     /// being a constant chosen when the profile was written.
     fn remaining_body_bytes(&self) -> usize {
+        // At the bytes-per-token the estimator is reading, not a literal four: a
+        // calibrated model (S-4.12) packs fewer bytes into a token, and the cap on
+        // an arriving result has to be the bytes its window actually holds.
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )]
+        let bytes = (self.remaining_body_tokens() as f64 * context::current_bytes_per_token()) as usize;
+        bytes
+    }
+
+    /// Tokens of body budget this step has left (see [`Self::remaining_body_bytes`]).
+    fn remaining_body_tokens(&self) -> usize {
         let window = self.profile.input_budget_tokens();
         let reserved = self.reserved_tokens();
         let held: u32 = self
@@ -1653,8 +2033,7 @@ impl Loop {
             .iter()
             .map(|b| context::estimate_tokens(&b.tagged.render()))
             .sum();
-        let left = window.saturating_sub(reserved).saturating_sub(held);
-        (left as usize).saturating_mul(4)
+        window.saturating_sub(reserved).saturating_sub(held) as usize
     }
 
     /// Record something a tool actually returned, saying what kind of record it
@@ -1785,6 +2164,15 @@ impl Loop {
 
     /// The one entry point.
     pub fn next(&mut self, input: Input) -> Vec<Effect> {
+        match self.bytes_per_token {
+            // Every estimate this step makes (the assembler's budget, the schema
+            // reservation, the compaction trigger) reads the one value.
+            Some(b) => context::with_bytes_per_token(b, || self.next_inner(input)),
+            None => self.next_inner(input),
+        }
+    }
+
+    fn next_inner(&mut self, input: Input) -> Vec<Effect> {
         if self.state.is_terminal() {
             // A terminal loop emits nothing, ever. A driver that keeps feeding it has
             // a bug, and the honest response is silence rather than a second outcome.
@@ -1825,6 +2213,10 @@ impl Loop {
             // steer that only landed between steps would be a steer that arrives
             // after the step it was meant to stop.
             (_, Input::Steer { text }) => self.on_steer(&text, &mut fx),
+
+            // A pin, like a steer, is accepted in any non-terminal state: it takes
+            // effect at the next routing pass (S-6.11).
+            (_, Input::Pin { tool }) => self.on_pin(&tool, &mut fx),
 
             (State::Executing, Input::ToolResult { output, source }) => {
                 self.on_tool_result(&output, &source, &mut fx);
@@ -1894,7 +2286,15 @@ impl Loop {
                 }
             }
             Admission::Escalate { reason, to } => {
-                self.finish_into(Outcome::Escalated { reason, to }, State::Refused, fx);
+                self.finish_into(
+                    Outcome::Escalated {
+                        reason,
+                        to,
+                        state: None,
+                    },
+                    State::Refused,
+                    fx,
+                );
             }
             Admission::Refuse { reason, fix } => {
                 self.finish_into(Outcome::Refused { reason, fix }, State::Refused, fx);
@@ -2131,6 +2531,42 @@ impl Loop {
             // drifted.
         }
 
+        // The token and dollar caps (AGENT-010 §6; S-2.12). Read here, at the
+        // step boundary, because that is the only place a wrap-up turn can be
+        // opened cleanly — mid-step there is a call outstanding.
+        //
+        // A run that was already given its report turn for a spent budget and is
+        // back here did not report on it: the turn exposed only `finish_task`, so
+        // reaching another step boundary means it did something else. That is a
+        // fence, named for the budget rather than for the steps, because the two
+        // call for different reactions — a spent budget means the task was too
+        // big for what was allowed, not that it stopped moving.
+        if self.budget_exhausted {
+            let axis = self.budget_axis_at(BUDGET_WRAP_PERCENT).unwrap_or("budget");
+            self.fence(
+                Degradation::BudgetExhausted {
+                    axis: axis.to_string(),
+                },
+                fx,
+            );
+            return;
+        }
+        if let Some(axis) = self.budget_axis_at(BUDGET_WRAP_PERCENT) {
+            self.budget_exhausted = true;
+            self.wrapping_up = true;
+            self.directive = Some(format!(
+                "This run has spent {BUDGET_WRAP_PERCENT}% or more of its {axis} budget. This is your last turn: call finish_task and report what you established, citing ONLY what you actually ran this session ({}). If the goal was not reached, say so plainly and say what more budget would buy.",
+                if self.evidence_candidates.is_empty() {
+                    "no tool returned a result this session".to_string()
+                } else {
+                    self.evidence_candidates.join(", ")
+                }
+            ));
+            fx.push(Effect::Note(Note::Degraded(Degradation::BudgetExhausted {
+                axis: axis.to_string(),
+            })));
+        }
+
         self.step += 1;
         if self.step > self.profile.orchestration.max_steps {
             if self.wrapping_up {
@@ -2174,7 +2610,96 @@ impl Loop {
         self.prior_provenance = self.pending_provenance;
         self.pending_provenance = Provenance::System;
 
+        if self.should_replan() {
+            self.replan(fx);
+            return;
+        }
         self.route(fx);
+    }
+
+    /// Whether this step boundary should ask for a new plan (§3.7; S-1.20).
+    ///
+    /// Two triggers, both on a planner-executor profile and neither while wrapping
+    /// up (a run with one turn left reports; it does not plan):
+    ///
+    /// * a **redirection** cleared the plan — the plan served the old question, and
+    ///   every remaining step was aimed at it;
+    /// * the plan is **exhausted on an unmet goal** — every step is done, the model
+    ///   did not report, and the step since then learned nothing. That is the run
+    ///   drifting without a plan, which is the shape the re-plan bound exists for.
+    ///
+    /// Before this existed the plan was made once at admission and never re-made,
+    /// so `max_replans_per_run` guarded a path nothing could reach.
+    fn should_replan(&self) -> bool {
+        if self.profile.orchestration.mode != Mode::PlannerExecutor || self.wrapping_up {
+            return false;
+        }
+        if self.replan_requested {
+            return true;
+        }
+        !self.working.plan.is_empty()
+            && self.working.active_step().is_none()
+            && self.barren_steps >= 1
+    }
+
+    /// Ask for a plan again. `on_plan` counts it against the bound and wraps up
+    /// when the bound is spent, holding the working state.
+    fn replan(&mut self, fx: &mut Vec<Effect>) {
+        self.replan_requested = false;
+        self.enter(State::Planning, fx);
+        let schema = self.plan_schema();
+        let prompt = Assembled {
+            system: self.task.charter.clone(),
+            body: self.replan_prompt(),
+        };
+        self.ask(Decode::Plan { schema }, prompt, fx);
+    }
+
+    /// The plan prompt for a second or later plan: the current goal, what is
+    /// already established, and why a new plan is being asked for.
+    fn replan_prompt(&self) -> String {
+        let established = if self.working.findings.is_empty() {
+            "nothing recorded yet".to_string()
+        } else {
+            self.working
+                .findings
+                .iter()
+                .map(|f| format!("- {} [{}]", f.headline, f.id))
+                .collect::<Vec<_>>()
+                .join("
+")
+        };
+        let done: Vec<String> = self
+            .working
+            .plan
+            .iter()
+            .filter(|s| s.status == StepStatus::Done)
+            .map(|s| format!("- {}", s.goal))
+            .collect();
+        format!(
+            "{}
+
+This is a NEW plan (re-plan {} of at most {}). The previous plan is              finished or no longer fits the goal, and the goal is not yet met. Do not repeat              steps that are already done.
+
+Already done:
+{}
+
+Established so far:
+{}
+
+             Current goal: {}",
+            self.plan_prompt(),
+            self.plans_accepted,
+            self.profile.orchestration.max_replans_per_run,
+            if done.is_empty() {
+                "- nothing".to_string()
+            } else {
+                done.join("
+")
+            },
+            established,
+            self.working.goal
+        )
     }
 
     fn route(&mut self, fx: &mut Vec<Effect>) {
@@ -2189,7 +2714,14 @@ impl Loop {
         // `strategy` namespace, the model searched and found the right one, and the
         // planner's wrong guess then held the slot.
         let mut wanted: Vec<String> = Vec::new();
-        let mut pinned: Vec<String> = self.discovered_tools.clone();
+        // A human's pin outranks everything else (S-6.11): it is what the desk's
+        // Tools tab sends, and it must be available on the very next step.
+        let mut pinned: Vec<String> = self.human_pins.clone();
+        for name in &self.discovered_tools {
+            if !pinned.contains(name) {
+                pinned.push(name.clone());
+            }
+        }
 
         for n in &self.discovered {
             if !wanted.contains(n) {
@@ -2368,6 +2900,9 @@ impl Loop {
                 if full {
                     fx.push(Effect::Note(Note::CoreTool {
                         name: "exposure_full".to_string(),
+                        // An empty object, not null: `trace::is_replayable` reads
+                        // a null `args` as "arguments were not logged".
+                        args: json!({}),
                         detail: format!(
                             "the slice is full for this turn ({budget} tools); nothing was evicted to make room, because dropping a tool invalidates the cached prefix for the whole transcript behind it"
                         ),
@@ -2870,14 +3405,14 @@ impl Loop {
         };
         if self.retries.is_stuck() {
             let d = give_up();
-            self.fence(d, fx);
+            self.give_up_or_escalate(d, fx);
             return;
         }
         let Some(correction) = correction else {
             // Budget spent. The step fails upward rather than looping — a silent loop
             // burns the whole budget and produces nothing anyone can act on.
             let d = give_up();
-            self.fence(d, fx);
+            self.give_up_or_escalate(d, fx);
             return;
         };
 
@@ -2901,6 +3436,7 @@ impl Loop {
     // ── Gating ──────────────────────────────────────────────────────────────
 
     fn gate(&mut self, call: ToolCall, fx: &mut Vec<Effect>) {
+        self.record_action(&call);
         // The two core tools are answered by the harness. Neither touches platform
         // state: `search_tools` reads this registry, `finish_task` ends the loop. A
         // policy ruling on either would be a ruling on the harness talking to itself.
@@ -3028,12 +3564,24 @@ impl Loop {
         let ruling = policy::decide(
             &self.profile,
             &ActionContext {
-                // No estimator yet (S-3.19), so the cost axis does not fire from
-                // here. `None` is "not estimated", never "free": treating unknown as
-                // zero would be a gate that reads as present in the config and never
+                // The driver's estimator, when it supplied one (S-2.16). `None`
+                // is "not estimated", never "free": treating unknown as zero
+                // would be a gate that reads as present in the config and never
                 // fires, which is worse than no gate.
-                estimated_usd: None,
-                remaining_usd: None,
+                estimated_usd: self
+                    .cost_estimator
+                    .as_ref()
+                    .and_then(|estimate| estimate(&call.name, &call.arguments)),
+                // Beside the estimate on the card, because $42 is a different
+                // question with $60 left than with $45. Only when both the cap
+                // and the spend are known; a remainder derived from an unpriced
+                // total would be a number nobody measured.
+                #[allow(clippy::cast_precision_loss)]
+                remaining_usd: self
+                    .working
+                    .budget
+                    .usd_tenth_cents_remaining
+                    .map(|t| t as f64 / 1000.0),
                 tool: call.name.clone(),
                 risk,
                 prior_provenance: self.prior_provenance,
@@ -3054,6 +3602,9 @@ impl Loop {
 
         match ruling.decision {
             Decision::Allow => {
+                if self.trial_spending_tools.contains(&call.name) {
+                    self.working.budget.trials_spent += 1;
+                }
                 self.running = Some(call.clone());
                 self.enter(State::Executing, fx);
                 fx.push(Effect::ExecuteTool {
@@ -3127,6 +3678,9 @@ impl Loop {
         };
         let (risk, namespace, idempotent) = (def.risk, def.namespace.clone(), def.idempotent);
 
+        if self.trial_spending_tools.contains(&call.name) {
+            self.working.budget.trials_spent += 1;
+        }
         self.running = Some(call.clone());
         self.enter(State::Executing, fx);
         fx.push(Effect::ExecuteTool {
@@ -3186,6 +3740,7 @@ impl Loop {
         }
         fx.push(Effect::Note(Note::CoreTool {
             name: REFLECT.to_string(),
+            args: Value::Object(call.arguments.clone()),
             detail: format!("reflection {} of {cap}: {doubt}", self.reflections_used),
         }));
 
@@ -3212,10 +3767,35 @@ impl Loop {
     /// The old goal and the reason go into `decided`, so the run can say what it was
     /// doing before and why it stopped — and so that re-asking the old question is
     /// answered by §3.6's correction rather than by starting over.
+    /// A human pinned a tool for this run (S-6.11). Unknown names are refused in a
+    /// note rather than stored: a pin for a tool the registry does not have would
+    /// sit in the list and be skipped by the router with nothing saying why.
+    fn on_pin(&mut self, tool: &str, fx: &mut Vec<Effect>) {
+        let known = self.registry.get(tool).is_some();
+        if known && !self.human_pins.iter().any(|p| p == tool) {
+            self.human_pins.push(tool.to_string());
+        }
+        fx.push(Effect::Note(Note::CoreTool {
+            name: "pin".to_string(),
+            args: json!({ "tool": tool }),
+            detail: if known {
+                format!("pinned {tool}: it is routed first from the next step")
+            } else {
+                format!("no tool named {tool:?}; nothing pinned")
+            },
+        }));
+        // Re-route so the call about to be made already sees the pin, the way a
+        // steer re-renders (the driver feeds a pin only at a selection call).
+        if known && self.state == State::AwaitingModel {
+            self.route(fx);
+        }
+    }
+
     fn on_steer(&mut self, text: &str, fx: &mut Vec<Effect>) {
         let steer = Steer::classify(text);
         fx.push(Effect::Note(Note::CoreTool {
             name: "steer".to_string(),
+            args: json!({ "text": text }),
             detail: format!("{steer:?}: {text}"),
         }));
 
@@ -3246,10 +3826,19 @@ impl Loop {
                 // it. Findings are KEPT — see the doc comment.
                 self.working.plan.clear();
                 self.plans_accepted = 0;
+                // A planner-executor profile plans again for the new question
+                // rather than carrying on planless (§3.4a; S-1.20).
+                if self.profile.orchestration.mode == Mode::PlannerExecutor {
+                    self.replan_requested = true;
+                }
             }
         }
 
         self.directive = Some(steer.correction(text));
+        if self.should_replan() {
+            self.replan(fx);
+            return;
+        }
         self.render(fx);
     }
 
@@ -3419,6 +4008,7 @@ impl Loop {
         });
         fx.push(Effect::Note(Note::CoreTool {
             name: RECORD_FINDING.to_string(),
+            args: Value::Object(call.arguments.clone()),
             detail: format!("{finding} — stored {}: {why}", confidence.as_str()),
         }));
 
@@ -3441,6 +4031,7 @@ impl Loop {
         let Some(window) = window else {
             fx.push(Effect::Note(Note::CoreTool {
                 name: RECORD_FINDING.to_string(),
+                args: Value::Object(call.arguments.clone()),
                 detail: format!(
                     "{finding} — held for this run only: none of the cited results says which period it covers, so there is no window to store it under"
                 ),
@@ -3503,11 +4094,35 @@ impl Loop {
         ));
 
         let b = &self.working.budget;
+        // What the loop counts, said as what it counts. `spend` is fed by the
+        // driver from each reply's usage (`record_spend`); until the first reply
+        // is recorded the burn is unmeasured, which is not zero.
+        let tokens = match (b.tokens_cap, b.tokens_remaining, self.spend.reported) {
+            (Some(c), Some(r), true) => {
+                format!("{} spent, {r} of {c} left", self.spend.tokens)
+            }
+            (Some(c), _, false) => format!("cap {c}, no model reply counted yet"),
+            (Some(c), None, true) => format!("cap {c}, burn not counted by this run"),
+            (None, _, _) => "no cap set by this profile".to_string(),
+        };
+        let usd = match (
+            b.usd_tenth_cents_cap,
+            b.usd_tenth_cents_remaining,
+            self.spend.usd_tenth_cents,
+        ) {
+            (Some(c), Some(r), Some(spent)) => {
+                format!("{spent} spent, {r} of {c} tenth-cents left")
+            }
+            (Some(c), _, _) => format!(
+                "cap {c} tenth-cents, spend not measured (a call came back without a priced row)"
+            ),
+            (None, _, Some(spent)) => {
+                format!("{spent} tenth-cents spent, no dollar cap enforced")
+            }
+            (None, _, None) => "no dollar cap enforced (no verified price row)".to_string(),
+        };
         lines.push(format!(
-            "budget: {}/{} steps left, {} trials spent{}. Token cap {}, tokens spent NOT \
-             counted by this run. Dollars have neither a cap nor a count — there is no price \
-             table on this platform (OQ-16). Trials have no cap here either. Treat every \
-             uncounted axis as unknown, not as zero and not as remaining.",
+            "budget: {}/{} steps left, {} trials spent{}. Tokens: {tokens}. Dollars: {usd}. Treat every uncounted axis as unknown, not as zero and not as remaining.",
             b.steps_remaining,
             b.steps_total,
             b.trials_spent,
@@ -3515,11 +4130,12 @@ impl Loop {
                 Some(n) => format!(", n_eff {n:.1}"),
                 None => String::new(),
             },
-            match b.tokens_cap {
-                Some(c) => format!("{c}"),
-                None => "not set by this profile".to_string(),
-            }
         ));
+        lines.push(match self.bytes_per_token {
+            Some(v) => format!("calibrated bytes-per-token {v:.2}"),
+            None => "bytes-per-token: unmeasured (no calibration row for this model); the 4.0 prior is in use"
+                .to_string(),
+        });
 
         lines.push(format!(
             "this step: {} tool call(s) attempted this run, {} returned something citable; \
@@ -3584,6 +4200,10 @@ impl Loop {
         let detail = lines.join("\n");
         fx.push(Effect::Note(Note::CoreTool {
             name: SELF_STATUS.to_string(),
+            // The tool takes no arguments; an empty object says so, where null
+            // reads as "arguments were not logged" and makes the whole run
+            // unreplayable (`trace::is_replayable`).
+            args: json!({}),
             detail: detail.clone(),
         }));
         self.observe_as(
@@ -3646,6 +4266,7 @@ impl Loop {
             );
             fx.push(Effect::Note(Note::CoreTool {
                 name: EXPAND.to_string(),
+                args: Value::Object(call.arguments.clone()),
                 detail: detail.clone(),
             }));
             let subject = record.subject.clone();
@@ -3661,7 +4282,7 @@ impl Loop {
         }
         let full = record.body.render();
         let cost = context::estimate_tokens(&full);
-        let room = self.remaining_body_bytes() / 4;
+        let room = self.remaining_body_tokens();
         let detail = if cost as usize <= room {
             let count = self.store.note_expansion(id);
             format!(
@@ -3683,6 +4304,7 @@ impl Loop {
         };
         fx.push(Effect::Note(Note::CoreTool {
             name: EXPAND.to_string(),
+            args: Value::Object(call.arguments.clone()),
             detail: detail.clone(),
         }));
         self.observe_as(
@@ -3728,6 +4350,7 @@ impl Loop {
         self.focus = Some(subject);
         fx.push(Effect::Note(Note::CoreTool {
             name: FOCUS.to_string(),
+            args: Value::Object(call.arguments.clone()),
             detail: detail.clone(),
         }));
         self.observe_as(
@@ -3794,6 +4417,7 @@ impl Loop {
         };
         fx.push(Effect::Note(Note::CoreTool {
             name: SEARCH_TOOLS.to_string(),
+            args: Value::Object(call.arguments.clone()),
             detail: detail.clone(),
         }));
         self.observe_as(
@@ -3916,9 +4540,19 @@ impl Loop {
         }
         fx.push(Effect::Note(Note::CoreTool {
             name: FINISH_TASK.to_string(),
+            args: Value::Object(call.arguments.clone()),
             detail: result.clone(),
         }));
-        self.finish_into(Outcome::Finished { result, evidence }, State::Finished, fx);
+        let budget_exhausted = self.budget_exhausted;
+        self.finish_into(
+            Outcome::Finished {
+                result,
+                evidence,
+                budget_exhausted,
+            },
+            State::Finished,
+            fx,
+        );
     }
 
     // ── Long work: suspend, do not poll (AGENT-010 §8) ──────────────────────
@@ -4202,6 +4836,41 @@ impl Loop {
 
     // ── Terminals ───────────────────────────────────────────────────────────
 
+    /// A correction that will not land: escalate when this tier can hand on,
+    /// fence when it cannot (AGENT-008 §4; S-2.12).
+    ///
+    /// Only `Stuck` escalates. It is the one degradation that says the *model*
+    /// could not do what was asked — the same correction failed every time — and a
+    /// more capable model is exactly the remedy. The others say something about the
+    /// backend or the profile (an ignored grammar, an output cap too small), and
+    /// handing those to another tier would move the fault rather than fix it.
+    ///
+    /// The working state goes with it, so the next tier resumes: the plan steps
+    /// already done stay done and the trials already spent are counted once.
+    fn give_up_or_escalate(&mut self, d: Degradation, fx: &mut Vec<Effect>) {
+        if let (Degradation::Stuck { code, attempts }, Some(to)) =
+            (&d, self.profile.escalate_to.clone())
+        {
+            fx.push(Effect::Note(Note::Degraded(d.clone())));
+            let reason = format!(
+                "the same failure ({code}) survived {attempts} corrections on {}; handing the task to {to} with its working state rather than fencing it",
+                self.profile.model_id
+            );
+            let state = Box::new(self.working.clone());
+            self.finish_into(
+                Outcome::Escalated {
+                    reason,
+                    to,
+                    state: Some(state),
+                },
+                State::Refused,
+                fx,
+            );
+            return;
+        }
+        self.fence(d, fx);
+    }
+
     fn fence(&mut self, d: Degradation, fx: &mut Vec<Effect>) {
         fx.push(Effect::Note(Note::Degraded(d.clone())));
         self.finish_into(Outcome::Fenced(d), State::Fenced, fx);
@@ -4331,6 +5000,7 @@ fn input_name(i: &Input) -> &'static str {
         Input::ModelError { .. } => "a model error",
         Input::Approval { .. } => "an approval",
         Input::Steer { .. } => "a steer from the user",
+        Input::Pin { .. } => "a tool pin from the user",
         Input::ToolResult { .. } => "a tool result",
         Input::ToolError { .. } => "a tool error",
         Input::JobAccepted { .. } => "a job handle",
@@ -4732,6 +5402,53 @@ mod tests {
         assert_eq!(l.state(), State::Executing);
     }
 
+    /// S-6.11: a tool the human pinned from the desk is routed on the very next
+    /// step, though the task never named its namespace and the model never
+    /// searched for it. Without the router reading the pin it is not exposed.
+    #[test]
+    fn a_pinned_tool_is_exposed_on_the_next_step() {
+        let mut reg = registry();
+        reg.register(ToolDef {
+            name: "list_studies".into(),
+            namespace: "studies".into(),
+            description: "List the studies.".into(),
+            risk: Risk::Read,
+            core: false,
+            idempotent: true,
+            input_schema: json!({"type": "object", "properties": {}}),
+        })
+        .unwrap();
+        let mut l = Loop::new(local(), reg, task());
+        l.next(Input::Admission(Admission::Admit));
+        assert!(!l.exposed().contains("list_studies"), "not exposed unasked");
+
+        // An unknown name is refused in a note, not stored.
+        let fx = l.next(Input::Pin {
+            tool: "no_such_tool".into(),
+        });
+        assert!(format!("{fx:?}").contains("nothing pinned"), "{fx:?}");
+
+        l.next(Input::Pin {
+            tool: "list_studies".into(),
+        });
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"read_bars"}"#.into(),
+        });
+        l.next(Input::ModelReply {
+            raw: r#"{"instrument":"BTC-USD"}"#.into(),
+        });
+        l.next(Input::ToolResult {
+            output: "bars".into(),
+            source: "platform.data".into(),
+        });
+        assert!(
+            l.exposed().contains("list_studies"),
+            "the pin reaches the next step's exposure: {:?}",
+            l.exposed()
+        );
+        assert!(!l.exposed().contains("no_such_tool"));
+    }
+
     #[test]
     fn a_result_starts_the_next_step_and_finish_task_ends_it() {
         let (mut l, _) = started();
@@ -4759,6 +5476,7 @@ mod tests {
             Some(&Outcome::Finished {
                 result: "no momentum".into(),
                 evidence: "exp_1".into(),
+                budget_exhausted: false,
             })
         );
         assert_eq!(l.state(), State::Finished);
@@ -4953,7 +5671,7 @@ mod tests {
         let note = fx
             .iter()
             .find_map(|e| match e {
-                Effect::Note(Note::CoreTool { name, detail }) if name == SEARCH_TOOLS => {
+                Effect::Note(Note::CoreTool { name, detail, .. }) if name == SEARCH_TOOLS => {
                     Some(detail)
                 }
                 _ => None,
@@ -5104,6 +5822,32 @@ mod tests {
         );
     }
 
+    /// S-9.10: the tape attribution needs survives the step. The selection note
+    /// is capped at twenty lines; the tape keeps every rendered id and the
+    /// signals each was scored on, so the corpus is not built from a truncation.
+    #[test]
+    fn a_retrieval_run_keeps_the_tape_attribution_needs() {
+        let (mut l, _) = retrieval();
+        one_result(&mut l);
+        // A second step, so a call follows a render.
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"read_bars"}"#.into(),
+        });
+        let tape = l.context_tape();
+        assert!(!tape.renders.is_empty(), "each assembly records what it rendered");
+        assert!(!tape.actions.is_empty(), "each call is kept as evidence of use");
+        assert!(
+            tape.renders.iter().flat_map(|r| r.ids.iter()).all(|id| tape.signals.contains_key(id)),
+            "every rendered record has the signals it was scored on"
+        );
+        let a = l.context_attribution();
+        assert!(a.rendered_tokens > 0, "attribution ran over the tape: {a:?}");
+        // The buffer policy renders no retrieval records and keeps no renders.
+        let (mut control, _) = started();
+        one_result(&mut control);
+        assert!(control.context_tape().renders.is_empty());
+    }
+
     /// The pull tools are offered only where they can work.
     #[test]
     fn expand_and_focus_reach_the_model_only_under_a_retrieval_policy() {
@@ -5155,7 +5899,7 @@ mod tests {
         let note = fx
             .iter()
             .find_map(|e| match e {
-                Effect::Note(Note::CoreTool { name, detail }) if name == EXPAND => Some(detail),
+                Effect::Note(Note::CoreTool { name, detail, .. }) if name == EXPAND => Some(detail),
                 _ => None,
             })
             .expect("expand answers");
@@ -5329,7 +6073,7 @@ mod tests {
         let note = fx
             .iter()
             .find_map(|e| match e {
-                Effect::Note(Note::CoreTool { name, detail }) if name == EXPAND => Some(detail),
+                Effect::Note(Note::CoreTool { name, detail, .. }) if name == EXPAND => Some(detail),
                 _ => None,
             })
             .expect("expand answers");
@@ -6001,7 +6745,7 @@ mod tests {
         let detail = fx
             .iter()
             .find_map(|e| match e {
-                Effect::Note(Note::CoreTool { name, detail }) if name == SELF_STATUS => {
+                Effect::Note(Note::CoreTool { name, detail, .. }) if name == SELF_STATUS => {
                     Some(detail.clone())
                 }
                 _ => None,
@@ -6017,22 +6761,71 @@ mod tests {
         // two are reported separately. A tool that folded them into one sentence
         // would be back to letting a reader infer a burn from a ceiling.
         assert!(detail.contains("steps left"), "{detail}");
-        assert!(detail.contains("Token cap 20000000"), "{detail}");
+        assert!(detail.contains("Tokens: cap 20000000, no model reply counted yet"), "{detail}");
         assert!(
-            detail.contains("tokens spent NOT counted by this run"),
+            detail.contains("Dollars: no dollar cap enforced"),
             "{detail}"
         );
-        assert!(
-            detail.contains("Dollars have neither a cap nor a count"),
-            "{detail}"
-        );
-        assert!(detail.contains("Trials have no cap here"), "{detail}");
+        assert!(detail.contains("bytes-per-token: unmeasured"), "{detail}");
+        // Once a reply is counted the line reports the burn, not just the ceiling.
+        let mut l2 = Loop::new(
+            {
+                let mut p = local();
+                p.orchestration.reflection = true;
+                p
+            },
+            registry(),
+            task(),
+        )
+        .with_bytes_per_token(Some(3.2));
+        l2.next(Input::Admission(Admission::Admit));
+        l2.record_spend(1200, None);
+        l2.next(Input::ModelReply {
+            raw: r#"{"name":"get_self_status"}"#.into(),
+        });
+        let fx2 = l2.next(Input::ModelReply { raw: "{}".into() });
+        let detail2 = fx2
+            .iter()
+            .find_map(|e| match e {
+                Effect::Note(Note::CoreTool { name, detail, .. }) if name == SELF_STATUS => {
+                    Some(detail.clone())
+                }
+                _ => None,
+            })
+            .expect("a second self-status note");
+        assert!(detail2.contains("Tokens: 1200 spent, 19998800 of 20000000 left"), "{detail2}");
+        assert!(detail2.contains("calibrated bytes-per-token 3.20"), "{detail2}");
         // And it does not invent a monitor state it has not seen.
         assert!(detail.contains("not visible from here"), "{detail}");
         assert!(
             detail.contains("no tool has tripped its breaker"),
             "{detail}"
         );
+    }
+
+    /// A tool that takes no arguments logs `{}`, not null: `trace::is_replayable`
+    /// reads null as "arguments were not logged", so a null here would make every
+    /// run that looked at itself unreplayable (S-4.8).
+    #[test]
+    fn a_self_status_note_carries_empty_object_args_so_the_run_stays_replayable() {
+        let mut p = local();
+        p.orchestration.reflection = true;
+        let mut l = Loop::new(p, registry(), task());
+        l.next(Input::Admission(Admission::Admit));
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"get_self_status"}"#.into(),
+        });
+        let fx = l.next(Input::ModelReply { raw: "{}".into() });
+        let args = fx
+            .iter()
+            .find_map(|e| match e {
+                Effect::Note(Note::CoreTool { name, args, .. }) if name == SELF_STATUS => {
+                    Some(args.clone())
+                }
+                _ => None,
+            })
+            .expect("a self-status note");
+        assert!(!args.is_null(), "null args make the trajectory unreplayable");
     }
 
     /// A routing miss costs one turn, not one step of the task's budget, and it never
@@ -6155,6 +6948,7 @@ mod tests {
             Some(&Outcome::Finished {
                 result: "no momentum".into(),
                 evidence: "exp_1".into(),
+                budget_exhausted: false,
             })
         );
     }
@@ -6546,5 +7340,501 @@ mod tests {
                 "drive.rs must stay sans-IO and provider-neutral, but it mentions {forbidden:?}"
             );
         }
+    }
+}
+
+/// One runtime: budgets, escalation-with-state, the re-plan trigger and the
+/// cost axis (AGENT-010 §6, §7; Set S tasks S-1.20, S-2.12, S-2.16).
+#[cfg(test)]
+mod runtime_tests {
+    use super::*;
+    use crate::profile::frontier_fixture;
+    use crate::registry::ToolDef;
+
+    fn reg() -> ToolRegistry {
+        let mut r = ToolRegistry::with_core();
+        r.register(ToolDef {
+            name: "read_bars".into(),
+            namespace: "data".into(),
+            description: "Read price bars.".into(),
+            risk: Risk::Read,
+            core: false,
+            idempotent: true,
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "instrument": {"type": "string"},
+                    "nonce": {"type": "integer"}
+                },
+                "required": ["instrument"]
+            }),
+        })
+        .unwrap();
+        r
+    }
+
+    fn task() -> Task {
+        Task {
+            goal: "find whether BTC-USD has momentum at 1h".into(),
+            charter: "You are a research agent.".into(),
+            demand: TaskDemand::MultiStep,
+            namespaces: vec!["data".into()],
+        }
+    }
+
+    fn done(fx: &[Effect]) -> Option<&Outcome> {
+        fx.iter().find_map(|e| match e {
+            Effect::Done(o) => Some(o),
+            _ => None,
+        })
+    }
+
+    fn decode(fx: &[Effect]) -> Option<&Decode> {
+        fx.iter().find_map(|e| match e {
+            Effect::CallModel(c) => Some(&c.decode),
+            _ => None,
+        })
+    }
+
+    fn native_read(l: &mut Loop, nonce: u32) -> Vec<Effect> {
+        l.next(Input::ModelReply {
+            raw: format!(
+                r#"{{"name":"read_bars","arguments":{{"instrument":"BTC-USD","nonce":{nonce}}}}}"#
+            ),
+        })
+    }
+
+    /// `max_tokens_per_task` reached → one report turn, then
+    /// `Finished { budget_exhausted: true }` (AGENT-010 §14.5).
+    #[test]
+    fn a_spent_token_budget_buys_one_report_turn_and_says_so() {
+        let mut p = frontier_fixture();
+        p.budgets.max_tokens_per_task = 1_000;
+        let mut l = Loop::new(p, reg(), task());
+        l.next(Input::Admission(Admission::Admit));
+        // The driver reports what the first call cost: past 90% of the cap.
+        l.record_spend(950, None);
+        native_read(&mut l, 1);
+        let fx = l.next(Input::ToolResult {
+            output: "ts,close\n1,100".into(),
+            source: "platform.data".into(),
+        });
+        assert!(
+            fx.iter().any(|e| matches!(
+                e,
+                Effect::Note(Note::Degraded(Degradation::BudgetExhausted { axis })) if axis == "tokens"
+            )),
+            "the wrap-up names the budget, not the steps: {fx:?}"
+        );
+        assert_eq!(
+            l.exposed().iter().collect::<Vec<_>>(),
+            vec!["finish_task"],
+            "the last turn can only report"
+        );
+        assert!(l.budget_exhausted());
+        let fx = l.next(Input::ModelReply {
+            raw: r#"{"name":"finish_task","arguments":{"result":"no momentum","evidence":"the read_bars result"}}"#.into(),
+        });
+        assert!(
+            matches!(
+                done(&fx),
+                Some(Outcome::Finished {
+                    budget_exhausted: true,
+                    ..
+                })
+            ),
+            "{fx:?}"
+        );
+    }
+
+    /// The dollar axis, only against a cap the driver was allowed to set.
+    #[test]
+    fn a_spent_dollar_budget_wraps_up_and_an_unpriced_call_poisons_the_total() {
+        let mut l = Loop::new(frontier_fixture(), reg(), task()).with_usd_cap(Some(1_000));
+        l.next(Input::Admission(Admission::Admit));
+        l.record_spend(10, Some(950));
+        assert_eq!(l.working().budget.usd_tenth_cents_remaining, Some(50));
+        native_read(&mut l, 1);
+        l.next(Input::ToolResult {
+            output: "x".into(),
+            source: "platform.data".into(),
+        });
+        assert!(l.budget_exhausted(), "95% of the dollar cap wraps up");
+
+        // One unpriced call and the total is unknown: never a wrap-up on a
+        // number with a hole in it, and never a remainder printed from one.
+        let mut l = Loop::new(frontier_fixture(), reg(), task()).with_usd_cap(Some(1_000));
+        l.next(Input::Admission(Admission::Admit));
+        l.record_spend(10, Some(100));
+        l.record_spend(10, None);
+        l.record_spend(10, Some(10_000));
+        assert_eq!(l.working().budget.usd_tenth_cents_remaining, None);
+        native_read(&mut l, 1);
+        l.next(Input::ToolResult {
+            output: "x".into(),
+            source: "platform.data".into(),
+        });
+        assert!(!l.budget_exhausted());
+    }
+
+    /// No cap set (an unpriced model): dollars never wrap a run up, however
+    /// much is reported.
+    #[test]
+    fn without_a_fresh_price_the_dollar_cap_is_not_enforced() {
+        let mut l = Loop::new(frontier_fixture(), reg(), task());
+        l.next(Input::Admission(Admission::Admit));
+        l.record_spend(10, Some(1_000_000));
+        native_read(&mut l, 1);
+        l.next(Input::ToolResult {
+            output: "x".into(),
+            source: "platform.data".into(),
+        });
+        assert!(!l.budget_exhausted());
+    }
+
+    fn stuck(mut l: Loop) -> Vec<Effect> {
+        l.next(Input::Admission(Admission::Admit));
+        let mut last = Vec::new();
+        for _ in 0..8 {
+            last = l.next(Input::ModelReply {
+                raw: r#"{"name":"finish_task","arguments":{"result":"done","evidence":""}}"#.into(),
+            });
+            if done(&last).is_some() {
+                break;
+            }
+        }
+        last
+    }
+
+    /// `Stuck` on a tier that can hand on escalates **with the working state**
+    /// (AGENT-008 §4; S-2.12); on a tier that cannot, it still fences.
+    #[test]
+    fn a_stuck_tier_with_somewhere_to_go_escalates_carrying_its_state() {
+        let mut p = frontier_fixture();
+        p.escalate_to = Some("claude-opus-5".into());
+        let fx = stuck(Loop::new(p, reg(), task()));
+        let Some(Outcome::Escalated { to, state, .. }) = done(&fx) else {
+            panic!("expected an escalation, got {fx:?}");
+        };
+        assert_eq!(to, "claude-opus-5");
+        let state = state.as_ref().expect("the working state travels");
+        assert_eq!(state.goal, "find whether BTC-USD has momentum at 1h");
+
+        let fx = stuck(Loop::new(frontier_fixture(), reg(), task()));
+        assert!(
+            matches!(done(&fx), Some(Outcome::Fenced(Degradation::Stuck { .. }))),
+            "with nowhere to go it is a fence, as before: {fx:?}"
+        );
+    }
+
+    /// The next tier resumes: steps already done stay done, the trials already
+    /// spent are counted once, and the old tier's correction does not follow.
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn a_resumed_run_does_not_redo_completed_steps() {
+        let mut state = WorkingState::default();
+        state.goal = "find whether BTC-USD has momentum at 1h".into();
+        state.plan = vec![
+            PlannedStep {
+                goal: "pull bars".into(),
+                kind: StepKind::Tool {
+                    name: "read_bars".into(),
+                },
+                status: StepStatus::Done,
+            },
+            PlannedStep {
+                goal: "test momentum".into(),
+                kind: StepKind::Tool {
+                    name: "read_bars".into(),
+                },
+                status: StepStatus::Pending,
+            },
+        ];
+        state.budget.trials_spent = 2;
+        state.last_error = Some(Correction {
+            code: "x".into(),
+            message: "y".into(),
+            fix: "z".into(),
+            step: 3,
+        });
+        let l = Loop::new(frontier_fixture(), reg(), task()).resuming_from(state);
+        let (i, step) = l.working().active_step().expect("the next step is active");
+        assert_eq!(i, 1, "the completed step is not re-run");
+        assert_eq!(step.goal, "test momentum");
+        assert_eq!(l.working().plan[0].status, StepStatus::Done);
+        assert_eq!(l.working().budget.trials_spent, 2, "trials are counted once");
+        assert!(l.working().last_error.is_none());
+        assert_eq!(
+            l.working().budget.steps_total,
+            frontier_fixture().orchestration.max_steps,
+            "the step budget is the new tier's"
+        );
+    }
+
+    fn local_planner(max_replans: u32) -> Profile {
+        let mut p = frontier_fixture();
+        p.model_id = "test-local".into();
+        p.tier = crate::profile::Tier::LocalMid;
+        p.context.effective_budget_tokens = 24_000;
+        p.context.reserve_for_output = 3_000;
+        p.tools.max_exposed_per_step = 6;
+        p.output.constrained_decoding = true;
+        p.orchestration.mode = Mode::PlannerExecutor;
+        p.orchestration.max_steps = 40;
+        p.orchestration.reflection = false;
+        p.orchestration.max_replans_per_run = max_replans;
+        p
+    }
+
+    const PLAN: &str = r#"{"steps":[{"goal":"pull bars","tool":"read_bars"}]}"#;
+
+    /// Run the one-step plan to exhaustion, then spend one barren step. Returns
+    /// the effects of the step boundary that follows.
+    fn exhaust_and_drift(l: &mut Loop, nonce: u32) -> Vec<Effect> {
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"read_bars"}"#.into(),
+        });
+        l.next(Input::ModelReply {
+            raw: format!(r#"{{"instrument":"BTC-USD","nonce":{nonce}}}"#),
+        });
+        l.next(Input::ToolResult {
+            output: format!("bars {nonce}"),
+            source: "platform.data".into(),
+        });
+        // The plan is exhausted; the model carries on without one and learns
+        // nothing.
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"read_bars"}"#.into(),
+        });
+        l.next(Input::ModelReply {
+            raw: format!(r#"{{"instrument":"ETH-USD","nonce":{nonce}}}"#),
+        });
+        l.next(Input::ToolError {
+            detail: "http_404".into(),
+        })
+    }
+
+    /// The trigger the bound was waiting for (§3.7; S-1.20): an exhausted plan
+    /// on an unmet goal re-plans, and the fourth plan wraps up instead of
+    /// continuing — with the working state intact.
+    #[test]
+    fn an_exhausted_plan_on_an_unmet_goal_re_plans_and_the_fourth_plan_wraps_up() {
+        let mut l = Loop::new(local_planner(3), reg(), task());
+        let fx = l.next(Input::Admission(Admission::Admit));
+        assert!(matches!(decode(&fx), Some(Decode::Plan { .. })));
+        l.next(Input::ModelReply { raw: PLAN.into() });
+
+        for cycle in 1..=3u32 {
+            let fx = exhaust_and_drift(&mut l, cycle);
+            assert!(
+                matches!(decode(&fx), Some(Decode::Plan { .. })),
+                "cycle {cycle}: an exhausted plan with a barren step after it asks for a new \
+                 plan: {fx:?}"
+            );
+            let fx = l.next(Input::ModelReply { raw: PLAN.into() });
+            if cycle < 3 {
+                assert!(
+                    fx.iter()
+                        .any(|e| matches!(e, Effect::Note(Note::Planned { .. }))),
+                    "plan {} is within the bound and is served",
+                    cycle + 1
+                );
+            } else {
+                assert!(
+                    !fx.iter()
+                        .any(|e| matches!(e, Effect::Note(Note::Planned { .. }))),
+                    "the fourth plan is past the bound and is not served"
+                );
+                assert_eq!(
+                    l.exposed().iter().collect::<Vec<_>>(),
+                    vec!["finish_task"],
+                    "it wraps up instead"
+                );
+                assert!(done(&fx).is_none(), "and it is not a fence");
+                assert_eq!(l.working().goal, "find whether BTC-USD has momentum at 1h");
+            }
+        }
+    }
+
+    /// A step that learned something after the plan does not re-plan — the
+    /// trigger is narrow, so a healthy planner run is untouched.
+    #[test]
+    fn a_productive_step_after_the_plan_does_not_re_plan() {
+        let mut l = Loop::new(local_planner(3), reg(), task());
+        l.next(Input::Admission(Admission::Admit));
+        l.next(Input::ModelReply { raw: PLAN.into() });
+        l.next(Input::ModelReply {
+            raw: r#"{"name":"read_bars"}"#.into(),
+        });
+        l.next(Input::ModelReply {
+            raw: r#"{"instrument":"BTC-USD","nonce":1}"#.into(),
+        });
+        let fx = l.next(Input::ToolResult {
+            output: "bars".into(),
+            source: "platform.data".into(),
+        });
+        assert!(
+            matches!(decode(&fx), Some(Decode::SelectTool { .. })),
+            "the step after a productive one routes normally: {fx:?}"
+        );
+    }
+
+    /// A redirection on a planner-executor profile plans again for the new
+    /// question (§3.4a; S-1.20, S-2.14).
+    #[test]
+    fn a_redirection_on_a_planner_profile_asks_for_a_new_plan() {
+        let mut l = Loop::new(local_planner(3), reg(), task());
+        l.next(Input::Admission(Admission::Admit));
+        l.next(Input::ModelReply { raw: PLAN.into() });
+        let fx = l.next(Input::Steer {
+            text: "actually, look at whether ETH-USD mean-reverts at 4h instead".into(),
+        });
+        assert!(
+            matches!(decode(&fx), Some(Decode::Plan { .. })),
+            "a redirected planner run re-plans: {fx:?}"
+        );
+        assert!(l.working().plan.is_empty(), "the old plan is gone");
+    }
+
+    /// An expensive call asks whatever its reversibility, and the card carries
+    /// the estimate beside the remaining budget (AGENT-008 §4; S-2.16).
+    #[test]
+    fn the_cost_axis_fires_from_the_drivers_estimator() {
+        let mut p = frontier_fixture();
+        p.budgets.ask_above_usd = Some(5.0);
+        let estimator: CostEstimator =
+            std::sync::Arc::new(|tool: &str, _: &Map<String, Value>| {
+                (tool == "read_bars").then_some(42.0)
+            });
+        let mut l = Loop::new(p, reg(), task())
+            .with_usd_cap(Some(60_000))
+            .with_cost_estimator(estimator);
+        l.next(Input::Admission(Admission::Admit));
+        let fx = native_read(&mut l, 1);
+        let ask = fx
+            .iter()
+            .find_map(|e| match e {
+                Effect::AskHuman { ruling, .. } => Some(ruling),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("a $42 read must reach a human: {fx:?}"));
+        assert_eq!(ask.code, "policy.cost_above_threshold");
+        assert!(ask.reason.contains("$42.00"), "{}", ask.reason);
+        assert!(
+            ask.reason.contains("$60.00"),
+            "the remaining budget is on the card: {}",
+            ask.reason
+        );
+    }
+
+    /// A lease's trial cap (S-11.6): reaching it buys one report turn, not a cut.
+    #[test]
+    fn a_trial_cap_wraps_the_run_up_when_it_is_reached() {
+        let mut l = Loop::new(frontier_fixture(), reg(), task())
+            .with_trial_spending_tools(["read_bars"])
+            .with_trial_cap(Some(1));
+        l.next(Input::Admission(Admission::Admit));
+        native_read(&mut l, 1);
+        assert_eq!(l.working().budget.trials_spent, 1);
+        let fx = l.next(Input::ToolResult {
+            output: "x".into(),
+            source: "platform.data".into(),
+        });
+        assert!(
+            fx.iter().any(|e| matches!(
+                e,
+                Effect::Note(Note::Degraded(Degradation::BudgetExhausted { axis })) if axis == "trials"
+            )),
+            "{fx:?}"
+        );
+        assert_eq!(l.exposed().iter().collect::<Vec<_>>(), vec!["finish_task"]);
+
+        // No cap: the same call never wraps the run up.
+        let mut l = Loop::new(frontier_fixture(), reg(), task())
+            .with_trial_spending_tools(["read_bars"]);
+        l.next(Input::Admission(Admission::Admit));
+        native_read(&mut l, 1);
+        l.next(Input::ToolResult {
+            output: "x".into(),
+            source: "platform.data".into(),
+        });
+        assert!(!l.budget_exhausted());
+    }
+
+    /// A sub-run's lease narrows the loop and never widens it.
+    #[test]
+    fn a_lease_narrows_the_loop_and_cannot_widen_it() {
+        use crate::subrun::{BudgetLease, Remaining};
+        let mut parent = Remaining {
+            tokens: 5_000,
+            trials: 4,
+            steps: 6,
+        };
+        let lease = BudgetLease::split(
+            &mut parent,
+            Remaining {
+                tokens: 1_000,
+                trials: 2,
+                steps: 3,
+            },
+        )
+        .unwrap();
+        let l = Loop::new(frontier_fixture(), reg(), task()).with_budget_lease(lease);
+        let b = &l.working().budget;
+        assert_eq!((b.steps_total, b.tokens_cap, b.trials_cap), (3, Some(1_000), Some(2)));
+
+        // Asking for more steps than the profile allows is clamped to the profile.
+        let mut big = Remaining {
+            tokens: 0,
+            trials: 0,
+            steps: 100_000,
+        };
+        let want = big;
+        let lease = BudgetLease::split(&mut big, want).unwrap();
+        let l = Loop::new(frontier_fixture(), reg(), task()).with_budget_lease(lease);
+        assert_eq!(
+            l.working().budget.steps_total,
+            frontier_fixture().orchestration.max_steps
+        );
+    }
+
+    /// The calibrated bytes-per-token reaches the assembler (S-4.12): a model
+    /// that packs fewer bytes into a token gets a larger estimate for the same
+    /// text, the prior is what an uncalibrated model keeps, and nothing leaks to
+    /// the next caller on the thread.
+    #[test]
+    fn a_calibrated_bytes_per_token_changes_what_is_budgeted_and_is_restored() {
+        let text = "x".repeat(400);
+        assert_eq!(context::estimate_tokens(&text), 100);
+        let under = context::with_bytes_per_token(2.5, || context::estimate_tokens(&text));
+        assert_eq!(under, 160, "2.5 bytes per token is 160 tokens for 400 bytes");
+        assert_eq!(context::estimate_tokens(&text), 100, "restored");
+
+        // Through the loop: a calibrated run still plans and asks for a model call,
+        // and leaves the thread's setting as it found it.
+        let mut l = Loop::new(frontier_fixture(), reg(), task()).with_bytes_per_token(Some(2.5));
+        let fx = l.next(Input::Admission(Admission::Admit));
+        assert!(fx.iter().any(|e| matches!(e, Effect::CallModel(_))));
+        assert_eq!(context::estimate_tokens(&text), 100);
+    }
+
+    /// The budget the loop enforces on an arriving result moves with the
+    /// calibration (S-4.12 loop-level): the same window holds fewer bytes at 2.5
+    /// bytes per token than at the 4.0 prior, and the two conversions agree.
+    #[test]
+    fn the_body_cap_in_bytes_follows_the_calibrated_bytes_per_token() {
+        let l = Loop::new(frontier_fixture(), reg(), task());
+        let tokens = l.remaining_body_tokens();
+        assert!(tokens > 1_000, "a frontier window leaves real room: {tokens}");
+        let at_prior = l.remaining_body_bytes();
+        assert_eq!(at_prior, tokens * 4, "uncalibrated: four bytes per token");
+        let calibrated = context::with_bytes_per_token(2.5, || {
+            (l.remaining_body_bytes(), l.remaining_body_tokens())
+        });
+        assert!(calibrated.0 < at_prior, "{} !< {at_prior}", calibrated.0);
+        // Same tokens in the window (nothing is held yet), fewer bytes per token.
+        assert!(calibrated.1 >= tokens - 8 && calibrated.1 <= tokens + 8);
+        let expected = (calibrated.1 as f64 * 2.5) as usize;
+        assert!(calibrated.0.abs_diff(expected) <= 2, "{} vs {expected}", calibrated.0);
     }
 }

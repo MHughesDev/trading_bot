@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 use crate::ApiClient;
 
 fn missing(field: &str) -> Value {
-    json!({ "error": "missing_field", "field": field })
+    crate::tool_error::missing_field(field)
 }
 
 fn str_field(params: &Value, key: &str) -> Option<String> {
@@ -84,12 +84,11 @@ pub async fn create_skill(api: &ApiClient, params: &Value) -> Value {
     }
     let outputs = params.get("outputs").and_then(Value::as_array);
     if outputs.is_none_or(|a| a.is_empty()) {
-        return json!({
-            "error": "no_outputs",
-            "fix": "declare at least one key in `outputs`. A skill that promises nothing cannot \
-                    be checked, and one that cannot be checked never accumulates the track \
-                    record that makes it worth keeping."
-        });
+        return crate::tool_error::refuse(
+            "no_outputs",
+            "the skill declares no outputs, and a skill that promises nothing cannot be checked.",
+            "declare at least one key in `outputs`",
+        );
     }
 
     post(

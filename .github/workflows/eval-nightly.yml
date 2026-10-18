@@ -1,0 +1,25 @@
+# The nightly promotion run (AGENT-009 section 4.2; Set S task S-4.17).
+#
+# The sealed 20% of every eval suite runs HERE and nowhere else. ci.yml's replay
+# test iterates `cases::open_cases()`, which excludes every sealed case, and the
+# `nightly_*` tests below are `#[ignore]`d so no PR run executes them.
+#
+# A harness version whose open-set rate exceeds its sealed-set rate by more than
+# the flakiness band is fitted to its own evals and is not promoted
+# (`scorecard::fitted_to_its_evals`).
+name: eval-nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  sealed-set:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: The sealed eval set and its honesty twins
+        run: cargo test -p harness --lib -- --ignored nightly_ --test-threads=1

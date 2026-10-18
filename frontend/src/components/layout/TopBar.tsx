@@ -11,6 +11,7 @@ import { StatusDot } from '@/components/primitives/Badge'
 import { IconButton } from '@/components/primitives/Button'
 import { MenuItem, MenuLabel, MenuSeparator, Popover, Tooltip } from '@/components/primitives/Overlay'
 import { ConfirmDialog } from '@/components/primitives/Modal'
+import { AlertsBell } from '@/components/ops/AlertsBell'
 import { cn } from '@/lib/utils'
 import { NAV_SECTIONS, SECONDARY_SECTIONS } from './nav-sections'
 
@@ -226,6 +227,8 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
             <Command size={14} aria-hidden />
           </IconButton>
         </Tooltip>
+
+        <AlertsBell />
 
         <EnvironmentPill />
 

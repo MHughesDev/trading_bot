@@ -17,6 +17,29 @@ use risk::{DivergenceHalt, DivergenceKind, HaltClearance};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+/// A transaction scoped to one tenant.
+///
+/// Every table this module touches is `FORCE ROW LEVEL SECURITY` with a policy
+/// on `current_setting('app.tenant_id', true)` (0105). Until 2026-10-03 these
+/// functions ran on the bare pool: every test connects as the owner — a
+/// superuser, who bypasses RLS — so they all passed, and in the running
+/// platform, as `app_role` with no tenant set, every insert failed its `WITH
+/// CHECK` and every read returned nothing. An empty read of the halt table is
+/// "no strategy is halted", which is the one answer this module must never give
+/// by accident. `set_config(.., true)` is transaction-local, so the setting
+/// cannot leak to the next borrower of the connection.
+async fn tenant_tx<'a>(
+    pool: &'a PgPool,
+    tenant_id: &str,
+) -> Result<sqlx::Transaction<'a, sqlx::Postgres>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+        .bind(tenant_id)
+        .execute(&mut *tx)
+        .await?;
+    Ok(tx)
+}
+
 /// Append one forward observation.
 ///
 /// `ON CONFLICT DO NOTHING` against the `(deployment_id, bar, source)` unique
@@ -31,6 +54,7 @@ pub async fn insert_observation(
     tenant_id: &str,
     o: &ForwardObservation,
 ) -> Result<(), sqlx::Error> {
+    let mut tx = tenant_tx(pool, tenant_id).await?;
     sqlx::query(
         "INSERT INTO mlops.forward_observation \
          (tenant_id, deployment_id, strategy_id, bar, realised_return, expected_return, \
@@ -62,9 +86,9 @@ pub async fn insert_observation(
     .bind(o.expected_turnover)
     .bind(i32::try_from(o.model_attributable_rejects).unwrap_or(i32::MAX))
     .bind(o.observed_at)
-    .execute(pool)
-    .await
-    .map(|_| ())
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await
 }
 
 /// Every observation for a deployment in `[from, to]`, oldest first.
@@ -88,6 +112,7 @@ pub async fn load_observations(
     from: DateTime<Utc>,
     to: DateTime<Utc>,
 ) -> Result<Vec<ForwardObservation>, sqlx::Error> {
+    let mut tx = tenant_tx(pool, tenant_id).await?;
     let rows = sqlx::query(
         "SELECT deployment_id, strategy_id, bar, realised_return, expected_return, numeraire, \
                 source, signal_matched, realised_slippage_bps, modelled_slippage_bps, \
@@ -100,8 +125,9 @@ pub async fn load_observations(
     .bind(deployment_id)
     .bind(from)
     .bind(to)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     let mut out = Vec::with_capacity(rows.len());
     for r in rows {
@@ -144,6 +170,7 @@ pub async fn insert_halt(
     halt: &DivergenceHalt,
     deployment_id: Option<Uuid>,
 ) -> Result<(), sqlx::Error> {
+    let mut tx = tenant_tx(pool, tenant_id).await?;
     sqlx::query(
         "INSERT INTO mlops.divergence_halt \
          (halt_id, tenant_id, strategy_id, deployment_id, kind, reason, raised_at) \
@@ -156,9 +183,9 @@ pub async fn insert_halt(
     .bind(halt.kind.as_str())
     .bind(&halt.reason)
     .bind(halt.raised_at)
-    .execute(pool)
-    .await
-    .map(|_| ())
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await
 }
 
 /// Record the human act of clearing a halt. The primary key is the halt's own
@@ -172,6 +199,7 @@ pub async fn insert_clearance(
     tenant_id: &str,
     clearance: &HaltClearance,
 ) -> Result<(), sqlx::Error> {
+    let mut tx = tenant_tx(pool, tenant_id).await?;
     sqlx::query(
         "INSERT INTO mlops.divergence_halt_clearance \
          (halt_id, tenant_id, cleared_by, note, cleared_at) VALUES ($1,$2,$3,$4,$5)",
@@ -181,9 +209,9 @@ pub async fn insert_clearance(
     .bind(clearance.cleared_by.as_str())
     .bind(&clearance.note)
     .bind(clearance.cleared_at)
-    .execute(pool)
-    .await
-    .map(|_| ())
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await
 }
 
 /// Halts with no clearance — what the registry must hold after a restart.
@@ -199,6 +227,7 @@ pub async fn load_active_halts(
     pool: &PgPool,
     tenant_id: &str,
 ) -> Result<Vec<DivergenceHalt>, sqlx::Error> {
+    let mut tx = tenant_tx(pool, tenant_id).await?;
     let rows = sqlx::query(
         "SELECT h.halt_id, h.strategy_id, h.kind, h.reason, h.raised_at \
            FROM mlops.divergence_halt h \
@@ -207,8 +236,9 @@ pub async fn load_active_halts(
           ORDER BY h.raised_at ASC",
     )
     .bind(tenant_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     let mut out = Vec::with_capacity(rows.len());
     for r in rows {

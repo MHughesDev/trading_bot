@@ -1,12 +1,12 @@
 # Phase 2 — One runtime
 
-**Completion: 31% (5 / 16 tasks), plus 9 partial (S-2.5–S-2.8, S-2.11, S-2.12, S-2.14–S-2.16). Two remain `NOT STARTED`: **S-2.9 and S-2.10**, and they interlock with a phase-4 dependency — the flag has nothing to compare against until the shadow replay (S-4.8) exists, and deleting `driver.rs` waits on the flag having been proved.**
+**Completion: 44% (7 / 16 tasks), plus 9 partial (S-2.5, S-2.6, S-2.8, S-2.9, S-2.11, S-2.12, S-2.14–S-2.16). Nothing is `NOT STARTED`. (2026-10-03: `driver.rs` is deleted and every model runs on the one loop; what keeps the partials open is named in each task: a live-Postgres run of resume, a live frontier credential for S-2.9 (BLOCKED:HUMAN for that clause only), the sub-run lease caller, and a verified hardware price row.)**
 
 **Requirement IDs:** AR-01…AR-16.
 **Spec:** [AGENT-010](../../../specs/AGENT-010-agent-runtime.md), ADR-0035.
 **Depends on:** Phase 1 (all three tracks).
 **Blocks:** Phase 8. Phase 6 consumes its effect log but can start before it.
-**Migration range:** 0061–0064.
+**Migration range:** 0061–0064 (0170 used for the resume tables, from the 0170–0172 block this track was allocated).
 **Migrations shipped:** 0061, 0062 (as `0061_agent_effect_log.sql` — the task’s `agent_events` name was taken by 0036).
 **Parallel with:** Phases 6, 7.
 
@@ -183,7 +183,17 @@ reports `exposure_full` rather than evicting.
 
 ### S-2.5 `agent_events`: the effect log is the run — L
 `PARTIAL` 2026-09-15 — the log exists, is written before every effect, and is proved against live
+
+**2026-10-05 (S-RUNTIME) - PARTIAL.** Run against a migrated Postgres: `pg_runtime_live::a_real_turn_leaves_a_log_that_replays_and_telemetry_that_reads_back` drives a real `AgentManager` turn (fake Anthropic provider, tool call then `finish_task`) and asserts the run's `agent_effect_log` projects to a trajectory for which `harness::trace::is_replayable` is true, with the tool call's arguments present and the `ExecuteTool` effect logged before its answer. **Still missing:** a sample of runs against a real model; one scripted run is not a sample.
 Postgres. The dual-write to `agent_messages` is unchanged and the SDK driver is not wired.
+
+**2026-10-03 (RUNTIME track) — PARTIAL.** The SDK driver this task said was "not wired" no longer exists (S-2.10), so there is one writer: `local_driver`. New this
+pass: a `state` row carrying the `WorkingState` hash is written in front of **every** input (`Pump::feed`), plus a
+`RunSpec` row at admission (everything replay rebuilds the loop from), and `Spend`, `Turn`, `Opening`, `Compact` and
+`Suspended` state rows. Replay checks the hash, so a rebuilt loop that took the same actions for a different reason is
+refused (`a_log_that_does_not_replay_to_the_same_state_is_refused`). **Still missing:** `harness::trace::is_replayable`
+over a sample of *live* runs: it needs real runs against a real model, and none was available to this track. The
+write-ahead ordering and the dual-write with `agent_messages` are unchanged.
 
 **The name in this task is already taken.** AGENT-010 §5 and this task both say `agent_events`;
 migration **0036** created a table of that name in 2026 — an SSE event stream keyed on
@@ -236,7 +246,28 @@ runs.
 
 ### S-2.6 Resume from the log — M
 `PARTIAL` 2026-09-16 — the decision is built and tested; the replay that acts on it is not wired,
+
+**2026-10-05 (S-RUNTIME) - PARTIAL.** The database half now runs against a migrated Postgres: five `resume_pg_*` tests in `local_driver.rs` (`an_interrupted_write_is_not_repeated_and_the_model_is_told`, `a_write_that_landed_is_answered_from_the_durable_record`, `a_mid_step_run_under_another_harness_is_interrupted_in_the_database`, `an_incompatible_log_attaches_the_job_result`, `a_suspended_run_resumes_on_job_done_across_a_version_change`), covering `load_log`, `interrupt`, the idempotency read and the status writes; the platform fake counts requests and none for `create_experiment` is made. Mutation-checked: ignoring the durable record fails the landed-write test. **Still missing:** no process was actually killed; the log is cut by construction, not by SIGKILL.
 and the run is still marked failed.
+
+**2026-10-03 (RUNTIME track) — PARTIAL.** The replay is built and acts. `local_driver::resume` rebuilds the loop from the log (`RunSpec` + inputs, `replay()`),
+checking **every batch it produces against the batch the log recorded** and every `WorkingState` hash, then continues:
+an outstanding read, model call or approval picks up where it was; an outstanding **write** is answered from the durable
+`agent_idempotency` record (migration 0170) or told "interrupted; not retried because it writes", never re-run; a
+suspended run resumes on `JobDone` and survives a `harness_version` change when the effect-log schema matches
+(`decide_for_resume`, `EFFECT_LOG_SCHEMA`); anything else is marked `interrupted` with its working state kept and the
+job's result attached to the timeline. `AgentManager::recover_orphans` now calls it for every orphan instead of failing
+them. Evidence: `a_resumed_run_does_not_repeat_an_interrupted_create_experiment` (a log cut after the approved
+`create_experiment`; both the no-record and the recorded-result branches issue zero `create_experiment` effects),
+`a_log_that_does_not_replay_to_the_same_state_is_refused`, `a_log_ending_on_an_input_replays_to_an_unlogged_batch`,
+`every_input_the_pump_writes_reads_back`, and in `agent::resume` `a_suspended_run_resumes_across_a_harness_version_change`,
+`a_mid_step_run_under_another_harness_is_still_interrupted`, `a_trailing_state_row_does_not_mask_the_outstanding_effect`.
+**Still missing, which is why this is not DONE:** the database half of `resume()` (`load_log`, `spawn_resume`,
+`interrupt`, the idempotency read) has not been run against a migrated Postgres, and no process was actually killed:
+the "kill the API" acceptance is simulated by replaying a truncated log. The platform DB and a migrated scratch DB were
+not available here (pgvector is absent on 5433).
+
+**2026-10-03 wave 2 (RUNTIME).** A run that used `record_finding` or `finish_task` is now replayable from the trace: `Note::CoreTool` carries `args` and `describe_effect` writes them (S-4.8), and the trace projection test `a_core_tool_note_survives_the_round_trip_through_the_log` asserts `is_replayable` where it used to pin the break.
 
 **What exists.** `crates/api/src/agent/resume.rs` decides what a restart should do with one run,
 from its effect log alone, as a **pure function over rows**. That is where the logic belongs: it
@@ -304,8 +335,15 @@ job result.
 **Traces:** AGENT-010 §5; §14.3.
 
 ### S-2.7 Every adapter through the proxy — S
-`PARTIAL` 2026-09-16 — the three behaviours now apply to every caller; they are shared code rather
+`DONE` 2026-09-16 — the three behaviours now apply to every caller; they are shared code rather
 than a shared HTTP hop.
+
+**2026-10-03 (RUNTIME track) — DONE.** S-2.10 deleted the hosted driver and the SDK container no longer hosts the agent, so there is no second internal path
+left to collapse: the one driver applies the shared 1-hour cache TTL (`crates/llm`), reads cache usage into
+`agent_runs`, and refuses an over-budget request with `context_budget_exceeded` before sending it
+(`call_model`, via `llm_proxy::estimate_request_tokens`). The standing decision is unchanged: the policy is one shared
+function, not an HTTP hop of the platform to itself. Evidence: `every_breakpoint_lives_an_hour` (llm) and S-1.9's cache
+usage tests; the refusal itself is exercised only by the budget arithmetic tests, not by a provider call.
 
 The task says "route all of them through the proxy". The proxy is an HTTP endpoint, and routing
 the internal drivers through it would mean the platform making HTTP calls to itself for every
@@ -347,7 +385,15 @@ refused with `context_budget_exceeded` rather than truncated.
 
 ### S-2.8 Columns the later phases read — S
 `PARTIAL` 2026-09-16 — eight of the ten are written by the local driver; `trials_spent` and
+
+**2026-10-05 (S-RUNTIME) - PARTIAL.** The live-Postgres check exists and passes: the same `pg_runtime_live` turn asserts `harness_version`, `profile_name`, `adapter`, `transport`, `outcome`, `prompt_tokens`, `est_prompt_tokens`, `cache_read_tokens` and `trials_spent` (0, not null, for a read) are written by the driver, `prompt_tokens >= tokens_in`, and `n_eff_after` was written (1.0). **Still missing:** `est_prompt_tokens` against a provider's own count (the fake provider reports its own usage), and a run that spends trials.
 `n_eff_after` have columns and no writer.
+
+**2026-10-03 (RUNTIME track) — PARTIAL.** The tenth column now has a writer: `Recorder::finish` reads the tenant's N_eff from the ledger (`n_eff_async`, the same
+computation the gate worker uses) and writes `n_eff_after`, leaving it null when the ledger cannot be read (an invented
+N_eff is worse than none). The SDK driver, which wrote none of the ten, is gone. **Not verified:** a live-Postgres run
+asserting all ten populate (`a_finished_run_carries_its_telemetry` is `#[ignore]` and needs the platform DB); only the
+compile and the unit paths ran.
 
 Migration 0062. None of these is a reporting column — each answers a question that cannot be
 answered any other way once the run is over:
@@ -406,7 +452,22 @@ estimate of the same request the provider counted.
 **Traces:** AGENT-010 §4; AGENT-005 §7; AGENT-009 §5.
 
 ### S-2.9 Flag the frontier onto the loop, and prove it before flipping — M
-`NOT STARTED`
+`PARTIAL`
+
+**2026-10-05 (S-RUNTIME) - PARTIAL (BLOCKED:HUMAN for the live-credential clause only).** A frontier-profile turn now completes end to end through the real manager and loop against a recorded/fake Anthropic transport (tool call, result, `finish_task`), in `pg_runtime_live`. The live frontier run and the day-of-trajectories shadow comparison still need credential H-2.
+
+**2026-10-03 (RUNTIME track) — PARTIAL.** **ADR row.** The task asks for an `agent.single_loop` flag with `driver.rs` kept as the fallback for one release; S-2.10
+asks for `driver.rs` to be deleted and `manager.rs` to have no tier branch. Both cannot hold. Chosen: **no flag, one
+loop for every model** (alternative rejected: the flag, which would keep a second, un-budgeted, un-resumable loop alive
+on the exact path the platform's most expensive runs take, to guard against a regression that the native transport's
+loop-level tests already cover). Hosted models with no shipped profile run under the shipped frontier profile with their
+model id swapped in (`AgentManager::profile_for`) and the run records that it did; an unknown *local* model still falls
+back conservatively or is refused. Proved before flipping with the recorded/fake inputs the platform has: the native
+transport against the loop (`both_transports_ask_the_world_for_the_same_things`, the new `runtime_tests`), replay of a
+frontier-profile run (`a_resumed_run_does_not_repeat_an_interrupted_create_experiment` runs under `claude-opus-5`), and
+the pump's native thread handling (`prepare_native`: unanswered calls answered, rejections and directives delivered as
+turns). **BLOCKED:HUMAN for exactly one clause:** "a frontier research turn completes end to end" and the day-of-real-
+trajectories shadow comparison need a live frontier credential (H-2) and S-4.8's shadow replay.
 
 `agent.single_loop` runs frontier profiles on the harness loop with the `native` transport.
 Keep `driver.rs` as the fallback for one release. Use the shadow replay (S-4.8) to compare
@@ -420,7 +481,16 @@ differences.
 **Traces:** AGENT-010 §13 step 3; MASTER §8 risks.
 
 ### S-2.10 Delete `driver.rs` — M
-`NOT STARTED`
+`DONE`
+
+**2026-10-03 (RUNTIME track) — DONE.** `crates/api/src/agent/driver.rs` is deleted. `manager.rs` always builds `LocalRunParams` and calls
+`local_driver::run`; its tier branch is gone (`profile_for` picks a profile, not a path). Workspace `fs` tools are
+registered on every tier (`bridge::registry_with_workspace`), the canary-or-adapter-verify runs for every tier, and
+elision always leaves a `work/transcript/...` handle that the driver writes before it can be needed
+(`result_handle`). `truncate_result` moved to `local_driver` (the auditor suite still reaches it through
+`agent::driver`, a one-line alias in `agent/mod.rs`, because `crates/api/src/auditor.rs` is outside this track).
+Evidence: `the_agent_module_contains_one_driver`, `the_manager_does_not_branch_on_tier`,
+`no_runtime_code_writes_an_unrecoverable_elision`, and the paused-run guard now names the single driver.
 
 The hosted driver goes. `manager.rs` loses its tier branch. Workspace `fs` tools are
 registered on every tier (`bridge::registry_with_workspace` when a conversation workspace
@@ -435,7 +505,20 @@ no transcript anywhere can read `[elided` without a handle when a workspace exis
 
 ### S-2.11 Waiting costs nothing — M
 `PARTIAL` 2026-09-16 — the loop half is built and proved; the two driver polling loops stay until
+
+**2026-10-05 (S-RUNTIME) - PARTIAL.** Built and run against a migrated scratch Postgres (every migration, pgvector columns substituted). `train_model` and `run_study` now map to job ids: `local_driver::long_job_handle` yields `training:<model>:<run>` for a still-running `train_model` (driver sets `timeout_seconds` 30, the tool's floor) and `study:<exp>:<study>` for a detached `run_study`; `manager::job_status` polls both (`study_entry`, `snapshot_outcome`); `POST .../studies` accepts `detach: true` (202 at once, in-memory registry, `detached` on the list read; a restart loses a running study and the watcher reports it ended, not succeeded). Evidence: `a_long_tool_still_running_names_the_job_the_watcher_polls`, `a_study_and_a_training_run_resume_their_run_when_they_end`, and live `resume_pg_a_suspended_run_resumes_on_job_done_across_a_version_change` (still-waiting spends zero model calls; resumes on JobDone across a harness-version change). **Still missing:** a real sweep/study/training run end to end, and the in-memory study registry does not survive a restart (the run is told the study ended, not that it succeeded). ADR: rejected making the study route always async (breaks every caller reading the 201 body).
 the resume path can replace them.
+
+**2026-10-03 (RUNTIME track) — PARTIAL.** The driver half is done and wired. `run_sweep` and `wait_for_backtest` are dispatched through the ordinary audited
+catalogue path with `timeout_seconds` set so they never wait; a call that is still running returns a handle, the loop
+suspends (`Effect::Await`), `local_driver` writes the resume contract (`Suspended` state row with the job id and the
+effect-log schema), marks the run `waiting_backtest`, and **exits**. `AgentManager`'s job watcher resumes it with
+`Input::JobDone` when the platform says the job ended (one cheap read per suspended run per 15 s; no model call, no
+connection, zero tokens). The two in-driver polling loops died with `driver.rs`. Honest note on the watcher: sweeps live
+in the research manager's memory rather than in `crates/jobs`, so there is no completion event to subscribe to and the
+watcher polls the platform's own API; what the spec forbids is a *run* polling, and none does. **Not verified:** the
+suspend-then-resume path end to end against a database (same gap as S-2.6); `train_model` and `run_study` return their
+own handles and are not yet mapped to a job id.
 
 `crates/harness/tests/waiting_costs_nothing.rs` asserts the thing that actually matters, and
 asserts it the only way it can be asserted: a run suspended on `Effect::Await` **emits no model
@@ -463,7 +546,29 @@ tokens** until the job completes.
 
 ### S-2.12 Budgets, watchdog, approvals, steering, escalation, sub-runs — L
 `PARTIAL` 2026-09-16 — the wall clock is gone and the steer half landed with S-2.14; the budget,
+
+**2026-10-05 (S-RUNTIME) - PARTIAL.** Migration `0235_sub_run_effect_log.sql` adds `agent_lifecycle.sub_run_effect` (append-only trigger, `GRANT SELECT, INSERT` to app_role). `subrun::record_delegation` writes the Delegation on both sides at claim (a `state/Delegation` row in the parent's `agent_effect_log`, projected by `trace_from_effects` to `Event::Delegation`, and the first row of the child's own log, same brief digest); `research_run_worker` logs CallModel/ModelReply/Settled. Running it against Postgres found two production bugs in the claim path, now fixed: `ON CONFLICT (campaign_id, phase, seq)` did not match the partial unique index (needs `WHERE campaign_id IS NOT NULL`, so every fresh claim errored) and `SUM(lease_*)` decoded as NUMERIC into i64. Evidence: `crates/api/tests/pg_subrun_log.rs` (4 live: `a_claim_leases_from_the_parent_and_records_the_delegation_on_both_sides`, `leases_handed_out_never_exceed_what_the_parent_had`, `a_parent_with_no_recorded_cap_hands_out_no_lease_and_never_a_zero`, `the_sub_run_log_is_append_only_and_granted_to_the_application_role` incl. `SET LOCAL ROLE app_role`); mutation-checked (parent Delegation row written under another kind: claim test fails). **Still missing:** the worker is a single constrained call, not a full loop with its own `Loop` effect log, so the child log holds only the Delegation, the model call, the reply and the settlement; the worker's lease consumption is unchanged.
 approval, escalation and sub-run halves are not started.
+
+**2026-10-03 (RUNTIME track) — PARTIAL.** Done: **budgets** (`Loop::record_spend`: the driver reports each call's tokens and, only when `config/prices.yaml` has a
+fresh verified row, its cost in integer tenths of a cent; reaching 90% of `max_tokens_per_task` or the dollar cap wraps
+up, one report turn, then `Finished { budget_exhausted: true }`; a missed report turn is a `BudgetExhausted` fence;
+`a_spent_token_budget_buys_one_report_turn_and_says_so`, `a_spent_dollar_budget_wraps_up_and_an_unpriced_call_poisons_the_total`,
+`without_a_fresh_price_the_dollar_cap_is_not_enforced`, and `adapter::` price tests incl. `the_shipped_price_table_loads`);
+the **idle watchdog** (`idle_timeout_s` now has an enforcement point: a model call with no reply inside it becomes
+`ModelError{stalled}`; suspended waits never reach it); **`AskHuman` on every tier over an event subscription**
+(migration 0170's `NOTIFY agent_approval` wakes the wait, a 30 s backstop read catches a missed notification, the row is
+reused across a resume, and the pause is audited before and after, which also closes the "no `audit_event` written"
+item); **escalation with state** (`Stuck` on a profile with `escalate_to` ends `Outcome::Escalated{state}`; the manager
+starts the target with `Loop::resuming_from`, completed steps stay done and trials count once;
+`a_stuck_tier_with_somewhere_to_go_escalates_carrying_its_state`, `a_resumed_run_does_not_redo_completed_steps`); the
+**steer** half (S-2.14). A non-`Clone` **`BudgetLease`** (`harness::subrun`) exists and `Loop::with_budget_lease`
+consumes it, narrowing steps/tokens/trials and never widening past the profile. **Missing:** the lease has no caller
+(sub-runs are launched by `campaign_driver`, outside this track), there is no `budget_leases` table, so no sub-run
+effect log or `Delegation` pairing is persisted, and the dollar cap cannot fire for local models until a hardware price
+row is verified (there is none).
+
+**2026-10-03 wave 2 (RUNTIME).** `BudgetLease` now has a caller: `agent::subrun::claim` (the one place a worker sub-run is claimed, reached by `campaign_driver` at HYPOTHESIZE) splits a lease from the parent run's remaining budget (its `RunSpec` cap, minus `agent_runs` spend, minus leases already handed out) **in the same transaction as the claim, under an advisory lock on the parent**, and persists it in migration 0171's `sub_run.lease_*` columns. An unfunded parent refuses the claim (`BriefError::Unfunded`) and leaves no row; a parent with no recorded cap gets a NULL lease, never a zero. `Claim` is no longer `Clone`. Also `Loop::with_trial_cap` / `with_budget_lease` (a lease narrows, never widens). **Still missing:** the worker's own loop does not yet consume the lease (that is `research_run_worker`, outside this track), settled leases are conservatively still counted in full, and the claim path has no live-Postgres test (the migration alone was validated in a scratch DB).
 
 **No wall clock — and, corrected 2026-09-27, nothing replaced it.**
 `orchestration.idle_timeout_s` has **no enforcement point anywhere in the
@@ -575,6 +680,18 @@ covers both transports.
 ### S-2.14 Steering that changes the goal; one live turn per conversation — M
 `PARTIAL` 2026-09-16 — both halves are built; nothing delivers a steer to a running loop yet.
 
+**2026-10-05 (S-RUNTIME) - PARTIAL.** Route to loop verified against Postgres: `pg_runtime_live::a_second_turn_names_the_live_run_and_a_steer_reaches_it` (a plain second turn is refused naming the live run; a `steer: true` turn returns the live run's id and the log gains a `Steer` input). **Still missing:** the HTTP route itself under a running turn (the manager is called directly).
+
+**2026-10-03 (RUNTIME track) — PARTIAL.** Both halves now meet: `POST /api/agent/conversations/{id}/messages` accepts `steer: true` (plus optional `mode`,
+`workflow`; `{text}` alone is unchanged), `AgentManager::send_turn` queues the text on the live run's `RunControl`, and
+the pump delivers it as `Input::Steer` at the next step boundary before a model call (a native model is also handed it
+as a thread turn). A redirection on a planner-executor profile now re-plans for the new question
+(`a_redirection_on_a_planner_profile_asks_for_a_new_plan`). Evidence:
+`steers_queue_in_order_and_a_stopping_run_refuses_them`,
+`the_message_body_accepts_text_alone_and_the_optional_fields`. **Not verified:** the route end to end with a running
+turn; a steer for a run this process is not driving (suspended or on another replica) is refused with a message saying
+so rather than queued.
+
 **Steering.** `state::Steer::classify` reads a mid-run message deterministically, before any
 model call — a steer that needed a model call to interpret would cost a step to read and could
 be misread, and what is being interpreted is a sentence the user just typed.
@@ -627,6 +744,16 @@ reason survive in `decided`; a second concurrent turn is rejected naming the liv
 ### S-2.15 Draining: a deploy with live runs — M
 `PARTIAL` 2026-09-16 — the platform drains on a signal; the monitor is not told.
 
+**2026-10-05 (S-RUNTIME) - PARTIAL.** The monitor half is verified: `pg_runtime_live::a_drain_opens_a_window_the_monitor_reads_and_honours` drains a manager, reads the window back through `MonitorStore::open_windows`, and asserts `monitor::platform::assess` returns `Suppressed` with it and `Halt` without. **Still missing:** a real SIGTERM against a running platform (the binary must not be started here).
+
+**2026-10-03 (RUNTIME track) — PARTIAL.** Two gaps closed. A drain now **detaches** every in-flight run at its next step boundary, still `running` with its next
+effect already in the log, so the next boot resumes it (S-2.6) instead of failing it; and it opens a COMP-007
+maintenance window (`MaintenanceWindow::open("platform:deploy", ...)`, 15 min, written through `MonitorStore`) so a
+rolling deploy is a recorded window rather than a heartbeat loss. Also new: `AgentManager::drain_run` /
+`resume_drained` for one run (session children). **Not verified:** a real SIGTERM against a running platform, and the
+window being honoured by the monitor service (the window is written; the monitor's reading of it is `set-S/phase-7`'s).
+A run blocked inside an approval wait or a long model call notices the detach when it returns, not before.
+
 There was no shutdown path at all: the process simply stopped, and `recover_orphans` marked every
 unfinished run `failed` on the way back up. A deploy during a research session cost the session.
 
@@ -669,7 +796,17 @@ is killed mid-write; COMP-007 records a maintenance window rather than a platfor
 
 ### S-2.16 Cost is an approval axis — S
 `PARTIAL` 2026-09-16 — the axis exists and refuses correctly; the estimator that feeds it is
+
+**2026-10-05 (S-RUNTIME) - PARTIAL, unchanged.** `config/prices.yaml` still ships `hardware: []`; a row needs a measured draw and price for this box, and an invented one would make `ask_above_usd` fire on a number nobody measured.
 S-3.19 and does not.
+
+**2026-10-03 (RUNTIME track) — PARTIAL.** The estimator now exists and is reached. The loop takes a `CostEstimator` (`Loop::with_cost_estimator`) and the cost
+axis reads it; `local_driver::cost_basis` builds one from this tenant's *measured* throughput
+(`/api/agent/cost/estimate`, S-3.19) and a fresh hardware price row for `TBOT_HARDWARE_CLASS`, and prices only calls that
+spend a trial over a named window. The approval card now carries the estimate and the remaining dollar budget
+(`the_cost_axis_fires_from_the_drivers_estimator`: a $42 call with $60 left asks and shows both). **Why still PARTIAL:**
+`config/prices.yaml` ships no hardware row (nobody has measured this box), so in production `estimated_usd` stays `None`
+until one is added, and a frontier model's provider calls carry no per-call estimate at all.
 
 Cost is now its own gate, above the untrusted-content escalation and below the approval
 envelopes. The position is the argument: an envelope is a statement about **what** the action is

@@ -1,0 +1,23 @@
+# Kraken OHLCVT history archives for deep backfill (Set P P-1.3).
+#
+# Kraken publishes downloadable OHLCVT CSV archives with years more history than
+# the public OHLC endpoint will page (that endpoint returns the most recent 720
+# candles only). The archive path reads them from local disk, and it is OFF until
+# an operator does two things:
+#
+#   1. place the files (Kraken's naming: XBTUSD_1.csv = pair alt-name, interval
+#      minutes) under `dir`, and
+#   2. record each file's sha256 below.
+#
+# The checksums are load-bearing: a file with no declared checksum is refused, a
+# mismatching one pauses the window, and nothing is inserted from a file that has
+# not verified. A checksum read from beside the file it checks proves only that
+# both were written by the same hand, so they live here, in review.
+#
+# With no checksums declared this file switches the archive path off, and the
+# platform registers only the OHLC API path.
+
+# dir = "D:/kraken_ohlcvt"
+
+[checksums]
+# "XBTUSD_1.csv" = "<64 hex digits>"

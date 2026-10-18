@@ -35,6 +35,13 @@ pub const LLM_PROXY: &str = "llm:proxy";
 /// An agent that could reset the switch could trade through its own halt.
 pub const MONITOR_CONTROL: &str = "monitor.control";
 
+/// Read raw text through the Data API (DATA-005 §5, DA-09; Set P P-3.5).
+///
+/// Held by the reader role only. Deliberately **not** in [`RESEARCH_SCOPES`]: text
+/// is the one series that can steer an agent, so no ordinary research session may
+/// hold it. `routes/data.rs::get_text` checks it before it reads.
+pub const TEXT_READER: &str = "research:text.reader";
+
 /// Everything a research session may hold.
 ///
 /// Deliberately small and complete: a reader should be able to tell what the agent

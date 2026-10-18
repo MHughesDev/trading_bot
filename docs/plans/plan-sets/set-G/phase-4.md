@@ -1,6 +1,6 @@
 # Phase 4 — Index & Navigation Updates
 
-**Completion: 75% (3 / 4) — G-4.2/4.3/4.4 DONE; G-4.1 (`FOLDER_MAP.md`) OPEN (audited 2026-09-15)**
+**Completion: 100% (4 / 4) — G-4.2/4.3/4.4 DONE; G-4.1 (`FOLDER_MAP.md`) DONE 2026-10-03, rebuilt from the tree on disk, 0 dead links**
 
 **Goal:** After all file moves and prunes are complete, update the navigation
 layer so readers can find everything from the top-level entry points: root
@@ -11,7 +11,7 @@ guides so contributors know where to create new plans and docs.
 
 ## Tasks
 
-### ☐ G-4.1 Update docs/FOLDER_MAP.md with new structure — S
+### ☑ G-4.1 Update docs/FOLDER_MAP.md with new structure — S — DONE 2026-10-03
 
 **Why.** `docs/FOLDER_MAP.md` is the directory map of the `docs/` tree. After
 Phases 1–3, the structure has changed:
@@ -40,7 +40,7 @@ Phases 1–3, the structure has changed:
 
 ---
 
-### ☐ G-4.2 Update docs/README.md as the central navigation hub — S
+### ☑ G-4.2 Update docs/README.md as the central navigation hub — S — DONE
 
 **Why.** `docs/README.md` is the front page of the documentation. It should
 give a reader a complete map of what is in `docs/` and where to go for:
@@ -67,7 +67,7 @@ governance, and onboarding.
 
 ---
 
-### ☐ G-4.3 Update root README.md to point to docs/ — S
+### ☑ G-4.3 Update root README.md to point to docs/ — S — DONE
 
 **Why.** The root `README.md` is the GitHub landing page. It should direct
 readers to `docs/README.md` for full documentation, and to `docs/plans/` for
@@ -96,7 +96,7 @@ duplicates or conflicts with the now-consolidated docs.
 
 ---
 
-### ☐ G-4.4 Update docs/procedures/add-plan.md and add-doc.md — S
+### ☑ G-4.4 Update docs/procedures/add-plan.md and add-doc.md — S — DONE
 
 **Why.** Procedure guides tell contributors how to add new content. After the
 move, `add-plan.md` must reference `docs/plans/set-X/` not `plans/set-X/`.

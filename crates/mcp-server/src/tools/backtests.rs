@@ -121,7 +121,7 @@ pub async fn get_backtest(api: &ApiClient, params: &Value) -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if id.is_empty() {
-        return json!({ "error": "missing_field", "field": "backtest_id" });
+        return crate::tool_error::missing_field("backtest_id");
     }
     let detail = params
         .get("detail")
@@ -148,7 +148,7 @@ pub async fn wait_for_backtest(
         .unwrap_or("")
         .to_string();
     if id.is_empty() {
-        return json!({ "error": "missing_field", "field": "backtest_id" });
+        return crate::tool_error::missing_field("backtest_id");
     }
     let timeout_secs = params
         .get("timeout_seconds")
@@ -251,7 +251,7 @@ pub async fn stop_backtest(api: &ApiClient, params: &Value) -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if id.is_empty() {
-        return json!({ "error": "missing_field", "field": "backtest_id" });
+        return crate::tool_error::missing_field("backtest_id");
     }
     match api
         .post(&format!("/api/backtests/{id}/stop"), json!({}))
@@ -269,7 +269,7 @@ pub async fn rerun_backtest(api: &ApiClient, params: &Value) -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if id.is_empty() {
-        return json!({ "error": "missing_field", "field": "backtest_id" });
+        return crate::tool_error::missing_field("backtest_id");
     }
     match api
         .post(&format!("/api/backtests/{id}/rerun"), json!({}))
@@ -291,7 +291,7 @@ pub async fn delete_backtest(api: &ApiClient, params: &Value) -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if id.is_empty() {
-        return json!({ "error": "missing_field", "field": "backtest_id" });
+        return crate::tool_error::missing_field("backtest_id");
     }
     match api.delete(&format!("/api/backtests/{id}")).await {
         Ok(resp) => resp,
@@ -320,10 +320,11 @@ pub async fn compare_backtests(api: &ApiClient, params: &Value) -> Value {
         })
         .unwrap_or_default();
     if ids.len() < 2 || ids.len() > 5 {
-        return json!({
-            "error": "invalid_request",
-            "hint": "pass backtest_ids as an array of 2-5 run UUIDs",
-        });
+        return crate::tool_error::refuse(
+            "invalid_request",
+            format!("compare_backtests needs 2 to 5 ids and got {}.", ids.len()),
+            "pass backtest_ids as an array of 2-5 run UUIDs",
+        );
     }
 
     let mut rows = Vec::with_capacity(ids.len());

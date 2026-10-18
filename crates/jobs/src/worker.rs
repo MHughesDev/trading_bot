@@ -48,6 +48,51 @@ impl JobContext {
         }
     }
 
+    /// Write a mid-run checkpoint. The adapter's half of resumption: a training
+    /// loop calls this on the Young-Daly cadence
+    /// ([`crate::checkpoint::checkpoint_interval_seconds`]) with a manifest built
+    /// from its own state.
+    ///
+    /// # Errors
+    /// `checkpoint_invalid` for a manifest missing any contract field, which is
+    /// refused rather than stored, and backend failures.
+    pub async fn write_checkpoint(
+        &self,
+        manifest: &Value,
+    ) -> Result<(), crate::store::JobStoreError> {
+        self.store.record_checkpoint(&self.job_id, manifest).await
+    }
+
+    /// How to pick this job up: resume from its newest checkpoint, restart, or
+    /// abandon (SPEC §9, ADR-P2-07). The worker's half of resumption, and the
+    /// production caller of [`crate::checkpoint::plan_resume`].
+    ///
+    /// `code_hash`, `image_digest` and `dataset_id` describe the computation
+    /// *about to run*; a checkpoint written by a different one is not this job's
+    /// and the plan says to restart. Call it first thing in `run`: on a job's
+    /// first attempt there is no checkpoint and the answer is a `Restart` with
+    /// that reason, which is simply "start".
+    ///
+    /// All three outcomes are under the **same trial**: the trial is the look,
+    /// not the process, and a re-queued job is not a second look.
+    ///
+    /// # Errors
+    /// Backend failures reading the checkpoint.
+    pub async fn resume_plan(
+        &self,
+        code_hash: &str,
+        image_digest: &str,
+        dataset_id: &str,
+    ) -> Result<crate::checkpoint::ResumePlan, crate::store::JobStoreError> {
+        let latest = self.store.latest_checkpoint(&self.job_id).await?;
+        Ok(crate::checkpoint::plan_resume(
+            latest.as_ref(),
+            code_hash,
+            image_digest,
+            dataset_id,
+        ))
+    }
+
     /// Whether cancellation has been requested. Long-running workers must poll this.
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Relaxed)
@@ -98,6 +143,8 @@ impl WorkerPool {
             kind.worker_class(),
             self.class
         );
+        // Budget admission asks this worker what a submission will cost (JB-08).
+        self.store.register_estimator(Arc::clone(&worker));
         self.workers.insert(kind, worker);
         self
     }

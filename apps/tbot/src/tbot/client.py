@@ -102,6 +102,7 @@ class Tbot:
         tf: str = "1m",
         as_of: str | None = None,
         limit: int | None = None,
+        format: str | None = None,
     ) -> dict[str, Any]:
         """Bars, clipped to this project's research cutoff.
 
@@ -115,9 +116,68 @@ class Tbot:
             params["as_of"] = as_of
         if limit:
             params["limit"] = limit
+        if format:
+            params["format"] = format
         if self.project_id:
             params["project_id"] = self.project_id
         return self._request("GET", "/api/data/bars", params=params)
+
+    def _data(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        """A project-scoped data read. ``None`` parameters are dropped."""
+        params = {k: v for k, v in params.items() if v is not None}
+        if self.project_id:
+            params["project_id"] = self.project_id
+        return self._request("GET", path, params=params)
+
+    def search(self, q: str, asset_class: str | None = None, limit: int | None = None) -> dict[str, Any]:
+        """Ranked instrument search over what this project may see."""
+        return self._data("/api/data/search", {"q": q, "asset_class": asset_class, "limit": limit})
+
+    def trades(self, instrument: str, start: str, end: str, as_of: str | None = None,
+               limit: int | None = None, format: str | None = None) -> dict[str, Any]:
+        return self._data("/api/data/trades", {"instrument": instrument, "start": start, "end": end,
+                                               "as_of": as_of, "limit": limit, "format": format})
+
+    def open_interest(self, venue: str, instrument: str, start: str, end: str,
+                      as_of: str | None = None, format: str | None = None) -> dict[str, Any]:
+        return self._data("/api/data/open_interest", {"venue": venue, "instrument": instrument, "from": start,
+                                                      "to": end, "as_of": as_of, "format": format})
+
+    def option_chain(self, underlying: str, as_of: str | None = None, venue: str | None = None,
+                     format: str | None = None) -> dict[str, Any]:
+        return self._data("/api/data/option_chain", {"underlying": underlying, "as_of": as_of,
+                                                     "venue": venue, "format": format})
+
+    def fundamentals(self, cik: int, fields: str | None = None, as_of: str | None = None,
+                     format: str | None = None) -> dict[str, Any]:
+        return self._data("/api/data/fundamentals", {"cik": cik, "fields": fields, "as_of": as_of,
+                                                     "format": format})
+
+    def features(self, name: str, instrument: str, start: str, end: str, tf: str = "1m",
+                 as_of: str | None = None, warmup: int | None = None,
+                 format: str | None = None) -> dict[str, Any]:
+        return self._data("/api/data/features", {"name": name, "instrument": instrument, "start": start,
+                                                 "end": end, "tf": tf, "as_of": as_of, "warmup": warmup,
+                                                 "format": format})
+
+    # -- memory (AGENT-003 section 5, AGENT-007) ------------------------------
+
+    def memory(self, bucket: str, subject: str | None = None) -> dict[str, Any]:
+        """Entries in one memory bucket (findings, negative_results, ...).
+
+        An unknown bucket is a named refusal, not an empty list: those mean opposite
+        things, and the first one invites you to stop looking.
+        """
+        params = {"subject": subject} if subject else {}
+        return self._request("GET", f"/api/memory/{bucket}", params=params)
+
+    def prefer(self, scope: str, statement: str) -> dict[str, Any]:
+        """Record a preference the user stated, in their words. The one writable bucket."""
+        return self._request("POST", "/api/memory/preferences", json={"scope": scope, "statement": statement})
+
+    def forget(self, bucket: str, entry_id: str) -> dict[str, Any] | None:
+        """Archive an entry. Nothing a trial ticket cites is ever erased (it is refused)."""
+        return self._request("DELETE", f"/api/memory/{bucket}/{entry_id}")
 
     def catalog(self) -> dict[str, Any]:
         params = {"project_id": self.project_id} if self.project_id else {}
@@ -241,3 +301,82 @@ class Tbot:
         if not target:
             raise TbotError(422, {"error": "no_project", "message": "no project id given or bound"})
         return self._request("GET", f"/api/projects/{target}")
+
+    # ---- skills (Set R-a): the registry's agent-facing half -------------------------
+    # The agent can search, propose, check a proposal and vote. Admission, promotion
+    # and quarantine are `skills.admit` routes that no agent token can call, so there
+    # is deliberately no method here for them.
+
+    def skills_glossary(self, project: str | None = None) -> dict[str, Any]:
+        """Every skill this caller can see, and which of them a session carries resident."""
+        return self._request("GET", "/api/skills/glossary", params={"project": project} if project else {})
+
+    def skills_search(self, query: str, project: str | None = None, limit: int = 10) -> dict[str, Any]:
+        """Full-text search over whole skill bodies. The reply says `mode`: lexical or dense."""
+        params: dict[str, Any] = {"q": query, "limit": limit}
+        if project:
+            params["project"] = project
+        return self._request("GET", "/api/skills/search", params=params)
+
+    def skills_show(self, skill_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/api/skills/item/{skill_id}")
+
+    def skills_propose(self, project_id: str, name: str, category: str, reason: str, source_ref: str,
+                       files: dict[str, str], sources: list[str] | None = None) -> dict[str, Any]:
+        """Propose a skill. It must cite the run it came from; the platform verifies and admits."""
+        return self._request("POST", "/api/skills/proposals", json={
+            "project_id": project_id, "name": name, "category": category, "reason": reason,
+            "source_ref": source_ref, "sources": sources or [], "files": files,
+        })
+
+    def skills_proposals(self, status: str | None = None) -> dict[str, Any]:
+        return self._request("GET", "/api/skills/proposals", params={"status": status} if status else {})
+
+    def skills_rate(self, skill_id: str, session_id: str, vote: int) -> Any:
+        return self._request("POST", f"/api/skills/{skill_id}/vote", json={"session_id": session_id, "vote": vote})
+
+    # ---- knowledge model (Set R-b): questions only --------------------------------------
+    # Recording what a move did, what a study measured or what a trial scored is the
+    # platform's job (`knowledge.write`, held by no agent), so there is no method for it.
+
+    def move_check(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        """Has this shape of structural move a record of failure? Warns, or blocks and cites it."""
+        return self._request("POST", "/api/knowledge/moves/veto", json={"candidate": candidate})
+
+    def analogs(self, instrument_id: int, venue_id: int, k: int = 5, as_of: str | None = None) -> dict[str, Any]:
+        """Nearest past windows by explicit fingerprint; the same episode is never one of them."""
+        params: dict[str, Any] = {"instrument_id": instrument_id, "venue_id": venue_id, "k": k}
+        if as_of:
+            params["as_of"] = as_of
+        return self._request("GET", "/api/knowledge/analogs", params=params)
+
+    def regime_profile(self, instrument: str, asset_class: str) -> dict[str, Any]:
+        return self._request("GET", "/api/knowledge/regimes/profile",
+                             params={"instrument": instrument, "asset_class": asset_class})
+
+    def regime_prior(self, instrument: str, asset_class: str, regime: str | None = None) -> dict[str, Any]:
+        params: dict[str, Any] = {"instrument": instrument, "asset_class": asset_class}
+        if regime:
+            params["regime"] = regime
+        return self._request("GET", "/api/knowledge/regimes/prior", params=params)
+
+    def compare_to_random(self, campaign_id: str) -> dict[str, Any]:
+        """A campaign against its matched random-search arm; refuses without a completed arm."""
+        return self._request("GET", f"/api/knowledge/campaigns/{campaign_id}/compare-to-random")
+
+    def model_calibrate(self, model_id: str, version: int, method: str = "aci_cusum",
+                        gamma: float | None = None) -> dict[str, Any]:
+        """Adaptive conformal calibration of a served version (N-4.1): runs ACI (or ACI with
+        CUSUM resets) over its realised forecasts and records the result as a wrapper version.
+        Refuses, with a reason, when fewer than 50 forecasts have been realised."""
+        body: dict[str, Any] = {"method": method}
+        if gamma is not None:
+            body["gamma"] = gamma
+        return self._request("POST", f"/api/models/{model_id}/versions/{int(version)}/calibrate", json=body)
+
+    def hypothesis_source(self, hypothesis_id: str, source: str, instrument: str, window_start: str,
+                          window_end: str, evidence_ids: list[str] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/api/knowledge/hypothesis-sources", json={
+            "hypothesis_id": hypothesis_id, "source": source, "instrument": instrument,
+            "window_start": window_start, "window_end": window_end, "evidence_ids": evidence_ids or [],
+        })

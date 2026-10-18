@@ -34,8 +34,15 @@ pub struct ResetRequest {
     /// `human:<user_id>`.
     pub actor: String,
     /// For a **global** reset only: whether every venue currently reconciles
-    /// clean. The API establishes this; the rule lives here so that the API and
-    /// the monitor cannot disagree about it.
+    /// clean. The rule lives here so that the API and the monitor cannot disagree
+    /// about it.
+    ///
+    /// **Overwritten by [`MonitorStore::reset`][r]** from
+    /// `monitor.venue_reconciliation` (0165) before validation: a precondition
+    /// the caller asserts is not a precondition. A caller's value is kept only
+    /// by code that calls [`Self::validate`] directly, which is tests.
+    ///
+    /// [r]: crate::store::MonitorStore::reset
     pub all_venues_reconciled: bool,
 }
 
@@ -50,6 +57,9 @@ pub enum ResetRefusal {
     NotHuman { actor: String },
     /// A global reset while a venue still fails reconciliation.
     VenuesNotReconciled,
+    /// A venue reset while that venue's last reconciliation did not agree
+    /// (COMP-007 §8.3: "resume is refused until reconciliation passes").
+    VenueNotReconciled { venue: String },
     /// Another reset of this scope less than five minutes ago.
     RateLimited { retry_after_secs: i64 },
 }
@@ -66,6 +76,10 @@ impl std::fmt::Display for ResetRefusal {
             Self::VenuesNotReconciled => {
                 f.write_str("a global reset requires every venue to reconcile clean first")
             }
+            Self::VenueNotReconciled { venue } => write!(
+                f,
+                "venue {venue} last failed reconciliation; it resumes only after a                  reconciliation of it agrees with our book"
+            ),
             Self::RateLimited { retry_after_secs } => write!(
                 f,
                 "this scope was reset less than {RESET_RATE_LIMIT_SECS}s ago; \
@@ -78,6 +92,24 @@ impl std::fmt::Display for ResetRefusal {
 impl std::error::Error for ResetRefusal {}
 
 impl ResetRequest {
+    /// The venue half of §8.3, separate from [`Self::validate`] because its input
+    /// is a fact about one venue that only the store can read.
+    ///
+    /// `venue_reconciled` is `monitor.venue_reconciled(venue)`: never checked, or
+    /// last check agreed. A scope that is not a venue is not held to it.
+    ///
+    /// # Errors
+    /// [`ResetRefusal::VenueNotReconciled`] for a venue whose last check did not
+    /// agree.
+    pub fn validate_venue(&self, venue_reconciled: bool) -> Result<(), ResetRefusal> {
+        match &self.scope {
+            Scope::Venue(v) if !venue_reconciled => Err(ResetRefusal::VenueNotReconciled {
+                venue: v.clone(),
+            }),
+            _ => Ok(()),
+        }
+    }
+
     /// The whole rule set. Nothing is written until this returns `Ok`.
     pub fn validate(
         &self,
@@ -217,6 +249,26 @@ mod tests {
             all_venues_reconciled: false,
         };
         assert!(r.validate(None, at(0)).is_ok());
+    }
+
+    #[test]
+    fn a_venue_whose_last_reconciliation_disagreed_cannot_be_resumed() {
+        let r = ResetRequest {
+            scope: Scope::venue("kraken"),
+            typed_confirmation: "venue:kraken".to_owned(),
+            reason: "looks fine to me".to_owned(),
+            actor: "human:mason".to_owned(),
+            all_venues_reconciled: true,
+        };
+        assert_eq!(
+            r.validate_venue(false),
+            Err(ResetRefusal::VenueNotReconciled {
+                venue: "kraken".to_owned()
+            })
+        );
+        assert!(r.validate_venue(true).is_ok());
+        // Global and strategy scopes are not venue resumes.
+        assert!(global().validate_venue(false).is_ok());
     }
 
     #[test]

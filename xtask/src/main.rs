@@ -6,8 +6,11 @@
 //!   check-bars-v1-frozen  — verify nothing writes the retired market_bars table (CI enforced)
 //!   check-bars-v2-frozen  — verify nothing new writes the frozen market_bars_v2 (CI enforced)
 //!   check-free-sources    — verify every declared data source is free, or waived by an ADR (CI enforced)
+//!   check-instruments-retained — verify no code path deletes an instrument row (Set P P-4.4)
 
 use std::process::Command;
+
+mod instruments_retained;
 
 fn main() {
     let task = std::env::args().nth(1);
@@ -17,13 +20,14 @@ fn main() {
         Some("check-bars-v1-frozen") => check_bars_v1_frozen(),
         Some("check-bars-v2-frozen") => check_bars_v2_frozen(),
         Some("check-free-sources") => check_free_sources(),
+        Some("check-instruments-retained") => instruments_retained::run(),
         Some(t) => {
             eprintln!("Unknown xtask: {t}");
             std::process::exit(1);
         }
         None => {
             println!(
-                "Usage: cargo xtask <check-money-f64|lint-no-json-hotpath|check-bars-v1-frozen|check-bars-v2-frozen|check-free-sources>"
+                "Usage: cargo xtask <check-money-f64|lint-no-json-hotpath|check-bars-v1-frozen|check-bars-v2-frozen|check-free-sources|check-instruments-retained>"
             );
         }
     }
@@ -198,6 +202,41 @@ fn check_money_f64() {
     }
 }
 
+/// True when a `serde_json` mention is the **decode** side of a venue response
+/// at the protocol boundary: a borrowed `RawValue`, a `Number`/`Value` field a
+/// response struct deserialises into, a `serde_json::Error`, or a
+/// `from_str`/`from_slice` call. What the lint exists to stop is the other
+/// direction -- encoding an `EventEnvelope` payload as JSON -- so any encode
+/// token (`to_string`, `to_vec`, `to_writer`, `to_value`, `to_raw_value`,
+/// `Serializer`, `Map`) disqualifies the line.
+///
+/// This replaced a blanket "any `serde_json` mention fails" rule that was red
+/// on 34 boundary-decode lines and so could never be put in CI (Set C ADR-C-LINT-1).
+fn json_use_is_boundary_decode(line: &str) -> bool {
+    const ENCODE: [&str; 7] = [
+        "serde_json::to_string",
+        "serde_json::to_vec",
+        "serde_json::to_writer",
+        "serde_json::to_value",
+        "serde_json::value::to_raw_value",
+        "serde_json::Serializer",
+        "serde_json::Map",
+    ];
+    const DECODE: [&str; 7] = [
+        "serde_json::from_str",
+        "serde_json::from_slice",
+        "serde_json::value::RawValue",
+        "serde_json::Number",
+        "serde_json::Value",
+        "serde_json::Error",
+        "RawValue",
+    ];
+    if ENCODE.iter().any(|t| line.contains(t)) {
+        return false;
+    }
+    DECODE.iter().any(|t| line.contains(t))
+}
+
 /// Scan market-lane hot-path crates for `serde_json` imports.
 ///
 /// `serde_json` is only allowed in:
@@ -311,6 +350,12 @@ fn lint_no_json_hotpath() {
                     {
                         continue;
                     }
+                }
+
+                // Decoding a venue's REST/WS response at the boundary is not
+                // payload encoding (Set C ADR-C-LINT-1).
+                if json_use_is_boundary_decode(line) {
+                    continue;
                 }
 
                 violations.push(format!(
@@ -779,7 +824,29 @@ fn line_writes_v2(line: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::line_writes_v2;
+    use super::{json_use_is_boundary_decode, line_writes_v2};
+
+    #[test]
+    fn decoding_a_venue_response_is_allowed_but_encoding_a_payload_is_not() {
+        assert!(json_use_is_boundary_decode(
+            "use serde_json::value::RawValue;"
+        ));
+        assert!(json_use_is_boundary_decode(
+            "    funding_rate: serde_json::Number,"
+        ));
+        assert!(json_use_is_boundary_decode(
+            "let env: OhlcEnvelope = serde_json::from_slice(body)"
+        ));
+        assert!(!json_use_is_boundary_decode(
+            "let b = serde_json::to_vec(&payload)?;"
+        ));
+        assert!(!json_use_is_boundary_decode(
+            "let v = serde_json::to_value(&bar).unwrap(); // serde_json::Value"
+        ));
+        assert!(!json_use_is_boundary_decode(
+            "let m = serde_json::Map::new();"
+        ));
+    }
 
     #[test]
     fn plain_inserts_are_writes() {
@@ -1126,7 +1193,7 @@ fn source_names_inserted(sql: &str) -> Vec<String> {
             if first.trim().parse::<i64>().is_err() {
                 continue; // not a `(id, 'name', …)` value tuple
             }
-            if let Some(name) = parts.next().and_then(|p| quoted(p)) {
+            if let Some(name) = parts.next().and_then(quoted) {
                 out.push(name);
             }
         }

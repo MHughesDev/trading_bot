@@ -190,6 +190,14 @@ impl TrialCounter for PgTrialCounter {
             submission.user_id.to_string(),
         );
         ctx.experiment_id.clone_from(&submission.experiment_id);
+        // A campaign's children are counted *against that campaign*. The driver
+        // reads `count(*) FROM mlops.trial WHERE campaign_id = $1` to decide
+        // BUDGET_EXHAUSTED, and a child registered with no campaign was counted
+        // in N_eff but invisible to that query, so no campaign's budget could
+        // ever run out (2026-10-03, campaign track). Only a *child* job whose
+        // manifest names a campaign qualifies: a top-level submission that merely
+        // carries a `campaign_id` field is not thereby driven by one.
+        ctx.campaign_id = campaign_of(submission);
         if let Some(session) = submission.session_id {
             ctx.on_behalf_of = Some(format!("session:{session}"));
         }
@@ -213,6 +221,21 @@ impl TrialCounter for PgTrialCounter {
         tracing::debug!(job = job_id, trial = %trial_id, "trial registered");
         Ok(trial_id)
     }
+}
+
+/// The campaign a child job is counted against, when it is one.
+///
+/// Pure so the rule is testable without a database: a submission has a campaign
+/// only if it has a parent job (the driver's) *and* its manifest carries a
+/// `campaign_id` that parses as a UUID.
+#[must_use]
+pub fn campaign_of(submission: &Submission) -> Option<Uuid> {
+    submission.parent_job_id.as_ref()?;
+    submission
+        .manifest
+        .get("campaign_id")
+        .and_then(Value::as_str)
+        .and_then(|s| s.parse().ok())
 }
 
 /// Append a lifecycle event for a job's trial in the job's transaction.
@@ -286,14 +309,169 @@ fn require_gpu_budget(req: &Submission) -> Result<(), JobStoreError> {
     }
 }
 
+// -- Budget admission (COMP-005 §7, JB-08) -----------------------------------
+
+/// What a project is allowed to spend. `None` on an axis means no limit.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ProjectBudget {
+    pub compute_s: Option<f64>,
+    pub usd_day: Option<f64>,
+    pub usd_total: Option<f64>,
+}
+
+/// What a project has spent or has committed to spend: `actual` where a job has
+/// finished, its `estimate` where it has not.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ProjectSpend {
+    pub compute_s: f64,
+    pub usd_day: f64,
+    pub usd_total: f64,
+}
+
+/// The admission rule, pure so it can be tested without a database.
+///
+/// A submission is refused when its estimate would take any limited axis past
+/// its limit. It is also refused when the axis is already **spent** (at or over
+/// its limit) even if the submission carries no estimate for that axis: an
+/// exhausted budget has no room for work whose cost nobody can state. A job
+/// with no estimate on a still-open axis is admitted; its `actual` is charged
+/// when it finishes.
+///
+/// # Errors
+/// `BudgetExhausted` naming the axis, what was used, what was asked, the limit.
+pub fn check_budget(
+    budget: &ProjectBudget,
+    spent: &ProjectSpend,
+    estimate: Option<&Cost>,
+) -> Result<(), JobStoreError> {
+    let axes = [
+        (
+            "compute_s",
+            budget.compute_s,
+            spent.compute_s,
+            estimate.and_then(|c| c.compute_s),
+        ),
+        (
+            "usd_day",
+            budget.usd_day,
+            spent.usd_day,
+            estimate.and_then(|c| c.cost_usd),
+        ),
+        (
+            "usd_total",
+            budget.usd_total,
+            spent.usd_total,
+            estimate.and_then(|c| c.cost_usd),
+        ),
+    ];
+    for (axis, limit, used, asked) in axes {
+        let Some(limit) = limit else { continue };
+        let asked_amount = asked.unwrap_or(0.0);
+        if used >= limit || used + asked_amount > limit {
+            return Err(JobStoreError::BudgetExhausted(format!(
+                "{axis}: {used:.2} used + {asked_amount:.2} estimated exceeds the project's \
+                 limit of {limit:.2}; raise the project budget or wait for the day to roll over"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Checks the project's budget inside the submission transaction.
+///
+/// A transaction-scoped advisory lock keyed on the project serialises
+/// concurrent submissions, so two submissions cannot each see room that only
+/// one of them has. System jobs (no project) and projects with no budget are
+/// not limited.
+async fn admit_budget(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    req: &Submission,
+    estimate: Option<&Cost>,
+) -> Result<(), JobStoreError> {
+    let Some(project_id) = req.project_id else {
+        return Ok(());
+    };
+    let Some(row) = sqlx::query(
+        "SELECT budget_compute_s::float8 AS compute_s, \
+                budget_usd_day::float8 AS usd_day, budget_usd_total::float8 AS usd_total \
+           FROM research_projects WHERE project_id = $1",
+    )
+    .bind(project_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(());
+    };
+    let budget = ProjectBudget {
+        compute_s: row.get("compute_s"),
+        usd_day: row.get("usd_day"),
+        usd_total: row.get("usd_total"),
+    };
+    if budget == ProjectBudget::default() {
+        return Ok(());
+    }
+
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(format!("jobs_budget:{project_id}"))
+        .execute(&mut **tx)
+        .await?;
+
+    let spent = sqlx::query(
+        "SELECT \
+           COALESCE(SUM(COALESCE((actual->>'compute_s')::float8, (estimate->>'compute_s')::float8, 0)), 0) AS compute_s, \
+           COALESCE(SUM(COALESCE((actual->>'cost_usd')::float8, (estimate->>'cost_usd')::float8, 0)), 0) AS usd_total, \
+           COALESCE(SUM(COALESCE((actual->>'cost_usd')::float8, (estimate->>'cost_usd')::float8, 0)) \
+                    FILTER (WHERE created_at >= date_trunc('day', now())), 0) AS usd_day \
+           FROM jobs WHERE project_id = $1 AND state <> 'cancelled'",
+    )
+    .bind(project_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    let spent = ProjectSpend {
+        compute_s: spent.get("compute_s"),
+        usd_day: spent.get("usd_day"),
+        usd_total: spent.get("usd_total"),
+    };
+    check_budget(&budget, &spent, estimate)
+}
+
 pub struct JobStore {
     pool: PgPool,
     counter: std::sync::Arc<dyn TrialCounter>,
+    /// Per-kind cost predictors, filled by `WorkerPool::register`, so a
+    /// submission that carries no estimate still gets one for budget admission.
+    estimators: std::sync::RwLock<
+        std::collections::HashMap<JobKind, std::sync::Arc<dyn crate::worker::Worker>>,
+    >,
 }
 
 impl JobStore {
     pub fn new(pool: PgPool, counter: std::sync::Arc<dyn TrialCounter>) -> Self {
-        Self { pool, counter }
+        Self {
+            pool,
+            counter,
+            estimators: std::sync::RwLock::default(),
+        }
+    }
+
+    /// Registers the worker whose `estimate` predicts this kind's cost at
+    /// submission (JB-08). Called by `WorkerPool::register`.
+    pub fn register_estimator(&self, worker: std::sync::Arc<dyn crate::worker::Worker>) {
+        if let Ok(mut map) = self.estimators.write() {
+            map.insert(worker.kind(), worker);
+        }
+    }
+
+    /// The estimate a submission is admitted on: the caller's own, else the
+    /// registered worker's prediction. A prediction with no figure in it is
+    /// `None`, not a zero: an unmeasured cost must not read as a free job.
+    fn estimate_for(&self, req: &Submission) -> Option<Cost> {
+        let cost = req.estimate.clone().or_else(|| {
+            let map = self.estimators.read().ok()?;
+            map.get(&req.kind).map(|w| w.estimate(&req.manifest))
+        })?;
+        (cost.compute_s.is_some() || cost.gpu_s.is_some() || cost.cost_usd.is_some())
+            .then_some(cost)
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -414,13 +592,17 @@ impl JobStore {
         let job_id = new_job_id();
         let queue = req.submitted_by.default_queue();
         let worker_class = req.kind.worker_class();
-        let estimate = req
-            .estimate
+        let estimate_cost = self.estimate_for(&req);
+        let estimate = estimate_cost
             .as_ref()
             .map(serde_json::to_value)
             .transpose()?;
 
         let mut tx = self.pool.begin().await?;
+
+        // JB-08: refuse before anything is registered or inserted, so a
+        // refused submission counts no trial and leaves no row.
+        admit_budget(&mut tx, &req, estimate_cost.as_ref()).await?;
 
         // Register first: the trial must exist before the job it authorizes.
         let trial_id = if req.kind.counts_trial() {
@@ -577,6 +759,48 @@ impl JobStore {
         append_event(&mut tx, job_id, "progress", value).await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    /// Store a mid-run checkpoint manifest for a job (SPEC §9, checklist 2.4).
+    ///
+    /// **Refuses a manifest that does not satisfy the contract**, by field name.
+    /// A partial checkpoint is the classic silent-divergence bug — the run
+    /// resumes, the numbers look fine, and the result is not the one the
+    /// uninterrupted run would have produced — and the only place it can be
+    /// caught is before it is stored. `plan_resume` treats a stored invalid
+    /// checkpoint as `Abandon`, which is why none may get in.
+    ///
+    /// # Errors
+    /// `Invalid("checkpoint_invalid: ...")` naming the missing or empty field.
+    pub async fn record_checkpoint(
+        &self,
+        job_id: &str,
+        manifest: &Value,
+    ) -> Result<(), JobStoreError> {
+        crate::checkpoint::CheckpointManifest::parse(manifest)
+            .map_err(|e| JobStoreError::Invalid(format!("checkpoint_invalid: {e}")))?;
+        let mut tx = self.pool.begin().await?;
+        append_event(&mut tx, job_id, "checkpoint", manifest.clone()).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// The newest checkpoint manifest a job recorded, if any.
+    ///
+    /// The newest, not the best: a later checkpoint is further along, and
+    /// `plan_resume` is what judges whether it may be used.
+    ///
+    /// # Errors
+    /// Backend failures.
+    pub async fn latest_checkpoint(&self, job_id: &str) -> Result<Option<Value>, JobStoreError> {
+        let row: Option<(Value,)> = sqlx::query_as(
+            "SELECT payload FROM job_events WHERE job_id = $1 AND kind = 'checkpoint'
+              ORDER BY id DESC LIMIT 1",
+        )
+        .bind(job_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|(v,)| v))
     }
 
     pub async fn complete(&self, job_id: &str, output: JobOutput) -> Result<(), JobStoreError> {
@@ -1095,5 +1319,130 @@ mod budget_tests {
         );
         assert_eq!(e.censoring(), ledger::Censoring::RightBudget);
         assert_ne!(e.censoring(), ledger::Censoring::Failed);
+    }
+}
+
+#[cfg(test)]
+mod campaign_count_tests {
+    use super::*;
+
+    fn child(manifest: Value, parent: Option<&str>) -> Submission {
+        let mut s = Submission::new(JobKind::Study, Uuid::nil(), manifest);
+        s.parent_job_id = parent.map(str::to_string);
+        s
+    }
+
+    /// The budget rule reads `trial.campaign_id`; a child that does not set it
+    /// is counted in N_eff and invisible to `BUDGET_EXHAUSTED`.
+    #[test]
+    fn a_campaign_child_is_counted_against_its_campaign() {
+        let id = Uuid::new_v4();
+        let sub = child(
+            serde_json::json!({ "campaign_id": id.to_string() }),
+            Some("job_x"),
+        );
+        assert_eq!(campaign_of(&sub), Some(id));
+    }
+
+    /// A top-level job that merely carries the field is not campaign-driven, and
+    /// a malformed id is not a campaign.
+    #[test]
+    fn only_a_child_naming_a_real_campaign_qualifies() {
+        let id = Uuid::new_v4();
+        assert_eq!(
+            campaign_of(&child(
+                serde_json::json!({ "campaign_id": id.to_string() }),
+                None
+            )),
+            None
+        );
+        assert_eq!(
+            campaign_of(&child(
+                serde_json::json!({ "campaign_id": "nope" }),
+                Some("job_x")
+            )),
+            None
+        );
+        assert_eq!(
+            campaign_of(&child(serde_json::json!({}), Some("job_x"))),
+            None
+        );
+    }
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+
+    fn cost(compute_s: Option<f64>, usd: Option<f64>) -> Cost {
+        Cost {
+            compute_s,
+            gpu_s: None,
+            cost_usd: usd,
+        }
+    }
+
+    #[test]
+    fn no_limit_means_no_refusal() {
+        let b = ProjectBudget::default();
+        let spent = ProjectSpend {
+            compute_s: 1e9,
+            usd_day: 1e9,
+            usd_total: 1e9,
+        };
+        assert!(check_budget(&b, &spent, Some(&cost(Some(1e9), Some(1e9)))).is_ok());
+    }
+
+    #[test]
+    fn an_estimate_past_the_limit_is_refused_naming_the_axis() {
+        let b = ProjectBudget {
+            compute_s: Some(100.0),
+            ..Default::default()
+        };
+        let spent = ProjectSpend {
+            compute_s: 70.0,
+            ..Default::default()
+        };
+        assert!(check_budget(&b, &spent, Some(&cost(Some(29.0), None))).is_ok());
+        let err = check_budget(&b, &spent, Some(&cost(Some(30.5), None))).unwrap_err();
+        match err {
+            JobStoreError::BudgetExhausted(m) => assert!(m.starts_with("compute_s:"), "{m}"),
+            other => panic!("wrong error: {other}"),
+        }
+    }
+
+    #[test]
+    fn a_spent_budget_refuses_even_an_unestimated_job() {
+        let b = ProjectBudget {
+            usd_total: Some(10.0),
+            ..Default::default()
+        };
+        let spent = ProjectSpend {
+            usd_total: 10.0,
+            ..Default::default()
+        };
+        assert!(check_budget(&b, &spent, None).is_err());
+        // ...but an open budget admits a job nobody could price.
+        let open = ProjectSpend {
+            usd_total: 9.99,
+            ..Default::default()
+        };
+        assert!(check_budget(&b, &open, None).is_ok());
+    }
+
+    #[test]
+    fn the_daily_cap_binds_before_the_total() {
+        let b = ProjectBudget {
+            usd_day: Some(5.0),
+            usd_total: Some(500.0),
+            ..Default::default()
+        };
+        let spent = ProjectSpend {
+            usd_day: 4.0,
+            usd_total: 100.0,
+            ..Default::default()
+        };
+        let err = check_budget(&b, &spent, Some(&cost(None, Some(2.0)))).unwrap_err();
+        assert!(err.to_string().contains("usd_day"), "{err}");
     }
 }

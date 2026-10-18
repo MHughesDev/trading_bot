@@ -33,7 +33,14 @@ const KIND_LABELS: Record<string, string> = {
   deploy_paper: 'Deploy to paper',
 }
 
-function Card({ p, onDecided }: { p: Proposal; onDecided: (d: ProposalDecision) => void }) {
+/**
+ * One proposal, decidable from the keyboard (AGENT-012 §3.4; S-10.15): with the
+ * card focused, `a` approves and `x` rejects — the same two keys the desk uses
+ * for an approval. Ignored while typing in the reason field, where `a` and `x`
+ * are letters. Exported so desk home's *Needs you* draws the same card rather
+ * than a second one that could drift from it.
+ */
+export function ProposalCard({ p, onDecided }: { p: Proposal; onDecided: (d: ProposalDecision) => void }) {
   const [note, setNote] = useState('')
   const decide = useMutation({
     mutationFn: (decision: 'approved' | 'rejected') => deskApi.decideProposal(p.proposal_id, decision, note),
@@ -44,7 +51,23 @@ function Card({ p, onDecided }: { p: Proposal; onDecided: (d: ProposalDecision) 
   const inert = inertNotice(p)
 
   return (
-    <div className="desk-card">
+    <div
+      className="desk-card"
+      tabIndex={0}
+      data-testid={`proposal-${p.proposal_id}`}
+      aria-label={`Proposal: ${KIND_LABELS[p.kind] ?? p.kind} — ${p.subject}. Press a to approve, x to reject.`}
+      onKeyDown={(e) => {
+        const t = e.target as HTMLElement
+        if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || decide.isPending) return
+        if (e.key === 'a') {
+          e.preventDefault()
+          decide.mutate('approved')
+        } else if (e.key === 'x') {
+          e.preventDefault()
+          decide.mutate('rejected')
+        }
+      }}
+    >
       <div className="desk-card-hd">
         <Badge tone={p.ring >= 2 ? 'neg' : 'outline'}>{KIND_LABELS[p.kind] ?? p.kind}</Badge>
         <Badge tone="outline">{ringLabel(p.ring)}</Badge>
@@ -53,8 +76,10 @@ function Card({ p, onDecided }: { p: Proposal; onDecided: (d: ProposalDecision) 
       <p>{p.subject}</p>
       {p.rationale && <p className="sub">{p.rationale}</p>}
       <p className="sub">
-        {/* The decision rests on this, not on the card. */}
-        dossier: {p.dossier_ref}
+        {/* The decision rests on this, not on the card. The dossier ticket is
+            the licence: the run's evidence, compiled and checked (S-8.7). */}
+        licensed by dossier <span className="mono">{p.dossier_ref}</span> · envelope{' '}
+        <span className="mono">{p.envelope}</span>
       </p>
       {inert && <p className="sub">{inert}</p>}
       <label className="sub" htmlFor={`note-${p.proposal_id}`}>
@@ -143,7 +168,7 @@ export function ProposalsQueue() {
         <EmptyState message="Nothing to decide" detail="No run has asked to reach ring 1 or ring 2." />
       ) : (
         pending.map((p) => (
-          <Card
+          <ProposalCard
             key={p.proposal_id}
             p={p}
             onDecided={(d) => {

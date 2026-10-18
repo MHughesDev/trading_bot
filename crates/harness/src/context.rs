@@ -142,7 +142,59 @@ const PLACEHOLDER_TOKENS: u32 = 48;
 /// optimistic estimate is not enforced.
 #[must_use]
 pub fn estimate_tokens(s: &str) -> u32 {
-    u32::try_from(s.len().div_ceil(4)).unwrap_or(u32::MAX)
+    let bpt = CALIBRATION.with(std::cell::Cell::get);
+    if (bpt - PRIOR_BYTES_PER_TOKEN).abs() < f64::EPSILON {
+        return u32::try_from(s.len().div_ceil(4)).unwrap_or(u32::MAX);
+    }
+    // The calibrated reading (S-4.12). Rounded UP: an under-estimate is the
+    // direction that lets a prompt overrun the window it was budgeted for.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    let t = (s.len() as f64 / bpt).ceil() as u64;
+    u32::try_from(t).unwrap_or(u32::MAX)
+}
+
+thread_local! {
+    /// The bytes-per-token this thread estimates with. A thread-local rather than
+    /// a global because several runs on different models share a process, and a
+    /// global would let one model's calibration size another's prompt. Set only
+    /// for the duration of a call into the loop, by [`with_bytes_per_token`].
+    static CALIBRATION: std::cell::Cell<f64> =
+        const { std::cell::Cell::new(PRIOR_BYTES_PER_TOKEN) };
+}
+
+/// The bytes-per-token [`estimate_tokens`] is reading on this thread right now:
+/// the 4.0 prior outside a calibrated call, the model's own figure inside one.
+///
+/// Anything that converts a *token* budget back into *bytes* (the cap on an
+/// arriving tool result) must use this, not a literal 4: the estimator and the
+/// converter have to agree, or a model calibrated at 2.5 bytes per token is
+/// admitted 60% more bytes than its window holds.
+#[must_use]
+pub fn current_bytes_per_token() -> f64 {
+    CALIBRATION.with(std::cell::Cell::get)
+}
+
+/// Run `f` with [`estimate_tokens`] reading `bytes_per_token` instead of the
+/// 4.0 prior (S-4.12). The value is clamped to [`BYTES_PER_TOKEN_RANGE`], and the
+/// previous setting is restored even if `f` panics.
+pub fn with_bytes_per_token<R>(bytes_per_token: f64, f: impl FnOnce() -> R) -> R {
+    struct Restore(f64);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            CALIBRATION.with(|c| c.set(self.0));
+        }
+    }
+    let v = if bytes_per_token.is_finite() {
+        bytes_per_token.clamp(BYTES_PER_TOKEN_RANGE.0, BYTES_PER_TOKEN_RANGE.1)
+    } else {
+        PRIOR_BYTES_PER_TOKEN
+    };
+    let _restore = Restore(CALIBRATION.with(|c| c.replace(v)));
+    f()
 }
 
 /// What compaction did, for the trace and for the timeline's compaction marker.
@@ -581,6 +633,80 @@ pub fn calibration_factor(ratios: &[f64]) -> Option<f64> {
     // Interpolating would produce a factor no observation supports.
     let rank = ((usable.len() as f64) * 0.9).ceil() as usize;
     usable.get(rank.saturating_sub(1)).copied()
+}
+
+/// The estimator's prior: the chars-per-token it divides by today.
+pub const PRIOR_BYTES_PER_TOKEN: f64 = 4.0;
+/// AGENT-009 section 5's clamp. A measurement outside it is a bad sample.
+pub const BYTES_PER_TOKEN_RANGE: (f64, f64) = (2.5, 5.0);
+/// The window of runs a calibration reads, per model.
+pub const CALIBRATION_WINDOW: usize = 50;
+
+/// One model's measured chars-per-token, and how well it holds (S-4.12).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TokenCalibration {
+    pub bytes_per_token: f64,
+    pub sample_n: usize,
+    /// Share of the sampled runs the calibrated estimate still over-estimated.
+    pub over_estimate_rate: f64,
+}
+
+/// Calibrate `bytes_per_token` from `(estimated, actual)` prompt-token pairs, the
+/// most recent first (S-4.12, AGENT-009 section 5).
+///
+/// `estimated` is what `estimate_tokens` said (chars / 4); `actual` is the
+/// provider's `prompt_tokens`. A run's own chars-per-token is therefore
+/// `4 * estimated / actual`.
+///
+/// **A low percentile, not the median.** The spec's sentence says median; its
+/// acceptance says the over-estimate rate "stays at 95% or above". The median
+/// over-estimates on half of all runs by construction, so the two cannot both
+/// hold. The estimator's contract (see [`calibration_factor`]) is that it
+/// OVER-estimates, because a budget built on an under-estimate overflows the
+/// window. A smaller bytes-per-token means more tokens estimated, so the
+/// conservative choice is the fifth percentile (nearest-rank) of the per-run
+/// values, then clamped. Recorded as ADR-S4-12-1.
+///
+/// `None` below ten usable pairs: a percentile of nine runs is a number about
+/// those nine, and the caller keeps [`PRIOR_BYTES_PER_TOKEN`] for an unseen model.
+#[must_use]
+pub fn calibrate_bytes_per_token(pairs: &[(u64, u64)]) -> Option<TokenCalibration> {
+    let usable: Vec<(f64, f64)> = pairs
+        .iter()
+        .take(CALIBRATION_WINDOW)
+        .filter(|(e, a)| *e > 0 && *a > 0)
+        .map(|(e, a)| (*e as f64, *a as f64))
+        .collect();
+    if usable.len() < 10 {
+        return None;
+    }
+    let mut per_run: Vec<f64> = usable
+        .iter()
+        .map(|(e, a)| PRIOR_BYTES_PER_TOKEN * e / a)
+        .collect();
+    per_run.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let rank = ((per_run.len() as f64) * 0.05).ceil() as usize;
+    let raw = per_run[rank.saturating_sub(1).min(per_run.len() - 1)];
+    let bpt = raw.clamp(BYTES_PER_TOKEN_RANGE.0, BYTES_PER_TOKEN_RANGE.1);
+    Some(TokenCalibration {
+        bytes_per_token: bpt,
+        sample_n: usable.len(),
+        over_estimate_rate: over_estimate_rate(&usable, bpt),
+    })
+}
+
+/// Share of `(estimated, actual)` pairs a calibrated estimate still
+/// over-estimates (or exactly meets): `estimated * 4 / bytes_per_token >= actual`.
+#[must_use]
+pub fn over_estimate_rate(pairs: &[(f64, f64)], bytes_per_token: f64) -> f64 {
+    if pairs.is_empty() {
+        return 0.0;
+    }
+    let over = pairs
+        .iter()
+        .filter(|(e, a)| e * PRIOR_BYTES_PER_TOKEN / bytes_per_token >= *a)
+        .count();
+    over as f64 / pairs.len() as f64
 }
 
 /// Whether this section may carry content at this provenance.
@@ -1054,6 +1180,44 @@ mod tests {
     /// The estimator's contract is that it OVER-estimates. Calibrating to the
     /// median satisfies that on exactly half of all calls, which is the same as
     /// not having the contract.
+    #[test]
+    fn calibration_refuses_below_ten_runs_and_uses_the_prior() {
+        let nine: Vec<(u64, u64)> = (0..9).map(|_| (1000, 900)).collect();
+        assert_eq!(calibrate_bytes_per_token(&nine), None);
+    }
+
+    /// The acceptance's number: the calibrated estimate over-estimates on at
+    /// least 95% of the runs it was fitted on. A median would give ~50%.
+    #[test]
+    fn a_calibrated_estimate_over_estimates_on_at_least_95_percent_of_runs() {
+        // Actual tokens spread 800..=1200 against a constant estimate of 1000.
+        let pairs: Vec<(u64, u64)> = (0..50).map(|i| (1000, 800 + i * 8)).collect();
+        let c = calibrate_bytes_per_token(&pairs).expect("fifty runs");
+        assert!(c.over_estimate_rate >= 0.95, "{c:?}");
+        assert_eq!(c.sample_n, 50);
+        let median_bpt = {
+            let mut v: Vec<f64> = pairs.iter().map(|(e, a)| 4.0 * *e as f64 / *a as f64).collect();
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            v[v.len() / 2]
+        };
+        let as_f: Vec<(f64, f64)> = pairs.iter().map(|(e, a)| (*e as f64, *a as f64)).collect();
+        assert!(
+            over_estimate_rate(&as_f, median_bpt) < 0.95,
+            "the median would not meet the acceptance, which is why it is not used"
+        );
+    }
+
+    #[test]
+    fn calibration_is_clamped_to_the_documented_range() {
+        // A tokenizer that looks like 20 chars per token is a bad sample.
+        let wild: Vec<(u64, u64)> = (0..20).map(|_| (10_000, 500)).collect();
+        let c = calibrate_bytes_per_token(&wild).unwrap();
+        assert!((c.bytes_per_token - 5.0).abs() < 1e-9);
+        let tiny: Vec<(u64, u64)> = (0..20).map(|_| (100, 10_000)).collect();
+        let c = calibrate_bytes_per_token(&tiny).unwrap();
+        assert!((c.bytes_per_token - 2.5).abs() < 1e-9);
+    }
+
     #[test]
     fn the_calibration_factor_is_the_p90_not_the_median() {
         // 1..=10: median 5.5, p90 9.

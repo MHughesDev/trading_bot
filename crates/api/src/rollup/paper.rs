@@ -194,6 +194,7 @@ pub fn paper_rollup(engine: &PaperTradingEngine) -> RollupResponse {
         },
         by_asset_class: tiles,
         account_totals: Some(totals),
+        mark_coverage: None,
     }
 }
 

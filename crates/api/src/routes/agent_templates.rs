@@ -177,6 +177,18 @@ pub async fn run_template(
             continue;
         }
 
+        // A model version's answers beside what the market then did.
+        if series.kind == skills::SeriesKind::Predictions {
+            match materialise_predictions(&state, &args, series, &project).await {
+                Ok((path, note)) => {
+                    data.insert(series.role.clone(), json!(path.to_string_lossy()));
+                    windows.push(note);
+                    continue;
+                }
+                Err(response) => return response,
+            }
+        }
+
         let key = match data_key(&args, series, &project) {
             Ok(k) => k,
             Err(response) => return response,
@@ -446,6 +458,226 @@ fn materialise_returns(
     Ok(path)
 }
 
+/// The horizons a predictions template asked for: `horizons` (an array of bar
+/// counts) and/or `horizon_bars`, 1 to 2000 each, at most 12 distinct.
+fn requested_horizons(args: &Value) -> Result<Vec<usize>, String> {
+    let mut hs: Vec<usize> = Vec::new();
+    if let Some(a) = args.get("horizons").and_then(Value::as_array) {
+        for v in a {
+            hs.push(
+                v.as_u64()
+                    .and_then(|x| usize::try_from(x).ok())
+                    .ok_or("`horizons` must be positive integers")?,
+            );
+        }
+    }
+    if let Some(h) = args.get("horizon_bars") {
+        hs.push(
+            h.as_u64()
+                .and_then(|x| usize::try_from(x).ok())
+                .ok_or("`horizon_bars` must be a positive integer")?,
+        );
+    }
+    if hs.is_empty() {
+        hs.push(1);
+    }
+    hs.sort_unstable();
+    hs.dedup();
+    if hs.iter().any(|h| !(1..=2000).contains(h)) || hs.len() > 12 {
+        return Err("horizons are 1 to 2000 bars, at most 12 of them".into());
+    }
+    Ok(hs)
+}
+
+/// Materialise `(ts, y_hat, y_h<k>...)` for a model version over a window.
+///
+/// The window is clipped by the project exactly as bars are, and the label bars
+/// are read through the same clip, so a forward return whose exit bar the
+/// project may not see is `NaN` rather than peeked (see
+/// `backtest::diagnostics_predictions` for the label definition). An unfilled
+/// series is refused as such -- nothing is dispatched to fill it.
+async fn materialise_predictions(
+    state: &AppState,
+    args: &Value,
+    series: &skills::template::SeriesRequest,
+    project: &Project,
+) -> Result<(PathBuf, Value), axum::response::Response> {
+    use backtest::diagnostics_predictions as dp;
+    use backtest::types::TimeframeExt;
+
+    let text = |k: &str| args.get(k).and_then(Value::as_str).map(str::to_string);
+    let reference = text(&series.model_arg).ok_or_else(|| {
+        bad(
+            "missing_field",
+            format!("`{}` (name@version) is required", series.model_arg),
+        )
+    })?;
+    let (model_id, version) =
+        dp::parse_model(&reference).map_err(|e| bad("bad_model", e.to_string()))?;
+    let horizons = requested_horizons(args).map_err(|m| bad("bad_horizons", m))?;
+    let output = text("output");
+    let key = data_key(args, series, project)?;
+    let tf = <domain::payloads::bar::Timeframe as TimeframeExt>::from_key(&key.timeframe)
+        .ok_or_else(|| bad("unknown_timeframe", key.timeframe.clone()))?;
+    let bar_ns = i64::try_from(tf.seconds())
+        .unwrap_or(i64::MAX)
+        .saturating_mul(1_000_000_000);
+
+    let parse = |s: &str| DateTime::parse_from_rfc3339(s).map(|d| d.with_timezone(&Utc));
+    let (start, end, _as_of) = match (parse(&key.start), parse(&key.end), parse(&key.as_of)) {
+        (Ok(a), Ok(b), Ok(c)) => (a, b, c),
+        _ => return Err(bad("bad_timestamp", "window did not round-trip".into())),
+    };
+    let fail = |e: String| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "materialisation_failed", "message": e, "series": series.role})),
+        )
+            .into_response()
+    };
+    let rows = dp::read_series(
+        &state.clickhouse_url,
+        &model_id,
+        version,
+        start.timestamp_nanos_opt().unwrap_or(i64::MIN),
+        end.timestamp_nanos_opt().unwrap_or(i64::MAX),
+    )
+    .await
+    .map_err(|e| match e {
+        dp::PredictionError::NoTable => bad("series_table_missing", e.to_string()),
+        other => fail(other.to_string()),
+    })?;
+    if rows.is_empty() {
+        return Err(bad(
+            "series_not_filled",
+            format!(
+                "no prediction series rows for {reference} in this window. Nothing was dispatched \
+                 to fill it: a `predict_series` job writes the series, and a model answers only \
+                 for decisions after it was trained"
+            ),
+        ));
+    }
+    let (answers, counts) = dp::answers_from_rows(&rows, output.as_deref())
+        .map_err(|e| bad("bad_output", e.to_string()))?;
+
+    // Labels need bars past the window: read to end + max horizon, clipped by the
+    // project, so a label beyond the readable bars is absent rather than peeked.
+    let max_h = i64::try_from(*horizons.last().unwrap_or(&1)).unwrap_or(1);
+    let wanted_end = end + chrono::Duration::nanoseconds(bar_ns.saturating_mul(max_h + 1));
+    let (label_end, _) = project.clip(wanted_end);
+    let bars = backtest::store::BarStore::connect(&state.clickhouse_url)
+        .as_of(label_end)
+        .load_bars(
+            &key.instrument_id,
+            tf,
+            start - chrono::Duration::nanoseconds(bar_ns.saturating_mul(2)),
+            label_end,
+        )
+        .await
+        .map_err(|e| fail(e.to_string()))?;
+    let closes: Vec<dp::BarClose> = bars
+        .iter()
+        .filter_map(|b| {
+            rust_decimal::prelude::ToPrimitive::to_f64(&b.close).map(|c| (b.open_ns, c))
+        })
+        .collect();
+    let labels = dp::forward_returns(&answers, &closes, bar_ns, &horizons);
+
+    let digest = {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(format!(
+            "{reference}|{:?}|{}|{}|{}|{:?}|{}|{}",
+            output,
+            key.instrument_id,
+            key.timeframe,
+            key.as_of,
+            horizons,
+            answers.len(),
+            answers.last().map_or(0, |a| a.at_ns)
+        ));
+        hex::encode(&h.finalize()[..16])
+    };
+    let path = cache_root()
+        .join(&digest[..2])
+        .join(format!("pred-{digest}.parquet"));
+    if !path.is_file() {
+        write_predictions(&path, &answers, &labels, &horizons).map_err(|e| fail(e.to_string()))?;
+    }
+    let note = json!({
+        "role": series.role,
+        "kind": "predictions",
+        "model": reference,
+        "instrument_id": key.instrument_id,
+        "timeframe": key.timeframe,
+        "start": key.start,
+        "end": key.end,
+        "as_of": key.as_of,
+        "horizons": horizons,
+        "rows": counts.rows,
+        "answered": counts.answered,
+        "used": answers.len(),
+        "label": "ln(close[i+h]/close[i]) from the last bar closed at the decision; NaN past the readable bars",
+    });
+    Ok((path, note))
+}
+
+fn write_predictions(
+    path: &Path,
+    answers: &[backtest::diagnostics_predictions::Answer],
+    labels: &[Vec<f64>],
+    horizons: &[usize],
+) -> anyhow::Result<()> {
+    use arrow::array::{ArrayRef, Float64Array, TimestampNanosecondArray};
+    use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+    use arrow::record_batch::RecordBatch;
+    use parquet::arrow::ArrowWriter;
+
+    let mut fields = vec![
+        Field::new(
+            "ts",
+            DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into())),
+            false,
+        ),
+        Field::new("y_hat", DataType::Float64, false),
+    ];
+    let mut arrays: Vec<ArrayRef> = vec![
+        Arc::new(
+            TimestampNanosecondArray::from(answers.iter().map(|a| a.at_ns).collect::<Vec<_>>())
+                .with_timezone("UTC"),
+        ),
+        Arc::new(Float64Array::from(
+            answers.iter().map(|a| a.y_hat).collect::<Vec<_>>(),
+        )),
+    ];
+    for (k, h) in horizons.iter().enumerate() {
+        fields.push(Field::new(format!("y_h{h}"), DataType::Float64, true));
+        arrays.push(Arc::new(Float64Array::from(
+            labels.iter().map(|row| row[k]).collect::<Vec<f64>>(),
+        )));
+    }
+    let schema = Arc::new(Schema::new(fields));
+    let batch = RecordBatch::try_new(schema.clone(), arrays)?;
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let mut w = ArrowWriter::try_new(&mut buf, schema, None)?;
+        w.write(&batch)?;
+        w.close()?;
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let staging = path.with_extension(format!("tmp-{}", std::process::id()));
+    std::fs::write(&staging, &buf)?;
+    if std::fs::rename(&staging, path).is_err() {
+        let _ = std::fs::remove_file(&staging);
+        if !path.is_file() {
+            anyhow::bail!("could not publish the materialised predictions");
+        }
+    }
+    Ok(())
+}
+
 /// `ts, open, high, low, close, volume, trade_count, quality_flags`.
 ///
 /// Prices are `Decimal` in the store and `f64` here, and that is a deliberate
@@ -632,6 +864,7 @@ mod tests {
             instrument_arg: "instrument_id".into(),
             timeframe_arg: "timeframe".into(),
             experiment_arg: "experiment_id".into(),
+            model_arg: "model".into(),
         }
     }
 

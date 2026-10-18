@@ -66,9 +66,13 @@ async def predict(req: PredictRequest):
                 detail=f"instance {i} is missing required feature(s): {', '.join(missing)}",
             )
 
-    predictions: list[Forecast] | None = run_predict(
-        artifact_bytes, req.instances, req.model_kind, DEFAULT_HORIZON
-    )
+    try:
+        predictions: list[Forecast] | None = run_predict(
+            artifact_bytes, req.instances, req.model_kind, DEFAULT_HORIZON
+        )
+    except base.Abstain as a:
+        # The model declined; a made-up forecast would be worse than none.
+        raise HTTPException(status_code=422, detail=f"abstain: {a.reason}")
 
     if predictions is None:
         # Total failure across all predictors — never 500 in dev.

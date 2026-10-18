@@ -43,6 +43,9 @@ pub(crate) struct Instance {
     /// The close of the last bar seen on each input — where a checkpoint's
     /// history replay stops (U-4.4).
     pub(crate) last_close: Vec<Option<i64>>,
+    /// The environment's macro and fundamentals rows (P-3.6). Empty until an
+    /// [`Event::External`](crate::Event::External) arrives.
+    pub(crate) external: std::sync::Arc<crate::external::ExternalData>,
 }
 
 impl Instance {
@@ -56,9 +59,16 @@ impl Instance {
             let mut impls = Vec::with_capacity(input.columns.len());
             let mut rows_cap = 1usize;
             for name in &input.columns {
-                let f = features::runtime::feature(name)
-                    .map_err(|e| EngineError::Feature(name.clone(), e.to_string()))?;
-                rows_cap = rows_cap.max(f.def().lookback_bars as usize);
+                let bar_secs = input.timeframe.seconds();
+                let f = match features::external_features::resolve_external(name, bar_secs) {
+                    Ok(Some(f)) => crate::history::Column::External(f),
+                    Ok(None) => crate::history::Column::Windowed(
+                        features::runtime::feature(name)
+                            .map_err(|e| EngineError::Feature(name.clone(), e.to_string()))?,
+                    ),
+                    Err(e) => return Err(EngineError::Feature(name.clone(), e.to_string())),
+                };
+                rows_cap = rows_cap.max(f.lookback_bars() as usize);
                 impls.push(f);
             }
             let cols_cap = plan
@@ -98,6 +108,7 @@ impl Instance {
             histories,
             temporal,
             last_close: vec![None; plan.inputs.len()],
+            external: std::sync::Arc::default(),
         })
     }
 
@@ -106,7 +117,7 @@ impl Instance {
         let Some(h) = self.histories.get_mut(input) else {
             return false;
         };
-        h.push(bar);
+        h.push(bar, &self.external);
         self.last_close[input] = Some(bar.close_ns);
         true
     }

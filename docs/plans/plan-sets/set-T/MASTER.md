@@ -1,6 +1,6 @@
 # Forward Evidence — Set T
 
-**Completion: 88% left (1 / 17 tasks). 1 done, 3 partial, 1 BLOCKED:HUMAN, 12 not started.**
+**Completion: 32% left (7 / 17 tasks). 7 done, 9 partial, 0 not started, 1 blocked upstream, 0 blocked on a human.** Re-counted 2026-10-05 (track VERIFY2) from the per-task markers; the line read 6 / 17 before.
 
 > **This line read `0% (0 / 17 tasks). NOT STARTED.` until 2026-09-21** — while
 > this set’s own phase files recorded real work. It was wrong by the maximum
@@ -69,7 +69,7 @@ build task.
 - **Live capital.** Roadmap H-4 (Q-4, liability) first, then `strict_v1`. No task here moves
   money.
 - **The monitor's construction** — that is Set S Phase 7. This set *operates* it and proves it.
-- **New execution venues.** Alpaca paper is the paper venue (ADR-0006, Q-1, resolved).
+- **New execution venues.** The paper venue is the app's own engine, `platform_paper` (ADR-0048, 2026-10-02, superseding ADR-0006's Alpaca-paper choice; Q-1 amended). No broker paper account is used.
 - **The agent authoring the deployed strategy.** Deliberately: Phase 1 deploys something
   hand-authored so the clock starts now.
 

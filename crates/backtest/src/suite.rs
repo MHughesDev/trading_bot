@@ -551,7 +551,18 @@ pub struct RunStudySpec {
     /// the others where the research left them.
     #[serde(default)]
     pub base_params: Option<ParamMap>,
+    /// Every Run of the Study pays its trading costs scaled by this many
+    /// hundredths of a percent (`+2000` = +20 %, `-2000` = -20 %): the cost axis of
+    /// SPEC §11.5's replicate grid. Zero, the default, is the modelled cost.
+    /// Bounded to [`COST_SCALE_BP_RANGE`] at the door.
+    #[serde(default)]
+    pub cost_scale_bp: i32,
 }
+
+/// The cost perturbations a Study will accept, in hundredths of a percent. Wider
+/// than the protocol's own +/-20 % so a caller can ask a harder question, narrower
+/// than "free" (-100 %): a cost scaled to nothing is a different experiment.
+pub const COST_SCALE_BP_RANGE: std::ops::RangeInclusive<i32> = -5000..=10_000;
 
 /// Input to [`SuiteManager::run_param_batch`] (in-process only).
 #[derive(Clone, Debug)]
@@ -605,6 +616,34 @@ impl From<GateError> for SuiteError {
 
 // ── internal record ──────────────────────────────────────────────────────────
 
+/// The one parameter the funnel perturbs, and around what.
+///
+/// The funnel's neighbourhood study (Gates 2, 12) and its PBO grid used to be
+/// hard-coded to a parameter named `fast` centred on 12, which is the EMA-cross
+/// strategy's, so every other strategy was perturbed along a parameter it does
+/// not have — and a campaign's incumbent, which is not at 12, was perturbed
+/// around somebody else's centre. The axis is now data on the Experiment.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SweepAxis {
+    pub param: String,
+    pub center: f64,
+    pub step: f64,
+}
+
+impl SweepAxis {
+    /// What every Experiment used before the axis was configurable. Kept as the
+    /// default so Experiments that never call [`SuiteManager::set_incumbent`]
+    /// behave exactly as they did.
+    #[must_use]
+    pub fn legacy() -> Self {
+        Self {
+            param: "fast".into(),
+            center: 12.0,
+            step: 1.0,
+        }
+    }
+}
+
 struct StoredStudy {
     kind: StudyKind,
     metric: MetricKind,
@@ -628,11 +667,28 @@ struct Record {
     /// A selection target: every Run of this Experiment is a portfolio run.
     target: Option<domain::strategy_graph::deployment::DeploymentTarget>,
     studies: Vec<StoredStudy>,
+    /// The parameters every Run of this Experiment starts from, when the
+    /// candidate is not the strategy's defaults (a campaign's incumbent). Empty
+    /// means defaults, which is every Experiment that predates
+    /// [`SuiteManager::set_incumbent`].
+    base_params: ParamMap,
+    /// The parameter the funnel's robustness study and PBO grid perturb. `None`
+    /// keeps the legacy axis ([`SweepAxis::legacy`]).
+    sweep: Option<SweepAxis>,
     gate_verdicts: Vec<GateVerdict>,
     gate3: Option<Gate3Outcome>,
     null: Option<Null>,
     null_choice: Option<NullChoiceView>,
     reconciliation: Option<ReconciliationVerdict>,
+}
+
+/// A stored Run the nightly drift job may re-run (see
+/// [`SuiteManager::reproducible_runs`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReproducibleRun {
+    pub user_id: Uuid,
+    pub run_id: String,
+    pub produced_at: DateTime<Utc>,
 }
 
 /// Where a Run came from: the Experiment that holds it and the slice it was
@@ -831,6 +887,8 @@ impl SuiteManager {
             research_slice: research,
             target: spec.target,
             studies: Vec::new(),
+            base_params: ParamMap::new(),
+            sweep: None,
             gate_verdicts: Vec::new(),
             gate3: None,
             null: None,
@@ -931,9 +989,26 @@ impl SuiteManager {
                 .filter(|r| r.user_id == user_id)
                 .ok_or(SuiteError::NotFound)?;
             let ctx = Self::dispatch_ctx(user_id, r);
-            let mut base = Self::base_config(&r.strategy_ref, &r.research_slice, r.target.as_ref());
+            let mut base = Self::base_config_with(
+                &r.strategy_ref,
+                &r.research_slice,
+                r.target.as_ref(),
+                &r.base_params,
+            );
             if let Some(p) = &spec.base_params {
                 base.params = p.clone();
+                base = base.rehashed();
+            }
+            if !COST_SCALE_BP_RANGE.contains(&spec.cost_scale_bp) {
+                return Err(SuiteError::Study(format!(
+                    "cost_scale_bp {} is outside {}..={} (hundredths of a percent)",
+                    spec.cost_scale_bp,
+                    COST_SCALE_BP_RANGE.start(),
+                    COST_SCALE_BP_RANGE.end()
+                )));
+            }
+            if spec.cost_scale_bp != 0 {
+                base.cost_scale_bp = spec.cost_scale_bp;
                 base = base.rehashed();
             }
             let study = StudyConfig {
@@ -994,6 +1069,20 @@ impl SuiteManager {
         Ok(view)
     }
 
+    /// The `delta_practical` declared on an Experiment before any trial ran
+    /// (SPEC §4.1), or `None` when the Experiment is not this user's. The effect
+    /// size a comparison's ROPE is built from: read it from here rather than let
+    /// a caller restate it, because a restated delta is a delta chosen after the
+    /// data.
+    #[must_use]
+    pub fn experiment_delta_practical(&self, user_id: Uuid, id: Uuid) -> Option<f64> {
+        let records = self.records.read().expect("suite lock poisoned");
+        records
+            .get(&id)
+            .filter(|r| r.user_id == user_id)
+            .map(|r| r.delta_practical)
+    }
+
     /// The objective declared on an Experiment (`Some(None)` = found, none set).
     #[must_use]
     pub fn experiment_objective(&self, user_id: Uuid, id: Uuid) -> Option<Option<Objective>> {
@@ -1020,6 +1109,71 @@ impl SuiteManager {
             .rev()
             .find(|s| s.result.study_id == study_id)
             .and_then(|s| s.result.carried_forward.as_ref().map(|c| c.params.clone()))
+    }
+
+    /// Re-run one of this user's stored Runs under its own config and report
+    /// whether the platform still computes the same thing (S-10.8, ADR-S10-18).
+    /// Reachable only through a Study the user owns, like [`Self::run_result`].
+    /// Spends no trial: it runs under a reproduction ticket and appends to
+    /// `mlops.reproduction`.
+    ///
+    /// # Errors
+    /// [`SuiteError::NotFound`] for a run the user does not own; otherwise the
+    /// reproduction's own refusal.
+    pub fn reproduce_run(
+        &self,
+        user_id: Uuid,
+        run_id: &str,
+    ) -> Result<crate::run::ReproduceReport, SuiteError> {
+        let rid: RunId = {
+            let records = self.records.read().expect("suite lock poisoned");
+            records
+                .values()
+                .filter(|r| r.user_id == user_id)
+                .flat_map(|r| r.studies.iter())
+                .flat_map(|s| s.result.members().iter())
+                .find(|m| m.as_str() == run_id)
+                .cloned()
+                .ok_or(SuiteError::NotFound)?
+        };
+        self.bt
+            .reproduce(&user_id.to_string(), &rid, &user_id.to_string())
+            .map_err(|e| SuiteError::Study(e.to_string()))
+    }
+
+    /// Every Run this process executed that can still be re-run, with its owner
+    /// and when it was produced. What the nightly drift job samples from
+    /// (AGENT-013 §8.4); a run whose config the process no longer holds is not
+    /// listed because it cannot be re-run.
+    #[must_use]
+    pub fn reproducible_runs(&self) -> Vec<ReproducibleRun> {
+        let retained: std::collections::HashSet<String> = self
+            .bt
+            .reproducible_runs()
+            .into_iter()
+            .map(|r| r.as_str().to_string())
+            .collect();
+        let records = self.records.read().expect("suite lock poisoned");
+        let mut out = Vec::new();
+        for r in records.values() {
+            for m in r.studies.iter().flat_map(|s| s.result.members().iter()) {
+                if !retained.contains(m.as_str()) {
+                    continue;
+                }
+                if let Some(res) = self.bt.store().get(m) {
+                    if res.status == RunStatus::Ok {
+                        out.push(ReproducibleRun {
+                            user_id: r.user_id,
+                            run_id: m.as_str().to_string(),
+                            produced_at: res.produced_at,
+                        });
+                    }
+                }
+            }
+        }
+        out.sort_by(|a, b| a.run_id.cmp(&b.run_id));
+        out.dedup_by(|a, b| a.run_id == b.run_id && a.user_id == b.user_id);
+        out
     }
 
     /// A stored Run result, reachable only through a Study the user owns
@@ -1106,6 +1260,7 @@ impl SuiteManager {
                 selection_rule: Some(selection_rule),
                 null_ref: None,
                 base_params: base_params.clone(),
+                cost_scale_bp: 0,
             },
         )?;
         let records = self.records.read().expect("suite lock poisoned");
@@ -1179,6 +1334,74 @@ impl SuiteManager {
         )
         .target(target.cloned())
         .build()
+    }
+
+    /// [`Self::base_config`] with the candidate's parameters applied. Empty
+    /// `params` is the strategy's defaults and returns the plain config, so the
+    /// config hash of an Experiment that never set an incumbent is unchanged.
+    fn base_config_with(
+        strategy_family: &str,
+        slice: &DataSlice,
+        target: Option<&domain::strategy_graph::deployment::DeploymentTarget>,
+        params: &ParamMap,
+    ) -> RunConfig {
+        let mut cfg = Self::base_config(strategy_family, slice, target);
+        if !params.is_empty() {
+            cfg.params = params.clone();
+            cfg = cfg.rehashed();
+        }
+        cfg
+    }
+
+    /// Declare the candidate this Experiment evaluates: the parameters every Run
+    /// starts from, and the axis the funnel perturbs.
+    ///
+    /// Refused once the funnel has produced verdicts. The evidence is about one
+    /// configuration, and changing which one after the fact would attach it to a
+    /// different candidate than the one that earned it.
+    ///
+    /// # Errors
+    /// `NotFound`, or `Invalid` for an axis that is not a finite positive step
+    /// or a funnel that has already run.
+    pub fn set_incumbent(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+        base_params: ParamMap,
+        sweep: Option<SweepAxis>,
+    ) -> Result<(), SuiteError> {
+        if let Some(a) = &sweep {
+            if a.param.trim().is_empty()
+                || !a.center.is_finite()
+                || !(a.step.is_finite() && a.step > 0.0)
+            {
+                return Err(SuiteError::Invalid(
+                    "a sweep axis needs a named parameter, a finite centre and a positive step"
+                        .into(),
+                ));
+            }
+        }
+        let mut records = self.records.write().expect("suite lock poisoned");
+        let r = records
+            .get_mut(&id)
+            .filter(|r| r.user_id == user_id)
+            .ok_or(SuiteError::NotFound)?;
+        if !r.gate_verdicts.is_empty() {
+            return Err(SuiteError::Invalid(
+                "the funnel has already run on this Experiment; its evidence belongs to the \
+                 configuration it ran on"
+                    .into(),
+            ));
+        }
+        r.base_params = base_params;
+        r.sweep = sweep;
+        Ok(())
+    }
+
+    /// The recommended null for this Experiment's strategy type (D-7).
+    #[must_use]
+    pub fn recommended_null(&self, user_id: Uuid, id: Uuid) -> Option<NullKind> {
+        self.null_picker(user_id, id).map(|v| v.recommended)
     }
 
     fn study_view(
@@ -1415,12 +1638,13 @@ impl SuiteManager {
         // Run the evidence studies the gates consume (counter climbs honestly).
         let research = r.research_slice.clone();
         let family = r.exp.strategy_family.clone();
-        let base = Self::base_config(&family, &research, r.target.as_ref());
+        let base = Self::base_config_with(&family, &research, r.target.as_ref(), &r.base_params);
+        let axis = r.sweep.clone().unwrap_or_else(SweepAxis::legacy);
 
-        let wf = Self::evidence_study("funnel-wf", StudyKind::WalkForward, &base, 4);
-        let cpcv = Self::evidence_study("funnel-cpcv", StudyKind::Cpcv, &base, 6);
-        let syn = Self::evidence_study("funnel-syn", StudyKind::SyntheticPaths, &base, 4);
-        let nbhd = Self::evidence_study("funnel-nbhd", StudyKind::Neighborhood, &base, 4);
+        let wf = Self::evidence_study("funnel-wf", StudyKind::WalkForward, &base, 4, &axis);
+        let cpcv = Self::evidence_study("funnel-cpcv", StudyKind::Cpcv, &base, 6, &axis);
+        let syn = Self::evidence_study("funnel-syn", StudyKind::SyntheticPaths, &base, 4, &axis);
+        let nbhd = Self::evidence_study("funnel-nbhd", StudyKind::Neighborhood, &base, 4, &axis);
 
         let wf_res = self.run_evidence(r, user_id, id, &wf)?;
         let cpcv_res = self.run_evidence(r, user_id, id, &cpcv)?;
@@ -1456,7 +1680,7 @@ impl SuiteManager {
         //     window. PBO asks how often the in-sample best configuration
         //     underperforms out of sample, which is a question about a grid and
         //     cannot be answered from one study's marginal distribution.
-        let pbo_perf = self.pbo_matrix(r, user_id, id, &base)?;
+        let pbo_perf = self.pbo_matrix(r, user_id, id, &base, &axis)?;
 
         let sharpe_variance_across_trials = variance(
             &[
@@ -1672,12 +1896,18 @@ impl SuiteManager {
         Ok(Self::funnel_view(r))
     }
 
-    fn evidence_study(id: &str, kind: StudyKind, base: &RunConfig, n: usize) -> StudyConfig {
+    fn evidence_study(
+        id: &str,
+        kind: StudyKind,
+        base: &RunConfig,
+        n: usize,
+        axis: &SweepAxis,
+    ) -> StudyConfig {
         let vary = match kind {
             StudyKind::Neighborhood => VarySpec::Neighborhood {
-                param: "fast".into(),
-                center: 12.0,
-                step: 1.0,
+                param: axis.param.clone(),
+                center: axis.center,
+                step: axis.step,
                 k: 4,
             },
             StudyKind::WalkForward => {
@@ -2017,6 +2247,7 @@ impl SuiteManager {
         user_id: Uuid,
         id: Uuid,
         base: &RunConfig,
+        axis: &SweepAxis,
     ) -> Result<Vec<Vec<f64>>, SuiteError> {
         let windows = Self::split_windows(&base.data_slice, PBO_PERIODS);
         let mut matrix = Vec::with_capacity(PBO_CONFIGS);
@@ -2024,9 +2255,9 @@ impl SuiteManager {
             let mut cfg = base.clone();
             // The same neighbourhood the robustness study perturbs, so the PBO
             // grid and Gate 2's evidence are about the same parameter.
-            let value = 12.0 + (c as f64 - (PBO_CONFIGS as f64 - 1.0) / 2.0);
+            let value = axis.center + (c as f64 - (PBO_CONFIGS as f64 - 1.0) / 2.0) * axis.step;
             cfg.params.insert(
-                "fast".into(),
+                axis.param.clone(),
                 serde_json::Number::from_f64(value)
                     .map_or(serde_json::Value::Null, serde_json::Value::Number),
             );
@@ -2569,8 +2800,12 @@ impl SuiteManager {
             .get_mut(&id)
             .filter(|r| r.user_id == user_id)
             .ok_or(SuiteError::NotFound)?;
-        let candidate =
-            Self::base_config(&r.exp.strategy_family, &r.research_slice, r.target.as_ref());
+        let candidate = Self::base_config_with(
+            &r.exp.strategy_family,
+            &r.research_slice,
+            r.target.as_ref(),
+            &r.base_params,
+        );
         self.emit(
             user_id,
             id,
@@ -2690,6 +2925,7 @@ mod tests {
             selection_rule: None,
             null_ref: None,
             base_params: None,
+            cost_scale_bp: 0,
         }
     }
 
@@ -2939,5 +3175,104 @@ mod tests {
         let cal = m.suite_calibration(u);
         assert_eq!(cal.experiments_contributing, 1);
         assert!(!cal.percentiles.is_empty());
+    }
+
+    // ------------------------------------------------------------------ //
+    // The funnel evaluates the candidate it was given, around its own axis
+    // ------------------------------------------------------------------ //
+
+    static AXIS_LOG: std::sync::Mutex<Vec<RunConfig>> = std::sync::Mutex::new(Vec::new());
+
+    fn recording_execute(cfg: &RunConfig) -> RunResult {
+        if cfg.strategy_ref == "axis-test-family" {
+            AXIS_LOG.lock().unwrap().push(cfg.clone());
+        }
+        synthetic_execute(cfg)
+    }
+
+    /// The funnel used to run the strategy's defaults and perturb a parameter
+    /// named `fast` around 12, whatever the strategy was. With an incumbent set,
+    /// every Run starts from the incumbent's parameters and the neighbourhood and
+    /// the PBO grid move the declared axis around the incumbent's own value.
+    #[test]
+    fn the_funnel_runs_the_incumbent_and_perturbs_its_declared_axis() {
+        AXIS_LOG.lock().unwrap().clear();
+        let exec: fn(&RunConfig) -> RunResult = recording_execute;
+        let m = SuiteManager::with_executor(
+            Box::new(ClosureExecutor(exec)),
+            Arc::new(InMemoryLedger::new()),
+        );
+        let u = Uuid::new_v4();
+        let mut s = spec("exp-axis");
+        s.strategy_family = "axis-test-family".into();
+        let id = m.create_experiment(u, s).unwrap().id;
+        let mut base = ParamMap::new();
+        base.insert("window".into(), json!(20));
+        base.insert("threshold".into(), json!(0.5));
+        m.set_incumbent(
+            u,
+            id,
+            base,
+            Some(SweepAxis {
+                param: "window".into(),
+                center: 20.0,
+                step: 2.0,
+            }),
+        )
+        .unwrap();
+        let rec = m.recommended_null(u, id).unwrap();
+        m.choose_null(u, id, rec, None).unwrap();
+        m.advance_funnel(u, id).unwrap();
+
+        let log = AXIS_LOG.lock().unwrap().clone();
+        assert!(log.len() > 20, "the funnel ran {} Runs", log.len());
+        for cfg in &log {
+            assert!(!cfg.params.contains_key("fast"), "the legacy axis leaked: {:?}", cfg.params);
+            assert_eq!(
+                cfg.params.get("threshold"),
+                Some(&json!(0.5)),
+                "a Run did not start from the incumbent: {:?}",
+                cfg.params
+            );
+        }
+        // The PBO grid: five values, 2 apart, centred on the incumbent's 20.
+        let mut seen: Vec<i64> = log
+            .iter()
+            .filter_map(|c| c.params.get("window").and_then(serde_json::Value::as_f64))
+            .map(|v| v.round() as i64)
+            .collect();
+        seen.sort_unstable();
+        seen.dedup();
+        for want in [16, 18, 20, 22, 24] {
+            assert!(seen.contains(&want), "{want} missing from {seen:?}");
+        }
+    }
+
+    #[test]
+    fn the_incumbent_cannot_change_after_the_funnel_has_run() {
+        let m = SuiteManager::new();
+        let u = Uuid::new_v4();
+        let id = m.create_experiment(u, spec("exp-late")).unwrap().id;
+        let rec = m.recommended_null(u, id).unwrap();
+        m.choose_null(u, id, rec, None).unwrap();
+        m.advance_funnel(u, id).unwrap();
+        assert!(matches!(
+            m.set_incumbent(u, id, ParamMap::new(), None),
+            Err(SuiteError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn a_degenerate_axis_is_refused() {
+        let m = SuiteManager::new();
+        let u = Uuid::new_v4();
+        let id = m.create_experiment(u, spec("exp-bad-axis")).unwrap().id;
+        for bad in [
+            SweepAxis { param: String::new(), center: 1.0, step: 1.0 },
+            SweepAxis { param: "p".into(), center: f64::NAN, step: 1.0 },
+            SweepAxis { param: "p".into(), center: 1.0, step: 0.0 },
+        ] {
+            assert!(m.set_incumbent(u, id, ParamMap::new(), Some(bad)).is_err());
+        }
     }
 }

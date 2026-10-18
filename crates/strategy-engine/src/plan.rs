@@ -297,4 +297,25 @@ impl Plan {
             })
             .collect()
     }
+
+    /// The plan's external indicators (`macro_<series>`,
+    /// `fundamental_<cik>_<tag>`; P-3.6) with the bar size of the input each is
+    /// computed on: what an environment must load rows for and hand over with
+    /// [`crate::Event::External`]. Empty for a plan that reads none.
+    #[must_use]
+    pub fn external_indicators(&self) -> Vec<(String, u32)> {
+        let mut out: Vec<(String, u32)> = self
+            .inputs
+            .iter()
+            .flat_map(|inp| {
+                inp.columns
+                    .iter()
+                    .filter(|c| features::external_features::is_external_name(c))
+                    .map(move |c| (c.clone(), inp.timeframe.seconds()))
+            })
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
 }

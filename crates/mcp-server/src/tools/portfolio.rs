@@ -24,7 +24,7 @@ pub async fn get_paper_activity(api: &ApiClient, params: &Value) -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if id.is_empty() {
-        return json!({ "error": "missing_field", "field": "instrument_id" });
+        return crate::tool_error::missing_field("instrument_id");
     }
     match api
         .get(&format!("/api/paper/instrument/{}", urlencode(id)))
@@ -50,7 +50,7 @@ pub async fn get_order(api: &ApiClient, params: &Value) -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if id.is_empty() {
-        return json!({ "error": "missing_field", "field": "order_id" });
+        return crate::tool_error::missing_field("order_id");
     }
     match api.get(&format!("/api/orders/{}", urlencode(id))).await {
         Ok(v) => v,

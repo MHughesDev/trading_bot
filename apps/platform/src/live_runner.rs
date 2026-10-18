@@ -37,6 +37,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use backtest::replay::{Consumed, Genesis, JournalInputs};
 use chrono::{DateTime, Utc};
 use domain::instrument::AssetClass;
 use domain::money::{Price, Size};
@@ -55,7 +56,6 @@ use strategy_engine::{
     ModelRequest, ModelResponse, OrderClosed, OrderClosedReason, Plan, PortfolioView, RestoreError,
     Step, WorkingOrder,
 };
-use backtest::replay::{Consumed, Genesis, JournalInputs};
 use strategy_runtime::live::V3Deployment;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -207,6 +207,10 @@ pub struct LiveDeps {
         Arc<dyn model_registry::provider::llm::LlmClient>,
         model_registry::provider::llm::LlmCaps,
     )>,
+    /// This deployment's external rows at start (P-3.6): what its macro and
+    /// fundamentals indicators read, in place before the warm-up is replayed.
+    /// Set per deployment by the supervisor; `None` for a plan that reads none.
+    pub external: Option<strategy_engine::ExternalData>,
 }
 
 // ── bars of a timeframe from bars of a minute ────────────────────────────────
@@ -364,6 +368,10 @@ struct Forward {
     /// holding a position — nothing is recorded: the shadow starts flat, and
     /// the two are compared only from a bar where both are flat.
     opened: bool,
+    /// Resumed from what was stored before a restart: its first bar re-anchors
+    /// the series rather than opening a new one, so the downtime reads as
+    /// missing bars and the cumulative divergence carries on.
+    resumed: bool,
 }
 
 fn forward_mark(
@@ -441,6 +449,7 @@ impl LiveRunner {
                 let genesis = Genesis {
                     checkpoint: Some(state.engine.clone()),
                     history: flat,
+                    external: deps.external.clone(),
                 };
                 let engine = genesis.build(Arc::clone(&plan), &spec)?;
                 info!(deployment = %d.deployment_id, tick = engine.tick(), "v3 deployment restored from its checkpoint");
@@ -471,6 +480,7 @@ impl LiveRunner {
                 let genesis = Genesis {
                     checkpoint: None,
                     history: flat,
+                    external: deps.external.clone(),
                 };
                 let engine = genesis.build(Arc::clone(&plan), &spec)?;
                 Self {
@@ -528,6 +538,7 @@ impl LiveRunner {
         fill_seq: i64,
         tenant: String,
         instrument_limits: risk::InstrumentLimits,
+        resumed: bool,
     ) -> Result<(), String> {
         let genesis = self
             .origin
@@ -561,6 +572,7 @@ impl LiveRunner {
             shadow,
             tenant,
             opened: false,
+            resumed,
         });
         Ok(())
     }
@@ -615,7 +627,9 @@ impl LiveRunner {
             return;
         };
         let live_close = decided.iter().find(|t| t.cause == Cause::BarClose);
-        let answers = live_close.map(|t| t.model_responses.clone()).unwrap_or_default();
+        let answers = live_close
+            .map(|t| t.model_responses.clone())
+            .unwrap_or_default();
         let step = match f.shadow.on_bar(input, bar, &answers) {
             Ok(Some(s)) => s,
             Ok(None) => return,
@@ -632,13 +646,18 @@ impl LiveRunner {
         let mark = Price::from_decimal(close);
         if !f.opened {
             if flat && f.shadow.position().is_zero() {
-                if let Err(e) = f.recorder.open(bar_at, mark) {
-                    warn!(deployment = %self.d.deployment_id, error = %e, "forward recorder did not open");
+                let (started, kind) = if f.resumed {
+                    (f.recorder.reanchor(bar_at, mark), "reanchor")
+                } else {
+                    (f.recorder.open(bar_at, mark), "open")
+                };
+                if let Err(e) = started {
+                    warn!(deployment = %self.d.deployment_id, error = %e, kind, "forward recorder did not start");
                     return;
                 }
                 f.opened = true;
-                info!(deployment = %self.d.deployment_id, bar = %bar_at, "forward recording opened");
-                let m = forward_mark(f, bar_at, close, "open");
+                info!(deployment = %self.d.deployment_id, bar = %bar_at, kind, "forward recording started");
+                let m = forward_mark(f, bar_at, close, kind);
                 if let Err(e) = self.deps.store.record_forward_mark(&m).await {
                     error!(deployment = %self.d.deployment_id, error = %e, "forward mark not stored");
                 }
@@ -677,7 +696,12 @@ impl LiveRunner {
         };
         let tenant = f.tenant.clone();
         let m = forward_mark(f, bar_at, close, "close");
-        if let Err(e) = self.deps.store.insert_observation(&tenant, &observation).await {
+        if let Err(e) = self
+            .deps
+            .store
+            .insert_observation(&tenant, &observation)
+            .await
+        {
             error!(deployment = %self.d.deployment_id, error = %e, "forward observation not stored");
         }
         if let Err(e) = self.deps.store.record_forward_mark(&m).await {
@@ -723,6 +747,25 @@ impl LiveRunner {
     /// # Errors
     /// A failed journal or checkpoint write (the deployment halts), or an
     /// engine defect.
+    /// Hand the engine fresh external rows (P-3.6). They replace the last
+    /// delivery whole and are journaled like any event a decision consumed, so
+    /// a replay reads exactly what this deployment read.
+    ///
+    /// # Errors
+    /// As [`Self::on_minute_bar`].
+    pub async fn refresh_external(
+        &mut self,
+        data: strategy_engine::ExternalData,
+    ) -> Result<(), LiveError> {
+        self.step(Event::External(data)).await.map(|_| ())
+    }
+
+    /// The compiled plan this runner steps.
+    #[must_use]
+    pub fn plan(&self) -> &Plan {
+        &self.plan
+    }
+
     pub async fn on_minute_bar(
         &mut self,
         instrument: &str,
@@ -826,23 +869,33 @@ impl LiveRunner {
         }
     }
 
+    /// What the paper engine routes this deployment's orders by (U-4.7): its
+    /// own account when it opened one, else the asset class's.
+    fn account_key(&self) -> String {
+        self.d.deployment_id.to_string()
+    }
+
     fn position(&self) -> Decimal {
         self.deps
             .paper
-            .positions(self.asset_class)
+            .positions_for(self.asset_class, Some(&self.account_key()))
             .iter()
             .find(|p| p.instrument_id == self.d.instrument_id)
             .map_or(Decimal::ZERO, |p| p.quantity)
     }
 
     fn view(&self) -> PortfolioView {
-        let snap = self.deps.paper.snapshot(self.asset_class);
+        let key = self.account_key();
+        let snap = self.deps.paper.snapshot_for(self.asset_class, Some(&key));
         let pos = snap
             .positions
             .iter()
             .find(|p| p.instrument_id == self.d.instrument_id);
         let unrealized: Decimal = snap.positions.iter().map(|p| p.unrealized_pnl).sum();
-        let daily_loss = self.deps.paper.daily_loss_usd(self.asset_class);
+        let daily_loss = self
+            .deps
+            .paper
+            .daily_loss_usd_for(self.asset_class, Some(&key));
         let position = pos.map_or(Decimal::ZERO, |p| p.quantity);
         let mark = self
             .deps
@@ -1464,6 +1517,7 @@ mod tests {
             store,
             sidecar: None,
             llm: None,
+            external: None,
         }
     }
 
@@ -1975,9 +2029,10 @@ mod tests {
 
         // A deliberately perturbed engine fails, naming the record and field.
         let mut perturbed = g.clone();
-        perturbed.nodes[1]
-            .args
-            .insert("n".into(), serde_json::from_value(serde_json::json!(22)).unwrap());
+        perturbed.nodes[1].args.insert(
+            "n".into(),
+            serde_json::from_value(serde_json::json!(22)).unwrap(),
+        );
         let reports = replayed(&store, &perturbed, &StdRegistries::new());
         let backtest::replay::Verdict::Diverged(d) = &reports[0].verdict else {
             panic!("{reports:?}");
@@ -2141,7 +2196,7 @@ mod tests {
             tick_size: Decimal::new(1, 1),
             lot_size: Decimal::new(1, 8),
         };
-        r.attach_forward(recorder, Uuid::new_v4(), 0, "t-fwd".into(), limits.clone())
+        r.attach_forward(recorder, Uuid::new_v4(), 0, "t-fwd".into(), limits, false)
             .unwrap();
         assert!(
             r.attach_forward(
@@ -2156,6 +2211,7 @@ mod tests {
                 0,
                 "t-fwd".into(),
                 limits,
+                false,
             )
             .is_err(),
             "a recorder attaches once"
@@ -2167,7 +2223,11 @@ mod tests {
         }
         let obs = store.observations.lock().unwrap();
         // Opened on the first bar, flat; one observation per bar after it.
-        assert_eq!(obs.len(), minutes.len() - 1, "one per bar after the opening mark");
+        assert_eq!(
+            obs.len(),
+            minutes.len() - 1,
+            "one per bar after the opening mark"
+        );
         assert!(obs.windows(2).all(|w| w[0].bar < w[1].bar));
         assert!(obs
             .iter()
@@ -2234,6 +2294,7 @@ mod tests {
         r.origin = Some(Genesis {
             checkpoint: None,
             history: Vec::new(),
+            external: None,
         });
         let recorder = reconciliation::ForwardRecorders::install()
             .deploy(
@@ -2251,6 +2312,7 @@ mod tests {
                 tick_size: Decimal::new(1, 1),
                 lot_size: Decimal::new(1, 8),
             },
+            false,
         )
         .unwrap();
         let mut first_flat = None;
@@ -2275,6 +2337,134 @@ mod tests {
         assert!(
             !store.observations.lock().unwrap().is_empty(),
             "recording opened once both were flat"
+        );
+    }
+
+    /// T-0.4 item 3: a restart resumes the forward series — the downtime reads
+    /// as missing bars, the series carries on from what was stored, and no
+    /// return is fabricated across the gap.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_restarted_forward_deployment_resumes_its_series_across_a_gap() {
+        let g = ema_7_21();
+        let plan = plan_of(&g, &StdRegistries::new());
+        let inst = "LIVE-FWD-RESUME-USD";
+        ready_instrument(inst, "100");
+        let (minutes, _) = trades_to_minutes(inst, 300);
+        let d = deployment(inst, &g);
+        let store = Arc::new(MemoryStore::default());
+        let limits = risk::InstrumentLimits {
+            tick_size: Decimal::new(1, 1),
+            lot_size: Decimal::new(1, 8),
+        };
+        let fwd = forward_spec(d.deployment_id.to_string());
+        let forward_id = fwd.deployment_id;
+
+        let deps_a = deps(store.clone(), Arc::new(NoLiveModels));
+        let gate = Arc::clone(&deps_a.gate);
+        let mut first = LiveRunner::start(
+            Arc::clone(&d),
+            Arc::clone(&plan),
+            AssetClass::CryptoSpotCex,
+            spec(inst),
+            deps_a,
+            vec![Vec::new()],
+        )
+        .await
+        .unwrap();
+        let recorder = reconciliation::ForwardRecorders::install()
+            .deploy(
+                fwd.clone(),
+                d.starting_capital,
+                Arc::clone(gate.halt_registry()),
+            )
+            .unwrap();
+        first
+            .attach_forward(recorder, forward_id, 0, "t-fwd".into(), limits, false)
+            .unwrap();
+        // Run until well into the series, then stop at a moment it is flat.
+        let mut k = 0;
+        for (i, m) in minutes.iter().enumerate() {
+            first.on_minute_bar(inst, *m).await.unwrap();
+            if i > 80 && first.is_idle() {
+                k = i + 1;
+                break;
+            }
+        }
+        assert!(k > 0, "the first run ends flat");
+        drop(first);
+        let before = store.observations.lock().unwrap().len();
+        assert!(before > 50);
+
+        // The process is down for a few minutes: those bars are never seen.
+        let down = 5;
+        let stored = crate::live_deployments::StoredForward {
+            marks: store.marks.lock().unwrap().clone(),
+            fills: store.fills.lock().unwrap().clone(),
+            observations: store.observations.lock().unwrap().clone(),
+        };
+        let deps_b = deps(store.clone(), Arc::new(NoLiveModels));
+        let mut second = LiveRunner::start(
+            Arc::clone(&d),
+            Arc::clone(&plan),
+            AssetClass::CryptoSpotCex,
+            spec(inst),
+            deps_b,
+            vec![minutes[..k + down].to_vec()],
+        )
+        .await
+        .unwrap();
+        let resumed = crate::live_deployments::resume_from(
+            &stored,
+            &d,
+            &fwd,
+            &reconciliation::ForwardRecorders::install(),
+            gate.halt_registry(),
+        )
+        .expect("the stored series resumes");
+        let fill_seq = stored.fills.last().map_or(0, |f| f.seq);
+        second
+            .attach_forward(
+                Arc::clone(&resumed),
+                forward_id,
+                fill_seq,
+                "t-fwd".into(),
+                limits,
+                true,
+            )
+            .unwrap();
+        for m in &minutes[k + down..] {
+            second.on_minute_bar(inst, *m).await.unwrap();
+        }
+        let marks = store.marks.lock().unwrap();
+        assert_eq!(
+            marks.iter().filter(|m| m.kind == "open").count(),
+            1,
+            "a resumed series does not open a second time"
+        );
+        let reanchor = marks
+            .iter()
+            .find(|m| m.kind == "reanchor")
+            .expect("the resumed series re-anchors at its first flat bar")
+            .bar;
+        let obs = store.observations.lock().unwrap();
+        assert!(
+            obs.len() > before,
+            "the series carries on after the restart"
+        );
+        assert!(
+            obs.iter().all(|o| o.bar != reanchor),
+            "no return is recorded for the anchor bar"
+        );
+        assert!(obs.windows(2).all(|w| w[0].bar < w[1].bar));
+        assert_eq!(
+            resumed.gaps().len(),
+            1,
+            "the downtime is one gap in the series"
+        );
+        let fills = store.fills.lock().unwrap();
+        assert!(
+            fills.windows(2).all(|w| w[1].seq == w[0].seq + 1),
+            "fill numbering continues"
         );
     }
 
@@ -2369,11 +2559,81 @@ mod tests {
     async fn a_deployment_not_bound_to_a_selection_reads_missing_with_the_reason() {
         let g = reads_w();
         let trace = one_decision("LIVE-ATTR-SOLO-USD", deployment("LIVE-ATTR-SOLO-USD", &g)).await;
-        let domain::strategy_graph::Value::Missing(MissingReason::NoData { what }) = &trace.values["w"]
+        let domain::strategy_graph::Value::Missing(MissingReason::NoData { what }) =
+            &trace.values["w"]
         else {
             panic!("{:?}", trace.values["w"]);
         };
         assert!(what.contains("not bound to a selection"), "{what}");
+    }
+
+    // ── U-4.7 ────────────────────────────────────────────────────────────────
+
+    /// A deployment trades in its own paper account: it sizes against its own
+    /// capital and its fills land there, never in the asset class's account
+    /// another deployment also trades in.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_deployment_with_its_own_account_sizes_and_trades_in_it() {
+        let inst = "LIVE-OWN-ACCT-USD";
+        ready_instrument(inst, "100");
+        let ac = AssetClass::CryptoSpotCex;
+        let g = ema_7_21();
+        let d = deployment(inst, &g);
+        env()
+            .paper
+            .open_deployment_account(d.deployment_id, ac, Decimal::from(2_000))
+            .unwrap();
+        let mut r = LiveRunner::start(
+            Arc::clone(&d),
+            plan_of(&g, &StdRegistries::new()),
+            ac,
+            spec(inst),
+            deps(Arc::new(MemoryStore::default()), Arc::new(NoLiveModels)),
+            vec![Vec::new()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            r.view().equity,
+            Decimal::from(2_000),
+            "its own capital, not the class account's"
+        );
+        let (minutes, _) = trades_to_minutes(inst, 120);
+        let mut decided = Vec::new();
+        for m in &minutes {
+            decided.extend(r.on_minute_bar(inst, *m).await.unwrap());
+        }
+        assert!(!submits(&decided).is_empty(), "it traded");
+        let key = d.deployment_id.to_string();
+        let own: Decimal = env()
+            .paper
+            .positions_for(ac, Some(&key))
+            .iter()
+            .filter(|p| p.instrument_id == inst)
+            .map(|p| p.quantity)
+            .sum();
+        let shared: Decimal = env()
+            .paper
+            .positions(ac)
+            .iter()
+            .filter(|p| p.instrument_id == inst)
+            .map(|p| p.quantity)
+            .sum();
+        assert_eq!(
+            shared,
+            Decimal::ZERO,
+            "nothing landed in the shared account"
+        );
+        assert_eq!(
+            own,
+            r.position(),
+            "the runner reads the account it trades in"
+        );
+        assert_ne!(
+            env().paper.snapshot_for(ac, Some(&key)).cash,
+            Decimal::from(2_000),
+            "its fills moved its own cash"
+        );
     }
 
     // ── U-4.5 ────────────────────────────────────────────────────────────────
@@ -2446,7 +2706,7 @@ mod tests {
         let reg = Arc::clone(&registry);
         let task =
             tokio::spawn(
-                async move { crate::live_deployments::drive(runner, &mut rx, &reg).await },
+                async move { crate::live_deployments::drive(runner, &mut rx, &reg, None).await },
             );
         let minute = |i: i64| crate::live_bars::MinuteBar {
             instrument_id: inst.into(),
@@ -2592,5 +2852,125 @@ mod tests {
             Some("left its selection: its strategy exited")
         );
         assert!(r.is_idle());
+    }
+
+    // ── P-3.6: external inputs on paper ──────────────────────────────────────
+
+    /// A 1h strategy that buys while the 10-year yield is above 3.5%.
+    fn rates_gate() -> StrategyGraph {
+        graph(serde_json::json!({
+          "format": "tbot.strategy/3", "kind": "trading", "name": "rates_gate",
+          "asset_class": "crypto_spot_cex", "timeframe": "1h",
+          "nodes": [
+            {"id":"rate","op":"feature","args":{"name":{"str":"macro_dgs10"}}},
+            {"id":"high","op":"gt","args":{"a":"rate","b":3.5}},
+            {"id":"go","op":"and","args":{"a":"high","b":"state.flat"}}
+          ],
+          "decide": {"rules": [{"when":"go","then":{"kind":"target","size":{"mode":"units","x":1}}}]}
+        }))
+    }
+
+    /// DGS10 published ten days before `T0` at `value`.
+    fn dgs10(value: Option<rust_decimal::Decimal>) -> strategy_engine::ExternalData {
+        let d = |n: i64| {
+            (chrono::DateTime::from_timestamp(T0, 0).unwrap() - chrono::Duration::days(n)).date_naive()
+        };
+        strategy_engine::ExternalData {
+            macro_rows: vec![dataplane::vintage::MacroObservation::derived(
+                "DGS10",
+                d(11),
+                d(10),
+                value,
+            )],
+            facts: vec![],
+        }
+    }
+
+    /// Thirty closed hours before `T0`, for the warm-up (the lookback counts the
+    /// source's day of publication lag: 25 bars on 1h).
+    fn hours_before_t0() -> Vec<Bar> {
+        (0..30)
+            .map(|i| Bar {
+                close_ns: (T0 - (29 - i) * 3_600) * 1_000_000_000,
+                open: 100.0,
+                high: 100.5,
+                low: 99.5,
+                close: 100.0,
+                volume: 10.0,
+            })
+            .collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_paper_deployment_reads_a_macro_series_and_its_journal_replays() {
+        let inst = "LIVE-MACRO-USD";
+        ready_instrument(inst, "100");
+        let g = rates_gate();
+        let store = Arc::new(MemoryStore::default());
+        let mut with = deps(store.clone(), Arc::new(NoLiveModels));
+        with.external = Some(dgs10(Some(rust_decimal::Decimal::new(40, 1))));
+        let mut r = LiveRunner::start(
+            deployment(inst, &g),
+            plan_of(&g, &StdRegistries::new()),
+            AssetClass::CryptoSpotCex,
+            spec(inst),
+            with,
+            vec![hours_before_t0()],
+        )
+        .await
+        .unwrap();
+        let (minutes, _) = trades_to_minutes(inst, 300);
+        let mut decided = Vec::new();
+        for m in &minutes[..150] {
+            decided.extend(r.on_minute_bar(inst, *m).await.unwrap());
+        }
+        assert!(
+            !submits(&decided).is_empty(),
+            "4.0 > 3.5: the gate opened on paper"
+        );
+        // A refresh revises the series to missing: journaled, and read from then on.
+        r.refresh_external(dgs10(None)).await.unwrap();
+        let mut after = Vec::new();
+        for m in &minutes[150..] {
+            after.extend(r.on_minute_bar(inst, *m).await.unwrap());
+        }
+        assert!(
+            after
+                .iter()
+                .all(|t| !matches!(t.values.get("rate"), Some(domain::strategy_graph::Value::Num(_)))),
+            "revised to missing reads missing"
+        );
+        assert!(
+            store.journal.lock().unwrap().iter().any(|rec| rec
+                .inputs
+                .get("preceding")
+                .is_some_and(|p| p.to_string().contains("\"external\""))),
+            "the refresh is in the journal"
+        );
+        // The backtest engine replays the journal identically: genesis rows and
+        // the refresh both reach the replay.
+        let reports = replayed(&store, &g, &StdRegistries::new());
+        let n = store.journal.lock().unwrap().len();
+        assert_eq!(identical(&reports), n);
+
+        // Without rows the same deployment holds: missing, not zero.
+        let inst2 = "LIVE-MACRO2-USD";
+        ready_instrument(inst2, "100");
+        let mut r2 = LiveRunner::start(
+            deployment(inst2, &g),
+            plan_of(&g, &StdRegistries::new()),
+            AssetClass::CryptoSpotCex,
+            spec(inst2),
+            deps(Arc::new(MemoryStore::default()), Arc::new(NoLiveModels)),
+            vec![hours_before_t0()],
+        )
+        .await
+        .unwrap();
+        let (minutes2, _) = trades_to_minutes(inst2, 150);
+        let mut held = Vec::new();
+        for m in &minutes2 {
+            held.extend(r2.on_minute_bar(inst2, *m).await.unwrap());
+        }
+        assert!(submits(&held).is_empty());
     }
 }

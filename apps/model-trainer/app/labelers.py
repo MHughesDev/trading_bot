@@ -56,6 +56,7 @@ def triple_barrier_labels(
     vert_bars: int = 60,
     devol: bool = True,
     close_col: str = "close",
+    path: str = "close",
 ) -> tuple[np.ndarray, int]:
     """Compute triple-barrier labels.
 
@@ -71,7 +72,15 @@ def triple_barrier_labels(
         sl:         stop-loss multiplier (same units)
         vert_bars:  vertical barrier in bars
         devol:      scale barriers by realized vol when True
+        path:       "close" (default; a barrier is touched when the close crosses it)
+                    or "high_low" (touched when the bar's high / low crosses it; when
+                    one bar's range spans both barriers the stop is taken first, the
+                    pessimistic reading, FEAT-005 3.4; N-1.4)
     """
+    if path == "high_low":
+        return _triple_barrier_high_low(df, pt, sl, vert_bars, devol, close_col)
+    if path != "close":
+        raise ValueError(f"unknown triple-barrier path {path!r}; use 'close' or 'high_low'")
     log_ret = _returns_from_df(df, close_col)
     vol = realized_vol(log_ret) if devol else np.ones(len(log_ret))
     n = len(df)
@@ -94,6 +103,37 @@ def triple_barrier_labels(
                 break
         # else: vertical exit → 0
 
+    return labels, vert_bars
+
+
+def _triple_barrier_high_low(df, pt, sl, vert_bars, devol, close_col):
+    """The intrabar path (N-1.4). Entry is the close of bar i; bar j (i < j <= i +
+    vert_bars) touches the target when its high is >= the up barrier and the stop
+    when its low is <= the down barrier. Both in one bar: stop first."""
+    from .failures import DataError
+
+    for col in ("high", "low"):
+        if col not in df.columns:
+            raise DataError(f"triple-barrier path 'high_low' needs a {col!r} column")
+    log_ret = _returns_from_df(df, close_col)
+    vol = realized_vol(log_ret) if devol else np.ones(len(log_ret))
+    close = np.log(df[close_col].to_numpy(dtype=float) + 1e-12)
+    hi = np.log(df["high"].to_numpy(dtype=float) + 1e-12)
+    lo = np.log(df["low"].to_numpy(dtype=float) + 1e-12)
+    n = len(df)
+    labels = np.zeros(n, dtype=np.float32)
+    for i in range(n):
+        if i + vert_bars >= n:
+            continue
+        up = pt * vol[i]
+        dn = -sl * vol[i]
+        up_hit = (hi[i + 1 : i + vert_bars + 1] - close[i]) >= up
+        dn_hit = (lo[i + 1 : i + vert_bars + 1] - close[i]) <= dn
+        either = up_hit | dn_hit
+        if not either.any():
+            continue
+        j = int(np.argmax(either))  # the first bar that touches anything
+        labels[i] = -1.0 if dn_hit[j] else 1.0  # a spanning bar takes the stop
     return labels, vert_bars
 
 

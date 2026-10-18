@@ -279,6 +279,7 @@ pub fn bad_ticks(bars: &[QcBar], cfg: &QcConfig) -> CheckResult {
 
     let win = cfg.bad_ticks.sigma_window.max(2);
     let mut reversing = 0usize;
+    let mut traded = 0usize;
     if returns.len() > win + 1 {
         for i in win..returns.len() - 1 {
             let window = &returns[i - win..i];
@@ -294,6 +295,12 @@ pub fn bad_ticks(bars: &[QcBar], cfg: &QcConfig) -> CheckResult {
                 && here.signum() != next.signum()
                 && reversed >= cfg.bad_ticks.reversal_fraction
             {
+                // ADR-P1-7a: a spike with traded volume behind it is a market
+                // move that reverted, not a bad print.
+                if traded_through(bars, i + 1, cfg) {
+                    traded += 1;
+                    continue;
+                }
                 reversing += 1;
                 offending.push(i + 1);
             }
@@ -314,12 +321,35 @@ pub fn bad_ticks(bars: &[QcBar], cfg: &QcConfig) -> CheckResult {
         Some(total as f64),
         format!(
             "{structural} structurally impossible bar(s), {reversing} spike(s) beyond \
-             {:.1}σ reversing ≥ {:.0}%",
+             {:.1}σ reversing ≥ {:.0}% ({traded} more excluded as traded moves: volume ≥              {:.1}× the rolling median)",
             cfg.bad_ticks.sigma_multiple,
-            cfg.bad_ticks.reversal_fraction * 100.0
+            cfg.bad_ticks.reversal_fraction * 100.0,
+            cfg.bad_ticks.volume_confirm_multiple
         ),
         offending,
     )
+}
+
+/// Whether bar `idx` carries enough traded volume to be a market move.
+///
+/// Volume is compared with the median of the preceding `sigma_window` bars. A
+/// disabled exemption (`volume_confirm_multiple <= 0`) and a window with no
+/// positive median both answer `false`: with no volume evidence the spike stays
+/// suspect, which is the conservative direction.
+fn traded_through(bars: &[QcBar], idx: usize, cfg: &QcConfig) -> bool {
+    let mult = cfg.bad_ticks.volume_confirm_multiple;
+    if mult <= 0.0 || idx == 0 {
+        return false;
+    }
+    let win = cfg.bad_ticks.sigma_window.max(2);
+    let from = idx.saturating_sub(win);
+    let mut vols: Vec<f64> = bars[from..idx].iter().map(|b| b.volume).collect();
+    if vols.is_empty() {
+        return false;
+    }
+    vols.sort_by(f64::total_cmp);
+    let median = vols[vols.len() / 2];
+    median > 0.0 && bars[idx].volume >= median * mult
 }
 
 // ── 4. stale runs ────────────────────────────────────────────────────────────
@@ -411,7 +441,8 @@ pub fn volume(bars: &[QcBar], cfg: &QcConfig) -> CheckResult {
         }
     }
 
-    let failed = zero_share > cfg.volume.max_zero_share || !spikes.is_empty();
+    let spike_share = spikes.len() as f64 / bars.len() as f64;
+    let failed = zero_share > cfg.volume.max_zero_share || spike_share > cfg.volume.max_spike_share;
     let mut offending = zero.clone();
     offending.extend(&spikes);
     offending.sort_unstable();
@@ -422,11 +453,13 @@ pub fn volume(bars: &[QcBar], cfg: &QcConfig) -> CheckResult {
         if failed { Outcome::Fail } else { Outcome::Pass },
         Some(zero_share),
         format!(
-            "{:.2}% zero-volume bars (limit {:.2}%); {} spike(s) over {:.0}× the rolling median",
+            "{:.2}% zero-volume bars (limit {:.2}%); {} spike(s) over {:.0}× the rolling median              ({:.3}% of bars, limit {:.2}%)",
             zero_share * 100.0,
             cfg.volume.max_zero_share * 100.0,
             spikes.len(),
-            cfg.volume.spike_multiple
+            cfg.volume.spike_multiple,
+            spike_share * 100.0,
+            cfg.volume.max_spike_share * 100.0
         ),
         offending,
     )
@@ -684,6 +717,50 @@ mod tests {
         );
     }
 
+    fn spiky_series() -> Vec<QcBar> {
+        let mut bars = clean(200);
+        for (i, b) in bars.iter_mut().enumerate() {
+            let p = 100.0 + (i as f64 * 0.01);
+            b.open = p;
+            b.high = p + 0.05;
+            b.low = p - 0.05;
+            b.close = p;
+            b.volume = 10.0;
+        }
+        bars[120].close = 140.0;
+        bars[120].high = 140.1;
+        bars
+    }
+
+    /// ADR-P1-7a: the same reversing spike is a bad print on thin volume and a
+    /// market move that reverted on heavy volume.
+    #[test]
+    fn bad_ticks_excludes_a_spike_that_traded_heavy_volume() {
+        let thin = spiky_series();
+        let r = bad_ticks(&thin, &cfg());
+        assert_eq!(r.outcome, Outcome::Fail, "{}", r.detail);
+
+        let mut heavy = spiky_series();
+        heavy[120].volume = 10.0 * 40.0;
+        let r = bad_ticks(&heavy, &cfg());
+        assert_eq!(r.outcome, Outcome::Pass, "{}", r.detail);
+        assert!(r.detail.contains("1 more excluded as traded"), "{}", r.detail);
+
+        // The exemption can be switched off.
+        let mut off = cfg();
+        off.bad_ticks.volume_confirm_multiple = 0.0;
+        assert_eq!(bad_ticks(&heavy, &off).outcome, Outcome::Fail);
+    }
+
+    /// A structurally impossible bar is never excused by its volume.
+    #[test]
+    fn bad_ticks_structural_failures_ignore_volume() {
+        let mut bars = clean(60);
+        bars[30].high = bars[30].close - 1.0;
+        bars[30].volume = 1.0e9;
+        assert_eq!(bad_ticks(&bars, &cfg()).outcome, Outcome::Fail);
+    }
+
     #[test]
     fn bad_ticks_is_silent_on_a_clean_series() {
         assert_eq!(bad_ticks(&clean(300), &cfg()).outcome, Outcome::Pass);
@@ -744,10 +821,36 @@ mod tests {
         for b in &mut bars {
             b.volume = 1_000.0;
         }
-        bars[150].volume = 1_000.0 * 25.0;
+        // Three spikes in 200 bars is 1.5%, over the 1% share limit.
+        for i in [150, 170, 190] {
+            bars[i].volume = 1_000.0 * 25.0;
+        }
         let r = volume(&bars, &cfg());
         assert_eq!(r.outcome, Outcome::Fail, "{}", r.detail);
         assert!(r.offending.contains(&150));
+    }
+
+    /// ADR-P1-7b: a lone spike in a long series is the heavy tail of a 1m volume
+    /// distribution, reported but not failed; the same bar in a short series is
+    /// over the share limit.
+    #[test]
+    fn volume_spikes_fail_on_their_share_not_their_existence() {
+        let mut long = clean(1_000);
+        for b in &mut long {
+            b.volume = 1_000.0;
+        }
+        long[500].volume = 25_000.0;
+        let r = volume(&long, &cfg());
+        assert_eq!(r.outcome, Outcome::Pass, "{}", r.detail);
+        assert!(r.offending.contains(&500), "the spike is still listed");
+        assert!(r.detail.contains("1 spike"), "{}", r.detail);
+
+        let mut short = clean(50 + 40);
+        for b in &mut short {
+            b.volume = 1_000.0;
+        }
+        short[80].volume = 25_000.0;
+        assert_eq!(volume(&short, &cfg()).outcome, Outcome::Fail);
     }
 
     #[test]

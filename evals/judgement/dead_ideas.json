@@ -1,0 +1,38 @@
+[
+  {
+    "case_id": "judgement/dead_01",
+    "subject": "ema_cross_v1",
+    "class": "costs_dominate",
+    "question_shape": "investigate"
+  },
+  {
+    "case_id": "judgement/dead_02",
+    "subject": "rsi_meanrev_btc_1h",
+    "class": "weak_effect",
+    "question_shape": "investigate"
+  },
+  {
+    "case_id": "judgement/dead_03",
+    "subject": "funding_carry_perp",
+    "class": "regime_dependent",
+    "question_shape": "investigate"
+  },
+  {
+    "case_id": "judgement/dead_04",
+    "subject": "overnight_drift_spy",
+    "class": "weak_effect",
+    "question_shape": "investigate"
+  },
+  {
+    "case_id": "judgement/dead_05",
+    "subject": "vol_breakout_eth_15m",
+    "class": "costs_dominate",
+    "question_shape": "investigate"
+  },
+  {
+    "case_id": "judgement/dead_06",
+    "subject": "pairs_btc_eth_zscore",
+    "class": "unstable_across_folds",
+    "question_shape": "investigate"
+  }
+]

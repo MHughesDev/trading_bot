@@ -135,5 +135,5 @@ hostile or boundary input, co-located with the code:
 ## 8. Traceability
 
 - ADR-0014 (boundary, pinned SDK, restart decision).
-- Concern map: `plans/set-D/MASTER.md` (#1–#29 → phase · task).
+- Concern map: `docs/plans/plan-sets/set-D/MASTER.md` (#1–#29 → phase · task).
 - DATA-004 (strategy definition format), DATA / ADR-0012 (bar storage).

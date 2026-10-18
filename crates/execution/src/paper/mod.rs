@@ -22,6 +22,7 @@ pub mod clob;
 pub mod dispatch;
 pub mod engine;
 pub mod ledger;
+pub mod persist;
 pub mod policy;
 pub mod prediction;
 pub mod session;

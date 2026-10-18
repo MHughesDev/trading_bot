@@ -1145,6 +1145,76 @@ fn a_finding_may_not_cite_an_identifier_the_session_never_saw() {
     );
 }
 
+/// S-10.12: the platform closes an open question when a later finding cites it, and a run
+/// can only cite what it has read. The question's id arrives in the brief, not in a tool
+/// result, so the brief's ids have to count as read -- or the closing rule never fires.
+/// A fabricated handle is still refused (the test above), so this is not a loosening.
+#[test]
+fn a_finding_may_cite_an_open_question_the_brief_showed() {
+    use harness::memory::{Brief, Retrieval, Slot};
+    let set = load();
+    let p = set.get("qwen3.6-35b-a3b").unwrap().clone();
+    let brief = |shown: bool| Brief {
+        items: vec![],
+        retrievals: if shown {
+            vec![Retrieval {
+                run_id: "run_1".into(),
+                entry_id: "q_blocking_7f3a9c21".into(),
+                rank: 0,
+                slot: Slot::OpenQuestion,
+                why: "an open question on this subject".into(),
+                cited: false,
+            }]
+        } else {
+            vec![]
+        },
+        elided: 0,
+    };
+    let rejected_as_unattributable = |shown: bool| {
+        let mut l = Loop::new(p.clone(), local_registry(), local_task()).with_brief(brief(shown));
+        l.next(Input::Admission(Admission::Admit));
+        l.next(Input::ModelReply {
+            raw: json!({ "steps": [
+                { "goal": "read", "tool": "get_bars" },
+                { "goal": "note it", "tool": "record_finding" }
+            ]})
+            .to_string(),
+        });
+        l.next(Input::ModelReply {
+            raw: json!({ "name": "get_bars" }).to_string(),
+        });
+        l.next(Input::ModelReply {
+            raw: json!({ "instrument": "BTC-USD" }).to_string(),
+        });
+        l.next(Input::ToolResult {
+            output: "{\"bars\": 500}".into(),
+            source: "platform.get_bars".into(),
+        });
+        l.next(Input::ModelReply {
+            raw: json!({ "name": "record_finding" }).to_string(),
+        });
+        let fx = l.next(Input::ModelReply {
+            raw: json!({
+                "finding": "The funding signal survives 2022.",
+                "evidence": "q_blocking_7f3a9c21"
+            })
+            .to_string(),
+        });
+        fx.iter().any(
+            |e| matches!(e, Effect::Note(harness::drive::Note::Rejected { code, .. })
+            if *code == "drive.finding_evidence_unattributable"),
+        )
+    };
+    assert!(
+        !rejected_as_unattributable(true),
+        "a question the brief showed must be citable"
+    );
+    assert!(
+        rejected_as_unattributable(false),
+        "and the same id with no brief behind it is still a fabricated handle"
+    );
+}
+
 /// `max_steps` bounds how long a task may run and says nothing about whether the
 /// running achieves anything. Those are different questions; only one was being
 /// asked. The run this encodes spent eleven detectably barren steps before its

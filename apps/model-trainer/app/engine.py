@@ -533,6 +533,7 @@ def train_torch_model(
     emit_progress,
     weight_decay: float = 0.0,
     sample_weight: np.ndarray | None = None,
+    checkpoint: dict | None = None,
 ):
     import torch
     import torch.nn as nn
@@ -566,7 +567,20 @@ def train_torch_model(
     train_loss = float("nan")
     val_loss = float("nan")
 
-    for epoch in range(epochs):
+    # Mid-run checkpoints (checklist 2.4/2.5). Off unless the request carries a
+    # `_checkpoint` block; `checkpoint["resume"]` is a manifest the platform's
+    # `plan_resume` has already approved, and restoring it puts the model, the
+    # optimizer and every RNG exactly where epoch `start_epoch` left them.
+    from . import checkpoint as _checkpoint
+
+    ckpt = _checkpoint.checkpointer_from_config(checkpoint, emit_progress=emit_progress)
+    start_epoch = 0
+    if ckpt is not None and checkpoint.get("resume"):
+        start_epoch = _checkpoint.restore_torch_checkpoint(
+            ckpt.store, checkpoint["resume"], model, opt
+        )
+
+    for epoch in range(start_epoch, epochs):
         model.train()
         perm = torch.randperm(n)
         running = 0.0
@@ -604,6 +618,12 @@ def train_torch_model(
             pct,
             {"epoch": epoch + 1, "train_loss": train_loss, "val_loss": val_loss},
         )
+        if ckpt is not None and epoch + 1 < epochs:
+            # Not after the last epoch: a finished run's checkpoint is the model.
+            ckpt.pct = pct
+            ckpt.maybe_write(
+                epoch=epoch + 1, model=model, optimizer=opt, dataloader_position=n
+            )
 
     return model, {"final_train_loss": train_loss, "final_val_loss": val_loss}
 
@@ -624,6 +644,7 @@ def wrap_bundle(
     sigma_scaler: float | None = None,
     calibration: dict | None = None,
     extra: dict | None = None,
+    sequence: dict | None = None,
 ) -> bytes:
     """Wrap a framework-native artifact in the self-describing bundle envelope.
 
@@ -644,5 +665,8 @@ def wrap_bundle(
         "calibration": calibration,
         "extra": extra or {},
     }
+    if sequence is not None:
+        # N-2.5: the window the model was trained on; serving builds the same one.
+        header["sequence"] = {"window": int(sequence["window"]), "stride": int(sequence.get("stride", 1))}
     hb = json.dumps(header, separators=(",", ":")).encode("utf-8")
     return MAGIC + struct.pack("<I", len(hb)) + hb + inner

@@ -16,7 +16,7 @@ use crate::credentials::LlmCredentialStore;
 use crate::{auth::BearerToken, state::AppState};
 
 use super::conversations;
-use super::manager::{PauseOutcome, ResumeOutcome, StartError};
+use super::manager::{PauseOutcome, PinOutcome, ResumeOutcome, StartError};
 
 #[derive(Debug, Deserialize)]
 pub struct NewConversationBody {
@@ -26,9 +26,28 @@ pub struct NewConversationBody {
     pub model: Option<String>,
 }
 
+/// `POST /api/agent/conversations/{id}/messages`.
+///
+/// `{text}` alone still means what it always meant — a Research turn under the
+/// default workflow. The three optional fields are what the desk needs and could
+/// not send (AGENT-012 §3.3; S-2.14): a Chat turn, a workflow chip, and a steer
+/// for the turn already running.
+///
+/// `deny_unknown_fields`, so a misspelt `workflw` is a 422 naming it rather than
+/// a silently default run.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MessageBody {
     pub text: String,
+    /// `chat` or `research`.
+    #[serde(default)]
+    pub mode: Option<harness::state::Mode>,
+    /// The stage skeleton, e.g. `falsify`. Absent is `investigate`.
+    #[serde(default)]
+    pub workflow: Option<harness::state::Workflow>,
+    /// Deliver to the conversation's live run as a steer (S-2.14).
+    #[serde(default)]
+    pub steer: bool,
 }
 
 /// The default provider and model for a new conversation.
@@ -45,8 +64,46 @@ pub fn default_provider() -> String {
 }
 
 fn default_model(state: &AppState) -> (String, String) {
+    let provider = default_provider();
     let model = std::env::var("TBOT_AGENT_MODEL").unwrap_or_else(|_| state.default_profile.clone());
-    (default_provider(), model)
+    let model = crate::model_policy::or_baseline(&provider, model);
+    (provider, model)
+}
+
+/// The provider and model a new conversation opens on for this user when the
+/// caller names none: the user's own default key first, then the key verified
+/// most recently, and only then the server's default. A user who connected only
+/// an OpenAI key must never be handed a conversation on a provider they have no
+/// key for, which is what the server default alone did.
+pub async fn default_engine_for_user(state: &AppState, user_id: uuid::Uuid) -> (String, String) {
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT provider, default_model FROM llm_credentials
+          WHERE user_id = $1 AND provider IN ('openai', 'anthropic')
+          ORDER BY is_default DESC, verified_at DESC NULLS LAST, updated_at DESC
+          LIMIT 1",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.pg)
+    .await
+    .ok()
+    .flatten();
+    match row {
+        Some((provider, model)) => {
+            // A default stored before the model policy may name a model that is no
+            // longer enabled; the conversation opens on the baseline instead.
+            let model = model
+                .map(|m| crate::model_policy::or_baseline(&provider, m))
+                .unwrap_or_else(|| suggested_model(&provider, state));
+            (provider, model)
+        }
+        None => default_model(state),
+    }
+}
+
+/// The model a provider starts on when the user has not chosen one.
+fn suggested_model(provider: &str, state: &AppState) -> String {
+    crate::model_policy::baseline(provider)
+        .map_or_else(|| state.default_profile.clone(), str::to_string)
 }
 
 fn start_error(e: &StartError) -> (StatusCode, &'static str) {
@@ -139,6 +196,13 @@ pub async fn list_profiles(State(state): State<AppState>, token: BearerToken) ->
                 "model_id": p.model_id,
                 "provider": p.provider,
                 "tier": p.tier.as_str(),
+                // The tier as measured: `unmeasured` for a local profile no
+                // scorecard row backs (S-4.13), never the declared tier alone.
+                "tier_label": p.tier_label(),
+                "measurement": match p.measurement() {
+                    harness::profile::Measurement::Measured { row } => json!({"measured": true, "row": row}),
+                    harness::profile::Measurement::Unmeasured { why } => json!({"measured": false, "why": why}),
+                },
                 "is_local": p.tier.is_local(),
                 "tool_calling": p.tool_calling.as_str(),
                 "max_steps": p.orchestration.max_steps,
@@ -253,9 +317,24 @@ pub async fn create_conversation(
     token: BearerToken,
     Json(body): Json<NewConversationBody>,
 ) -> Response {
-    let (dp, dm) = default_model(&state);
+    let (dp, dm) = default_engine_for_user(&state, token.user_id()).await;
+    // A provider named without a model must not inherit the other provider's model.
+    let model = match (&body.provider, body.model) {
+        (_, Some(m)) => m,
+        (Some(p), None) if *p != dp => suggested_model(p, &state),
+        _ => dm,
+    };
     let provider = body.provider.unwrap_or(dp);
-    let model = body.model.unwrap_or(dm);
+    if !crate::model_policy::is_allowed(&provider, &model) {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "model_not_enabled",
+                "message": crate::model_policy::not_enabled_message(&provider, &model),
+            })),
+        )
+            .into_response();
+    }
     match conversations::create(&state.pg, token.user_id(), &provider, &model).await {
         Ok(id) => (
             StatusCode::CREATED,
@@ -319,8 +398,18 @@ pub async fn send_message(
     let creds = LlmCredentialStore::new(state.pg.clone(), state.cred_crypto.clone());
     match state
         .agent
-        // No workflow chip on the front door yet (AGENT-012 §3.3).
-        .send_message(token.user_id(), conversation_id, &body.text, &creds, None)
+        .send_turn(
+            token.user_id(),
+            conversation_id,
+            &body.text,
+            &creds,
+            super::manager::TurnOptions {
+                workflow: body.workflow,
+                mode: body.mode,
+                steer: body.steer,
+                max_trials: None,
+            },
+        )
         .await
     {
         Ok(run_id) => (StatusCode::ACCEPTED, Json(json!({ "run_id": run_id }))).into_response(),
@@ -782,6 +871,69 @@ pub async fn resume_run(
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PinBody {
+    pub tool: String,
+}
+
+/// POST /api/agent/runs/{id}/pins — pin a tool for this run (S-6.11).
+///
+/// The loop's router reads the pin at the run's next step boundary and exposes
+/// the tool first. A pin is a request the router can still decline (a ring or the
+/// paper gate may hide the tool), so the answer says `queued`, not `available`.
+pub async fn pin_run(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(run_id): Path<Uuid>,
+    Json(body): Json<PinBody>,
+) -> Response {
+    let tool = body.tool.trim();
+    match state.agent.pin_tool(token.user_id(), run_id, tool).await {
+        Ok(PinOutcome::Pinned) => Json(json!({
+            "pinned": true,
+            "tool": tool,
+            "queued": true,
+            "message": "delivered at the run's next step boundary",
+        }))
+        .into_response(),
+        Ok(PinOutcome::NoSuchRun) => {
+            (StatusCode::NOT_FOUND, Json(json!({ "error": "not_found" }))).into_response()
+        }
+        Ok(PinOutcome::UnknownTool) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "unknown_tool", "tool": tool })),
+        )
+            .into_response(),
+        Ok(PinOutcome::AlreadyFinished(status)) => (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "run_already_finished", "status": status })),
+        )
+            .into_response(),
+        Ok(PinOutcome::NotDrivenHere(status)) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "run_not_driven_here",
+                "status": status,
+                "message": "this process is not driving this run, so there is no router to tell",
+            })),
+        )
+            .into_response(),
+        Ok(PinOutcome::Stopping) => (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "run_stopping" })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "pin tool failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "pin_failed" })),
+            )
+                .into_response()
+        }
+    }
+}
+
 /// POST /api/agent/trajectory — append one agent tool step (SPEC §14.6).
 ///
 /// Every tool step reaches this through `mcp_server_lib::dispatch_tool`, whichever
@@ -910,4 +1062,25 @@ pub async fn close_audit_record(
         Json(json!({ "recorded": true, "verdict": verdict.as_str() })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod message_body_tests {
+    use super::MessageBody;
+
+    /// `{text}` alone is still a valid turn, and the three new fields parse.
+    #[test]
+    fn the_message_body_accepts_text_alone_and_the_optional_fields() {
+        let b: MessageBody = serde_json::from_str(r#"{"text":"hi"}"#).unwrap();
+        assert!(b.mode.is_none() && b.workflow.is_none() && !b.steer);
+        let b: MessageBody = serde_json::from_str(
+            r#"{"text":"only 1h","mode":"chat","workflow":"falsify","steer":true}"#,
+        )
+        .unwrap();
+        assert_eq!(b.mode, Some(harness::state::Mode::Chat));
+        assert_eq!(b.workflow, Some(harness::state::Workflow::Falsify));
+        assert!(b.steer);
+        // A misspelt field is refused rather than silently ignored.
+        assert!(serde_json::from_str::<MessageBody>(r#"{"text":"x","workflw":"falsify"}"#).is_err());
+    }
 }

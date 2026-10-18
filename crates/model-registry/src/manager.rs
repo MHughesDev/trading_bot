@@ -46,6 +46,11 @@ fn slugify(name: &str) -> String {
     }
 }
 
+mod curve;
+mod resume;
+pub use curve::{point_from_metric, MetricPoint};
+pub use resume::{RecoveryAction, RecoveryReport, ResumeDecision};
+
 pub struct ModelManager {
     pg: PgPool,
     jobs: RwLock<HashMap<Uuid, Arc<Job>>>,
@@ -96,6 +101,16 @@ impl ModelManager {
         metric: Option<serde_json::Value>,
     ) {
         use std::sync::atomic::Ordering;
+        // A checkpoint manifest the trainer published is stored for resumption
+        // (checklist 2.4/2.5); a partial one is refused at the door.
+        if let Some(manifest) = metric.as_ref().and_then(|m| m.get("checkpoint")) {
+            self.record_checkpoint(run_id, manifest).await;
+        }
+        // The epoch it reports, kept so the Training Console can draw a curve
+        // (H-5.5); the merge below keeps only the latest.
+        if let Some(m) = metric.as_ref() {
+            self.record_metric_point(run_id, m).await;
+        }
         let jobs = self.jobs.read().await;
         if let Some(job) = jobs.get(&run_id) {
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -335,6 +350,40 @@ impl ModelManager {
             anyhow::bail!("external_llm_adapter models do not train (D-3)");
         }
 
+        // Set N: resolve the declaration and the family before any row is written or
+        // anything dispatched. A request with neither retrains the way the model was last
+        // trained (the same declaration, window shifted to now), never from silent defaults.
+        let mut req = req;
+        if req.declaration.is_none() && req.family.is_none() && req.data.is_none() {
+            if let Some((d, f)) =
+                crate::studio::inherit_from_last_run(&self.pg, model_id, Utc::now()).await
+            {
+                req.declaration = Some(d);
+                req.family = f;
+            }
+        }
+        let studio_artifacts_prefix =
+            std::env::var("ARTIFACT_STORE_PATH").unwrap_or_else(|_| "./artifacts".to_string());
+        let studio = crate::studio::resolve(
+            req.declaration.as_ref(),
+            req.family.as_ref(),
+            &format!("{:?}", model.definition.framework).to_lowercase(),
+            &studio_artifacts_prefix,
+            Utc::now(),
+        )?;
+
+        // N-1.6: a declared run in an Experiment adds its specifications to the count.
+        if let (Some(exp), Some(v)) = (req.experiment_id.as_deref(), studio.validated.as_ref()) {
+            if let Some((parent, _)) = crate::studio::last_declared_run(&self.pg, model_id).await {
+                if let Err(e) =
+                    crate::studio::record_specifications(&self.pg, exp, &parent, &v.declaration)
+                        .await
+                {
+                    anyhow::bail!("could not count the run's specifications on {exp}: {e}");
+                }
+            }
+        }
+
         let run_id = Uuid::new_v4();
         let job = Job::new(
             run_id,
@@ -360,27 +409,41 @@ impl ModelManager {
         .bind(user_id)
         .execute(&self.pg)
         .await;
+        // The declaration and family this run was started with (migration 0207): read
+        // back by `drive_train` to dispatch them, and by a later retrain to repeat them.
+        let _ = sqlx::query(
+            "UPDATE training_runs SET declaration_json = $2, family_json = $3 WHERE run_id = $1",
+        )
+        .bind(run_id)
+        .bind(studio.declaration_json.as_ref())
+        .bind(studio.family_json())
+        .execute(&self.pg)
+        .await;
 
         // Resolve the definition and the dataset spec before anything is
         // dispatched: the trial must name the exact data it will read (INV-12),
         // and a plan that cannot be built dispatches nothing at all.
         let definition = self.load_definition(model_id, &hp).await?;
         let lookback_days = req.data.as_ref().map_or(30, |d| d.lookback_days);
-        let window_end = Utc::now();
-        let window_start = window_end - chrono::Duration::days(i64::from(lookback_days));
+        let (window_start, window_end) = studio.window().unwrap_or_else(|| {
+            let end = Utc::now();
+            (end - chrono::Duration::days(i64::from(lookback_days)), end)
+        });
         let artifacts_prefix =
             std::env::var("ARTIFACT_STORE_PATH").unwrap_or_else(|_| "./artifacts".to_string());
+        let planned_request = match &studio.lowered {
+            // A declared run plans exactly what its declaration lowers to.
+            Some(l) => l.request.clone(),
+            None => dataset_request(
+                &definition,
+                req.data.as_ref(),
+                (window_start, window_end),
+                &artifacts_prefix,
+            )?,
+        };
         let plan = self
             .datasets
-            .plan(
-                &user_id.to_string(),
-                dataset_request(
-                    &definition,
-                    req.data.as_ref(),
-                    (window_start, window_end),
-                    &artifacts_prefix,
-                )?,
-            )
+            .plan(&user_id.to_string(), planned_request)
             .await?;
 
         let subject = training_subject(
@@ -391,6 +454,19 @@ impl ModelManager {
             &plan,
         );
         let mut ticket = self.register_legacy(user_id, &subject).await?;
+        // What recovery needs to rebuild this run after a restart, with the data
+        // window resolved to instants (see `manager/resume.rs`).
+        self.record_spec(
+            run_id,
+            model_id,
+            user_id,
+            ticket.trial_id(),
+            &hp,
+            &serde_json::to_value(&req.data).unwrap_or_default(),
+            req.version_note.as_deref(),
+            (window_start, window_end),
+        )
+        .await;
 
         self.jobs.write().await.insert(run_id, Arc::clone(&job));
 
@@ -650,76 +726,7 @@ impl ModelManager {
     ) -> anyhow::Result<serde_json::Value> {
         self.ensure_model_owned(model_id, user_id).await?;
 
-        // 1. Verify version exists; gather artifact info.
-        let version_row: Option<(String, Option<serde_json::Value>, Option<String>)> = sqlx::query_as(
-            "SELECT mv.status, ma.sha256, ma.storage_uri \
-             FROM model_versions mv \
-             LEFT JOIN model_artifacts ma ON ma.model_id=mv.model_id AND ma.version=mv.version AND ma.artifact_type='model' \
-             WHERE mv.model_id=$1 AND mv.version=$2",
-        )
-        .bind(model_id)
-        .bind(version)
-        .fetch_optional(&self.pg)
-        .await?;
-
-        let (_ver_status, artifact_hash, _artifact_uri) =
-            version_row.ok_or_else(|| anyhow::anyhow!("version {version} not found"))?;
-
-        let mut gate_checks = Vec::new();
-        let mut gate_passed = true;
-
-        // Check 1: Passed eval suite
-        let eval_passed: Option<(i64,)> = sqlx::query_as(
-            "SELECT COUNT(*) FROM evaluation_runs WHERE model_id=$1 AND version=$2 AND status='succeeded'",
-        )
-        .bind(model_id)
-        .bind(version)
-        .fetch_optional(&self.pg)
-        .await?;
-        let has_eval = eval_passed.is_some_and(|(n,)| n > 0);
-        gate_checks.push(serde_json::json!({ "check": "passed_eval_suite", "passed": has_eval, "required": true }));
-        if !has_eval {
-            gate_passed = false;
-        }
-
-        // Check 2: Artifact integrity
-        let artifact_ok = artifact_hash.is_some();
-        gate_checks.push(serde_json::json!({ "check": "artifact_integrity", "passed": artifact_ok, "required": true }));
-        if !artifact_ok {
-            gate_passed = false;
-        }
-
-        // Check 3: Rollback available (prior production version exists)
-        let prior_production: Option<(i32,)> = sqlx::query_as(
-            "SELECT version FROM model_aliases WHERE model_id=$1 AND alias='production'",
-        )
-        .bind(model_id)
-        .fetch_optional(&self.pg)
-        .await?;
-        let rollback_available = prior_production.is_some() || environment != "live";
-        gate_checks.push(serde_json::json!({ "check": "rollback_available", "passed": rollback_available, "required": environment == "live" }));
-        if !rollback_available && environment == "live" {
-            gate_passed = false;
-        }
-
-        // Check 4: No metric regression (from latest eval run)
-        let regression: Option<(Option<serde_json::Value>,)> = sqlx::query_as(
-            "SELECT regression_report_json FROM evaluation_runs WHERE model_id=$1 AND version=$2 AND status='succeeded' ORDER BY created_at DESC LIMIT 1",
-        )
-        .bind(model_id)
-        .bind(version)
-        .fetch_optional(&self.pg)
-        .await?;
-        let no_regression = regression
-            .as_ref()
-            .and_then(|(r,)| r.as_ref())
-            .and_then(|r| r.get("verdict"))
-            .and_then(|v| v.as_str())
-            .is_none_or(|v| v != "regressed"); // if no baseline, pass
-        gate_checks.push(serde_json::json!({ "check": "no_metric_regression", "passed": no_regression, "required": true }));
-        if !no_regression {
-            gate_passed = false;
-        }
+        let (gate_checks, gate_passed) = self.gate_checks(model_id, version, environment).await?;
 
         // Gate decision
         if !gate_passed && override_reason.is_none() {
@@ -808,6 +815,121 @@ impl ModelManager {
             "gate_checks": gate_checks,
             "override_reason": override_reason,
         }))
+    }
+
+    /// The promotion gate's checks for a version, without promoting anything: what a person
+    /// deciding a proposal reads, and what `promote_gated` enforces. Returns the checks and
+    /// whether every required one passed.
+    pub async fn gate_checks(
+        &self,
+        model_id: &str,
+        version: i32,
+        environment: &str,
+    ) -> anyhow::Result<(Vec<serde_json::Value>, bool)> {
+        // 1. Verify version exists; gather artifact info.
+        let version_row: Option<(String, Option<serde_json::Value>, Option<String>)> = sqlx::query_as(
+            "SELECT mv.status, ma.sha256, ma.storage_uri \
+             FROM model_versions mv \
+             LEFT JOIN model_artifacts ma ON ma.model_id=mv.model_id AND ma.version=mv.version AND ma.artifact_type='model' \
+             WHERE mv.model_id=$1 AND mv.version=$2",
+        )
+        .bind(model_id)
+        .bind(version)
+        .fetch_optional(&self.pg)
+        .await?;
+
+        let (_ver_status, artifact_hash, _artifact_uri) =
+            version_row.ok_or_else(|| anyhow::anyhow!("version {version} not found"))?;
+
+        let mut gate_checks = Vec::new();
+        let mut gate_passed = true;
+
+        // Check 1: Passed eval suite
+        let eval_passed: Option<(i64,)> = sqlx::query_as(
+            "SELECT COUNT(*) FROM evaluation_runs WHERE model_id=$1 AND version=$2 AND status='succeeded'",
+        )
+        .bind(model_id)
+        .bind(version)
+        .fetch_optional(&self.pg)
+        .await?;
+        let has_eval = eval_passed.is_some_and(|(n,)| n > 0);
+        gate_checks.push(serde_json::json!({ "check": "passed_eval_suite", "passed": has_eval, "required": true }));
+        if !has_eval {
+            gate_passed = false;
+        }
+
+        // Check 2: Artifact integrity
+        let artifact_ok = artifact_hash.is_some();
+        gate_checks.push(serde_json::json!({ "check": "artifact_integrity", "passed": artifact_ok, "required": true }));
+        if !artifact_ok {
+            gate_passed = false;
+        }
+
+        // Check 3: Rollback available (prior production version exists)
+        let prior_production: Option<(i32,)> = sqlx::query_as(
+            "SELECT version FROM model_aliases WHERE model_id=$1 AND alias='production'",
+        )
+        .bind(model_id)
+        .fetch_optional(&self.pg)
+        .await?;
+        let rollback_available = prior_production.is_some() || environment != "live";
+        gate_checks.push(serde_json::json!({ "check": "rollback_available", "passed": rollback_available, "required": environment == "live" }));
+        if !rollback_available && environment == "live" {
+            gate_passed = false;
+        }
+
+        // Check 4: No metric regression (from latest eval run)
+        let regression: Option<(Option<serde_json::Value>,)> = sqlx::query_as(
+            "SELECT regression_report_json FROM evaluation_runs WHERE model_id=$1 AND version=$2 AND status='succeeded' ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(model_id)
+        .bind(version)
+        .fetch_optional(&self.pg)
+        .await?;
+        let no_regression = regression
+            .as_ref()
+            .and_then(|(r,)| r.as_ref())
+            .and_then(|r| r.get("verdict"))
+            .and_then(|v| v.as_str())
+            .is_none_or(|v| v != "regressed"); // if no baseline, pass
+        gate_checks.push(serde_json::json!({ "check": "no_metric_regression", "passed": no_regression, "required": true }));
+        if !no_regression {
+            gate_passed = false;
+        }
+
+        // Check 5 (Set N N-3.2, N-3.6): the usage rules. A forecast that does not clear
+        // them may not size a position, so it does not become `production`. A missing
+        // measurement blocks (ADR-N-05): no recorded series, no HARQ baseline, no ES test.
+        let usage = self.usage_verdict(model_id, version).await;
+        gate_checks.push(serde_json::json!({
+            "check": "usage_rules",
+            "passed": usage.allowed,
+            "required": true,
+            "reasons": usage.reasons(),
+        }));
+        if !usage.allowed {
+            gate_passed = false;
+        }
+
+        Ok((gate_checks, gate_passed))
+    }
+
+    /// The usage-rule verdict for a version, from its latest successful evaluation, for the
+    /// uses its definition implies. The one reading of the evidence the promotion gate, the
+    /// verdict route and the evidence route share.
+    pub async fn usage_verdict(&self, model_id: &str, version: i32) -> crate::verdict::VerdictReport {
+        let uses = crate::studio::uses_for_version(&self.pg, model_id, version).await;
+        self.usage_verdict_for(model_id, version, &uses).await
+    }
+
+    /// As [`Self::usage_verdict`] for an explicit set of uses (a Gate 3 binding names its own).
+    pub async fn usage_verdict_for(
+        &self,
+        model_id: &str,
+        version: i32,
+        uses: &[crate::scoring_v2::ForecastUse],
+    ) -> crate::verdict::VerdictReport {
+        usage_verdict_pg(&self.pg, model_id, version, uses).await
     }
 
     /// Set an arbitrary alias (production/candidate/staging/fallback) to a version.
@@ -1172,6 +1294,7 @@ impl ModelManager {
                 crate::sidecar::PredictInstance {
                     instrument_id,
                     features,
+                    series: HashMap::default(),
                 }
             })
             .collect();
@@ -1531,6 +1654,33 @@ impl ModelManager {
         job.progress_pct.store(15, Ordering::Relaxed);
         self.broadcast_progress(&job.snapshot());
 
+        // Resume from a stored checkpoint when `plan_resume` says it applies to
+        // this computation; a checkpoint that fails the contract fails the run.
+        let resume = match self.resume_for(job.run_id, &dataset.content_hash).await {
+            Ok(r) => r,
+            Err(why) => {
+                job.fail(
+                    ledger::TerminalReason::PreemptedAbandoned,
+                    format!("checkpoint_invalid: {why}"),
+                );
+                self.broadcast_progress(&job.snapshot());
+                self.persist_run(&job).await;
+                return;
+            }
+        };
+
+        // The declaration and family this run was started with (migration 0207).
+        let (studio_declaration, studio_family): (Option<serde_json::Value>, Option<serde_json::Value>) =
+            sqlx::query_as(
+                "SELECT declaration_json, family_json FROM training_runs WHERE run_id = $1",
+            )
+            .bind(job.run_id)
+            .fetch_optional(&self.pg)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or((None, None));
+
         let nats_subject = format!("models.run.{}.progress", job.run_id);
         let dispatch = crate::sidecar::TrainDispatchRequest {
             run_id: job.run_id,
@@ -1545,6 +1695,9 @@ impl ModelManager {
             progress: crate::sidecar::ProgressConfig { nats_subject },
             data: None,
             folds: fold_specs,
+            resume,
+            declaration: studio_declaration.clone(),
+            family: studio_family.clone(),
         };
 
         let result = self.sidecar.dispatch_train(dispatch).await;
@@ -1575,6 +1728,11 @@ impl ModelManager {
                     "runtime": format!("{:?}", definition.runtime).to_lowercase(),
                     "hyperparameters": definition.hyperparameters,
                     "spec_hash": spec_hash,
+                    // What a served forecast of this version is about: its label horizon and
+                    // the bar timeframe, so it can be realised from bars later (N-4.1) and a
+                    // volatility model can be served from recent bars (N-4.2).
+                    "horizon_bars": plan.horizon_bars,
+                    "timeframe": plan.request().timeframe,
                 });
 
                 let _ = sqlx::query(
@@ -1594,6 +1752,19 @@ impl ModelManager {
                 .execute(&self.pg)
                 .await;
 
+                // Set N: what the version says about itself (migration 0209), the
+                // declaration its dataset was built from (0207), and its HPO trials on the
+                // model's trial counter (0208: every trial counts).
+                self.record_studio_facts(
+                    &model_id,
+                    version,
+                    dataset.dataset_version_id,
+                    studio_family.as_ref(),
+                    studio_declaration.as_ref(),
+                    r.metrics.as_ref(),
+                )
+                .await;
+
                 // Write model_artifacts row
                 let artifact_id = uuid::Uuid::new_v4();
                 let _ = sqlx::query(
@@ -1609,6 +1780,25 @@ impl ModelManager {
                 .bind(&sha256)
                 .execute(&self.pg)
                 .await;
+
+                // Each later fold's own model, so a backtest answers every
+                // fold's window with a model trained before it (Set U U-5.8).
+                for f in &r.fold_artifacts {
+                    if let Err(e) = storage::postgres::models::record_fold_artifact(
+                        &self.pg,
+                        &model_id,
+                        version,
+                        f.index,
+                        chrono::DateTime::from_timestamp_nanos(f.trained_through_ns),
+                        &f.artifact_uri,
+                        f.size_bytes,
+                        &f.sha256,
+                    )
+                    .await
+                    {
+                        tracing::warn!(model_id, version, fold = f.index, error = %e, "could not record a fold's model");
+                    }
+                }
 
                 // Update model status to evaluating
                 let _ = sqlx::query(
@@ -1794,6 +1984,10 @@ impl ModelManager {
         .and_then(|m| m.get("trial_count").and_then(serde_json::Value::as_i64))
         .unwrap_or(0);
 
+        // N-3.5: deflate by the model's own trial counter (migration 0208), which counts
+        // every training run and every HPO trial, never fewer than the last run reported.
+        let trial_count = trial_count.max(crate::studio::trial_count(&pg, &model_id).await);
+
         // Check single-use holdout status (I-2.8): if the holdout was already
         // scored for this version, mark it in the dispatch so the sidecar records it.
         let holdout_used: bool = sqlx::query_as::<_, (Option<serde_json::Value>,)>(
@@ -1868,6 +2062,24 @@ impl ModelManager {
         job.progress_pct.store(30, Ordering::Relaxed);
         self.broadcast_progress(&job.snapshot());
 
+        // The family and declaration the version was trained as, so the trainer scores it
+        // with the same windows and the baselines that belong beside it (Set N).
+        let (eval_family, eval_declaration): (Option<serde_json::Value>, Option<serde_json::Value>) =
+            sqlx::query_as::<_, (Option<String>, Option<String>, Option<serde_json::Value>)>(
+                "SELECT v.family, v.family_variant, d.dataset_spec                    FROM model_versions v                    LEFT JOIN dataset_versions d ON d.dataset_version_id = v.dataset_version_id                   WHERE v.model_id = $1 AND v.version = $2",
+            )
+            .bind(&model_id)
+            .bind(version)
+            .fetch_optional(&pg)
+            .await
+            .ok()
+            .flatten()
+            .map_or((None, None), |(f, v, spec)| {
+                (
+                    f.zip(v).map(|(f, v)| serde_json::json!({"family": f, "variant": v})),
+                    spec,
+                )
+            });
         let nats_subject = format!("models.run.{}.progress", job.run_id);
         let eval_dispatch = crate::sidecar::EvalDispatchRequest {
             eval_id: job.run_id,
@@ -1884,6 +2096,8 @@ impl ModelManager {
             run_baselines: true,
             progress: crate::sidecar::ProgressConfig { nats_subject },
             folds: fold_specs,
+            declaration: eval_declaration,
+            family: eval_family,
         };
 
         let eval_result = match self.sidecar.dispatch_evaluate(eval_dispatch).await {
@@ -1914,7 +2128,17 @@ impl ModelManager {
 
         let eval_json = serde_json::to_value(&eval_result).unwrap_or(serde_json::json!({}));
         let metrics = eval_result.metrics.clone().unwrap_or(serde_json::json!({}));
-        let scorecard = crate::scorecard::compute_scorecard_from_eval(&eval_json);
+        // N-3.5 / N-3.2: a successful evaluation must carry its baselines, and its
+        // scorecard carries the usage-rule verdict and the complexity flag.
+        let studio_uses = crate::studio::uses_for_version(&pg, &model_id, version).await;
+        let checked = crate::scorecard::eval_scorecard(
+            &eval_result.status,
+            &eval_json,
+            &metrics,
+            &studio_uses,
+        );
+        let scorecard = checked.scorecard;
+        let baseline_refusal = checked.refusal;
         let report = eval_result
             .report
             .clone()
@@ -1944,7 +2168,11 @@ impl ModelManager {
             serde_json::json!({ "verdict": "no_baseline", "checks": [] })
         };
 
-        let succeeded = eval_result.status == "succeeded" || eval_result.status == "stub";
+        let succeeded = (eval_result.status == "succeeded" || eval_result.status == "stub")
+            && baseline_refusal.is_none();
+        if let Some(why) = &baseline_refusal {
+            job.fail(ledger::TerminalReason::IntegrityRejected, why.clone());
+        }
 
         // Persist eval results, including the full immutable report (I-2.12).
         // `report_json` is stored in evaluation_runs if the column exists;
@@ -2013,6 +2241,65 @@ impl ModelManager {
         );
         self.broadcast_progress(&job.snapshot());
         self.persist_eval(&job).await;
+    }
+
+    /// Record the Set N facts of a freshly registered version. Each write is best-effort in
+    /// the sense that a failure is logged and does not undo a trained model, but none is
+    /// silent: a version whose family was not recorded is visible as a NULL, and a failed
+    /// trial-count write is an error in the log.
+    async fn record_studio_facts(
+        &self,
+        model_id: &str,
+        version: i32,
+        dataset_version_id: Uuid,
+        family: Option<&serde_json::Value>,
+        declaration: Option<&serde_json::Value>,
+        metrics: Option<&serde_json::Value>,
+    ) {
+        let fam = family.and_then(|f| f.get("family")).and_then(serde_json::Value::as_str);
+        let var = family.and_then(|f| f.get("variant")).and_then(serde_json::Value::as_str);
+        let engine = metrics
+            .and_then(|m| m.get("engine_version"))
+            .and_then(serde_json::Value::as_str);
+        let contamination = metrics.and_then(|m| m.get("contamination"));
+        let code_handle = metrics
+            .and_then(|m| m.get("code_hash"))
+            .and_then(serde_json::Value::as_str);
+        if let Err(e) = sqlx::query(
+            "UPDATE model_versions SET family = $3, family_variant = $4, engine_version = $5,              contamination = $6, code_handle = $7 WHERE model_id = $1 AND version = $2",
+        )
+        .bind(model_id)
+        .bind(version)
+        .bind(fam)
+        .bind(var)
+        .bind(engine)
+        .bind(contamination)
+        .bind(code_handle)
+        .execute(&self.pg)
+        .await
+        {
+            tracing::warn!(model_id, version, error = %e, "could not record the version's family");
+        }
+        if let Some(d) = declaration {
+            let hash = d.get("declaration_hash").and_then(serde_json::Value::as_str);
+            if let Err(e) = sqlx::query(
+                "UPDATE dataset_versions SET dataset_spec = $2, declaration_hash = $3                  WHERE dataset_version_id = $1",
+            )
+            .bind(dataset_version_id)
+            .bind(d)
+            .bind(hash)
+            .execute(&self.pg)
+            .await
+            {
+                tracing::warn!(model_id, version, error = %e, "could not record the declaration on the dataset");
+            }
+        }
+        // HPO: every trial the search ran counts, on top of the run itself.
+        if let Some(n) = metrics.and_then(crate::studio::hpo_trials_reported) {
+            if let Err(e) = crate::studio::count_hpo_trials(&self.pg, model_id, n).await {
+                tracing::error!(model_id, trials = n, error = %e, "could not count the HPO trials");
+            }
+        }
     }
 
     async fn load_baseline_metrics(&self, model_id: &str, version: i32) -> serde_json::Value {
@@ -2168,6 +2455,9 @@ impl ModelManager {
                     .unwrap_or_default()
             )),
             data: None,
+            declaration: None,
+            family: None,
+            experiment_id: None,
         };
 
         self.start_train(model_id, user_id, req).await
@@ -2318,32 +2608,51 @@ impl ModelManager {
         crate::report::export_report_json(&report)
     }
 
-    /// Return strategy definitions that reference this model.
+    /// Return strategy definitions that reference this model (H-4.5).
+    ///
+    /// A strategy references a model by a node's `model_ref` (a `model_forecast`
+    /// condition, or any other model-backed node), which is the model's id or its
+    /// slug. The match is a JSONB containment on `definition_json->'nodes'`,
+    /// which `strategy_definitions_nodes_gin` (migration 0200) indexes, so the
+    /// cost is the matches and not the table.
+    ///
+    /// This used to select from a table named `strategies`, which does not exist,
+    /// and swallowed the error with `unwrap_or_default()`: every model read as
+    /// "not used by anything". A failed read is an error here and reaches the
+    /// route's 422, because an empty list is a claim about the strategies.
     pub async fn get_used_by(&self, model_id: &str) -> anyhow::Result<Vec<serde_json::Value>> {
-        // Query strategies whose definition_json nodes contain a model_ref matching this model.
-        let rows: Vec<(String, String, serde_json::Value)> = sqlx::query_as(
-            "SELECT strategy_id, display_name, definition_json \
-             FROM strategies \
-             WHERE definition_json::text LIKE $1 \
-             ORDER BY created_at DESC \
-             LIMIT 100",
-        )
-        .bind(format!("%{model_id}%"))
-        .fetch_all(&self.pg)
-        .await
-        .unwrap_or_default();
+        // Both spellings a node may carry. A model that does not exist matches
+        // nothing (the slug lookup is `None`), it does not match everything.
+        let slug: Option<String> =
+            sqlx::query_scalar("SELECT slug FROM ai_models WHERE model_id = $1")
+                .bind(model_id)
+                .fetch_optional(&self.pg)
+                .await?;
+        let refs: Vec<String> = std::iter::once(model_id.to_string())
+            .chain(slug)
+            .collect();
+        let probes: Vec<serde_json::Value> = refs
+            .iter()
+            .map(|r| serde_json::json!([{ "model_ref": r }]))
+            .collect();
 
-        let result = rows
+        let rows: Vec<(String, String, i64)> = sqlx::query_as(
+            "SELECT d.strategy_id,                     COALESCE(d.definition_json->>'display_name', d.definition_json->>'name', d.strategy_id),                     (SELECT COUNT(*) FROM strategy_instances i                       WHERE i.strategy_id = d.strategy_id AND i.state = 'running')              FROM strategy_definitions d              WHERE d.definition_json->'nodes' @> ANY($1::jsonb[])              ORDER BY d.created_at DESC              LIMIT 100",
+        )
+        .bind(&probes)
+        .fetch_all(&self.pg)
+        .await?;
+
+        Ok(rows
             .into_iter()
-            .map(|(sid, name, _def)| {
+            .map(|(sid, name, running)| {
                 serde_json::json!({
                     "strategy_id": sid,
                     "display_name": name,
+                    "running_instances": running,
                 })
             })
-            .collect();
-
-        Ok(result)
+            .collect())
     }
 
     /// Return recent inference traces for this model.
@@ -2465,6 +2774,8 @@ fn dataset_request(
         sample_weight_method: dataplane::label::SampleWeightMethod::Uniqueness,
         code_hash: dataplane::content_hash(&("forward_return", LABEL_CODE_VERSION))
             .unwrap_or_else(|_| "unhashable".into()),
+        barrier_path: None,
+        sampling: None,
     }
     .content_keyed();
 
@@ -2506,4 +2817,26 @@ fn dataset_request(
         adjustment_policy: dataplane::corporate::AdjustmentPolicy::Unadjusted,
         output_prefix: artifacts_prefix.to_string(),
     })
+}
+
+/// The usage-rule verdict for `model_id@version` over `uses`, from the version's latest successful
+/// evaluation. A free function over a pool so a caller with no `ModelManager` (the Gate 3
+/// binding check, Set N N-3.6) reads the evidence exactly as the promotion gate does.
+pub async fn usage_verdict_pg(
+    pg: &sqlx::PgPool,
+    model_id: &str,
+    version: i32,
+    uses: &[crate::scoring_v2::ForecastUse],
+) -> crate::verdict::VerdictReport {
+    let metrics: Option<serde_json::Value> = sqlx::query_scalar(
+        "SELECT metrics_json FROM evaluation_runs          WHERE model_id = $1 AND version = $2 AND status = 'succeeded'          ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(model_id)
+    .bind(version)
+    .fetch_optional(pg)
+    .await
+    .ok()
+    .flatten()
+    .flatten();
+    crate::verdict::judge_metrics(&metrics.unwrap_or(serde_json::Value::Null), uses)
 }

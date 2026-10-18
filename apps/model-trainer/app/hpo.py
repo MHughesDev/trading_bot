@@ -154,20 +154,31 @@ def run_hpo(
     sampler = optuna.samplers.TPESampler(seed=seed)
     study = optuna.create_study(direction="minimize", sampler=sampler)
 
+    # Every trial that was started counts (N-2.10, MD-05): a trial that raised or returned inf
+    # still spent a look at the data, so the deflation must count it. The count is returned
+    # to the adapter, which reports it as `metrics["hpo_trials"]`; the platform adds it to the
+    # model's monotonic trial counter (`studio::count_hpo_trials`).
     n_trials_done = 0
+    n_scored = 0
     for i in range(max_trials):
         pct = (i / max(max_trials, 1)) * 100.0
         emit_progress("hpo", pct, {"hpo_trial": i + 1})
+        n_trials_done += 1
         try:
             study.optimize(objective, n_trials=1, show_progress_bar=False)
-            n_trials_done += 1
+            n_scored += 1
         except Exception as e:  # noqa: BLE001
             log.warning("HPO trial %d exception: %s", i, e)
 
-    best_hp = study.best_params if n_trials_done > 0 else {}
+    try:
+        # Every trial returning inf means nothing was learned: keep the caller's parameters
+        # rather than adopting an arbitrary "best".
+        best_hp = study.best_params if n_scored > 0 and np.isfinite(study.best_value) else {}
+    except ValueError:  # no completed trial at all
+        best_hp = {}
     best_def = {
         **definition,
         "hyperparameters": {**(definition.get("hyperparameters") or {}), **best_hp},
     }
-    log.info("HPO done: %d trials, best value=%.6f", n_trials_done, study.best_value)
+    log.info("HPO done: %d trials counted, %d scored", n_trials_done, n_scored)
     return best_def, n_trials_done

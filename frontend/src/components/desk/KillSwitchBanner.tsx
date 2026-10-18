@@ -6,18 +6,28 @@
 // disabled one, not one behind a confirm. A banner with a close button is a
 // banner that will be closed.
 //
-// **The "within one event" half is not met, and this file says so rather than
-// implying it.** See the comment on `refetchInterval` below: it is a three-
-// second poll, plus immediate invalidation for a halt made from this client.
-// Meeting the criterion needs a push channel for kill-switch state, which the
-// platform does not have.
+// **"Within one event" is a push now, with the poll underneath it.**
+// `GET /api/desk/kill-switch/events` holds a `LISTEN` on `monitor_kill_switch`
+// — the channel `monitor.kill_switch`'s trigger has published on since 0075 —
+// and sends the halted scopes on every change. A global halt is applied to
+// this banner from the frame itself (`applyKillSwitchFrame`). The three-second
+// poll stays: it is what the banner falls back to when the stream is down, and
+// what reconciles a reset.
 //
 // It lives in `AppLayout`, above the router outlet, which is why "every route"
 // is a structural property rather than something each page has to remember.
-import { useQuery } from '@tanstack/react-query'
+import { useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { deskApi, type KillSwitchState } from '@/api/desk'
-import { KILL_SWITCH_QUERY_KEY, killSwitchView } from './KillSwitchBanner.helpers'
+import { useDeskStream } from '@/hooks/useDeskStream'
+import type { WireEvent } from '@/lib/desk/events'
+import {
+  KILL_SWITCH_QUERY_KEY,
+  KILL_SWITCH_STREAM,
+  applyKillSwitchFrame,
+  killSwitchView,
+} from './KillSwitchBanner.helpers'
 
 /**
  * What the chrome may claim about live trading, given what answered.
@@ -45,25 +55,30 @@ export type KillSwitchView =
   | { kind: 'unknown' }
 
 export function KillSwitchBanner() {
+  const qc = useQueryClient()
+  // The push half (§19.6). Every frame either sets the halted state directly
+  // or asks the status route again; see `applyKillSwitchFrame` for which.
+  const onFrame = useCallback(
+    (e: WireEvent) => {
+      const { next, refetch } = applyKillSwitchFrame(
+        qc.getQueryData<KillSwitchState | null>(KILL_SWITCH_QUERY_KEY),
+        e.content ?? {},
+      )
+      if (next) qc.setQueryData(KILL_SWITCH_QUERY_KEY, next)
+      if (refetch) void qc.invalidateQueries({ queryKey: KILL_SWITCH_QUERY_KEY })
+    },
+    [qc],
+  )
+  useDeskStream({ url: KILL_SWITCH_STREAM, onEvent: onFrame })
   const q = useQuery({
     queryKey: KILL_SWITCH_QUERY_KEY,
     queryFn: () => deskApi.killSwitch(),
-    // **Three seconds. That is the guarantee, and it is the only one.**
-    //
-    // §19.6 asks for the banner within one event of the trip, and this comment
-    // used to claim it: "a live event refetches immediately, so 'within one
-    // event' holds wherever the stream is connected". Nothing streams
-    // kill-switch state to a browser — `useDeskStream` is per-run and there is
-    // no global channel — and the event the sentence referred to was dispatched
-    // by nobody. A trip from the risk engine or from another operator reaches
-    // this banner by poll and by nothing else, so it can be up to three seconds
-    // late, and the comment that said otherwise was the only thing standing
-    // between that fact and the acceptance criterion it fails.
-    //
-    // The one case that *is* immediate is a halt made from this client, because
-    // the control invalidates `KILL_SWITCH_QUERY_KEY` — which is a property of
-    // those two call sites, not of this banner, and is worth exactly what it
-    // says and no more.
+    // **Three seconds, underneath the push.** The stream above is what makes a
+    // trip from the risk engine or another operator reach this banner within
+    // one event; this poll is what holds when the stream is down (the route
+    // unregistered, the `LISTEN` refused, the connection dropped), and what
+    // clears the banner after a reset. A halt made from this client also
+    // invalidates `KILL_SWITCH_QUERY_KEY` directly.
     refetchInterval: 3_000,
     refetchOnWindowFocus: true,
   })

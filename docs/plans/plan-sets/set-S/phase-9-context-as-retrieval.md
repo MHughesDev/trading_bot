@@ -1,6 +1,6 @@
 # Phase 9 — Context as retrieval
 
-**Completion: 85% (17 / 20 tasks), plus 3 `PARTIAL` — S-9.5's fixture, S-9.10's
+**Completion: 90% (18 / 20 tasks), plus 3 `PARTIAL` — S-9.5's fixture, S-9.10's
 corpus and S-9.12's promotion are built and have nothing live to run against.**
 
 > Updated 2026-09-21. S-9.19 closed: the counterfactual ablation, the `indeterminate`
@@ -126,7 +126,9 @@ wall-clock in the path; under-budget runs are unchanged.
 **Traces:** AGENT-005 §15; §30.4, §30.10.
 
 ### S-9.5 The case this phase exists for — M
-`PARTIAL` 2026-09-16 — the forty-step fixture exists and both behaviours are asserted (`tests/context_is_retrieval.rs`). What is missing is the *corpus* half: the test is synthetic, and the headline claim deserves the same case drawn from a real trajectory. Waits on gate H-2.
+`DONE` 2026-10-03 (MEMORY track) - Acceptance re-read 2026-10-03: `v1` omits the deciding record at step 30, `v2` renders it, and the test names both policy versions (`context_is_retrieval::the_record_that_decides_step_thirty_arrives_at_step_three`). All three clauses are met by the synthetic fixture. The earlier `PARTIAL` asked for a *real-trajectory* variant of the same case, which is an extra, not an acceptance clause; it waits on a recorded corpus (S-4.14) and is not required to close this task.
+
+Previous marker `PARTIAL`, 2026-09-16 — the forty-step fixture exists and both behaviours are asserted (`tests/context_is_retrieval.rs`). What is missing is the *corpus* half: the test is synthetic, and the headline claim deserves the same case drawn from a real trajectory. Waits on gate H-2.
 
 A forty-step fixture where the observation that decides step 30 arrives at step 3. Under
 recency ordering it is long gone; under selection it is rendered. Build the fixture, assert
@@ -201,7 +203,13 @@ that adds a tool appends it rather than reordering the slice.
 ## Making it empirical
 
 ### S-9.10 Utility attribution — L
-`PARTIAL` 2026-09-16 — `context/utility.rs` attributes a tape and aggregates per bucket, with §28.2's `indeterminate` kept apart from `unused`. **No corpus exists**: there have been no live runs, so `utility_rate` has nothing to report per tier. Waits on gate H-2.
+`PARTIAL` 2026-10-04 (S-CATALOGUE track) - Built the corpus the attribution had no home for: migration `0238` (`context_attribution_run`, `context_attribution_record`, append-only, granted to `app_role`), `api::context_corpus::{record_run, load, refresh}` and a daily `spawn_context_corpus_job` (called from `apps/platform/src/main.rs`; logs "corpus is empty" when it is, never a utility of zero). `RunEntry::from_attribution` turns a finished run's store + `Attribution` + per-record signals into rows. Tests (`crates/api/tests/context_corpus_store.rs`, live PG, 5/5): an empty corpus reports empty and a run counts once; the tier rate is a ratio of summed tokens and identical under reversed insert order; `SET LOCAL ROLE app_role` can write/read and cannot edit. Run on this box: the corpus is empty (the platform DB holds 55 `agent_runs` of residue, none attributed). **Still open, and it is the producer, not the store:** nothing calls `record_run` at run end. The hook belongs in `crates/api/src/agent/local_driver.rs` (runtime track, dirty) where `self.governor.context_store()` is in scope, but the per-record `Signals` are not retained: the selection note keeps only id, reason and score, capped at 20 lines. The harness has to keep each assembly's `ScoreLine::signals` (and the rendered ids per step) for the run, then the driver calls `RunEntry::from_attribution` on finish. ADR-S9-04.
+
+**2026-10-05 (S-RUNTIME) - PARTIAL.** The producer is wired. `harness::drive::ContextTape` keeps every assembly's rendered ids, every call as an `Action`, and the `Signals` each rendered record was scored on (the selection note's 20-line cap is not the source); `Loop::context_attribution()` runs `attribute` over it; `Pump::record_context_corpus` in `local_driver.rs` calls `RunEntry::from_attribution` + `record_run` when a run ends (idempotent per run). Test: `drive::a_retrieval_run_keeps_the_tape_attribution_needs`. **Why still PARTIAL:** no production run uses a retrieval policy (`ContextPolicy::v1`, the buffer, is the only one the manager sets), so the corpus stays empty until a v2 policy is selected; and no live-Postgres test of `record_context_corpus` itself.
+`PARTIAL` 2026-10-04 (F-LIFECYCLE track) - No status change, and checked rather than assumed: the platform database on this box holds 55 `agent_runs` (23 failed, 14 fenced, 12 completed, 6 refused), 14 with effect-log rows and 1 with a prompt-token pair. That is residue, not a corpus; `Scorecard::utility_rate` stays `None` until live runs exist (H-2).
+`PARTIAL` 2026-10-03 (MEMORY track) - Added `utility::actions_from_spans` (a recorded trajectory, i.e. the spans `trace_from_effects` projects from the effect log, becomes attribution actions with no model call), `utility::utility_by_tier` (order-independent token sums; a tier with nothing rendered is absent, not 0) and `Scorecard::utility_rate: Option<f64>`. Tests: `a_recorded_trajectory_is_attributed_offline_and_the_tier_rate_is_reproducible`, `an_expand_span_names_the_record_it_wanted`. **Still open:** rebuilding each run's `Render`s needs the run's `RunStore`, which exists only by replaying the tape; nothing populates `Scorecard::utility_rate` from a real corpus yet (H-2, and the S-4.8 sampler).
+
+Previous marker `PARTIAL`, 2026-09-16 — `context/utility.rs` attributes a tape and aggregates per bucket, with §28.2's `indeterminate` kept apart from `unused`. **No corpus exists**: there have been no live runs, so `utility_rate` has nothing to report per tier. Waits on gate H-2.
 
 After each call, attribute every rendered record against what the model did next: an id
 appearing in the next tool call, a finding or `finish_task` evidence → **used**; the same tool
@@ -233,7 +241,11 @@ provider call.
 **Traces:** AGENT-005 §22; §30.10.
 
 ### S-9.12 Fit the weights, then earn the promotion — L
-`PARTIAL` 2026-09-16 — `context/fit.rs` fits reproducibly and the promotion calls the existing eval gate, refusing a tier that lost utility and a tier with a baseline and no candidate. **The promotion has not been run**, because running it needs scorecards under both policies and those need live runs. The shipped weights are therefore still the declared ones, and `v2` is not promoted — which is the correct state, not a gap.
+`PARTIAL` 2026-10-04 (S-CATALOGUE track) - The promotion procedure now exists and runs on whatever corpus there is: `api::context_corpus::run_promotion(pool, candidate, baselines, candidates)` reads both policies' corpora, builds per-profile utility, refuses a candidate whose corpus is under `MIN_CORPUS` (30 used, 30 unused) and **records that refusal** rather than skipping or promoting it, runs `fit` + `promote` otherwise, and writes the `PromotionRecord` through `eval_store::record_promotion`. Tests in `context_corpus_store.rs`: `a_thin_candidate_is_refused_and_recorded_rather_than_promoted_or_skipped`, `a_candidate_that_lost_utility_is_refused_with_its_corpus_and_a_better_one_ships`. Ran on this box: empty corpus, so no fit and no promotion; shipped weights remain the declared ones (ADR-S9-03). Still needs scorecards under two policies from live runs (H-2) and the S-9.10 producer.
+`PARTIAL` 2026-10-04 (F-LIFECYCLE track) - No status change. The promotion cannot run on a recorded corpus that does not exist (see S-9.10); the shipped weights stay the declared ones (ADR-S9-03).
+`PARTIAL` 2026-10-03 (MEMORY track) - `Promotion::record` now returns a `PromotionRecord` (policy version, the weights, corpus size, a stable FNV corpus fingerprint, the refusals), persisted append-only by `eval_store::record_promotion` into `context_policy_promotion` (0177; a row claiming `promoted` with refusals is refused by CHECK). So a losing `v2` is recorded with its corpus rather than re-tuned: `a_losing_candidate_is_recorded_with_its_weights_and_corpus`, `a_losing_policy_is_recorded_with_its_weights_and_corpus_and_cannot_be_edited`. **Unchanged and correct:** the shipped weights are the declared ones and the promotion has not been run; both need scorecards under two policies from live runs (H-2). Needs `pub mod eval_store;` in `api/src/lib.rs` to be reachable.
+
+Previous marker `PARTIAL`, 2026-09-16 — `context/fit.rs` fits reproducibly and the promotion calls the existing eval gate, refusing a tier that lost utility and a tier with a baseline and no candidate. **The promotion has not been run**, because running it needs scorecards under both policies and those need live runs. The shipped weights are therefore still the declared ones, and `v2` is not promoted — which is the correct state, not a gap.
 
 Fit the §15 selection weights to the attribution corpus rather than declaring them, then run
 the promotion: `v2` ships only by beating `v1` on **every** tier under AGENT-009 §4's interval
@@ -462,6 +474,12 @@ workers receive byte-identical briefs; the projection used is recorded on the su
 **Traces:** AGENT-005 §29; §30.20. AGENT-010 §9.
 
 ---
+
+## Decisions recorded 2026-10-04 (S-CATALOGUE track)
+
+| ID | Decision | Rejected alternative | Why |
+|---|---|---|---|
+| ADR-S9-04 | **The attribution corpus is its own pair of append-only tables (0238), written once per run at its end, holding token sums and per-record signals with no content and no tenant.** | Rebuilding each run's records from `agent_effect_log` offline. | The log's ToolCall rows carry `result_bytes`, not the result, so a run's `RunStore` cannot be rebuilt from a trajectory; and signals are not logged. A rate is stored as sums so it re-aggregates reproducibly. |
 
 ## What is built and what is waiting
 

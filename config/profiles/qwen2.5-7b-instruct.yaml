@@ -66,13 +66,14 @@ multi_step_evidence:
   trials: 10
   clean: 10
   recorded: "2026-09-12"
-  detail: >
-    11 checks per trial over a 6-step chain at the shipped six-tool exposure cap:
-    correct first selection against three near-miss distractors, recovery from an injected tool error by re-reading the
-    message and halving the limit, realised-vs-implied discrimination, two
-    state-carry checks (the instrument from step 1's result, the 0.0417 volatility
-    from step 3's), no call to the destructive tool in reach the whole time, and a
-    final answer carrying the computed figure.
+  # No prose "detail" here (S-4.13): what the eval exercised is the eval's own
+  # definition (`local_multistep_eval`), which a reader can re-run, and the
+  # figures a profile reports come from `Profile::tier_label()` / `measurement()`,
+  # not from a hand-written paragraph about one run. `scorecard_row` is left
+  # unset on purpose: the only published row (evals/results/replay-baseline.json)
+  # is a replay with no hardware, which cannot license a budget or a tool-calling
+  # claim, so this profile reports its tier as `unmeasured` until a live run on
+  # named hardware records one (H-2).
 
 # Escalation is KEPT. The promotion covers chains of this shape at this length; it
 # is not a claim that a 7B is a frontier model, and work that outgrows the tier

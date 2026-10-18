@@ -112,7 +112,14 @@ export function ModelTestTab({ modelId }: Props) {
 
   const [running, setRunning] = useState(false)
   const [results, setResults] = useState<VersionResult[]>([])
-  const [llmResult, setLlmResult] = useState<{ text?: string; latency_ms?: number; error?: string } | null>(null)
+  const [llmResult, setLlmResult] = useState<{
+    text?: string
+    latency_ms?: number
+    tokens?: number
+    cost_usd?: string
+    trace_id?: string
+    error?: string
+  } | null>(null)
   const [saveName, setSaveName] = useState('')
 
   // Instrument -> available timeframes.
@@ -238,10 +245,17 @@ export function ModelTestTab({ modelId }: Props) {
     setRunning(true)
     setLlmResult(null)
     try {
-      const res = await modelsApi.testVersion(modelId, version, [
-        { instrument_id: instrument || 'unknown', features: {} },
-      ] as never)
-      setLlmResult({ text: res.data.text, latency_ms: res.data.latency_ms })
+      // The server reads `prompt` from the instance. This used to send only an
+      // empty feature map, so the server answered its default "Hello" and the
+      // prompt typed here never reached the model.
+      const res = await modelsApi.testVersion(modelId, version, [{ prompt }])
+      setLlmResult({
+        text: res.data.text,
+        latency_ms: res.data.latency_ms,
+        tokens: res.data.tokens,
+        cost_usd: res.data.cost_usd,
+        trace_id: res.data.trace_id,
+      })
     } catch (e) {
       setLlmResult({ error: String(e) })
     } finally {
@@ -310,9 +324,14 @@ export function ModelTestTab({ modelId }: Props) {
           {llmResult?.text && (
             <div className="rounded-xl border border-border bg-surface p-4">
               <p className="text-sm text-text whitespace-pre-wrap">{llmResult.text}</p>
-              {llmResult.latency_ms !== undefined && (
-                <p className="mt-3 text-xs text-fg-secondary">{llmResult.latency_ms} ms</p>
-              )}
+              <p className="mt-3 text-xs text-fg-secondary font-mono" data-testid="llm-metrics">
+                {llmResult.latency_ms !== undefined ? `${llmResult.latency_ms} ms` : 'latency —'}
+                {' · '}
+                {llmResult.tokens !== undefined ? `${llmResult.tokens} tokens` : 'tokens —'}
+                {' · '}
+                {llmResult.cost_usd !== undefined ? `$${llmResult.cost_usd}` : 'cost —'}
+                {llmResult.trace_id ? ` · trace ${llmResult.trace_id}` : ''}
+              </p>
             </div>
           )}
           {!llmResult && (

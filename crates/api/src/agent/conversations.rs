@@ -26,9 +26,10 @@ use uuid::Uuid;
 pub const ACTIVE_RUN_STATES: &[&str] =
     &["queued", "running", "waiting_backtest", "awaiting_approval"];
 
-/// `(id, title, provider, model, created_at, last_activity_at, active_runs, turns)`
+/// `(id, title, provider, model, created_at, last_activity_at, active_runs, turns,
+/// parent_conversation_id)`
 ///
-/// Named because the anonymous tuple is eight fields deep and read in two places; a
+/// Named because the anonymous tuple is nine fields deep and read in two places; a
 /// column reordered in one query and not the other would compile and be wrong.
 type SummaryRow = (
     Uuid,
@@ -39,6 +40,7 @@ type SummaryRow = (
     DateTime<Utc>,
     Option<i64>,
     Option<i64>,
+    Option<Uuid>,
 );
 
 /// `(run_id, turn_index, status, prompt, summary, error, tokens_in, tokens_out,
@@ -68,6 +70,9 @@ pub struct ConversationSummary {
     /// Whether an agent is working in this conversation right now.
     pub running: bool,
     pub turns: i64,
+    /// The journal a continuous session's child conversation hangs under
+    /// (AGENT-012 s2b), so the rail groups children without walking agendas.
+    pub parent_conversation_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -137,7 +142,8 @@ pub async fn list(
         "SELECT c.conversation_id, c.title, c.provider, c.model, c.created_at,
                 c.last_activity_at,
                 COUNT(r.run_id) FILTER (WHERE r.status = ANY($3)) AS active,
-                COUNT(r.run_id) AS turns
+                COUNT(r.run_id) AS turns,
+                c.parent_conversation_id
            FROM agent_conversations c
            LEFT JOIN agent_runs r ON r.conversation_id = c.conversation_id
           WHERE c.user_id = $1 AND c.archived_at IS NULL
@@ -154,7 +160,7 @@ pub async fn list(
     Ok(rows
         .into_iter()
         .map(
-            |(id, title, provider, model, created, last, active, turns)| ConversationSummary {
+            |(id, title, provider, model, created, last, active, turns, parent)| ConversationSummary {
                 conversation_id: id,
                 title,
                 provider,
@@ -163,6 +169,7 @@ pub async fn list(
                 last_activity_at: last,
                 running: active.unwrap_or(0) > 0,
                 turns: turns.unwrap_or(0),
+                parent_conversation_id: parent,
             },
         )
         .collect())
@@ -186,7 +193,8 @@ async fn list_one(
         "SELECT c.conversation_id, c.title, c.provider, c.model, c.created_at,
                 c.last_activity_at,
                 COUNT(r.run_id) FILTER (WHERE r.status = ANY($3)) AS active,
-                COUNT(r.run_id) AS turns
+                COUNT(r.run_id) AS turns,
+                c.parent_conversation_id
            FROM agent_conversations c
            LEFT JOIN agent_runs r ON r.conversation_id = c.conversation_id
           WHERE c.user_id = $1 AND c.conversation_id = $2
@@ -198,7 +206,7 @@ async fn list_one(
     .fetch_optional(pg)
     .await?;
 
-    let (id, title, provider, model, created, last, active, turns) =
+    let (id, title, provider, model, created, last, active, turns, parent) =
         row.ok_or(ConversationError::NotFound)?;
     Ok(ConversationSummary {
         conversation_id: id,
@@ -209,6 +217,7 @@ async fn list_one(
         last_activity_at: last,
         running: active.unwrap_or(0) > 0,
         turns: turns.unwrap_or(0),
+        parent_conversation_id: parent,
     })
 }
 

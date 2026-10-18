@@ -29,16 +29,32 @@
 //! # What `supported` needs, and what this can supply
 //!
 //! §6.9's battery — an out-of-sample ticket, a cost-model ticket, a benchmark
-//! ticket and a reproducibility receipt. **Only the first is derivable today.**
-//! `mlops.trial` does not label a trial's role, so "which ticket was the
-//! benchmark" has no answer in the schema, and the funnel records no receipt.
+//! ticket and a reproducibility receipt. Updated 2026-10-04 (S-10.4, S-10.8), and
+//! each piece is a **row, not a ticket that merely exists**:
+//!
+//! * out-of-sample — the trial a measurement of the falsifier's metric came from;
+//! * cost-model — a trial of this hypothesis that carries a recorded
+//!   `breakeven_cost_multiple` (the cost-sensitivity study measured it);
+//! * benchmark — a trial that carries a recorded `permutation_p_value` (a
+//!   null-world study produced it);
+//! * receipt — a **bit-identical reproduction** of one of its trials under a
+//!   receipt the original carried (`mlops.reproduction`, 0241). A reproduction with
+//!   no receipt on record proves the number and not the pipeline, so it does not
+//!   count.
 //!
 //! Absent evidence is left absent, exactly as `gate_worker` leaves it: a
 //! would-be `supported` becomes `inconclusive: evidence_incomplete` carrying the
-//! list of what was missing. That means **`supported` is currently unreachable
-//! from real data**, and saying so is the point — the alternative is filling the
-//! battery with tickets that happen to exist, which would make the expensive
-//! verdict the cheap one.
+//! list of what was missing. `supported` is therefore reachable from real data
+//! **only after** somebody has run the cost and null studies and
+//! `lifecycle.reproduce` — the expensive verdict stays the expensive one.
+//!
+//! # A read as the platform's role
+//!
+//! Every ledger read here runs under the tenant's context (`tenant_tx`). It did
+//! not until 2026-10-04: `mlops.trial` and `mlops.trial_statistic` FORCE
+//! row-level security keyed on `app.tenant_id`, so as the role the platform's pool
+//! belongs to the evidence query returned no rows and every hypothesis would have
+//! resolved `insufficient_data` — invisible to owner-connected tests.
 //!
 //! Refutations are unaffected, and that asymmetry is deliberate: requiring the
 //! battery before admitting a failure would make failing expensive and passing
@@ -61,6 +77,61 @@ pub struct Decided {
     pub missing: Vec<&'static str>,
     /// The metric the falsifier named, so a reader can see what was looked for.
     pub metric: String,
+    /// What decided it: the falsifier's metric, comparator and threshold, every
+    /// measurement with the ticket that produced it, which one fired, and the
+    /// battery as the ledger could and could not supply it. Persisted with the
+    /// verdict (`verdict_inputs`, 0242) so a card showing "refuted" can show the
+    /// number that refuted it rather than a figure somebody reconstructs.
+    pub inputs: Value,
+}
+
+/// The inputs a verdict was reached from, as the row holds them (S-10.15).
+///
+/// Built from the same `Falsifier` and `Evidence` `evaluate` was given and
+/// nothing else, so it cannot describe a decision the platform did not make.
+#[must_use]
+pub fn verdict_inputs(falsifier: &Falsifier, role: Role, evidence: &Evidence) -> Value {
+    let measurements: Vec<Value> = evidence
+        .measurements
+        .get(&falsifier.metric)
+        .map(|ms| {
+            ms.iter()
+                .map(|m| {
+                    json!({
+                        "value": m.value,
+                        "ticket_id": m.ticket_id,
+                        "se": m.se,
+                        "fired": falsifier.comparator.fired(m.value, falsifier.threshold),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let fired_by = evidence
+        .measurements
+        .get(&falsifier.metric)
+        .and_then(|ms| {
+            ms.iter()
+                .find(|m| falsifier.comparator.fired(m.value, falsifier.threshold))
+        })
+        .map(|m| json!({ "value": m.value, "ticket_id": m.ticket_id }));
+    json!({
+        "metric": falsifier.metric,
+        "comparator": falsifier.comparator.as_str(),
+        "threshold": falsifier.threshold,
+        "role": role.as_str(),
+        "measurements": measurements,
+        "fired_by": fired_by,
+        "n": evidence.n,
+        "battery": {
+            "out_of_sample_ticket": evidence.out_of_sample_ticket,
+            "cost_model_ticket": evidence.cost_model_ticket,
+            "benchmark_ticket": evidence.benchmark_ticket,
+            "repro_spec": evidence.repro_spec,
+        },
+        "protocol_unstable": evidence.protocol_unstable,
+        "budget_exhausted": evidence.budget_exhausted,
+    })
 }
 
 impl Decided {
@@ -106,6 +177,16 @@ pub async fn evidence_for(
     protocol_unstable: bool,
     budget_exhausted: bool,
 ) -> Result<Evidence, Undecidable> {
+    // Under the tenant's own context, like every other reader of the ledger
+    // (`ledger::pg::tenant_tx`). `mlops.trial` and `mlops.trial_statistic` both
+    // FORCE row-level security keyed on `app.tenant_id`; a read with no context set
+    // returns no rows as the platform's role, so every hypothesis on a live
+    // platform would have resolved `insufficient_data` while owner-connected tests
+    // passed (the same shape as 0145/0147: a test that runs as the owner cannot see
+    // a policy that only binds the role the platform runs as).
+    let mut tx = ledger::pg::tenant_tx(pg, tenant)
+        .await
+        .map_err(|e| Undecidable::Db(e.to_string()))?;
     let rows: Vec<(Uuid, f64)> = sqlx::query_as(
         "SELECT s.trial_id, s.value
            FROM mlops.trial_statistic s
@@ -118,9 +199,55 @@ pub async fn evidence_for(
     .bind(hypothesis_id)
     .bind(tenant)
     .bind(metric)
-    .fetch_all(pg)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|e| Undecidable::Db(e.to_string()))?;
+
+    // The other two tickets of §6.9's battery, derived from what the funnel recorded
+    // *on this hypothesis's own trials* (S-10.4): a cost-model ticket is a trial the
+    // cost-sensitivity study measured a breakeven cost multiple on, and a benchmark
+    // ticket is a trial a null-world study produced a permutation p-value for. Each
+    // is a statistic the platform computed and stamped with the trial, so the claim
+    // "the comparison was made" is a row, not a trial that merely exists.
+    let battery: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT s.trial_id, s.name
+           FROM mlops.trial_statistic s
+           JOIN mlops.trial t ON t.trial_id = s.trial_id
+          WHERE t.hypothesis_id = $1
+            AND t.tenant_id = $2
+            AND s.name IN ('breakeven_cost_multiple', 'permutation_p_value')
+          ORDER BY s.recorded_at",
+    )
+    .bind(hypothesis_id)
+    .bind(tenant)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|e| Undecidable::Db(e.to_string()))?;
+    let (cost_model_ticket, benchmark_ticket) = battery_tickets(&battery);
+
+    // The receipt (S-10.8): a reproduction of one of this hypothesis's own trials
+    // that came back bit-identical **under a receipt the original carried**. A
+    // reproduction with no receipt on record proves the number and not the
+    // pipeline, so it is not §6.9's receipt and does not count.
+    let trial_ids: Vec<Uuid> = rows.iter().map(|(t, _)| *t).collect();
+    let receipt: Option<String> = if trial_ids.is_empty() {
+        None
+    } else {
+        sqlx::query_scalar(
+            "SELECT receipt_rerun::text FROM mlops.reproduction
+              WHERE tenant_id = $1 AND original_trial_id = ANY($2)
+                AND outcome = 'bit_identical' AND NOT receipt_missing
+              ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(tenant)
+        .bind(&trial_ids)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| Undecidable::Db(e.to_string()))?
+    };
+    tx.commit()
+        .await
+        .map_err(|e| Undecidable::Db(e.to_string()))?;
 
     let mut measurements: BTreeMap<String, Vec<Measurement>> = BTreeMap::new();
     if !rows.is_empty() {
@@ -146,20 +273,41 @@ pub async fn evidence_for(
         // gates it feeds are CPCV and walk-forward. It is the one piece of
         // §6.9's battery the schema can actually answer for.
         out_of_sample_ticket: rows.first().map(|(t, _)| t.to_string()),
-        // Not derivable. `mlops.trial` carries no role for a trial, so "which
-        // ticket was the benchmark" and "which pinned the cost model" have no
-        // answer here — and a ticket that merely exists is not evidence that the
-        // comparison was made.
-        cost_model_ticket: None,
-        benchmark_ticket: None,
-        // The funnel records no reproducibility receipt. `backtest::receipt`
-        // builds one and nothing calls it (S-10.8).
-        repro_spec: None,
+        // Derived above from the statistics recorded on this hypothesis's own
+        // trials — `mlops.trial` carries no role column, and none is needed: the
+        // statistic names say which comparison a trial took part in.
+        cost_model_ticket,
+        benchmark_ticket,
+        // The receipt of a bit-identical reproduction of one of this hypothesis's
+        // trials (S-10.8), digested so the verdict row names it without carrying
+        // it. `None` when nobody has reproduced the result: `supported` stays
+        // unavailable until somebody has.
+        repro_spec: receipt.map(|r| {
+            use sha2::{Digest, Sha256};
+            format!("sha256:{}", hex::encode(Sha256::digest(r.as_bytes())))
+        }),
         n: u32::try_from(rows.len()).unwrap_or(u32::MAX),
         measurements,
         protocol_unstable,
         budget_exhausted,
     })
+}
+
+/// The cost-model and benchmark tickets §6.9 asks for, from the statistics a
+/// hypothesis's trials carry. The first trial to carry each statistic is its
+/// ticket. Pure, so the mapping is tested without a database.
+#[must_use]
+pub fn battery_tickets(stats: &[(Uuid, String)]) -> (Option<String>, Option<String>) {
+    let first = |name: &str| {
+        stats
+            .iter()
+            .find(|(_, n)| n == name)
+            .map(|(t, _)| t.to_string())
+    };
+    (
+        first("breakeven_cost_multiple"),
+        first("permutation_p_value"),
+    )
 }
 
 /// Decide every open hypothesis a run sealed, and write the verdicts.
@@ -254,6 +402,7 @@ pub async fn decide_run(
             verdict,
             missing,
             metric: falsifier.metric.clone(),
+            inputs: verdict_inputs(&falsifier, Role::from_column(&role), &evidence),
         };
         if let Err(e) = write(pg, &d).await {
             undecidable.push((hypothesis_id, e));
@@ -275,12 +424,14 @@ async fn write(pg: &PgPool, d: &Decided) -> Result<(), Undecidable> {
     let (status, why) = d.columns();
     sqlx::query(
         "UPDATE agent_lifecycle.hypothesis
-            SET status = $2, inconclusive_why = $3, decided_at = now()
+            SET status = $2, inconclusive_why = $3, decided_at = now(),
+                verdict_inputs = $4
           WHERE hypothesis_id = $1 AND status = 'open'",
     )
     .bind(d.hypothesis_id)
     .bind(status)
     .bind(why)
+    .bind(&d.inputs)
     .execute(pg)
     .await
     .map_err(|e| Undecidable::Db(e.to_string()))?;
@@ -301,6 +452,7 @@ pub fn as_json(decided: &[Decided], undecidable: &[(Uuid, Undecidable)]) -> Valu
                     "status": status,
                     "why": why,
                     "missing": d.missing,
+                    "inputs": d.inputs,
                 })
             })
             .collect::<Vec<_>>(),
@@ -374,7 +526,8 @@ mod tests {
                 hypothesis_id: Uuid::nil(),
                 verdict: v,
                 missing: vec![],
-                metric: "sharpe".into()
+                metric: "sharpe".into(),
+                inputs: Value::Null,
             }
             .columns(),
             ("refuted", None)
@@ -434,6 +587,56 @@ mod tests {
         assert!(missing.iter().all(|m| !m.is_empty()));
     }
 
+    /// S-10.4: the cost-model and benchmark tickets are the trials that carry the
+    /// statistic their comparison produces, and absent evidence stays absent.
+    #[test]
+    fn the_battery_tickets_are_the_trials_that_carry_the_comparison_statistics() {
+        let (a, b, c) = (Uuid::from_u128(1), Uuid::from_u128(2), Uuid::from_u128(3));
+        let stats = vec![
+            (a, "breakeven_cost_multiple".to_string()),
+            (b, "permutation_p_value".to_string()),
+            (c, "breakeven_cost_multiple".to_string()),
+        ];
+        let (cost, bench) = battery_tickets(&stats);
+        assert_eq!(cost, Some(a.to_string()), "the first trial to carry it");
+        assert_eq!(bench, Some(b.to_string()));
+        assert_eq!(battery_tickets(&[]), (None, None));
+        assert_eq!(
+            battery_tickets(&[(a, "pbo".to_string())]),
+            (None, None),
+            "a trial that merely exists, or carries another statistic, is not a ticket"
+        );
+    }
+
+    /// S-10.15: the inputs a verdict was reached from are what the card shows, so
+    /// they must name the number that decided it and the threshold it was held to.
+    #[test]
+    fn a_refutation_records_the_number_that_refuted_it() {
+        let mut ms = BTreeMap::new();
+        ms.insert(
+            "sharpe".to_string(),
+            vec![
+                Measurement { value: 0.9, ticket_id: "t-pass".into(), se: None },
+                Measurement { value: -0.2, ticket_id: "t-fail".into(), se: None },
+            ],
+        );
+        let evidence = Evidence {
+            measurements: ms,
+            out_of_sample_ticket: Some("t-pass".into()),
+            n: 12,
+            ..Evidence::default()
+        };
+        let f = falsifier();
+        let inputs = verdict_inputs(&f, Role::Primary, &evidence);
+        assert_eq!(inputs["metric"], "sharpe");
+        assert_eq!(inputs["comparator"], f.comparator.as_str());
+        assert_eq!(inputs["threshold"], f.threshold);
+        assert_eq!(inputs["fired_by"]["ticket_id"], "t-fail");
+        assert_eq!(inputs["fired_by"]["value"], -0.2);
+        assert_eq!(inputs["measurements"].as_array().unwrap().len(), 2);
+        assert_eq!(inputs["battery"]["repro_spec"], Value::Null);
+    }
+
     /// The JSON a run record carries names what was missing rather than
     /// counting it: "evidence incomplete" is not something anyone can act on
     /// and "no benchmark ticket" is.
@@ -446,6 +649,7 @@ mod tests {
             },
             missing: vec!["a benchmark ticket"],
             metric: "sharpe".into(),
+            inputs: Value::Null,
         };
         let j = as_json(
             &[d],

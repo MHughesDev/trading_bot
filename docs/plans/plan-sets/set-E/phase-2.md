@@ -1,6 +1,6 @@
 # Phase 2 — Live P&L, Manual Orders & Shared Data Layer
 
-**Completion: 33% (1 / 3 tasks complete — 2.3 landed 2026-09-15, track 16)**
+**Completion: 100% (3 / 3 — 2.3 on 2026-09-15; 2.1 and 2.2 on 2026-10-03, track PROD)**
 
 **Goal:** Build the shared position/mark/P&L data layer once, then use it to
 turn on the live dashboard rollup and paper-mode manual orders.
@@ -15,7 +15,18 @@ turn on the live dashboard rollup and paper-mode manual orders.
 
 ## Tasks
 
-### ◑ 2.1 [PARTIAL — no Redis handle, marks come from the paper engine] Shared trading-data layer in `AppState` — S–M — **prerequisite**
+### ☑ 2.1 [DONE 2026-10-03 — without Redis, by ADR] Shared trading-data layer in `AppState` — S–M — **prerequisite**
+
+> **2026-10-03 (track PROD).** **ADR-E-2.1:** the shared layer is the paper
+> engine's mark board (fed by the live collectors, with observation times) plus
+> `AppState::instrument_meta` (`InstrumentMetaCache`) and the `instruments`
+> table — not a Redis handle. Rejected alternative: adding Redis for marks.
+> Every consumer that exists reads the in-process board already (the order gate
+> since 2.3, the hot path since 5.4, and now the live rollup in 2.2), so a Redis
+> copy would be a second mark source that could disagree with the one orders are
+> priced against. Locked decision 4's substance — marks surfaced when missing or
+> stale, never zeroed — is kept (see 2.2). Revisit only when a process other
+> than the platform needs marks.
 The compute is done and tested (`api/src/rollup/compute_rollup`,
 `risk/src/gate.rs`); only the data plumbing is missing.
 - Add a **Redis handle** to `AppState` (`state.rs` has none today), constructed
@@ -29,7 +40,21 @@ The compute is done and tested (`api/src/rollup/compute_rollup`,
 - **Files:** `crates/api/src/state.rs`, platform startup wiring.
 - **Verify:** `AppState` exposes Redis + registry; a smoke test reads a mark.
 
-### ☐ 2.2 [OPEN — still the hard-coded all-zero response] — ⚠ **BLOCKS UNATTENDED PAPER** Live dashboard P&L rollup — M
+### ☑ 2.2 [DONE 2026-10-03] Live dashboard P&L rollup — M
+
+> **2026-10-03 (track PROD).** `GET /api/dashboard/rollup?mode=LIVE` now reads
+> the **caller's** `pnl_lots`/`pnl_closes` (`load_ledger(pg, token.user_id(), …)`,
+> every predicate carries `user_id` — the rollup now uses its `BearerToken`),
+> joins `instruments` for venue/asset class, values open lots at the platform
+> mark board, and returns `mark_coverage`: instruments `missing` a mark, `stale`
+> (> 300 s), `unconverted` (non-USD quote) and `unreadable_lots` (no stored side)
+> are listed and left out of unrealized — never zeroed silently. Short lots are
+> now valued correctly (`compute_rollup` used `mark − open` for every lot).
+> Migration **0154** adds `pnl_lots.side` (nullable, `CHECK in ('buy','sell')`).
+> Today `orders.execution_mode` is `CHECK = 'paper'`, so a live rollup is a
+> computed zero with complete coverage. Tests: `routes::dashboard::tests` (4 —
+> seeded non-zero rollup incl. a short, missing/stale/unconverted/unreadable
+> surfaced, another user's lots excluded, the route takes `BearerToken`).
 **Addresses #13 (CL dashboard.rs).** `AccountMode::Live` returns an all-zero
 `RollupResponse` (`dashboard.rs:58-65`). P&L is computed from the **ledger**
 (`pnl_lots`/`pnl_closes`, migration 0008), not the broker — so it's achievable

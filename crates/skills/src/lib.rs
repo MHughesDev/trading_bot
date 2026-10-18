@@ -36,8 +36,16 @@
 //! would be even harder to notice.
 
 pub mod contract;
+pub mod core;
+pub mod lifecycle;
+pub mod lint;
+pub mod materialiser;
+pub mod mount;
+pub mod quality;
+pub mod registry;
 pub mod run;
 pub mod runner;
+pub mod signing;
 pub mod template;
 
 use serde::{Deserialize, Serialize};

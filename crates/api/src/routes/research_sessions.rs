@@ -19,22 +19,34 @@
 //! `every_mutating_handler_asks_the_same_question` below fails the build if a
 //! new handler is added without it.
 //!
-//! # What creation refuses today, and why refusing is the safe side
+//! # What creation decides, and where
 //!
-//! Three settings are refused at creation rather than accepted and ignored:
+//! §8's gate is `research_session::charter::admit`, called here at the one
+//! place a continuous session is created (S-11.9, wired 2026-10-03), with a
+//! `charter::Profile` built from the loaded harness profile by
+//! [`charter_profile`]:
 //!
-//! * a **non-frontier profile** (AGENT-014 §8, a user decision): a local tier is
-//!   not left alone with a budget over days;
-//! * **`autonomy = autonomous`**: §8 makes it conditional on the profile's
-//!   `judgement` pass rate, and nothing reads that threshold yet (S-11.9). A
-//!   session that ran unattended because the check was missing is the one
-//!   failure here that spends real money;
-//! * **`replenish = true`**: the survey run that refills a drained agenda is
-//!   S-11.11. Accepting the flag would give the operator a switch that silently
-//!   does nothing, which is worse than a refusal naming the task.
+//! * a **non-frontier profile** is refused with the profile named (a user
+//!   decision): a local tier is not left alone with a budget over days;
+//! * **`autonomy = autonomous`** is refused, not ignored, unless the profile is
+//!   measured and passes `judgement` above its own threshold for every
+//!   permitted workflow. The measurement is `profile_standing` and
+//!   `profile_judgement` (0163), recorded through
+//!   `POST /api/research/profiles/{profile}/scorecard`; a profile with no
+//!   record is unmeasured and `autonomous` is refused with `admit`'s own
+//!   sentence naming the profile;
+//! * under `notify` or `supervised`, a missing measurement is **not** a
+//!   refusal: a human is told about every start, which is the property §8's
+//!   threshold exists to protect. It is written on the session's log as a note
+//!   (ADR-P11-04) so the gap is visible on the session rather than assumed
+//!   away.
 //!
-//! Each refusal names what is missing, so the day it lands the message is what
-//! points here.
+//! `replenish = true` is accepted: the driver answers a drained agenda with a
+//! `survey` item through `replenish::on_drain` (S-11.11).
+//!
+//! A blank trial cap is filled at creation with §2.1's default
+//! (`SessionBudget::with_default_trials`, ADR-P11-03), so a lease has a
+//! ceiling in the unit a run is metered in.
 
 use std::convert::Infallible;
 use std::time::Duration;
@@ -51,7 +63,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use research_session::{
     agenda::{AgendaItem, ItemStatus, Source},
-    charter::Autonomy,
+    charter::{self, Autonomy, TierRefusal},
     fold::EventKind,
     Charter, ResearchSession,
 };
@@ -60,7 +72,10 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::routes::desk_charter::{self, DeskCharter};
-use crate::{auth::BearerToken, sessions, state::AppState};
+use crate::{
+    auth::BearerToken, session_contradictions, session_day, session_profile, sessions,
+    state::AppState,
+};
 
 /// The scope a human session carries and an agent session never does.
 const HUMAN_SCOPE: &str = "web:full";
@@ -196,6 +211,83 @@ pub async fn current(State(state): State<AppState>, token: BearerToken) -> impl 
     }
 }
 
+/// `GET /api/research/sessions/current/stage` - the calling run's own view of
+/// where it is in the lifecycle (AGENT-013 section 8, `lifecycle.get_stage`).
+///
+/// Read-only and keyed on the token's run, like [`current`]: a run cannot ask
+/// about another's. `404 not_a_run` for a token that is not one of the
+/// platform's runs.
+pub async fn current_stage(State(state): State<AppState>, token: BearerToken) -> impl IntoResponse {
+    let Some(run) = caller_run(&state, &token).await else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": "not_a_run",
+                "message": "this token is not one of the platform's own agent runs, so it has no stage",
+            })),
+        )
+            .into_response();
+    };
+    type RunRow = (String, Option<String>, Option<String>, Option<String>, Option<String>);
+    let row: Result<Option<RunRow>, _> = sqlx::query_as(
+        "SELECT status, mode, ring, workflow, stage FROM agent_runs WHERE run_id = $1",
+    )
+    .bind(run)
+    .fetch_optional(&state.pg)
+    .await;
+    let (status, mode, ring, workflow, stage) = match row {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "no_run", "run_id": run })),
+            )
+                .into_response()
+        }
+        Err(e) => return db(e),
+    };
+    let hypotheses: Vec<(Uuid, String, String, String)> = match sqlx::query_as(
+        "SELECT hypothesis_id, role, status, statement FROM agent_lifecycle.hypothesis
+          WHERE run_id = $1 ORDER BY created_at LIMIT 50",
+    )
+    .bind(run)
+    .fetch_all(&state.pg)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return db(e),
+    };
+    let pending: Result<(i64,), _> = sqlx::query_as(
+        "SELECT COUNT(*) FROM agent_lifecycle.proposal WHERE run_id = $1 AND decision = 'pending'",
+    )
+    .bind(run)
+    .fetch_one(&state.pg)
+    .await;
+    let pending = match pending {
+        Ok(r) => r.0,
+        Err(e) => return db(e),
+    };
+    (
+        StatusCode::OK,
+        Json(json!({
+            "run_id": run,
+            "status": status,
+            "mode": mode,
+            "ring": ring,
+            "workflow": workflow,
+            "stage": stage,
+            "hypotheses": hypotheses
+                .into_iter()
+                .map(|(id, role, status, statement)| json!({
+                    "hypothesis_id": id, "role": role, "status": status, "statement": statement,
+                }))
+                .collect::<Vec<_>>(),
+            "proposals_awaiting_a_human": pending,
+        })),
+    )
+        .into_response()
+}
+
 // ── list and create ─────────────────────────────────────────────────────────
 
 /// `GET /api/research/sessions`
@@ -259,6 +351,11 @@ pub struct CreateBody {
     pub model: Option<String>,
     #[serde(default)]
     pub workflow: Option<String>,
+    /// The day budget **in trials** (ADR-P11-05), beside the form's dollars. Left
+    /// out it is `DEFAULT_TRIALS_PER_DAY`, pre-filled and editable like the
+    /// $25/day; a value below one is refused.
+    #[serde(default)]
+    pub trials_per_day: Option<i64>,
 }
 
 /// `POST /api/research/sessions`
@@ -318,8 +415,26 @@ pub async fn create(
             // written again here, because a session opened from the composer and
             // a conversation opened from the rail must reach the same model or
             // the desk has two defaults.
-            let provider = crate::agent::routes::default_provider();
-            match crate::agent::conversations::create(&state.pg, token.user_id(), &provider, &tier)
+            // The user's own default key first (the same lookup the "New chat"
+            // button uses), so a session never opens on a provider they have no
+            // key for.
+            let (provider, user_model) =
+                crate::agent::routes::default_engine_for_user(&state, token.user_id()).await;
+            let conv_model = if body.model.is_some() || provider == crate::agent::routes::default_provider() {
+                tier.clone()
+            } else {
+                user_model
+            };
+            // The model policy: a model the person named is refused, a default is
+            // held to the provider's baseline.
+            if body.model.is_some() && !crate::model_policy::is_allowed(&provider, &conv_model) {
+                return bad(
+                    &crate::model_policy::not_enabled_message(&provider, &conv_model),
+                    "pick an enabled model in Settings, API keys",
+                );
+            }
+            let conv_model = crate::model_policy::or_baseline(&provider, conv_model);
+            match crate::agent::conversations::create(&state.pg, token.user_id(), &provider, &conv_model)
                 .await
             {
                 Ok(id) => id,
@@ -354,7 +469,20 @@ pub async fn create(
             .and_then(harness::state::Workflow::parse);
         return match state
             .agent
-            .send_message(token.user_id(), conversation_id, question, &creds, workflow)
+            .send_turn(
+                token.user_id(),
+                conversation_id,
+                question,
+                &creds,
+                // Research, said out loud: this door is the one that makes a
+                // bounded run a session, and `mode: None` is read as Chat since
+                // ADR-S10-02 - which never opens a session row.
+                crate::agent::manager::TurnOptions {
+                    workflow,
+                    mode: Some(harness::state::Mode::Research),
+                    ..Default::default()
+                },
+            )
             .await
         {
             Ok(run_id) => {
@@ -378,6 +506,15 @@ pub async fn create(
     }
 
     // ── the continuous case ─────────────────────────────────────────────────
+    let trials_per_day = body
+        .trials_per_day
+        .unwrap_or(charter::DEFAULT_TRIALS_PER_DAY);
+    if trials_per_day < 1 {
+        return bad(
+            &format!("a day budget of {trials_per_day} trials is not a budget"),
+            "it is at least one trial; leave it blank for the platform default",
+        );
+    }
     let Some(form) = body.charter.as_ref() else {
         return bad(
             "a continuous session needs a charter",
@@ -389,31 +526,81 @@ pub async fn create(
         Err(r) => return bad(&r.message, &r.fix),
     };
 
-    if translated.autonomy == Autonomy::Autonomous {
+    // §8, as one decision: `charter::admit`.
+    let Some(loaded) = state.profiles.get(&tier) else {
         return bad(
-            "`autonomous` is refused, not ignored",
-            "AGENT-014 §8 makes it conditional on the profile's `judgement` pass rate, and \
-             nothing reads that threshold yet (Set S task S-11.9). Use `notify`, which starts \
-             items and tells you about each one.",
+            &format!("no profile named `{tier}` is loaded"),
+            "pick a profile the platform knows; the charter form lists them",
         );
-    }
-    if translated.replenish {
-        return bad(
-            "`replenish` is refused, not ignored",
-            "the survey run that refills a drained agenda is Set S task S-11.11. Accepting the \
-             flag would give you a switch that silently does nothing.",
-        );
-    }
+    };
+    // What the platform has recorded about this profile (0163): its latest
+    // standing and its `judgement` pass rate per workflow. A read that fails is a
+    // failed create, not an unmeasured profile - refusing `autonomous` on a table
+    // that did not answer would be right by accident.
+    let standing = match session_profile::latest_standing(&state.pg, &tier).await {
+        Ok(s) => s,
+        Err(e) => return db(e),
+    };
+    let judgement = match session_profile::latest_judgement(&state.pg, &tier).await {
+        Ok(j) => j,
+        Err(e) => return db(e),
+    };
+    let admission = match admit_at_creation(
+        &translated.charter,
+        translated.autonomy,
+        &session_profile::charter_profile(&tier, loaded, standing.as_ref(), &judgement),
+    ) {
+        Ok(a) => a,
+        Err(refusal) => {
+            return bad(
+                &refusal.to_string(),
+                "use `notify`, which starts items and tells you about each one; `autonomous` \
+                     needs a measured `judgement` pass rate for every permitted workflow \
+                     (AGENT-014 §8)",
+            )
+        }
+    };
 
     let mut session =
-        ResearchSession::continuous(Uuid::new_v4(), conversation_id, translated.charter, &tier);
+        ResearchSession::continuous(Uuid::new_v4(), conversation_id, admission.charter, &tier);
     session.autonomy = translated.autonomy;
-    session.budget = translated.budget;
+    session.budget = translated.budget.with_default_trials();
     session.schedule = translated.schedule;
     session.review_every = translated.review_every;
+    session.replenish = translated.replenish;
 
     if let Err(e) = sessions::create(&state.pg, token.user_id(), &session).await {
         return db(e);
+    }
+    // The day budget in trials, filled here where the user can see it
+    // (ADR-P11-05). Without a row the day gate names what is missing on every
+    // lease and never binds.
+    if let Err(e) = session_day::set_trials_per_day(&state.pg, session.id, trials_per_day).await {
+        return bad(
+            &e.to_string(),
+            "the session was created without a day budget in trials; set one with PUT \
+             /api/research/sessions/{id}/day-budget",
+        );
+    }
+    if let Some(note) = &admission.note {
+        // ADR-P11-04: the half of §8 nothing can measure yet, on the log of
+        // the session it applies to. Not fatal to the create: the row and its
+        // `session_created` event are already committed, and a note that
+        // failed to write is a gap in the log, not a session that should not
+        // exist.
+        let _ = sessions::append(
+            &state.pg,
+            session.id,
+            EventKind::Note,
+            json!({
+                "judgement_not_measured": note,
+                "autonomy": session.autonomy.as_str(),
+                "why": "§8 asks for a `judgement` pass rate per permitted workflow before a \
+                        session is left alone; nothing records one yet, so this session runs \
+                        under an autonomy that tells a human about every start",
+            }),
+        )
+        .await;
     }
     (
         StatusCode::CREATED,
@@ -423,11 +610,81 @@ pub async fn create(
             "continuous": true,
             "autonomy": session.autonomy.as_str(),
             "exploration_share": session.exploration_share(),
+            "replenish": session.replenish,
+            "trials_total": session.budget.trials_total,
+            "trials_per_day": trials_per_day,
+            "judgement": admission.note.as_ref().map_or("admitted", |_| "not_measured"),
+            "removed_workflows": admission.removed,
             "state": "draft",
             "next": "POST /api/research/sessions/{id}/resume starts it",
         })),
     )
         .into_response()
+}
+
+/// What §8's gate let through at creation.
+#[derive(Debug)]
+struct Admission {
+    charter: Charter,
+    /// Every workflow §8 removed, each with its note.
+    removed: Vec<charter::RemovedWorkflow>,
+    /// The half of §8 that could not be measured, when the autonomy setting
+    /// keeps a human informed of every start (ADR-P11-04).
+    note: Option<String>,
+}
+
+/// §8 at creation: `charter::admit`, plus the one reading this platform has to
+/// make about a measurement nothing records (ADR-P11-04).
+///
+/// `admit` is strict and stays strict: an unmeasured profile passes `judgement`
+/// for nothing. Under `autonomous` that refusal stands — it is the setting
+/// where nobody is watching. Under `notify` or `supervised` a refusal that is
+/// *only* about the missing measurement (`NotMeasured`,
+/// `NothingPermittedRemains` with every removal `not_measured`) admits the
+/// charter as written and returns the refusal's own sentence as a note, so the
+/// gap rides on the session. A refusal about what the profile **is** — not a
+/// frontier, or a workflow it measurably failed — is never softened.
+fn admit_at_creation(
+    charter: &Charter,
+    autonomy: Autonomy,
+    profile: &charter::Profile,
+) -> Result<Admission, TierRefusal> {
+    match charter::admit(charter, autonomy, profile) {
+        Ok(a) => Ok(Admission {
+            charter: a.charter,
+            removed: a.removed,
+            note: None,
+        }),
+        Err(e @ TierRefusal::NotMeasured { .. }) if autonomy != Autonomy::Autonomous => {
+            Ok(Admission {
+                charter: charter.clone(),
+                removed: Vec::new(),
+                note: Some(e.to_string()),
+            })
+        }
+        Err(e @ TierRefusal::NothingPermittedRemains { .. })
+            if autonomy != Autonomy::Autonomous
+                && charter_workflows(charter, profile).iter().all(|w| {
+                    matches!(profile.judgement_for(w), charter::Judgement::NotMeasured)
+                }) =>
+        {
+            Ok(Admission {
+                charter: charter.clone(),
+                removed: Vec::new(),
+                note: Some(e.to_string()),
+            })
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// The workflows a charter asks for, as §2.2 reads an empty list.
+fn charter_workflows(charter: &Charter, profile: &charter::Profile) -> Vec<String> {
+    if charter.permitted_workflows.is_empty() {
+        profile.supports.clone()
+    } else {
+        charter.permitted_workflows.clone()
+    }
 }
 
 /// `GET /api/research/sessions/{id}`
@@ -442,6 +699,10 @@ pub async fn get(
     };
     let folded = match sessions::state(&state.pg, id).await {
         Ok(f) => f,
+        Err(e) => return db(e),
+    };
+    let trials_per_day = match session_day::trials_per_day(&state.pg, id).await {
+        Ok(n) => n,
         Err(e) => return db(e),
     };
     // The amendments, newest first. `charter_version` on its own reports that
@@ -468,6 +729,9 @@ pub async fn get(
             "question": session.question,
             "charter": session.charter,
             "budget": session.budget,
+            // The day in trials (0161), or null for a session that predates it -
+            // which is "nobody said", not "no cap".
+            "trials_per_day": trials_per_day,
             "schedule": session.schedule,
             "autonomy": session.autonomy.as_str(),
             "replenish": session.replenish,
@@ -1013,6 +1277,92 @@ pub async fn prioritise_item(
     item_action(state, token, p, Action::Prioritise).await
 }
 
+/// The body of a redirecting steer.
+#[derive(Debug, Deserialize)]
+pub struct RedirectBody {
+    pub question: String,
+}
+
+/// `POST …/{id}/agenda/{item}/redirect` — AGENT-014 §6.4.
+///
+/// A steer that redirects a live child's goal also rewrites the agenda item's
+/// question, "so the agenda does not lie about what ran". The rule is
+/// `execute::redirect`'s — the dedupe key moves with the question and the
+/// score is cleared — and this handler persists what it decided, on the row
+/// and on the log. Only a live item (`claimed` / `running`) can be redirected:
+/// a queued one is simply re-asked, and a finished one's question is the record
+/// of what produced its verdict.
+pub async fn redirect_item(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(p): Path<ItemPath>,
+    Json(body): Json<RedirectBody>,
+) -> impl IntoResponse {
+    if !token.permits(HUMAN_SCOPE) {
+        return forbidden("steering an agenda item");
+    }
+    if let Err(r) = owned(&state, token.user_id(), p.id).await {
+        return r;
+    }
+    let items = match sessions::agenda(&state.pg, p.id).await {
+        Ok(i) => i,
+        Err(e) => return db(e),
+    };
+    let Some(mut item) = items.into_iter().find(|i| i.id == p.item) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "no_such_item", "item_id": p.item })),
+        )
+            .into_response();
+    };
+    if !research_session::execute::is_steerable(&item.status) {
+        return bad(
+            &format!(
+                "item is `{}`, and only a live child can be redirected",
+                item.status.word()
+            ),
+            "edit a queued item by adding the question you want and vetoing this one",
+        );
+    }
+    let redirect = match research_session::execute::redirect(&mut item, &body.question) {
+        Ok(r) => r,
+        Err(e) => return bad(&e.to_string(), "say what the run is now for"),
+    };
+    if let Err(e) = sqlx::query(
+        "UPDATE agenda_items SET question = $2, dedupe_key = $3, score = NULL WHERE item_id = $1",
+    )
+    .bind(item.id)
+    .bind(&redirect.to)
+    .bind(&redirect.to_key)
+    .execute(&state.pg)
+    .await
+    {
+        // The one refusal here that is not the rule's: another live item
+        // already asks the new question, and layer one's index will not hold
+        // two. Saying so beats a 500.
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "duplicate_question",
+                "message": format!("another live item already asks this: {e}"),
+            })),
+        )
+            .into_response();
+    }
+    let _ = sessions::append(
+        &state.pg,
+        p.id,
+        EventKind::Note,
+        json!({ "redirected": redirect, "by": token.user_id() }),
+    )
+    .await;
+    (
+        StatusCode::OK,
+        Json(json!({ "ok": true, "redirect": redirect })),
+    )
+        .into_response()
+}
+
 enum Action {
     Approve,
     Veto,
@@ -1226,6 +1576,222 @@ pub async fn amend_charter(
         .into_response()
 }
 
+// ── the day budget in trials ────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct DayBudgetBody {
+    pub trials_per_day: i64,
+}
+
+/// `GET …/{id}/day-budget` - the day's budget and what has been spent against it,
+/// counted the way the driver's day gate counts it (S-11.13: "a route counting
+/// spend against a day").
+///
+/// **In trials, and it says so.** A run is metered in trials; no per-run USD is
+/// recorded (`llm_usage.cost_usd` keys on the auth session), so `usd_per_day` is
+/// served as the budget the human typed and `spent_today` never as dollars. The
+/// day is the one `OpenHours::day_start` names (the schedule's zone, UTC when it
+/// has none) and the response says which. A finished run with no `trials_spent`
+/// is counted in `unmeasured_runs` and not as a zero, and a run still going is
+/// counted in `live_children` because its spend is not in the sum yet: the
+/// figure is a floor and says so. Read-only; an agent token may call it.
+pub async fn day_budget(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+) -> impl IntoResponse {
+    let session = match owned(&state, token.user_id(), id).await {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let trials_per_day = match session_day::trials_per_day(&state.pg, id).await {
+        Ok(n) => n,
+        Err(e) => return db(e),
+    };
+    let hours = research_session::schedule::OpenHours::parse(&session.schedule)
+        .unwrap_or_else(|_| research_session::schedule::OpenHours::always_open());
+    let (day_start, zone) = hours.day_start(Utc::now());
+    let row: Result<(i64, i64, i64, i64), _> = sqlx::query_as(
+        "SELECT COALESCE(SUM(trials_spent) FILTER (WHERE finished_at IS NOT NULL), 0)::bigint,
+                COUNT(*) FILTER (WHERE finished_at IS NOT NULL AND trials_spent IS NULL)::bigint,
+                COUNT(*) FILTER (WHERE finished_at IS NOT NULL)::bigint,
+                COUNT(*) FILTER (WHERE finished_at IS NULL)::bigint
+           FROM agent_runs
+          WHERE session_id = $1
+            AND (finished_at IS NULL OR finished_at >= $2)",
+    )
+    .bind(id)
+    .bind(day_start)
+    .fetch_one(&state.pg)
+    .await;
+    let (spent, unmeasured, finished, live) = match row {
+        Ok(r) => r,
+        Err(e) => return db(e),
+    };
+    (
+        StatusCode::OK,
+        Json(json!({
+            "session_id": id,
+            "unit": "trials",
+            "trials_per_day": trials_per_day,
+            "usd_per_day": session.budget.usd_per_day,
+            "usd_spent": null,
+            "usd_spent_note": "no per-run dollar figure is recorded; spend is counted in trials",
+            "day_starts_at": day_start,
+            "day_zone": zone,
+            "spent_today": {
+                "trials": spent,
+                "runs_finished": finished,
+                "unmeasured_runs": unmeasured,
+            },
+            "live_children": live,
+            "is_floor": live > 0 || unmeasured > 0,
+            "remaining_trials": trials_per_day.map(|cap| (cap - spent).max(0)),
+        })),
+    )
+        .into_response()
+}
+
+/// `PUT …/{id}/day-budget` - amend the day's trial budget (ADR-P11-05).
+///
+/// Appends a note naming who changed it and from what, for the reason a charter
+/// amendment is an event: a budget that moved without a record is a budget nobody
+/// can reconstruct a day's spend against.
+pub async fn set_day_budget(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(id): Path<Uuid>,
+    Json(body): Json<DayBudgetBody>,
+) -> impl IntoResponse {
+    if !token.permits(HUMAN_SCOPE) {
+        return forbidden("amending a day budget");
+    }
+    if let Err(r) = owned(&state, token.user_id(), id).await {
+        return r;
+    }
+    let before = match session_day::trials_per_day(&state.pg, id).await {
+        Ok(n) => n,
+        Err(e) => return db(e),
+    };
+    if let Err(e) = session_day::set_trials_per_day(&state.pg, id, body.trials_per_day).await {
+        return bad(&e.to_string(), "give at least one trial");
+    }
+    let _ = sessions::append(
+        &state.pg,
+        id,
+        EventKind::Note,
+        json!({
+            "day_budget_trials": { "from": before, "to": body.trials_per_day },
+            "by": token.user_id(),
+        }),
+    )
+    .await;
+    (
+        StatusCode::OK,
+        Json(json!({ "ok": true, "trials_per_day": body.trials_per_day })),
+    )
+        .into_response()
+}
+
+// ── a profile's standing and judgement ──────────────────────────────────────
+
+/// `POST /api/research/profiles/{profile}/scorecard` - record a scorecard
+/// (0163, ADR-P11-04).
+///
+/// What the eval harness (or an operator) posts after running the `judgement`
+/// suite: the profile's `measured | degraded | withdrawn` standing with a reason,
+/// and a pass rate per workflow. It is what lets `autonomous` be granted for the
+/// first time, and what pauses a session on a profile whose scorecard has fallen.
+/// Human-scoped like every write here: a profile that could record its own
+/// scorecard would be grading itself.
+pub async fn record_scorecard(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(profile): Path<String>,
+    Json(input): Json<session_profile::ScorecardInput>,
+) -> impl IntoResponse {
+    if !token.permits(HUMAN_SCOPE) {
+        return forbidden("recording a profile scorecard");
+    }
+    if state.profiles.get(&profile).is_none() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": "unknown_profile",
+                "message": format!("no profile named `{profile}` is loaded"),
+            })),
+        )
+            .into_response();
+    }
+    match session_profile::record_scorecard(
+        &state.pg,
+        &profile,
+        &input,
+        &format!("user:{}", token.user_id()),
+    )
+    .await
+    {
+        Ok(health) => (
+            StatusCode::CREATED,
+            Json(json!({
+                "ok": true,
+                "profile": profile,
+                "health": health.as_str(),
+                "judgement_recorded": input.judgement.len(),
+            })),
+        )
+            .into_response(),
+        Err(session_profile::ScorecardError::Invalid(m)) => {
+            bad(&m, "see the field named in the message")
+        }
+        Err(session_profile::ScorecardError::Db(e)) => db(e),
+    }
+}
+
+/// `GET /api/research/profiles/{profile}/standing` - what is recorded.
+pub async fn profile_standing(
+    State(state): State<AppState>,
+    _token: BearerToken,
+    Path(profile): Path<String>,
+) -> impl IntoResponse {
+    let standing = match session_profile::latest_standing(&state.pg, &profile).await {
+        Ok(s) => s,
+        Err(e) => return db(e),
+    };
+    let judgement = match session_profile::latest_judgement(&state.pg, &profile).await {
+        Ok(j) => j,
+        Err(e) => return db(e),
+    };
+    (
+        StatusCode::OK,
+        Json(json!({
+            "profile": profile,
+            // `null` is "nobody recorded one", which is not "healthy".
+            "standing": standing.as_ref().map(|s| json!({
+                "health": s.health.as_str(),
+                "reason": s.reason,
+                "autonomous_threshold": s.autonomous_threshold,
+                "recorded_by": s.recorded_by,
+                "recorded_at": s.recorded_at,
+            })),
+            "judgement": judgement,
+        })),
+    )
+        .into_response()
+}
+
+// ── contradictions ──────────────────────────────────────────────────────────
+
+/// `GET /api/research/contradictions` - the pairs a session's source 4.5 reads,
+/// resolved and not (0161). What a `diagnose` item raised from a contradiction
+/// opens in the desk: both entries and the question they raise.
+pub async fn contradictions(State(state): State<AppState>, token: BearerToken) -> impl IntoResponse {
+    match session_contradictions::list(&state.pg, token.user_id()).await {
+        Ok(pairs) => (StatusCode::OK, Json(json!({ "contradictions": pairs }))).into_response(),
+        Err(e) => db(e),
+    }
+}
+
 // ── digests ─────────────────────────────────────────────────────────────────
 
 /// `(digest_id, from_seq, to_seq, body, spend_unit, created_at)`.
@@ -1264,6 +1830,111 @@ fn digest_json(
     })
 }
 
+/// What one `source_ref` opens (S-11.2: "each carries its `source_ref` and opens
+/// in the desk").
+///
+/// A ref is a free string the source wrote: a memory entry id (`q_…`, `n_…`,
+/// `f_…`; the two sides of a contradiction pair are both entry ids), a
+/// `survey:<run>` from the replenisher, or an observation fingerprint
+/// (`regime:…`, `coverage:…`, `monitor:<event>`). The desk was given the string
+/// and nothing that said which of those it was, so it could render a chip and
+/// not open one. `found` is a lookup, never an assumption: a ref whose row is
+/// gone says `false` rather than leaving a chip that opens nothing.
+async fn resolve_ref(state: &AppState, user_id: Uuid, r: &str) -> Value {
+    use harness::memory::Kind;
+    let unresolved = |kind: &str| json!({ "ref": r, "kind": kind, "found": false, "open": null });
+
+    if let Some(run) = r.strip_prefix("survey:") {
+        let Ok(run) = Uuid::parse_str(run) else {
+            return unresolved("survey_run");
+        };
+        let hit: Option<(Uuid,)> =
+            sqlx::query_as("SELECT run_id FROM agent_runs WHERE run_id = $1 AND user_id = $2")
+                .bind(run)
+                .bind(user_id)
+                .fetch_optional(&state.pg)
+                .await
+                .ok()
+                .flatten();
+        return json!({
+            "ref": r, "kind": "survey_run", "found": hit.is_some(),
+            "open": hit.map(|_| json!({ "run_id": run })),
+        });
+    }
+    if let Some(event) = r.strip_prefix("monitor:") {
+        let hit: Option<(Uuid,)> =
+            sqlx::query_as("SELECT event_id FROM monitor.events WHERE event_id::text = $1")
+                .bind(event)
+                .fetch_optional(&state.pg)
+                .await
+                .ok()
+                .flatten();
+        return json!({
+            "ref": r, "kind": "monitor_event", "found": hit.is_some(),
+            "open": hit.map(|_| json!({ "route": "/api/monitor/events", "event_id": event })),
+        });
+    }
+    if r.starts_with("regime:") || r.starts_with("coverage:") {
+        // An observation names itself: the fingerprint *is* the record (the
+        // flip or the boundary crossed), and there is no row behind it to open.
+        let kind = if r.starts_with("regime:") { "regime_flip" } else { "coverage_extended" };
+        return json!({ "ref": r, "kind": kind, "found": true, "open": { "self_describing": true } });
+    }
+    // Otherwise a memory entry id.
+    match crate::memory_store::MemoryStore::new(state.pg.clone()).get(user_id, r).await {
+        Ok(Some(e)) => {
+            let bucket = match e.kind {
+                Kind::Finding => "findings",
+                Kind::NegativeResult => "negative",
+                Kind::InstrumentProfile => "profiles",
+                Kind::OpenQuestion => "questions",
+                Kind::UserPreference => "preferences",
+                Kind::SignalRegistry => "signals",
+                Kind::PlatformDefect => "defects",
+            };
+            json!({
+                "ref": r, "kind": "memory_entry", "found": !e.archived,
+                "archived": e.archived,
+                "open": { "route": format!("/api/memory/{bucket}"), "bucket": bucket,
+                          "subject": e.subject, "id": e.id },
+            })
+        }
+        _ => unresolved("unknown"),
+    }
+}
+
+/// `GET …/{id}/agenda/{item}/refs` - each of an item's `source_refs`, resolved to
+/// what the desk opens (S-11.2). Read-only; an agent token may call it.
+pub async fn item_refs(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Path(p): Path<ItemPath>,
+) -> impl IntoResponse {
+    if let Err(r) = owned(&state, token.user_id(), p.id).await {
+        return r;
+    }
+    let items = match sessions::agenda(&state.pg, p.id).await {
+        Ok(i) => i,
+        Err(e) => return db(e),
+    };
+    let Some(item) = items.into_iter().find(|i| i.id == p.item) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "no_such_item", "item_id": p.item })),
+        )
+            .into_response();
+    };
+    let mut refs = Vec::new();
+    for r in &item.source_refs {
+        refs.push(resolve_ref(&state, token.user_id(), r).await);
+    }
+    (
+        StatusCode::OK,
+        Json(json!({ "item_id": item.id, "refs": refs })),
+    )
+        .into_response()
+}
+
 /// `GET …/{id}/digests`
 pub async fn digests(
     State(state): State<AppState>,
@@ -1296,6 +1967,41 @@ pub async fn digests(
 }
 
 // ── the log, live ───────────────────────────────────────────────────────────
+
+/// The channel `session_events`' insert trigger publishes the session id on
+/// (0164). The payload is the id only.
+const LOG_CHANNEL: &str = "session_events";
+
+async fn open_log_listener(pool: &sqlx::PgPool) -> Option<sqlx::postgres::PgListener> {
+    let mut l = sqlx::postgres::PgListener::connect_with(pool).await.ok()?;
+    l.listen(LOG_CHANNEL).await.ok()?;
+    Some(l)
+}
+
+/// Sleep until this session's log changes or `ceiling` passes.
+///
+/// "Within one event": a transition reaches an open journal when it is written,
+/// and the ceiling is only the backstop for a notification a reconnect lost.
+async fn wait_for_log(
+    listener: &mut Option<sqlx::postgres::PgListener>,
+    id: Uuid,
+    ceiling: Duration,
+) {
+    let deadline = tokio::time::Instant::now() + ceiling;
+    let want = id.to_string();
+    loop {
+        let Some(l) = listener.as_mut() else {
+            tokio::time::sleep_until(deadline).await;
+            return;
+        };
+        match tokio::time::timeout_at(deadline, l.recv()).await {
+            Err(_) => return,
+            Ok(Ok(n)) if n.payload() == want => return,
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) => *listener = None,
+        }
+    }
+}
 
 #[derive(Deserialize)]
 pub struct EventsQuery {
@@ -1336,9 +2042,13 @@ pub async fn events(
     tokio::spawn(async move {
         let mut cursor = resume;
         let mut first = true;
+        // Listen *before* the first read: an event that lands between the two is
+        // then both in the read and in a notification, never in neither. A
+        // listener that cannot be opened degrades to the poll.
+        let mut listener = open_log_listener(&pool).await;
         loop {
             if !first {
-                tokio::time::sleep(POLL_INTERVAL).await;
+                wait_for_log(&mut listener, id, POLL_INTERVAL).await;
             }
             first = false;
             let rows: Vec<(i64, String, Option<String>, Value, DateTime<Utc>)> =
@@ -1406,6 +2116,9 @@ mod tests {
             "pub async fn add_item(",
             "pub async fn reorder(",
             "pub async fn amend_charter(",
+            "pub async fn redirect_item(",
+            "pub async fn set_day_budget(",
+            "pub async fn record_scorecard(",
         ];
         for handler in mutating {
             let body = src

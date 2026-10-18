@@ -24,7 +24,7 @@ pub async fn create_automation(api: &ApiClient, params: &Value) -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if strategy_id.is_empty() {
-        return json!({ "error": "missing_field", "field": "execution_strategy_id" });
+        return crate::tool_error::missing_field("execution_strategy_id");
     }
     let instrument_id = params
         .get("instrument_id")
@@ -40,10 +40,11 @@ pub async fn create_automation(api: &ApiClient, params: &Value) -> Value {
         .unwrap_or("paper");
 
     if account_mode == "live" && !crate::mcp_live_automations_allowed() {
-        return json!({
-            "error": "live_automations_disabled",
-            "hint": "Set MCP_ALLOW_LIVE_AUTOMATIONS=true to enable live automations"
-        });
+        return crate::tool_error::refuse(
+            "live_automations_disabled",
+            "live automations are switched off on this server.",
+            "use account_mode \"paper\"; enabling live is an operator decision (MCP_ALLOW_LIVE_AUTOMATIONS), not a caller edit",
+        );
     }
 
     let armed = params
@@ -92,7 +93,7 @@ async fn toggle_armed(api: &ApiClient, params: &Value, armed: bool) -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if id.is_empty() {
-        return json!({ "error": "missing_field", "field": "automation_id" });
+        return crate::tool_error::missing_field("automation_id");
     }
     let action = if armed { "arm" } else { "disarm" };
     match api

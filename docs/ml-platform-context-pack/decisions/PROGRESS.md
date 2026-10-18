@@ -1195,3 +1195,51 @@ tears down a container.
 All eight exceptions are in `docs/governance/COMPLACENCY_LOG.md` with the phase that
 would close each.
 
+---
+
+## Set S S-8.9 close-out — the `Verified by:` pass (2026-10-04)
+
+AGENT-005 to AGENT-014 carry 104 acceptance criteria. After this pass **98 name tests that
+exist** (each grepped against the tree), **33 are ticked**, **65 say Partial** and **6 still
+read `[--]`**. The count is not the claim; the next two sections are.
+
+### What is enforced by mechanism (new evidence, same mechanisms)
+
+**Research decisions are scored against planted truth, and the sealed fifth cannot run on a
+PR.** `eval::judgement_suite` holds 46 cases per tier; the PR build `include_str!`s only the
+open tapes, `score_tape(.., for_pr = true)` refuses a sealed tape or a sealed id, and the
+answer key is a `const` in the scorer that a test proves appears in no file under
+`evals/judgement/`. A planted null reported `supported`, and a re-tested dead idea, each fail
+the suite; both were mutation-checked.
+
+**A regression blocks.** The judgement scorecard is gated against its own committed
+baseline on every `cargo test --workspace --lib`, beside the replay baseline.
+
+**The Chat/Research line is two mechanisms, not one.** Ring filter at exposure and a refusal
+at the door (`chat_turn_spends_no_trials`), plus the reservation route refusing a body that
+names a Chat run.
+
+**`Verified by:` names real tests.** A name was kept only if `fn <name>` or the test file
+exists in the tree; a slot with nothing to name was left `[--]`.
+
+### What is not true, honestly
+
+**No tier's judgement has been measured.** The judgement tapes are the outputs of five
+declared reference policies, not recordings of a model. They prove the scoring, sealing and
+gating work; they say nothing about any model. Live run: `BLOCKED:HUMAN` (credential, gate
+H-2).
+
+**Nothing in AGENT-010's resume, wait or escalation clauses has met a killed process or a live
+model.** The kill is a replay of a truncated log; the database half of `resume()` has not run
+against a migrated Postgres.
+
+**The desk's 375px and theme claims are static reads of `desk.css`**, not a browser.
+
+**AGENT-013 AC-8, AC-9 and AC-12 lean on files the S-LIFECYCLE track was still writing**
+(`reproduce.rs`, `repro_drift.rs`, `compare_candidates.rs`); they are marked Partial and were
+not run.
+
+**`docs/specs/README.MD` was not touched.** The nine specs are still `Proposed` there and
+AGENT-001 to 004 and COMP-006 are not marked superseded; that is the user's file.
+
+Exceptions with the phase that would close each: `COMPLACENCY_LOG.md`, S8-9 to S8-15.

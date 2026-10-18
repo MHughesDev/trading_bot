@@ -38,6 +38,7 @@ hex = "0.4"
 model-registry = { workspace = true }
 event-bus = { workspace = true }
 collectors = { workspace = true }
+dataplane = { workspace = true }
 async-nats = { workspace = true }
 rtrb = { workspace = true }
 rust_decimal = { workspace = true }

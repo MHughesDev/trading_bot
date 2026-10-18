@@ -98,6 +98,22 @@ impl Engine {
         history: impl IntoIterator<Item = (InputIdx, Bar)>,
         spec: &InstrumentSpec,
     ) -> Result<Self, RestoreError> {
+        Self::restore_with_external(plan, checkpoint, history, spec, None)
+    }
+
+    /// [`Self::restore`], with the external rows the plan's macro and
+    /// fundamentals indicators read (P-3.6) in place before the history is
+    /// replayed, so those columns rebuild exactly too.
+    ///
+    /// # Errors
+    /// As [`Self::restore`].
+    pub fn restore_with_external(
+        plan: Arc<Plan>,
+        checkpoint: &Checkpoint,
+        history: impl IntoIterator<Item = (InputIdx, Bar)>,
+        spec: &InstrumentSpec,
+        external: Option<crate::external::ExternalData>,
+    ) -> Result<Self, RestoreError> {
         if checkpoint.format != CHECKPOINT_FORMAT {
             return Err(RestoreError::Format(checkpoint.format));
         }
@@ -114,6 +130,9 @@ impl Engine {
             });
         }
         let mut engine = Self::new(plan)?;
+        if let Some(data) = external {
+            engine.inst.external = Arc::new(data);
+        }
         let mut bars: Vec<(InputIdx, Bar)> = history
             .into_iter()
             .filter(|(i, b)| {

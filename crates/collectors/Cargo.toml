@@ -7,6 +7,8 @@ edition = "2021"
 domain = { workspace = true }
 dataplane = { workspace = true }
 storage = { workspace = true }
+# Set P P-3.2: the fundamentals store (dataplane.fundamentals_fact).
+sqlx = { workspace = true }
 event-bus = { workspace = true }
 dashmap = { workspace = true }
 serde = { workspace = true }
@@ -25,6 +27,8 @@ rkyv = { workspace = true }
 xxhash-rust = { workspace = true, features = ["xxh3"] }
 sha2 = "0.10"
 hex = "0.4"
+# Set P P-1.3: config/kraken_archive.toml.
+toml = "0.8"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

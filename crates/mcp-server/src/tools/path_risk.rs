@@ -80,7 +80,7 @@ const DEFAULT_MULTIPLIERS: &[f64] = &[1.0, 1.5, 2.0, 3.0, 5.0];
 // ── Shared plumbing ──────────────────────────────────────────────────────────
 
 fn missing(field: &str) -> Value {
-    json!({ "error": "missing_field", "field": field })
+    crate::tool_error::missing_field(field)
 }
 
 fn str_field(params: &Value, key: &str) -> Option<String> {
@@ -162,15 +162,14 @@ async fn fetch_trades(api: &ApiClient, run_id: &str) -> Result<Vec<TradeRow>, Va
     }
     let trades = read_trades(&payload);
     if trades.is_empty() {
-        return Err(json!({
-            "error": "no_trades",
-            "run_id": run_id,
-            "why": "this run recorded no closed trades, so there is no sequence to resample \
-                    and no cost to re-charge. An empty trade list is not a result with zero \
-                    risk; it is a run that did not trade.",
-            "fix": "get_backtest shows whether the run completed and whether its strategy \
-                    produced any entries"
-        }));
+        return Err(crate::tool_error::refuse_extra(
+            "no_trades",
+            "this run recorded no closed trades; an empty trade list is a run that did not \
+             trade, not a result with zero risk.",
+            "call get_backtest on this run_id to see whether it completed and produced entries, \
+             then pass a run that traded",
+            json!({ "run_id": run_id }),
+        ));
     }
     Ok(trades)
 }
@@ -371,26 +370,25 @@ fn parse_resample(params: &Value) -> Result<ResampleRequest, Value> {
     // documented failure is reporting one as the other; a default would pick the
     // question for a caller who had not noticed there were two.
     let Some(raw_mode) = str_field(params, "mode") else {
-        return Err(json!({
-            "error": "mode_required",
-            "why": "reshuffle and bootstrap answer different questions and this tool will not \
-                    choose for you. Reshuffle holds the outcome set fixed and varies the ORDER, \
-                    so it measures path risk. Bootstrap resamples the outcomes, so it measures \
-                    estimation uncertainty about the endpoint.",
-            "accepts": ["reshuffle", "bootstrap"]
-        }));
+        return Err(crate::tool_error::refuse_extra(
+            "mode_required",
+            "reshuffle (varies the ORDER: path risk) and bootstrap (resamples the outcomes: estimation \
+             uncertainty about the endpoint) answer different questions; this tool will not choose.",
+            "add `mode`: \"reshuffle\" or \"bootstrap\"",
+            json!({ "accepts": ["reshuffle", "bootstrap"] }),
+        ));
     };
     let Some(mode) = Mode::parse(&raw_mode) else {
-        return Err(json!({
-            "error": "unknown_mode",
-            "mode": raw_mode,
-            "accepts": ["reshuffle", "bootstrap"],
-            "block_not_offered": "a block bootstrap needs an expected block length estimated \
-                                  from the series' own autocorrelation. The platform's estimator \
-                                  is `backtest::stats::bootstrap::politis_white_block`, this \
-                                  crate cannot reach it, and a second estimator written here \
-                                  would disagree with that one silently."
-        }));
+        return Err(crate::tool_error::refuse_extra(
+            "unknown_mode",
+            format!("mode `{raw_mode}` is not offered; a block bootstrap needs the platform's own block-length estimator, which this tool cannot reach."),
+            "set mode to \"reshuffle\" or \"bootstrap\"",
+            json!({
+                "mode": raw_mode,
+                "accepts": ["reshuffle", "bootstrap"],
+                "block_not_offered": "a block bootstrap needs an expected block length estimated from the series' own autocorrelation. The platform's estimator is `backtest::stats::bootstrap::politis_white_block`, this crate cannot reach it, and a second estimator written here would disagree with that one silently.",
+            }),
+        ));
     };
 
     let n_paths = params
@@ -398,14 +396,12 @@ fn parse_resample(params: &Value) -> Result<ResampleRequest, Value> {
         .and_then(Value::as_u64)
         .map_or(DEFAULT_PATHS, |n| usize::try_from(n).unwrap_or(usize::MAX));
     if !(MIN_PATHS..=MAX_PATHS).contains(&n_paths) {
-        return Err(json!({
-            "error": "n_paths_out_of_range",
-            "asked": n_paths,
-            "min": MIN_PATHS,
-            "max": MAX_PATHS,
-            "why": "below the minimum the tail percentiles move with the seed, which makes them \
-                    a property of the draw rather than of the strategy"
-        }));
+        return Err(crate::tool_error::refuse_extra(
+            "n_paths_out_of_range",
+            format!("n_paths {n_paths} is outside {MIN_PATHS} to {MAX_PATHS}; below the minimum the tail percentiles move with the seed."),
+            format!("set n_paths between {MIN_PATHS} and {MAX_PATHS}"),
+            json!({ "asked": n_paths, "min": MIN_PATHS, "max": MAX_PATHS }),
+        ));
     }
 
     // A capital level of zero or less cannot be ruined into, so it is dropped
@@ -446,16 +442,15 @@ pub async fn trade_reshuffle_bootstrap(api: &ApiClient, params: &Value) -> Value
 /// are testable without a network.
 fn resample_report(trades: &[TradeRow], req: &ResampleRequest) -> Value {
     if trades.len() < MIN_TRADES {
-        return json!({
-            "error": "too_few_trades",
-            "run_id": req.run_id,
-            "have": trades.len(),
-            "need": MIN_TRADES,
-            "why": "a percentile over resampled paths needs a sample to resample. Below this the \
-                    answer is a property of the handful of trades that happened, and reporting \
-                    it as a distribution would dress an anecdote as a statistic.",
-            "fix": "run over a longer window, or at a timeframe that trades more often"
-        });
+        return crate::tool_error::refuse_extra(
+            "too_few_trades",
+            format!(
+                "{} trades is below the {MIN_TRADES} a resampled percentile needs; reporting it as a distribution would dress an anecdote as a statistic.",
+                trades.len()
+            ),
+            "run over a longer window, or at a timeframe that trades more often",
+            json!({ "run_id": req.run_id, "have": trades.len(), "need": MIN_TRADES }),
+        );
     }
 
     let pnl: Vec<f64> = trades.iter().map(|t| t.pnl).collect();
@@ -646,21 +641,22 @@ fn parse_shock(params: &Value) -> Result<ShockRequest, Value> {
                 .filter(|m| *m >= 0.0 && m.is_finite())
                 .collect();
             if parsed.len() != a.len() {
-                return Err(json!({
-                    "error": "bad_multipliers",
-                    "why": "every multiplier must be a finite, non-negative number: this grid is \
-                            made of multiples of the run's measured costs"
-                }));
+                return Err(crate::tool_error::refuse(
+                    "bad_multipliers",
+                    "every multiplier must be a finite, non-negative number: the grid is made of multiples of the run's measured costs.",
+                    "send `multipliers` as an array of finite numbers, each zero or more",
+                ));
             }
             parsed
         }
         None => DEFAULT_MULTIPLIERS.to_vec(),
     };
     if multipliers.is_empty() {
-        return Err(json!({
-            "error": "bad_multipliers",
-            "why": "the grid is empty, so there is no curve to report"
-        }));
+        return Err(crate::tool_error::refuse(
+            "bad_multipliers",
+            "the grid is empty, so there is no curve to report.",
+            "send at least one multiplier in `multipliers`, or omit it for the default grid",
+        ));
     }
     Ok(ShockRequest {
         run_id,
@@ -690,17 +686,19 @@ fn shock_report(trades: &[TradeRow], req: &ShockRequest) -> Value {
     // tool could return, and it would mean the opposite of what it says.
     let unrecorded = trades.iter().filter(|t| t.costs_paid.is_none()).count();
     if unrecorded > 0 {
-        return json!({
-            "error": "costs_not_recorded",
-            "run_id": req.run_id,
-            "trades_missing_costs_paid": unrecorded,
-            "of": trades.len(),
-            "why": "not every trade in this run carries `costs_paid`, and a missing cost is not \
-                    a zero cost. Scaling an unknown base would return a break-even multiple \
-                    saying the strategy survives any cost, which is the most dangerous wrong \
-                    answer available here.",
-            "fix": "re-run under a cost model that records per-trade costs"
-        });
+        return crate::tool_error::refuse_extra(
+            "costs_not_recorded",
+            format!(
+                "{unrecorded} of {} trades carry no `costs_paid`, and a missing cost is not a zero cost; scaling an unknown base would report that the strategy survives any cost.",
+                trades.len()
+            ),
+            "re-run under a cost model that records per-trade costs, then pass that run_id",
+            json!({
+                "run_id": req.run_id,
+                "trades_missing_costs_paid": unrecorded,
+                "of": trades.len(),
+            }),
+        );
     }
 
     let total_costs: f64 = trades.iter().filter_map(|t| t.costs_paid).sum();
@@ -709,16 +707,13 @@ fn shock_report(trades: &[TradeRow], req: &ShockRequest) -> Value {
     let gross_pnl = net_pnl + total_costs;
 
     if total_costs <= 0.0 {
-        return json!({
-            "error": "no_costs_charged",
-            "run_id": req.run_id,
-            "total_costs": total_costs,
-            "why": "this run was charged no costs at all, so there is nothing to multiply and \
-                    every point on the curve would equal the unshocked result. A zero-cost \
-                    backtest is itself the finding — the break-even multiple would be infinite, \
-                    and it would be a fact about the cost model rather than about the strategy.",
-            "fix": "run_oracle_test measures whether the cost model charges what it claims"
-        });
+        return crate::tool_error::refuse_extra(
+            "no_costs_charged",
+            "this run was charged no costs at all, so every point on the curve would equal the \
+             unshocked result; a zero-cost backtest is itself the finding.",
+            "call run_oracle_test to measure whether the cost model charges what it claims",
+            json!({ "run_id": req.run_id, "total_costs": total_costs }),
+        );
     }
 
     let curve: Vec<Value> = req
@@ -1167,7 +1162,7 @@ mod tests {
     fn too_few_trades_is_refused_rather_than_answered() {
         let out = resample_report(&rows(&[1.0, 2.0, -1.0], 0.1), &req(Mode::Bootstrap, None));
         assert_eq!(
-            out.get("error").and_then(Value::as_str),
+            out.get("error").and_then(|e| e.get("code")).and_then(Value::as_str),
             Some("too_few_trades")
         );
         assert_eq!(
@@ -1183,10 +1178,10 @@ mod tests {
     fn a_missing_mode_is_refused_and_the_refusal_explains_both_modes() {
         let e = parse_resample(&json!({ "run_id": "r1" })).expect_err("mode is required");
         assert_eq!(
-            e.get("error").and_then(Value::as_str),
+            e.get("error").and_then(|e| e.get("code")).and_then(Value::as_str),
             Some("mode_required")
         );
-        let why = e.get("why").and_then(Value::as_str).expect("why");
+        let why = e.pointer("/error/message").and_then(Value::as_str).expect("why");
         assert!(why.contains("path risk"), "{why}");
         assert!(why.contains("estimation uncertainty"), "{why}");
     }
@@ -1195,7 +1190,7 @@ mod tests {
     fn block_mode_is_refused_by_name_and_names_the_symbol_it_would_need() {
         let e = parse_resample(&json!({ "run_id": "r1", "mode": "block" }))
             .expect_err("block is not offered");
-        assert_eq!(e.get("error").and_then(Value::as_str), Some("unknown_mode"));
+        assert_eq!(e.get("error").and_then(|e| e.get("code")).and_then(Value::as_str), Some("unknown_mode"));
         let note = e
             .get("block_not_offered")
             .and_then(Value::as_str)
@@ -1208,7 +1203,7 @@ mod tests {
         let e = parse_resample(&json!({ "run_id": "r1", "mode": "bootstrap", "n_paths": 10 }))
             .expect_err("below the floor");
         assert_eq!(
-            e.get("error").and_then(Value::as_str),
+            e.get("error").and_then(|e| e.get("code")).and_then(Value::as_str),
             Some("n_paths_out_of_range")
         );
     }
@@ -1307,7 +1302,7 @@ mod tests {
         let trades = rows(&vec![10.0; 40], 0.0);
         let out = shock_report(&trades, &shock("r1"));
         assert_eq!(
-            out.get("error").and_then(Value::as_str),
+            out.get("error").and_then(|e| e.get("code")).and_then(Value::as_str),
             Some("no_costs_charged")
         );
         assert!(out.get("breakeven_multiplier").is_none(), "{out}");
@@ -1319,7 +1314,7 @@ mod tests {
         trades[7].costs_paid = None;
         let out = shock_report(&trades, &shock("r1"));
         assert_eq!(
-            out.get("error").and_then(Value::as_str),
+            out.get("error").and_then(|e| e.get("code")).and_then(Value::as_str),
             Some("costs_not_recorded")
         );
         assert_eq!(
@@ -1397,7 +1392,7 @@ mod tests {
         let e = parse_shock(&json!({ "run_id": "r1", "multipliers": [1.0, -2.0] }))
             .expect_err("negative costs are not a shock");
         assert_eq!(
-            e.get("error").and_then(Value::as_str),
+            e.get("error").and_then(|e| e.get("code")).and_then(Value::as_str),
             Some("bad_multipliers")
         );
     }

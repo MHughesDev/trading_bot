@@ -155,6 +155,273 @@ pub fn check_revision_pinning(manifest: &Value, confirmatory: bool) -> Result<()
     Ok(())
 }
 
+// ── Experiment creation gate (Set P P-2.3) ───────────────────────────────────
+//
+// `admit_experiment` above was complete and tested and its only caller was the
+// auditor's fixture runner: the create handler never asked it anything, so a grade-D
+// series backed Experiments freely. This is the part that asks.
+//
+// The grade it reads is the **persisted battery grade** (`data_qc_reports`, P-2.2),
+// never a recomputation with `grade()`'s four thresholds, which disagree with the
+// battery and would let the admission gate and the manifest print different letters.
+
+/// Whether a series with **no persisted report** refuses an Experiment.
+///
+/// `true` since 2026-10-04 (ADR-P2-3a). It was `false` while nothing wrote
+/// `data_qc_reports` (the P-2.6 sequencing rule: refusing everything would be an
+/// outage). The nightly census job now grades every series that holds bars
+/// (`apps/platform/src/census_jobs.rs`) and the 11 live series have reports, so
+/// "ungraded" now means a series with no bars or one that appeared since the last
+/// pass, and it is refused with the way to get it graded. Rejected: leaving it
+/// `false` (an Experiment on data nobody graded is the case DA-07 exists to stop).
+pub const REFUSE_UNGRADED: bool = true;
+
+/// One series an Experiment declares.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SeriesRef {
+    pub instrument: String,
+    pub timeframe: String,
+}
+
+/// The series a `universe_ref` names, and the parts that cannot be graded here.
+///
+/// A `universe_ref` is free text to the suite. This reads the form a human or agent
+/// writes for explicit data: comma-separated symbols. `selection:<ref>` universes
+/// are resolved per decision instant at run time, so they cannot be graded here and
+/// are returned as `skipped`; they are not silently treated as clean.
+#[must_use]
+pub fn series_of(
+    universe_ref: &str,
+    eval_resolution: Option<&str>,
+) -> (Vec<SeriesRef>, Vec<String>) {
+    let timeframe = eval_resolution.unwrap_or("1d").to_string();
+    let mut series = Vec::new();
+    let mut skipped = Vec::new();
+    for part in universe_ref
+        .split(',')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
+        if part.starts_with("selection:") {
+            skipped.push(part.to_string());
+        } else {
+            series.push(SeriesRef {
+                instrument: part.to_string(),
+                timeframe: timeframe.clone(),
+            });
+        }
+    }
+    (series, skipped)
+}
+
+/// What the gate found for one series.
+#[derive(Debug, Clone, Serialize)]
+pub struct SeriesVerdict {
+    pub instrument: String,
+    pub timeframe: String,
+    /// `None`: no persisted report.
+    pub grade: Option<String>,
+    pub report_id: Option<uuid::Uuid>,
+    pub reasons: Value,
+    /// The refusal's code when the series did not pass.
+    pub refusal: Option<&'static str>,
+    pub fix: Option<&'static str>,
+    /// The waiver that admitted a grade-C series.
+    pub waiver_id: Option<uuid::Uuid>,
+}
+
+impl SeriesVerdict {
+    #[must_use]
+    pub fn admitted(&self) -> bool {
+        self.refusal.is_none()
+    }
+}
+
+/// A persisted grade as the gate reads it: letter, report id, reasons.
+pub type GradedSeries = (String, uuid::Uuid, Value);
+
+/// Decide one series from its grade and (for C) the waiver the caller offered.
+///
+/// Pure. There is no token, scope or role among its inputs: no credential can
+/// bypass it because none reaches it, which is what "no scope can bypass the
+/// check" means when the check is a function of the data alone.
+#[must_use]
+pub fn decide_series(
+    series: &SeriesRef,
+    graded: Option<GradedSeries>,
+    waiver: Option<(uuid::Uuid, Waiver)>,
+) -> SeriesVerdict {
+    let mut v = SeriesVerdict {
+        instrument: series.instrument.clone(),
+        timeframe: series.timeframe.clone(),
+        grade: None,
+        report_id: None,
+        reasons: Value::Null,
+        refusal: None,
+        fix: None,
+        waiver_id: None,
+    };
+    let Some((letter, report_id, reasons)) = graded else {
+        if REFUSE_UNGRADED {
+            v.refusal = Some("data_ungraded");
+            v.fix = Some(
+                "this series has no persisted data_qc report: the nightly census grades every                  series that holds bars, so either it holds none (collect or backfill it) or                  the grading pass has not run since it appeared; submit a data_qc job for                  this instrument and timeframe to grade it now",
+            );
+        }
+        return v;
+    };
+    v.grade = Some(letter.clone());
+    v.report_id = Some(report_id);
+    v.reasons = reasons;
+    let (waiver_id, waiver) = match waiver {
+        Some((id, w)) => (Some(id), Some(w)),
+        None => (None, None),
+    };
+    match admit_experiment(&letter, waiver.as_ref()) {
+        Ok(()) => {
+            if letter == "C" {
+                v.waiver_id = waiver_id;
+            }
+        }
+        Err(r) => {
+            v.refusal = Some(r.code);
+            v.fix = Some(r.fix);
+        }
+    }
+    v
+}
+
+/// Look up an approved `qc_waiver` for one series.
+///
+/// Valid only if the approval is `kind = 'qc_waiver'`, answered by a human
+/// (`answered_by` set), the answer is `approve` with a non-empty note (the reason),
+/// and its payload names this exact `(instrument, timeframe)` and the grade `C`.
+/// A waiver for one series does not cover another, and one granted for `C` does not
+/// cover a later `D` ([`Waiver::is_valid_for`]).
+pub async fn find_waiver(
+    pg: &sqlx::PgPool,
+    approval_id: uuid::Uuid,
+    series: &SeriesRef,
+) -> Option<(uuid::Uuid, Waiver)> {
+    type Row = (Value, Option<Value>, Option<uuid::Uuid>);
+    let (payload, answer, answered_by): Row = sqlx::query_as(
+        "SELECT payload, answer, answered_by FROM approval_requests
+          WHERE approval_id = $1 AND kind = 'qc_waiver' AND state = 'answered'",
+    )
+    .bind(approval_id)
+    .fetch_optional(pg)
+    .await
+    .ok()
+    .flatten()?;
+    let answered_by = answered_by?;
+    let answer = answer?;
+    if answer.get("option").and_then(Value::as_str) != Some("approve") {
+        return None;
+    }
+    let names = |k: &str| payload.get(k).and_then(Value::as_str);
+    if names("instrument") != Some(series.instrument.as_str())
+        || names("timeframe") != Some(series.timeframe.as_str())
+    {
+        return None;
+    }
+    Some((
+        approval_id,
+        Waiver {
+            granted_for: names("grade").unwrap_or("").to_string(),
+            approved_by: answered_by.to_string(),
+            reason: answer
+                .get("note")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        },
+    ))
+}
+
+/// Check every series an Experiment declares. Returns all verdicts; the caller
+/// refuses if any is not admitted, and the 422 lists **every** failing series with
+/// its reasons: an error that names only the first is one that gets fixed one
+/// retry at a time.
+pub async fn check_experiment_data(
+    pg: &sqlx::PgPool,
+    universe_ref: &str,
+    eval_resolution: Option<&str>,
+    waiver_id: Option<uuid::Uuid>,
+) -> (Vec<SeriesVerdict>, Vec<String>) {
+    let (series, skipped) = series_of(universe_ref, eval_resolution);
+    let mut out = Vec::with_capacity(series.len());
+    for s in &series {
+        let graded = storage::clickhouse::qc_reports::latest_grade(pg, &s.instrument, &s.timeframe)
+            .await
+            .ok()
+            .flatten()
+            .map(|g| (g.grade, g.report_id, g.reasons));
+        let waiver = match (&graded, waiver_id) {
+            (Some((letter, _, _)), Some(id)) if letter == "C" => find_waiver(pg, id, s).await,
+            _ => None,
+        };
+        out.push(decide_series(s, graded, waiver));
+    }
+    (out, skipped)
+}
+
+/// The 422 body: `data_quality_insufficient`, every failing series, with reasons.
+#[must_use]
+pub fn refusal_body(verdicts: &[SeriesVerdict]) -> Value {
+    let failing: Vec<&SeriesVerdict> = verdicts.iter().filter(|v| !v.admitted()).collect();
+    let names = failing
+        .iter()
+        .map(|v| {
+            format!(
+                "{} {} grade {}",
+                v.instrument,
+                v.timeframe,
+                v.grade.as_deref().unwrap_or("?")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    serde_json::json!({
+        "error": "data_quality_insufficient",
+        "message": format!(
+            "{} of {} series cannot back an Experiment: {names}",
+            failing.len(),
+            verdicts.len()
+        ),
+        "series": failing,
+    })
+}
+
+/// Record the admission on the Experiment's lineage, one row per series.
+///
+/// # Errors
+/// The database; the caller reports `lineage_recorded: false` rather than
+/// pretending, since the Experiment already exists.
+pub async fn record_admission(
+    pg: &sqlx::PgPool,
+    experiment_id: &str,
+    user_id: uuid::Uuid,
+    verdicts: &[SeriesVerdict],
+) -> Result<(), sqlx::Error> {
+    for v in verdicts.iter().filter(|v| v.admitted()) {
+        sqlx::query(
+            "INSERT INTO experiment_data_admission
+               (experiment_id, user_id, instrument_id, timeframe, report_id, grade, waiver_id)
+             VALUES ($1,$2,$3,$4,$5,$6,$7)",
+        )
+        .bind(experiment_id)
+        .bind(user_id)
+        .bind(&v.instrument)
+        .bind(&v.timeframe)
+        .bind(v.report_id)
+        .bind(v.grade.as_deref())
+        .bind(v.waiver_id)
+        .execute(pg)
+        .await?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,5 +540,108 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.code, "data_as_of_before_window_end");
+    }
+    // ── the creation gate (P-2.3) ────────────────────────────────────────────
+
+    fn series(i: &str) -> SeriesRef {
+        SeriesRef {
+            instrument: i.into(),
+            timeframe: "1m".into(),
+        }
+    }
+    fn graded(l: &str) -> Option<GradedSeries> {
+        Some((l.into(), uuid::Uuid::nil(), json!(["why"])))
+    }
+
+    #[test]
+    fn a_grade_d_series_is_refused_with_its_reasons_listed() {
+        let v = decide_series(&series("BTC-USD"), graded("D"), None);
+        assert_eq!(v.refusal, Some("data_grade_d_refused"));
+        let body = refusal_body(&[v]);
+        assert_eq!(body["error"], "data_quality_insufficient");
+        assert_eq!(body["series"][0]["reasons"], json!(["why"]));
+    }
+
+    #[test]
+    fn grade_c_fails_without_a_waiver_and_passes_with_one() {
+        assert_eq!(
+            decide_series(&series("X"), graded("C"), None).refusal,
+            Some("data_grade_c_needs_waiver")
+        );
+        let id = uuid::Uuid::from_u128(7);
+        let v = decide_series(&series("X"), graded("C"), Some((id, good_waiver())));
+        assert!(v.admitted());
+        assert_eq!(v.waiver_id, Some(id), "the waiver id travels to the lineage");
+    }
+
+    /// A waiver is never recorded against a grade that did not need it, and never
+    /// rescues a D.
+    #[test]
+    fn a_waiver_neither_decorates_a_b_nor_rescues_a_d() {
+        let id = uuid::Uuid::from_u128(7);
+        let b = decide_series(&series("X"), graded("B"), Some((id, good_waiver())));
+        assert_eq!(b.waiver_id, None);
+        assert!(!decide_series(&series("X"), graded("D"), Some((id, good_waiver()))).admitted());
+    }
+
+    #[test]
+    fn every_failing_series_is_listed_not_just_the_first() {
+        let vs = vec![
+            decide_series(&series("A"), graded("D"), None),
+            decide_series(&series("B"), graded("B"), None),
+            decide_series(&series("C"), graded("C"), None),
+        ];
+        assert_eq!(refusal_body(&vs)["series"].as_array().unwrap().len(), 2);
+    }
+
+    /// ADR-P2-3a: ungraded is refused, with the way to get it graded, and never
+    /// reads as a letter.
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn an_ungraded_series_is_refused_and_told_how_to_get_graded() {
+        assert!(REFUSE_UNGRADED);
+        let v = decide_series(&series("NEW"), None, None);
+        assert!(!v.admitted());
+        assert_eq!(v.refusal, Some("data_ungraded"));
+        assert!(v.fix.unwrap().contains("data_qc job"));
+        assert!(v.grade.is_none(), "it must read as ungraded, never as a letter");
+    }
+
+    #[test]
+    fn a_universe_ref_names_its_series_and_selections_are_skipped_not_cleaned() {
+        let (named, skipped) = series_of("BTC-USD, ETH-USD,selection:top5", Some("1h"));
+        assert_eq!(named.len(), 2);
+        assert_eq!(named[0].timeframe, "1h");
+        assert_eq!(skipped, vec!["selection:top5".to_string()]);
+        assert_eq!(series_of("BTC-USD", None).0[0].timeframe, "1d");
+    }
+
+    /// P-2.3 clause 4: no token scope bypasses it. The decision has no scope input,
+    /// and the handler calls the gate before it creates anything with no scope
+    /// branch in between, so each scope is checked by name against both facts.
+    #[test]
+    fn no_token_scope_can_bypass_the_creation_gate() {
+        let handler = include_str!("routes/experiments.rs");
+        let at = handler.find("pub async fn create_experiment(").unwrap();
+        let body = &handler[at..at + handler[at..].find("\n}").unwrap()];
+        let gate = body
+            .find("check_experiment_data(")
+            .expect("the handler calls the gate");
+        let create = body.find("state.suite.create_experiment(").unwrap();
+        assert!(gate < create, "the gate must precede creation");
+        let between = &body[gate..create];
+        assert!(!between.contains("permits("), "no scope branch may sit between");
+        for scope in crate::auth::scopes::RESEARCH_SCOPES
+            .iter()
+            .copied()
+            .chain([crate::auth::scopes::WEB_FULL, crate::auth::scopes::TEXT_READER])
+        {
+            assert!(!between.contains(scope), "scope {scope} must not appear in the gate path");
+            assert_eq!(
+                decide_series(&series("X"), graded("D"), None).refusal,
+                Some("data_grade_d_refused"),
+                "scope {scope}"
+            );
+        }
     }
 }

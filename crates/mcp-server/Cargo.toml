@@ -27,3 +27,7 @@ strategy-lang = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true }
 axum = { workspace = true }
+# tests/path_risk_end_to_end.rs runs the real simulator (S-3.12). Dev-only: the
+# library stays a thin HTTP client (ADR-0010) and does not link the engine.
+backtest = { workspace = true }
+nautilus-backtest = { workspace = true }

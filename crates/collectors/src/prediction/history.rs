@@ -27,6 +27,7 @@
 //! existed — which is an argument for collecting forward, not an assumption that
 //! backfill will fill it.
 
+use std::str::FromStr;
 use std::time::Duration;
 
 use chrono::{DateTime, TimeZone, Utc};
@@ -76,6 +77,10 @@ const CENTS_PER_UNIT: i64 = 100;
 pub enum KalshiHistoryError {
     #[error("malformed response: {0}")]
     Parse(String),
+    #[error("rate limited: {0}")]
+    RateLimited(String),
+    #[error("transport: {0}")]
+    Transport(String),
     #[error("candlestick at {ts} quotes {cents} cents, outside the 0..=100 probability range")]
     ImpossibleProbability { ts: i64, cents: i64 },
     #[error("candlestick timestamp {0} is not a valid instant")]
@@ -96,12 +101,23 @@ pub struct Candlestick {
     pub end_period_ts: i64,
     #[serde(default)]
     pub price: Option<CandlePrice>,
+    /// Whole contracts (the cents-era shape).
     #[serde(default)]
     pub volume: Option<i64>,
     #[serde(default)]
     pub open_interest: Option<i64>,
+    /// Fixed-point strings, e.g. `"30.00"` (the current shape, checked
+    /// 2026-10-04 against `api.elections.kalshi.com`).
+    #[serde(default)]
+    pub volume_fp: Option<String>,
+    #[serde(default)]
+    pub open_interest_fp: Option<String>,
 }
 
+/// A candlestick's traded price. Kalshi moved from integer cents (`close`) to
+/// dollar strings (`close_dollars`, `"0.3400"`); both are read, the dollars form
+/// first, so a recorded old payload and the live endpoint parse alike. A period
+/// with no trades carries an empty `price` object, which has neither.
 #[derive(Debug, Deserialize)]
 pub struct CandlePrice {
     #[serde(default)]
@@ -112,6 +128,8 @@ pub struct CandlePrice {
     pub low: Option<i64>,
     #[serde(default)]
     pub close: Option<i64>,
+    #[serde(default)]
+    pub close_dollars: Option<String>,
 }
 
 /// One historical observation of an event's probability, PIT-honest.
@@ -147,15 +165,39 @@ pub fn parse_candlesticks(
         .map_err(|e| KalshiHistoryError::Parse(e.to_string()))?;
     let mut out = Vec::with_capacity(parsed.candlesticks.len());
     for candle in parsed.candlesticks {
-        let Some(cents) = candle.price.as_ref().and_then(|p| p.close) else {
+        let Some(price) = candle.price.as_ref() else {
             continue;
         };
-        if !(0..=CENTS_PER_UNIT).contains(&cents) {
-            return Err(KalshiHistoryError::ImpossibleProbability {
-                ts: candle.end_period_ts,
-                cents,
-            });
-        }
+        // Dollars first (the live shape), then cents. A dollar string that does
+        // not parse is an error, not a skipped period: a malformed price is a
+        // venue defect worth seeing, an absent one is a period with no trades.
+        let probability = match (&price.close_dollars, price.close) {
+            (Some(d), _) => {
+                let p = Decimal::from_str(d.trim())
+                    .map_err(|e| KalshiHistoryError::Parse(format!("close_dollars {d:?}: {e}")))?;
+                if p < Decimal::ZERO || p > Decimal::ONE {
+                    return Err(KalshiHistoryError::ImpossibleProbability {
+                        ts: candle.end_period_ts,
+                        cents: (p * Decimal::from(CENTS_PER_UNIT))
+                            .round()
+                            .to_string()
+                            .parse()
+                            .unwrap_or(i64::MAX),
+                    });
+                }
+                p
+            }
+            (None, Some(cents)) => {
+                if !(0..=CENTS_PER_UNIT).contains(&cents) {
+                    return Err(KalshiHistoryError::ImpossibleProbability {
+                        ts: candle.end_period_ts,
+                        cents,
+                    });
+                }
+                Decimal::from(cents) / Decimal::from(CENTS_PER_UNIT)
+            }
+            (None, None) => continue,
+        };
         let event_time = Utc
             .timestamp_opt(candle.end_period_ts, 0)
             .single()
@@ -167,12 +209,110 @@ pub fn parse_candlesticks(
             ticker: ticker.to_owned(),
             event_time,
             knowledge,
-            close_probability: Decimal::from(cents) / Decimal::from(CENTS_PER_UNIT),
-            volume: candle.volume.unwrap_or(0),
-            open_interest: candle.open_interest.unwrap_or(0),
+            close_probability: probability,
+            volume: whole(candle.volume_fp.as_deref()).or(candle.volume).unwrap_or(0),
+            open_interest: whole(candle.open_interest_fp.as_deref())
+                .or(candle.open_interest)
+                .unwrap_or(0),
         });
     }
     Ok(out)
+}
+
+/// A fixed-point count string (`"30.00"`) as whole contracts, rounded.
+fn whole(fp: Option<&str>) -> Option<i64> {
+    let d = Decimal::from_str(fp?.trim()).ok()?;
+    d.round().to_string().parse().ok()
+}
+
+/// Kalshi's public API base (the same host the live poller uses).
+pub const KALSHI_REST_BASE: &str = "https://api.elections.kalshi.com/trade-api/v2";
+
+/// The venue name rows are written under, matching the live collector's.
+pub const VENUE: &str = "kalshi";
+
+/// The series a market ticker belongs to: the part before the first `-`
+/// (`KXHIGHNY-26SEP23-B65.5` is in series `KXHIGHNY`). The candlesticks URL needs
+/// both; a ticker with no `-` has no series and is refused rather than guessed.
+#[must_use]
+pub fn series_of(ticker: &str) -> Option<&str> {
+    let (series, rest) = ticker.split_once('-')?;
+    (!series.is_empty() && !rest.is_empty()).then_some(series)
+}
+
+/// The self-imposed budget for this reader: Kalshi's published read ceiling is
+/// far above it and this is a research collector, not a feed.
+#[must_use]
+pub const fn limit() -> crate::ratelimit::VenueLimit {
+    crate::ratelimit::VenueLimit {
+        venue: "kalshi_public",
+        capacity: 5,
+        refill_tokens: 5,
+        refill_window: Duration::from_secs(1),
+        cost_per_request: 1,
+        source_quote: "No ceiling is quoted here: a self-imposed 5 requests/second for the public, unauthenticated market-data endpoints.",
+    }
+}
+
+/// Fetch one market's candlesticks for `[from, to]` and parse them into
+/// PIT-honest history rows. `period_minutes` is Kalshi's `period_interval`
+/// (1, 60 or 1440).
+///
+/// The limiter is asked **before** the request is sent and a refusal is returned
+/// as [`KalshiHistoryError::RateLimited`]: the request is not sent and the caller
+/// waits and asks again.
+///
+/// # Errors
+/// A ticker with no series, the limiter, transport/HTTP status, or a malformed
+/// payload.
+pub async fn fetch_candlesticks(
+    http: &dyn crate::backfill::HttpGet,
+    limiter: &crate::ratelimit::RateLimiter,
+    base: &str,
+    ticker: &str,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+    period_minutes: u32,
+) -> Result<Vec<KalshiHistoryBar>, KalshiHistoryError> {
+    let series = series_of(ticker).ok_or_else(|| {
+        KalshiHistoryError::Parse(format!("ticker {ticker:?} names no series (no `-`)"))
+    })?;
+    limiter
+        .try_acquire()
+        .map_err(|d| KalshiHistoryError::RateLimited(d.to_string()))?;
+    let url = format!(
+        "{base}/series/{series}/markets/{ticker}/candlesticks?start_ts={}&end_ts={}&period_interval={period_minutes}",
+        from.timestamp(),
+        to.timestamp()
+    );
+    let resp = http
+        .get(&url)
+        .await
+        .map_err(|e| KalshiHistoryError::Transport(e.to_string()))?;
+    let body = resp
+        .ok_body("kalshi")
+        .map_err(|e| KalshiHistoryError::Transport(e.to_string()))?;
+    parse_candlesticks(ticker, &String::from_utf8_lossy(&body))
+}
+
+/// History rows as stored rows. The source id is resolved by the caller from
+/// `dataplane.source` by [`SOURCE_NAME`]; this does not guess one.
+#[must_use]
+pub fn to_rows(bars: &[KalshiHistoryBar], source_id: i32) -> Vec<storage::clickhouse::alt::ProbabilityRow> {
+    bars.iter()
+        .map(|b| {
+            storage::clickhouse::alt::ProbabilityRow::new(
+                VENUE,
+                &b.ticker,
+                b.event_time,
+                b.knowledge,
+                b.close_probability,
+                b.volume,
+                b.open_interest,
+                source_id,
+            )
+        })
+        .collect()
 }
 
 /// The rows knowable at `as_of`.
@@ -243,6 +383,97 @@ mod tests {
             .len(),
             1
         );
+    }
+
+    /// The live endpoint's shape (recorded 2026-10-04 from
+    /// `api.elections.kalshi.com`): dollar strings and fixed-point counts, and an
+    /// empty `price` object for a period with no trades.
+    const LIVE_PAGE: &str = r#"{"candlesticks":[
+      {"end_period_ts":1790089200,"open_interest_fp":"30.00",
+       "price":{"close_dollars":"0.3400","high_dollars":"0.3400","low_dollars":"0.3400",
+                "mean_dollars":"0.3400","open_dollars":"0.3400"},
+       "volume_fp":"30.00","yes_ask":{"close_dollars":"0.3500"},"yes_bid":{"close_dollars":"0.3200"}},
+      {"end_period_ts":1790092800,"open_interest_fp":"38.00","price":{},"volume_fp":"0.00"}
+    ],"ticker":"KXHIGHNY-26SEP23-B65.5"}"#;
+
+    #[test]
+    fn the_live_dollar_shape_parses_and_a_no_trade_period_is_skipped() {
+        let rows = parse_candlesticks("KXHIGHNY-26SEP23-B65.5", LIVE_PAGE).expect("live shape");
+        assert_eq!(rows.len(), 1, "an empty price object is a period with no trades");
+        assert_eq!(rows[0].close_probability, dec!(0.34));
+        assert_eq!(rows[0].volume, 30);
+        assert_eq!(rows[0].open_interest, 30);
+        assert!(rows[0].knowledge.is_derived());
+    }
+
+    #[test]
+    fn a_dollar_price_outside_zero_to_one_is_refused() {
+        let bad = r#"{"candlesticks":[{"end_period_ts":1790089200,"price":{"close_dollars":"1.4000"}}]}"#;
+        assert!(matches!(
+            parse_candlesticks("KXTEST-26", bad),
+            Err(KalshiHistoryError::ImpossibleProbability { .. })
+        ));
+        let junk = r#"{"candlesticks":[{"end_period_ts":1790089200,"price":{"close_dollars":"abc"}}]}"#;
+        assert!(matches!(parse_candlesticks("KXTEST-26", junk), Err(KalshiHistoryError::Parse(_))));
+    }
+
+    #[test]
+    fn a_ticker_names_its_series_or_is_refused() {
+        assert_eq!(series_of("KXHIGHNY-26SEP23-B65.5"), Some("KXHIGHNY"));
+        assert_eq!(series_of("NODASH"), None);
+        assert_eq!(series_of("-X"), None);
+    }
+
+    struct Canned(std::sync::Mutex<Vec<String>>, &'static str);
+
+    #[async_trait::async_trait]
+    impl crate::backfill::HttpGet for Canned {
+        async fn get(&self, url: &str) -> Result<crate::backfill::HttpResponse, dataplane::backfill::FetchError> {
+            self.0.lock().unwrap().push(url.to_owned());
+            Ok(crate::backfill::HttpResponse {
+                status: 200,
+                retry_after_ms: None,
+                body: self.1.as_bytes().to_vec(),
+            })
+        }
+    }
+
+    /// The fetch asks the limiter first: past the declared budget the request is
+    /// **not sent**, and the URL it does send is a plain GET of the series path.
+    #[tokio::test]
+    async fn the_fetch_sends_a_get_and_the_limiter_refuses_past_its_budget() {
+        let http = Canned(std::sync::Mutex::new(vec![]), LIVE_PAGE);
+        let limiter = crate::ratelimit::RateLimiter::new(limit());
+        let (from, to) = (
+            Utc.timestamp_opt(1_790_000_000, 0).unwrap(),
+            Utc.timestamp_opt(1_790_100_000, 0).unwrap(),
+        );
+        for _ in 0..limit().capacity {
+            let rows = fetch_candlesticks(&http, &limiter, KALSHI_REST_BASE, "KXHIGHNY-26SEP23-B65.5", from, to, 60)
+                .await
+                .expect("within budget");
+            assert_eq!(rows.len(), 1);
+        }
+        let sent = http.0.lock().unwrap().len();
+        let refused = fetch_candlesticks(&http, &limiter, KALSHI_REST_BASE, "KXHIGHNY-26SEP23-B65.5", from, to, 60).await;
+        assert!(matches!(refused, Err(KalshiHistoryError::RateLimited(_))), "{refused:?}");
+        assert_eq!(http.0.lock().unwrap().len(), sent, "a refused request is not sent");
+        let url = http.0.lock().unwrap()[0].clone();
+        assert!(url.contains("/series/KXHIGHNY/markets/KXHIGHNY-26SEP23-B65.5/candlesticks?"), "{url}");
+        assert!(url.contains("period_interval=60"), "{url}");
+    }
+
+    #[test]
+    fn stored_rows_keep_the_derived_flag() {
+        let rows = parse_candlesticks("KXHIGHNY-26SEP23-B65.5", LIVE_PAGE).unwrap();
+        let stored = to_rows(&rows, 24);
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].source_id, 24);
+        assert!(
+            stored[0].quality_flags & dataplane::QualityFlags::BACKFILLED_KNOWLEDGE_TIME.0 != 0,
+            "a candlestick row must be written flagged"
+        );
+        assert!(stored[0].knowledge_time > stored[0].event_time);
     }
 
     #[test]

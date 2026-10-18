@@ -146,6 +146,16 @@ pub trait BackfillSource: Send + Sync {
     /// The declared rate limit, for the record and for the census.
     fn declared_limit(&self) -> RateLimit;
 
+    /// The most bar-close time one request can carry at `period_secs`, when the
+    /// venue caps a page by row count. The engine asks for exactly this much per
+    /// page; without it every timeframe was fetched in the policy's fixed 5-hour
+    /// slices, so a three-year daily window cost ~5,400 requests for ~1,100 bars
+    /// (measured 2026-10-03) — wasteful against a free endpoint whose goodwill is
+    /// the whole supply. `None` keeps the policy's span.
+    fn max_page_span(&self, _period_secs: u32) -> Option<chrono::Duration> {
+        None
+    }
+
     async fn fetch_page(&self, req: &PageRequest) -> Result<BackfillPage, FetchError>;
 }
 
@@ -430,6 +440,10 @@ pub trait BackfillStateStore: Send + Sync {
     async fn ensure(&self, key: &BackfillKey) -> Result<BackfillState, StateError>;
 
     /// Record progress after a page landed.
+    ///
+    /// `rows_written` is **this page's** count, and the store adds it to the
+    /// row's total. Not the run's running total: that restarts at zero after a
+    /// restart, and summing it page by page records a triangle number.
     async fn advance(
         &self,
         key: &BackfillKey,

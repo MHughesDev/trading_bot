@@ -64,6 +64,7 @@ struct Entry {
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)] // a one-shot migration report: one value per strategy
 enum Outcome {
     /// A construct with no v3 translation yet — named, never approximated.
     Refused { construct: String, at: String, why: String },
@@ -200,6 +201,7 @@ async fn main() -> Result<()> {
 }
 
 async fn latest_job(pg: &sqlx::PgPool, strategy_id: &str) -> Result<Option<Job>> {
+    #[allow(clippy::type_complexity)]
     let row: Option<(String, String, DateTime<Utc>, DateTime<Utc>, Decimal, Value)> =
         sqlx::query_as(
             "SELECT timeframe, instrument_id, start_time, end_time, initial_balance, result \
@@ -423,7 +425,7 @@ fn attribute(old: &OldResult, new: &NewResult, changes: &[Change]) -> Vec<Differ
             attributed_to: why,
         });
     }
-    if old.pnl.map_or(true, |p| (p - new.pnl).abs() > 1e-6) {
+    if old.pnl.is_none_or(|p| (p - new.pnl).abs() > 1e-6) {
         let mut why = Vec::new();
         // The old venue facade recorded orders and reported no fills back
         // (FEAT-007 §1 defect 9), so its P&L was zero however it traded.

@@ -34,7 +34,15 @@ use std::path::{Path, PathBuf};
 /// The sets with per-task status markers. A–L use one `Completion:` line per
 /// MASTER instead and are counted by hand in PLAN.md §1's last table — stated
 /// here so a reader does not take their absence for completeness.
-const LIVE_SETS: &[&str] = &["set-P", "set-S", "set-T", "set-U"];
+///
+/// Sets M, N, Q, R-a and R-b were planned on 2026-10-04 (track F-RESERVED) and joined this
+/// list on 2026-10-04 (track VERIFY), once their build tracks had started closing tasks: a
+/// set belongs here from the moment any of its tasks is not `NOT STARTED`. Their task ids are
+/// `M-`, `N-`, `Q-`, `RA-` and `RB-` (the id grammar in `is_task_heading` is uppercase
+/// letters, a dash, then digits and dots, so `R-a-1.1` would not parse).
+const LIVE_SETS: &[&str] = &[
+    "set-P", "set-S", "set-T", "set-U", "set-M", "set-N", "set-Q", "set-R-a", "set-R-b",
+];
 
 /// How much a task of each declared size is worth.
 fn weight(size: char) -> f64 {
@@ -197,7 +205,7 @@ fn phase_files(set: &str) -> Vec<PathBuf> {
         .filter(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("phase-") && n.ends_with(".md"))
+                .is_some_and(|n| n.starts_with("phase-") && n.to_ascii_lowercase().ends_with(".md"))
         })
         .collect();
     out.sort_by_key(|p| phase_number(p));

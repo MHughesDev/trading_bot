@@ -518,6 +518,32 @@ impl SeparationJob {
         self.run_on(tenant_id, scope, model_version, &series).await
     }
 
+    /// Run the test for every tenant the platform serves.
+    ///
+    /// The daily job used to call [`Self::run`] with the literal tenant
+    /// `"default"`. A tenant id is a user id (the job store and the suite both
+    /// register trials under `user_id.to_string()`), so that call read an empty
+    /// ledger every day and wrote a row saying there was nothing to separate —
+    /// which looked like a finding about the regime model and was a fact about
+    /// the tenant name (OPEN-TASKS C1.4). One failing tenant does not stop the
+    /// others; each result is returned with its tenant.
+    pub async fn run_for_all_tenants(
+        &self,
+        scope: &RegimeScope,
+        model_version: &str,
+    ) -> Vec<(String, Result<SeparationRun, sqlx::Error>)> {
+        let tenants = match crate::knowledge_jobs::tenants(&self.pg).await {
+            Ok(t) => t,
+            Err(e) => return vec![("*".to_string(), Err(e))],
+        };
+        let mut out = Vec::with_capacity(tenants.len());
+        for tenant in tenants {
+            let r = self.run(&tenant, scope, model_version).await;
+            out.push((tenant, r));
+        }
+        out
+    }
+
     /// The same run, over series supplied by the caller.
     ///
     /// Split out so the measurement can be driven from series the ledger does

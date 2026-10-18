@@ -76,10 +76,13 @@ pub async fn execute(ws: &Workspace, name: &str, args: &Map<String, Value>) -> (
                 return ("read_file needs `path`".into(), true);
             };
             // `write: false` — reading is allowed from every area, including the
-            // read-only ones.
-            let resolved = match ws.resolve(path, false) {
-                Ok(p) => p,
-                Err(e) => return (format!("{e}. {}", e.fix()), true),
+            // read-only ones. The skills mount is one more read-only place (R-a).
+            let resolved = match skills_path(ws, path) {
+                Some(p) => p,
+                None => match ws.resolve(path, false) {
+                    Ok(p) => p,
+                    Err(e) => return (format!("{e}. {}", e.fix()), true),
+                },
             };
             match tokio::fs::read(&resolved).await {
                 Ok(bytes) => {
@@ -108,9 +111,12 @@ pub async fn execute(ws: &Workspace, name: &str, args: &Map<String, Value>) -> (
 
         "list_files" => {
             let base = match path_arg.filter(|p| !p.trim().is_empty()) {
-                Some(p) => match ws.resolve(p, false) {
-                    Ok(r) => r,
-                    Err(e) => return (format!("{e}. {}", e.fix()), true),
+                Some(p) => match skills_path(ws, p) {
+                    Some(r) => r,
+                    None => match ws.resolve(p, false) {
+                        Ok(r) => r,
+                        Err(e) => return (format!("{e}. {}", e.fix()), true),
+                    },
                 },
                 None => ws.root().to_path_buf(),
             };
@@ -172,6 +178,42 @@ async fn collect(base: &Path, root: &Path, out: &mut Vec<String>) {
             }
         }
     }
+}
+
+/// Where the session's skills are mounted, relative to the workspace root (R-a).
+pub const SKILLS_MOUNT: &str = ".claude/skills";
+
+/// A read-only path inside the skills mount, or `None` for any other path.
+///
+/// The mount is not one of the five areas, so `Workspace::resolve` refuses it, which
+/// is also why the agent can never *write* there: `write_file` and `delete_file` still
+/// go through `resolve`. Reading is allowed by this function alone, and only for a
+/// path made of plain components under `.claude/skills`: no `..`, no absolute path,
+/// no drive prefix.
+#[must_use]
+pub fn skills_path(ws: &Workspace, given: &str) -> Option<PathBuf> {
+    let rel = given.trim().trim_start_matches("./");
+    let rest = rel.strip_prefix(SKILLS_MOUNT)?;
+    if !(rest.is_empty() || rest.starts_with('/')) {
+        return None;
+    }
+    let plain = rest
+        .split('/')
+        .filter(|c| !c.is_empty())
+        .all(|c| c != ".." && c != "." && !c.contains(':') && !c.contains('\\'));
+    plain.then(|| ws.root().join(rel))
+}
+
+/// The skill a `read_file` of `.claude/skills/<name>/SKILL.md` activates.
+#[must_use]
+pub fn activated_skill(path: &str) -> Option<String> {
+    let rel = path
+        .trim()
+        .trim_start_matches("./")
+        .strip_prefix(SKILLS_MOUNT)?;
+    let mut parts = rel.split('/').filter(|c| !c.is_empty());
+    let name = parts.next()?;
+    (parts.next() == Some("SKILL.md") && parts.next().is_none()).then(|| name.to_string())
 }
 
 /// Whether a tool name belongs to the workspace rather than the platform.
@@ -340,5 +382,33 @@ mod tests {
         let b = workspace_for(dir.path(), Uuid::new_v4());
         assert_ne!(a.root(), b.root());
         assert!(!a.contains(b.root()));
+    }
+
+    #[test]
+    fn the_skills_mount_is_readable_only_through_plain_paths() {
+        let ws = Workspace::new(std::path::PathBuf::from("/w/agents/x"), Quota::default());
+        assert!(skills_path(&ws, ".claude/skills/playbook/SKILL.md").is_some());
+        assert!(skills_path(&ws, "./.claude/skills").is_some());
+        for bad in [
+            ".claude/skills/../../secret",
+            ".claude/skillsX/a",
+            ".claude/skills/a/../..",
+            ".claude/skills/C:/x",
+            "inbox/a",
+            "/etc/passwd",
+        ] {
+            assert!(skills_path(&ws, bad).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn reading_a_skills_body_names_the_skill_it_activates() {
+        assert_eq!(
+            activated_skill(".claude/skills/playbook/SKILL.md").as_deref(),
+            Some("playbook")
+        );
+        assert_eq!(activated_skill(".claude/skills/playbook/notes.md"), None);
+        assert_eq!(activated_skill(".claude/skills/skill-finder/GLOSSARY.md"), None);
+        assert_eq!(activated_skill("work/SKILL.md"), None);
     }
 }

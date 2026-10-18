@@ -400,3 +400,55 @@ Track these four metrics before and after each phase. Use `cargo bench` for micr
 > `.cargo/config.toml:1-4` (it breaks CI runners without AVX-512; the note
 > suggests `RUSTFLAGS` at build time, or `x86-64-v3`). That is a reasoned
 > deviation, not an omission, and it should not be re-opened as work.
+
+---
+
+## Closure of the "do" items (track LEGACY, 2026-10-03)
+
+The six items the verdict above marked worth doing. The other 11 stay "close, not worth doing".
+
+| Item | Status | What changed |
+|---|---|---|
+| **#14/#15** `ws/live.rs` re-serialises and clones per subscriber | `DONE` | `crates/api/src/live_bus.rs`: a frame's payload is serialised **once**, at publish, into a `Box<RawValue>`, and the frame travels as `Arc<LiveFrame>` (`LiveSender = broadcast::Sender<Arc<LiveFrame>>`), so fan-out to N sockets is N reference-count bumps, not N deep clones of a `serde_json::Value`. `ws/live.rs::forward_frame` splices the already-serialised text into its own envelope (`FrameOut`, which adds only the per-subscription `sub_id`). Tests: `live_bus::one_serialisation_is_shared_by_every_receiver` (the receivers hold the same allocation: `Arc::ptr_eq`), `no_listener_means_no_work`, `invalid_text_is_dropped_not_forwarded`, and `ws::live::frame_envelope_matches_the_enum_variant` (the wire bytes equal the old `WsOutMessage::Frame` serialisation) |
+| **(fold)** `hot_path.rs` builds a `json!` per tick | `DONE` | The tape frame is written straight into one `String` by `tape_frame_json` (no `serde_json::Value`), and only when `live_bus::has_listeners` is true: with no panel open the tape costs nothing. `publish_text` validates once and drops invalid text. Test: `tape_frame_is_valid_json_with_the_published_shape` |
+| **finding 3** busy-spin `yield_now` on all three ring consumers | `DONE` | `IdleBackoff` in `hot_path.rs`: a wall-clock-bounded spin (200 us), then park with backoff (200 us doubling to 1 ms). Used by stages 2, 3 and 4. Tests: `idle_backoff_spins_then_sleeps_then_caps_and_resets` (pure, synthetic clock), `an_idle_consumer_parks_instead_of_spinning` (179 polls in 60 ms; **mutation-checked**: replacing the sleep with a yield gives 62,072 polls and the test fails). All 18 `hot_path` tests, including the end-to-end fill tests that run stages 3 and 4, pass. **A measured cost:** a parked wake-up is **14-16 ms on this Windows box** for a requested 1 ms, because the OS timer tick is 15.6 ms (`a_parked_wakeup_is_measured_not_assumed`); on Linux, where the platform runs, it is about the request. So after a lull a tick can wait up to one timer tick. Acceptable for 1-minute bars and the tape; `timeBeginPeriod(1)` at boot on Windows is the fix if it ever matters (`main.rs`, orchestrator-owned) |
+| **finding 4** dead UUIDv5 code in `ids.rs` | `DONE` | `crates/domain/src/ids.rs` deleted and its two lines in `crates/domain/src/lib.rs` (`pub mod ids;`, `pub use ids::...`). It had no caller anywhere (grep over `crates/` and `apps/`), so removing it beat correcting a doc for code nobody runs. `docs/Specs/DATA-003-timestamps-and-identity.md` AC-5 still cites `domain::tests::event_id_from_key_is_deterministic`, which no longer exists: that spec line should now cite the xxh3 dedup tests instead (spec not edited here) |
+| **lint** `lint-no-json-hotpath` not in CI, fails on `RawValue` | `DONE` | `.github/workflows/ci.yml`: new job `lint-no-json-hotpath` (own block, before `check-bars-v1-frozen`). The lint was red on **34** lines, not one, all of them *decoding* a venue's REST/WS response (`RawValue` imports, `serde_json::Number` fields, `from_slice` calls), none encoding a payload. `xtask/src/main.rs::json_use_is_boundary_decode` now lets the decode side through and still fails on `to_string`, `to_vec`, `to_writer`, `to_value`, `to_raw_value`, `Serializer`, `Map`. **`crates/collectors/src/crypto/kraken.rs` was not edited**: it is pre-existing dirty, and its `RawValue` use is the legitimate zero-copy parse the lint exists to allow. 25 `xtask` tests pass, including `decoding_a_venue_response_is_allowed_but_encoding_a_payload_is_not`; `cargo xtask lint-no-json-hotpath` exits 0 |
+| **metrics** p99 and allocations-per-tick never measured | `DONE` for the synchronous path; end to end `NOT MEASURED` | Below |
+
+### Measured results
+
+Machine: the Windows 11 dev box, release profile with `lto=off, codegen-units=16`
+(`hot_path::metrics::per_tick_allocations_and_latency`, 20,000 ticks;
+`crates/domain/tests/trade_decode_allocs.rs`). A counting global allocator, thread-local so parallel tests
+do not pollute it. Reproduce with `cargo test --release -p platform -- hot_path::metrics --nocapture`.
+
+| Metric | Result | Target |
+|---|---|---|
+| Tick-to-intent latency: aggregate, build the world event, evaluate one EMA-cross strategy | **p50 0.3 us, p99 0.4-0.5 us, p99.9 0.5-0.6 us** (three runs) | final < 50 us p99 |
+| `rkyv` decode of the trade payload | 0.1 us p50, 0.2 us p99 (debug build); **1 allocation** (the trade-id `String`) | n/a |
+| Allocations per tick, whole synchronous path | decode 1 + stage 2 (`instrument_id.clone()` into the `WorldEvent`) 1 + stage 3 (one strategy) 4 = **6** | Phase B < 20 (met); final < 5 (**missed by one**) |
+| Tape frame | 0 with no socket listening; 1 (the `String`) with one | n/a |
+| Baseline for comparison | ~150+ allocations, 0.5-5 ms | |
+
+**What this does and does not show.** The synchronous decision work is about 100x inside the final
+latency target, and allocations are 25x below the baseline but one above the final target (the stage 3
+four are inside `strategy-runtime`, and the stage 2 one is the `String` in `WorldEvent::Bar`, a `strategy-runtime`
+type: neither is this track's code). **Not measured, and why:** (1) WebSocket frame receipt to
+ring push (the Kraken JSON parse and the `rtrb` push, in `crates/collectors`, which is not this track's file
+and needs a live socket or a recorded frame replay to drive); (2) the cross-thread ring hand-off and the
+wake-up of a parked consumer, which is the OS-timer figure above on this box and about the sleep request on
+Linux; (3) the order-submit leg (metric 3) and UI throughput (metric 4). A true tick-to-intent p99 needs
+the `Instant` stamped at frame receipt and read at `OrderIntent` construction (the method this section
+specifies), which touches the collector and `strategy-runtime`. Until then the figure above is the bound
+on the part of the path this repo's tests can drive, not the end-to-end p99.
+
+### ADR rows
+
+| ID | Decision | Rejected alternative |
+|---|---|---|
+| ADR-C-LINT-1 | The lint's rule is "no JSON **encoding** in a hot-path crate"; boundary **decoding** is allowed | Allow-listing the 34 lines by file, which would rot; editing `kraken.rs` to drop the `RawValue` import, which would trade a zero-copy parse for an allocating one to satisfy a lint |
+| ADR-C-IDS-1 | Delete `ids.rs` | Fix its doc and keep the dead UUIDv5 code (a future author could still follow it) |
+| ADR-C-IDLE-1 | Spin by wall-clock budget, then sleep | A fixed count of `yield_now` polls (64 polls is tens of microseconds and every real tick arrives later, so every tick met a sleeping consumer) |
+| ADR-C-BUS-1 | `LiveFrame` carries a pre-serialised `RawValue`; `LiveSender` carries `Arc<LiveFrame>`. `live_bus.rs` is outside the brief's literal file list; it is the other half of `ws/live.rs` and has no other user than the publishers in `apps/platform` | Leaving `live_bus.rs` alone and caching serialisation in the socket loop, which cannot share across sockets |
+

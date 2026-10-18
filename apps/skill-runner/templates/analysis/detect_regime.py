@@ -26,6 +26,7 @@
     ["hurst", ""],
     ["variance_ratio", ""],
     ["adx", ""],
+    ["efficiency_ratio", ""],
     ["trend_verdict", ""],
     ["agreement", ""]
   ],
@@ -219,6 +220,25 @@ def _variance_ratio(r, q=5):
     return {"q": q, "ratio": float(vr), "z": float(z), "p_value": p}
 
 
+def _efficiency_ratio(close):
+    """Net move over total path length of the closes, in 0..1.
+
+    1.0 is a straight line and 0 is a series that went nowhere however far it
+    travelled; a trend rule wants the first and a reversion rule the second. This
+    is the same quantity the feature engine serves as `efficiency_ratio_N`
+    (`crates/features`), written again because the runner has no Rust, and
+    compared with it over the same bars by `features_f2_reconciliation`. `None`
+    when the path has no length at all, rather than a 0/0.
+    """
+    close = np.asarray(close, dtype=float)
+    if close.size < 3:
+        return None
+    path = float(np.sum(np.abs(np.diff(close))))
+    if path == 0.0:
+        return None
+    return float(abs(close[-1] - close[0]) / path)
+
+
 def _adx(frame, period=14):
     """Wilder's ADX. Trend strength without direction."""
     h = pd.to_numeric(frame["high"], errors="coerce").to_numpy(dtype=float)
@@ -298,6 +318,8 @@ def run(payload: dict) -> dict:
     hurst = _hurst(r)
     vr = _variance_ratio(r)
     adx = _adx(frame)
+    closes = pd.to_numeric(frame["close"], errors="coerce").to_numpy(dtype=float)
+    efficiency = _efficiency_ratio(closes[np.isfinite(closes) & (closes > 0)])
 
     # Each method's vote on trending versus mean-reverting, and then whether they
     # agree. Votes rather than an average: averaging three numbers on three
@@ -348,6 +370,7 @@ def run(payload: dict) -> dict:
         "variance_ratio": vr["ratio"] if vr else None,
         "variance_ratio_test": vr,
         "adx": adx["adx"] if adx else None,
+        "efficiency_ratio": efficiency,
         "adx_detail": adx,
         "votes": votes,
         "trend_verdict": trend_verdict,

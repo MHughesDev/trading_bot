@@ -39,6 +39,7 @@ impl Publisher {
             .await
             .map_err(|e| BusError::Publish(e.to_string()))?;
 
+        observability::Metrics::new().increment_published(lane);
         Ok(())
     }
 
@@ -72,9 +73,18 @@ impl Publisher {
         };
         let subject = lanes::subject_for(lane, instrument_name);
         let js = self.js.clone();
+        let lane = lane.to_owned();
         tokio::spawn(async move {
-            if let Err(e) = js.publish(subject, bytes.into()).await {
-                tracing::warn!(error = %e, "tee JetStream publish failed");
+            match js.publish(subject, bytes.into()).await {
+                Ok(_) => observability::Metrics::new().increment_published(&lane),
+                Err(e) => {
+                    observability::metrics::inc(
+                        "pipeline_publish_failures_total",
+                        "Bus publishes that failed, by lane.",
+                        &[("lane", &lane)],
+                    );
+                    tracing::warn!(error = %e, "tee JetStream publish failed");
+                }
             }
         });
     }

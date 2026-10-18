@@ -118,7 +118,12 @@ pub async fn create_strategy(
 ) -> Value {
     let vr = validate_strategy(definition_json);
     if !vr.valid {
-        return json!({ "error": "validation_failed", "errors": vr.errors });
+        return crate::tool_error::refuse_extra(
+            "validation_failed",
+            format!("the definition has {} validation error(s); see `errors`.", vr.errors.len()),
+            "fix each entry in `errors`, then call create_strategy again",
+            json!({ "errors": vr.errors }),
+        );
     }
     let def: StrategyDefinition = serde_json::from_str(definition_json).expect("already validated");
     create_strategy_from_def(api, def, parent_strategy_id).await
@@ -146,7 +151,13 @@ pub async fn create_strategy_from_def(
 ) -> Value {
     let body = match serde_json::to_value(&def) {
         Ok(v) => v,
-        Err(e) => return json!({ "error": "serialization_error", "detail": e.to_string() }),
+        Err(e) => {
+            return crate::tool_error::refuse(
+                "serialization_error",
+                format!("the definition could not be serialised: {e}"),
+                "send a definition that is plain JSON (no NaN or infinite numbers)",
+            )
+        }
     };
     let path = match parent_strategy_id.filter(|p| !p.is_empty()) {
         Some(parent) => format!(
@@ -181,7 +192,7 @@ pub async fn get_strategy(api: &ApiClient, params: &Value) -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if slug.is_empty() {
-        return json!({ "error": "missing_field", "field": "strategy_id" });
+        return crate::tool_error::missing_field("strategy_id");
     }
     match api.get(&format!("/api/strategies/{slug}/config")).await {
         Ok(resp) => resp,
@@ -225,11 +236,15 @@ pub async fn list_compatible_strategies(api: &ApiClient, params: &Value) -> Valu
 pub fn specs() -> Vec<crate::spec::ToolSpec> {
     use crate::spec::ToolSpec;
     use crate::taxonomy::Risk;
+    // Two doors, exactly one of them (S-5.8). `required` is gone because a schema
+    // cannot say "one of these two" in the subset a constrained decoder reads;
+    // the handler refuses neither-and-both by name instead.
     let definition = json!({
         "type": "object",
-        "required": ["definition_json"],
         "properties": {
-            "definition_json": { "type": "object", "description": "Strategy definition OBJECT (format: get_authoring_guide). Send the object, not a string containing JSON." }
+            "definition_json": { "type": "object", "description": "Strategy definition OBJECT (format: get_authoring_guide). Send the object, not a string containing JSON." },
+            "text": { "type": "string", "description": "SLv2 text instead of a definition — exactly one of the two. See get_slv2_guide." },
+            "form": { "type": "object", "description": "clause fills (get_slv2_guide section form.schema)" }
         }
     });
     // `create_strategy` takes one field the read-only tools do not: the explicit
@@ -238,9 +253,9 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
     // that gets filled with whatever is nearest.
     let create_definition = json!({
         "type": "object",
-        "required": ["definition_json"],
         "properties": {
             "definition_json": { "type": "object", "description": "Strategy definition OBJECT (format: get_authoring_guide). Send the object, not a string containing JSON." },
+            "text": { "type": "string", "description": "SLv2 text instead of a definition — exactly one of the two. The header's name is the slug, so writing the same name again is how you iterate." },
             "parent_strategy_id": {
                 "type": "string",
                 "description": "OPTIONAL. The slug this was forked from, when it came from a DIFFERENT slug's lineage. Omit it when iterating on the same slug, and for a first version."
@@ -252,8 +267,10 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
             "validate_strategy",
             "strategy",
             Risk::Read,
-            "Validate a strategy definition without persisting it; returns structured errors \
-             (path plus message) you can fix and retry. Free and instant.",
+            "Validate a strategy without persisting it — a definition object or SLv2 text; \
+             returns structured errors (code, where, message, fix, see) you can fix and retry, \
+             and on success the features it uses, its warm-up and its cost class. Free and \
+             instant.",
             definition.clone(),
         )
         .internal(),
@@ -261,7 +278,7 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
             "create_strategy",
             "strategy",
             Risk::Write,
-            "Validate and persist a strategy definition to the platform's library. Saving is \
+            "Validate and persist a strategy (a definition object or SLv2 text) to the platform's library. Saving is \
              append-only: re-using the same strategy_id records a NEW revision whose parent is \
              the previous one and moves the slug's head to it. Nothing is overwritten and every \
              earlier version stays readable, so KEEP THE SAME SLUG while you iterate — that is \

@@ -1,9 +1,11 @@
 import asyncio
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from .schemas import TrainRequest, EvalRequest, PostHocRequest
 from .worker import run_training, run_evaluation, run_posthoc, RESULTS
+from . import embedding as _embedding
+from . import instrument_profile as _profile
 
 app = FastAPI(title="model-trainer", version="0.1.0")
 
@@ -15,7 +17,14 @@ async def health():
 
 @app.get("/capabilities")
 async def capabilities():
-    return {"frameworks": ["xgboost", "lightgbm", "sklearn", "torch"]}
+    from . import checkpoint as _ckpt
+
+    # The identity a checkpoint must match to be resumed into (`plan_resume`).
+    return {
+        "frameworks": ["xgboost", "lightgbm", "sklearn", "torch"],
+        "code_hash": _ckpt.code_hash(),
+        "image_digest": _ckpt.image_digest(),
+    }
 
 
 @app.post("/train")
@@ -55,3 +64,42 @@ async def posthoc(req: PostHocRequest):
     """
     result = await run_posthoc(req)
     return result.model_dump()
+
+
+@app.post("/fingerprint")
+async def fingerprint(req: _profile.FingerprintRequest):
+    """Tier-1 asset fingerprints (SPEC 5.2) - the `instrument_profile` job's call."""
+    return _profile.fingerprint_instruments(req)
+
+
+@app.post("/embed")
+async def embed(req: _profile.EmbedRequest):
+    """Whitened 48-d retrieval vectors over a population (SPEC 5.3).
+
+    422 with the reason when the population is too small to whiten: "not enough
+    instruments yet" is an answer the caller carries, not a failure.
+    """
+    try:
+        return _profile.embed_population(req)
+    except _embedding.NotEnoughPopulation as e:
+        raise HTTPException(
+            status_code=422, detail={"error": "not_enough_population", "message": str(e)}
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail={"error": "invalid", "message": str(e)})
+
+
+# --- Set N (N-4.1): adaptive conformal calibration -------------------------------------
+from . import calibration as _calibration  # noqa: E402
+
+
+@app.post("/calibrate")
+async def calibrate(req: _calibration.CalibrateRequest):
+    """Wrap point (or band) predictions into calibrated intervals (ACI / ACI + CUSUM resets).
+
+    Returns the bands, the coverage series and the reset indices; the Rust side calls this.
+    """
+    try:
+        return _calibration.run(req)
+    except _calibration.failures.DataError as e:
+        raise HTTPException(status_code=422, detail={"error": "invalid", "message": str(e)})

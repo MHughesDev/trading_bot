@@ -27,6 +27,9 @@
 
 pub mod gate;
 pub mod idempotency;
+// Set S S-1.2 / S-1.19: the answer shape and the typed refusal, one seam each.
+pub mod result_shape;
+pub mod tool_error;
 pub mod spec;
 pub mod taxonomy;
 pub mod tools;
@@ -104,6 +107,16 @@ impl ApiError {
         });
         if let (Some(status), Some(map)) = (self.status, obj.as_object_mut()) {
             map.insert("status".into(), json!(status));
+        }
+        // S-1.19: the harness routes on `retryable` (it reads a top-level one as
+        // well as `/error/retryable`) and the model acts on `fix`. `error` stays
+        // the platform's own code, verbatim: `audit::verdict_of` keys `forbidden`
+        // and `scope_denied` on it, and the platform's codes are not this
+        // crate's to re-spell.
+        if let Some(map) = obj.as_object_mut() {
+            let (retryable, fix) = tool_error::api_advice(self.status);
+            map.insert("retryable".into(), json!(retryable));
+            map.insert("fix".into(), json!(fix));
         }
         obj
     }
@@ -812,6 +825,9 @@ pub async fn dispatch_in_family(
             Err(e) => e.to_value(),
             Ok(ticket) => {
                 let mut out = dispatch_untraced(ctx, tool_name, params, progress).await;
+                // S-1.2: the one place a typed tool's answer gains its rendered
+                // `summary`. Adds a key; renames and nests nothing.
+                result_shape::attach_summary(s, &mut out);
                 if let (Some(t), Some(obj)) = (ticket, out.as_object_mut()) {
                     obj.entry("ids")
                         .or_insert_with(|| json!({}))
@@ -858,12 +874,20 @@ async fn dispatch_untraced(
         // Static reference data, answered here rather than over HTTP — the same
         // exception `list_lanes` takes (see `tools::venues`).
         "get_venue_constraints" => tools::venues::get_venue_constraints(params),
+        "apply_funding_costs" => tools::venues::apply_funding_costs(&ctx.api, params).await,
+        "attribute_divergence" => tools::venues::attribute_divergence(&ctx.api, params).await,
         "list_features" => tools::strategy::list_features(params),
-        "preview_signals" => tools::strategy::preview_signals(&ctx.api, params).await,
+        // A swept draft is previewed at its parameter defaults (S-5.12).
+        "preview_signals" => tools::strategy_lang::preview_signals(&ctx.api, params).await,
         "compile_strategy" => tools::strategy::compile_strategy(params),
-        "explain_strategy" => tools::strategy::explain_strategy(params),
+        // The base answer plus the author's comments (S-5.15).
+        "explain_strategy" => tools::strategy_lang::explain_strategy_with_stored_notes(&ctx.api, params).await,
         "diff_strategies" => tools::strategy::diff_strategies(params),
         "apply_move" => tools::strategy::apply_move(params),
+        // Set S S-5.11–S-5.13, S-5.15: the rest of the SLv2 surface.
+        "strategy_skeleton" => tools::strategy_lang::strategy_skeleton(params),
+        "get_slv2_guide" => tools::strategy_lang::get_slv2_guide(params),
+        "suggest_moves" => tools::strategy_lang::suggest_moves(&ctx.api, params).await,
         "lookahead_truncation_test" => {
             tools::strategy::lookahead_truncation_test(&ctx.api, params).await
         }
@@ -876,17 +900,18 @@ async fn dispatch_untraced(
         "list_instruments" => tools::discovery::list_instruments(&ctx.api).await,
 
         // ── Authoring ──────────────────────────────────────────────────────────
+        // Both take SLv2 `text` as well as a definition (S-5.8); the text door
+        // lives in `tools::strategy_lang` and ends at the same validator and the
+        // same save route.
         "validate_strategy" => {
             let definition_json = definition_arg(params);
-            let result = tools::authoring::validate_strategy(&definition_json);
-            serde_json::to_value(result).unwrap_or_else(|_| json!({"error": "serialization_error"}))
+            tools::strategy_lang::validate_strategy(params, &definition_json)
         }
         "create_strategy" => {
             let definition_json = definition_arg(params);
-            // Forwarded, never synthesised: an absent `parent_strategy_id` is a
-            // claim of no parent, not a prompt to guess one (ADR-D-21).
-            let parent = params.get("parent_strategy_id").and_then(Value::as_str);
-            tools::authoring::create_strategy(&ctx.api, &definition_json, parent).await
+            // `parent_strategy_id` is forwarded, never synthesised: an absent one
+            // is a claim of no parent, not a prompt to guess one (ADR-D-21).
+            tools::strategy_lang::create_strategy(&ctx.api, params, &definition_json).await
         }
         "get_strategy" => tools::authoring::get_strategy(&ctx.api, params).await,
         "list_strategies" => tools::authoring::list_strategies(&ctx.api).await,
@@ -897,6 +922,9 @@ async fn dispatch_untraced(
         // ── Market data ────────────────────────────────────────────────────────
         "get_bars" => tools::market::get_bars(&ctx.api, params).await,
         "get_instrument" => tools::market::get_instrument(&ctx.api, params).await,
+        "get_funding_history" => tools::market::get_funding_history(&ctx.api, params).await,
+        "probe_pit_provenance" => tools::market::probe_pit_provenance(&ctx.api, params).await,
+        "audit_survivorship" => tools::market::audit_survivorship(&ctx.api, params).await,
         "list_asset_classes" => tools::market::list_asset_classes(&ctx.api).await,
 
         // ── Asset onboarding ───────────────────────────────────────────────────
@@ -959,6 +987,10 @@ async fn dispatch_untraced(
         "get_strategy_v3" => tools::strategy_v3::get(&ctx.api, params).await,
         "get_strategy_catalogue" => tools::strategy_v3::catalogue(&ctx.api, params).await,
 
+        // ── Deployment proposals (Set U U-7.7) ─────────────────────────────────
+        "propose_deployment" => tools::deployment_proposals::propose(&ctx.api, params).await,
+        "list_deployment_proposals" => tools::deployment_proposals::list(&ctx.api, params).await,
+
         // ── Selections (Set U U-6.3) ───────────────────────────────────────────
         "run_selection" => tools::selections::run_selection(&ctx.api, params).await,
         "list_selection_runs" => tools::selections::list_selection_runs(&ctx.api, params).await,
@@ -996,6 +1028,8 @@ async fn dispatch_untraced(
         "design" => tools::lifecycle::design(&ctx.api, params).await,
         "propose" => tools::lifecycle::propose(&ctx.api, params).await,
         "open_question" => tools::lifecycle::open_question(&ctx.api, params).await,
+        "compare_candidates" => tools::lifecycle::compare_candidates(&ctx.api, params).await,
+        "reproduce" => tools::lifecycle::reproduce(&ctx.api, params).await,
         "report_kill" => tools::falsification::report_kill(&ctx.api, params).await,
         "report_evaluator_defect" => {
             tools::falsification::report_evaluator_defect(&ctx.api, params).await
@@ -1007,6 +1041,17 @@ async fn dispatch_untraced(
         "get_trade_list" => tools::falsification::get_trade_list(&ctx.api, params).await,
         "probe_data_quality" => tools::falsification::probe_data_quality(&ctx.api, params).await,
         "find_similar_trials" => tools::falsification::find_similar_trials(&ctx.api, params).await,
+        "regime_failure_search" => {
+            tools::falsification::regime_failure_search(&ctx.api, params).await
+        }
+        "parameter_fragility_map" => {
+            tools::falsification::parameter_fragility_map(&ctx.api, params).await
+        }
+        // Run-and-read falsification (S-3.13): each delay / variant is a counted look.
+        "timing_jitter_sensitivity" => {
+            tools::falsification::timing_jitter_sensitivity(&ctx.api, params).await
+        }
+        "ablation_sweep" => tools::falsification::ablation_sweep(&ctx.api, params).await,
 
         // ── Path risk and cost realism over a finished run (S-3.12) ───────────
         "trade_reshuffle_bootstrap" => {
@@ -1017,6 +1062,18 @@ async fn dispatch_untraced(
         // ── Web access (ADR-P7-01) and the skill library (ADR-P7-03) ──────────
         "web_search" => tools::research_tools::web_search(&ctx.api, params).await,
         "fetch_url" => tools::research_tools::fetch_url(&ctx.api, params).await,
+        // Set R-a: the registry's agent-facing half. None of these admits anything.
+        "propose_skill" => tools::skills_registry::propose_skill(&ctx.api, params).await,
+        // Set R-b: the knowledge model's questions. None records a measurement.
+        "check_move_history" => tools::knowledge_model::check_move_history(&ctx.api, params).await,
+        "find_analog_windows" => tools::knowledge_model::find_analog_windows(&ctx.api, params).await,
+        "tag_hypothesis_source" => tools::knowledge_model::tag_hypothesis_source(&ctx.api, params).await,
+        "get_regime_profile" => tools::knowledge_model::get_regime_profile(&ctx.api, params).await,
+        "get_regime_prior" => tools::knowledge_model::get_regime_prior(&ctx.api, params).await,
+        "compare_to_random" => tools::knowledge_model::compare_to_random(&ctx.api, params).await,
+        "search_skills" => tools::skills_registry::search_skills(&ctx.api, params).await,
+        "get_skill_proposal" => tools::skills_registry::get_skill_proposal(&ctx.api, params).await,
+        "rate_skill" => tools::skills_registry::rate_skill(&ctx.api, params).await,
         "create_skill" => tools::research_tools::create_skill(&ctx.api, params).await,
         "list_skills" => tools::research_tools::list_skills(&ctx.api, params).await,
         "run_skill" => tools::research_tools::run_skill(&ctx.api, params).await,
@@ -1028,6 +1085,16 @@ async fn dispatch_untraced(
         "spend_holdout_look" => tools::audit::spend_holdout_look(&ctx.api, params).await,
         "probability_of_overfit" => tools::audit::probability_of_overfit(&ctx.api, params).await,
         "family_wise_test" => tools::audit::family_wise_test(&ctx.api, params).await,
+        // Set Q Q-1.7 / Q-1.8 and Set M M-1.8 (new tool files).
+        "alpha_chain_audit" => tools::alpha_chain::alpha_chain_audit(&ctx.api, params).await,
+        "run_robustness_suite" => tools::robustness::run_robustness_suite(&ctx.api, params).await,
+        "explain_trade" => tools::explain_trade::explain_trade(&ctx.api, params).await,
+        "run_research_strategy" => tools::layer1::run_research_strategy(&ctx.api, params).await,
+        "future_perturbation_test" => {
+            tools::audit::future_perturbation_test(&ctx.api, params).await
+        }
+        // The static leakage pass over submitted code (S-3.11); local, no round trip.
+        "feature_leakage_scan" => tools::audit::feature_leakage_scan(params),
         "metric_integrity" => tools::audit::metric_integrity(&ctx.api, params).await,
 
         // ── The precheck reads (S-8.2) ─────────────────────────────────────────
@@ -1038,6 +1105,11 @@ async fn dispatch_untraced(
         "get_session" => tools::lifecycle::get_session(&ctx.api, params).await,
         "list_agenda" => tools::lifecycle::list_agenda(&ctx.api, params).await,
         "get_digest" => tools::lifecycle::get_digest(&ctx.api, params).await,
+        "get_stage" => tools::lifecycle_sessions::get_stage(&ctx.api, params).await,
+        "get_charter" => tools::lifecycle_sessions::get_charter(&ctx.api, params).await,
+        "list_contradictions" => {
+            tools::lifecycle_sessions::list_contradictions(&ctx.api, params).await
+        }
 
         // ── Code (S-8.8) ───────────────────────────────────────────────────────
         "run_python" => tools::code::run_python(ctx, params).await,
@@ -1469,5 +1541,41 @@ mod catalogue_tests {
         let ctx = McpContext::unledgered(ApiClient::new("http://127.0.0.1:1", "t"));
         let out = dispatch_under(&ctx, "x_skill", &json!({}), None, &envelope()).await;
         assert_eq!(out.get("error"), Some(&json!("unknown_tool")));
+    }
+
+    /// S-1.2, through the real dispatch seam rather than the helper: a typed
+    /// tool's answer carries its rendered `summary`, and every key it already
+    /// had is where it was. Without the one call in `dispatch_in_family` this
+    /// fails, which is the reachability the task is about.
+    #[tokio::test]
+    async fn a_typed_tools_answer_carries_a_rendered_summary_beside_its_payload() {
+        let ctx = McpContext::unledgered(ApiClient::new("http://127.0.0.1:1", "t"));
+        let text = "strategy trend_v1 on $bound_at_init timeframe 1h
+                    entry long when ema(close, 7) > ema(close, 21)
+size fixed 0.01
+                    exit stop 2 % from entry
+exit time 48 bars
+";
+        let out =
+            dispatch_under(&ctx, "compile_strategy", &json!({ "text": text }), None, &envelope())
+                .await;
+        assert!(out.get("error").is_none(), "{out:#}");
+        assert!(
+            out["summary"].as_str().is_some_and(|s| s.contains("trend_v1")),
+            "{out:#}"
+        );
+        assert_eq!(out["summary_fields"]["strategy_id"], "trend_v1");
+        assert_eq!(out["detail"]["definition"]["strategy_id"], "trend_v1");
+    }
+
+    /// A refusal is not summarised: the summary of an error would read as a
+    /// result.
+    #[tokio::test]
+    async fn a_refusal_carries_no_summary() {
+        let ctx = McpContext::unledgered(ApiClient::new("http://127.0.0.1:1", "t"));
+        let out = dispatch_under(&ctx, "compile_strategy", &json!({}), None, &envelope()).await;
+        assert!(out.get("summary").is_none(), "{out:#}");
+        assert_eq!(out["error"]["code"], "missing_field");
+        assert!(out["error"]["fix"].as_str().is_some_and(|f| !f.is_empty()));
     }
 }

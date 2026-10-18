@@ -1,6 +1,6 @@
 # Phase 4 — Strategy Surface & Sizing
 
-**Completion: 0% (0 / 4 tasks complete; 4.2 and 4.4 partially landed 2026-09-15, track 16 — neither meets its Definition of Done; 1 deferred-by-design — 4.5)**
+**Completion: 4.1 DONE (2026-10-03, track PROD) · 4.2 and 4.4 SUPERSEDED BY SET U (see their blocks — not closed by Set E) · 4.3 open · 4.5 deferred-by-design**
 
 **Goal:** Close the gaps between what the strategy builder lets users express and
 what the engine executes, **without ever breaking live/replay parity**
@@ -17,7 +17,22 @@ what the engine executes, **without ever breaking live/replay parity**
 
 ## Tasks
 
-### ☐ 4.1 SMA / ATR indicators — S–M each — **no format bump**
+### ☑ 4.1 [DONE 2026-10-03] SMA / ATR indicators — S–M each — **no format bump**
+
+> Found already built: `crates/features` carries `sma_N` (alias of
+> `rolling_mean_N`) and `atr_N` (Wilder, high/low/close) in the registry and the
+> windowed runtime, and the legacy simulator already evaluates features through
+> that one runtime with full OHLC rows. The only gate was
+> `backtest::requirements::parse_feature`, which accepted `ema`/`rsi` alone.
+> It now derives `Sma` and `Atr`, validating periods through the runtime's own
+> registry bounds (`atr_1`, `sma_0` refused) and taking warm-up from its
+> declared lookback. The builder's two "SMA / ATR not yet supported" warnings in
+> `frontend/src/utils/toDefinition.ts` are removed. Tests:
+> `requirements::tests` (2 new) and
+> `utils/__tests__/sma-and-atr-are-saved-without-a-warning.test.ts` (2). The
+> `FEATURE_VERSION` bumps in the original text were unnecessary (nothing about
+> the existing features changed). The legacy sim is scheduled for deletion by
+> Set U U-8.3; on the v3 engine these are `rolling_mean`/`atr_N` nodes.
 **Addresses #23 (NF).** Builder warns SMA/ATR "not yet supported"
 (`toDefinition.ts:122-126`); confirmed absent from `crates/features/` (only EMA/
 RSI/window). Feature names are free strings on `features.technical`, so no format
@@ -32,7 +47,16 @@ change — implement in the shared crate and both live + replay gain them.
 - **Verify:** indicator unit tests; a backtest using `sma_*`/`atr_*` runs;
   builder no longer warns.
 
-### ☐ 4.2 [OPEN — `intents.rs:31` returns `None`: no order AND no error] — ⚠ **BLOCKS UNATTENDED PAPER** `PercentOfBalance` sizing — M/L — **live + replay together**
+### ⇄ 4.2 [SUPERSEDED BY SET U — live half DONE 2026-09-15; replay half moves to the v3 engine] `PercentOfBalance` sizing — M/L — **live + replay together**
+
+> **2026-10-03 (track PROD), checked against the Set U plan and code.** The v3
+> engine carries `SizeSpec::EquityFraction` through `strategy-engine`
+> (`decide.rs`, `planner.rs`) — one sizer for backtest, paper and live — and the
+> v1→v3 translator (U-7.3, PARTIAL) maps percent-of-balance `place_order` rules
+> to it. So the "replay call site" this task was waiting on is the v3 engine's,
+> not `sim.rs`'s, and `sim.rs` is deleted by U-8.3. **What Set E does not close:**
+> a *stored v1* PoB strategy still hard-errors in `sim.rs` until U-8.5 migrates
+> it; do not evaluate one before then. Set E 4.2 is therefore not marked DONE.
 **Addresses #22 (NF, PoB).** Parse-only in the shared
 `intents::build_intent_from_action` (returns `None`,
 `strategy-runtime/src/intents.rs:35`); backtest hard-errors on non-Fixed
@@ -89,7 +113,17 @@ pipeline's `initial_universe` is unsourced outside tests.
 - **Verify:** a discovery strategy surfaces a real instrument set end-to-end;
   the universe feed has a test.
 
-### ☐ 4.4 [OPEN — exit rules dropped on save with a warning only] — ⚠ **BLOCKS UNATTENDED PAPER** Strategy-definition v1.5: exit nodes + AND/OR — L — **format bump**
+### ⇄ 4.4 [SUPERSEDED BY SET U — the v1.5 bump is replaced by the v3 graph; builder emission still open] Strategy-definition v1.5: exit nodes + AND/OR — L — **format bump**
+
+> **2026-10-03 (track PROD), checked against the Set U plan and code.** Exits
+> are first-class in the v3 intent vocabulary (`bracket`, `protect`, trailing and
+> `atr(k, n)` distances — `strategy-engine/src/compile.rs`), boolean conditions
+> are ordinary expression nodes, and the translator (U-7.3) turns a v1 spec's
+> exits into a `protect` rule. A v1.5 grammar bump would be a second format to
+> maintain beside it, so it is not built. **What stays true until the builder
+> emits v3 (U-7.4):** `toDefinition.ts` keeps *rejecting* a spec that declares
+> exits on save rather than saving it without them — that refusal is correct and
+> must not be removed early. Set E 4.4 is therefore not marked DONE.
 **Addresses #24 (NF).** v1.0 grammar has no boolean operators and no exit nodes
 (`nodes.rs`, ADR-0007); the builder hard-errors on AND/mixed conditions and
 drops exit rules (`toDefinition.ts:130-165`). Both require grammar/vocabulary

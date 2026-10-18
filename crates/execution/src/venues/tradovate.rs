@@ -82,6 +82,32 @@ fn parse_state(s: &str) -> BrokerOrderState {
     }
 }
 
+/// Tradovate's `action` → `Side`. Exactly `Buy` or `Sell`; anything else is an
+/// error (Set E audit #9 — this was `if action == "Buy" { Buy } else { Sell }`).
+pub(crate) fn parse_action(s: &str) -> Result<Side, BrokerError> {
+    match s {
+        "Buy" => Ok(Side::Buy),
+        "Sell" => Ok(Side::Sell),
+        other => Err(BrokerError::Serialization(format!(
+            "tradovate reported order action {other:?}; refusing to guess a direction"
+        ))),
+    }
+}
+
+/// Tradovate's `ordType` → `OrderType`. It used to be `Market` or else `Limit`.
+pub(crate) fn parse_ord_type(s: &str) -> Result<OrderType, BrokerError> {
+    match s {
+        "Market" => Ok(OrderType::Market),
+        "Limit" => Ok(OrderType::Limit),
+        "Stop" => Ok(OrderType::Stop),
+        "StopLimit" => Ok(OrderType::StopLimit),
+        "TrailingStop" => Ok(OrderType::TrailingStop),
+        other => Err(BrokerError::Serialization(format!(
+            "tradovate reported order type {other:?}; refusing to guess one"
+        ))),
+    }
+}
+
 #[async_trait]
 impl Broker for TradovateBroker {
     async fn submit(&self, order: &ApprovedOrder) -> Result<String, BrokerError> {
@@ -195,16 +221,8 @@ impl Broker for TradovateBroker {
             .await
             .map_err(|e| BrokerError::Serialization(e.to_string()))?;
 
-        let side = if o.action == "Buy" {
-            Side::Buy
-        } else {
-            Side::Sell
-        };
-        let order_type = if o.ord_type == "Market" {
-            OrderType::Market
-        } else {
-            OrderType::Limit
-        };
+        let side = parse_action(&o.action)?;
+        let order_type = parse_ord_type(&o.ord_type)?;
         let avg_fill_price = o
             .avg_px
             .as_deref()
@@ -244,7 +262,10 @@ impl Broker for TradovateBroker {
             let text = resp.text().await.unwrap_or_default();
             return Err(BrokerError::Http(text));
         }
-        Ok(vec![])
+        // Never implemented, and answering "none" reads as a clean book.
+        Err(BrokerError::Serialization(
+            "tradovate open-order listing is not implemented; use query_order".to_owned(),
+        ))
     }
 
     async fn query_positions(&self) -> Result<Vec<BrokerPosition>, BrokerError> {
@@ -283,5 +304,26 @@ impl Broker for TradovateBroker {
                 })
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod inbound_tests {
+    use super::*;
+
+    #[test]
+    fn only_exact_buy_and_sell_actions_are_read() {
+        assert_eq!(parse_action("Buy").unwrap(), Side::Buy);
+        assert_eq!(parse_action("Sell").unwrap(), Side::Sell);
+        for bad in ["", "buy", "SELL", "Short", "Sell "] {
+            assert!(parse_action(bad).is_err(), "{bad:?} must be refused");
+        }
+    }
+
+    #[test]
+    fn an_unknown_ord_type_is_refused() {
+        assert_eq!(parse_ord_type("StopLimit").unwrap(), OrderType::StopLimit);
+        assert!(parse_ord_type("MIT").is_err());
+        assert!(parse_ord_type("").is_err());
     }
 }

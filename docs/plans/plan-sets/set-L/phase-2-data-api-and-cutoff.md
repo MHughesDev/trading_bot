@@ -1,6 +1,7 @@
 # Phase 2 — Data API v2, the research cutoff and the Desk
 
-**Completion: cutoff core complete and verified; most §5 endpoints not built.
+**Completion: cutoff core complete and verified; §5 endpoints built except `quotes`/`book`
+(`BLOCKED:UPSTREAM`, Set P); `data_snapshot_id` and Parquet delivery landed 2026-10-03.
 DA-07 and DA-13 landed later, in Phase 6 — see
 [phase-5-6](phase-5-6-toolbox-ui-and-evals.md).**
 
@@ -97,3 +98,52 @@ Also missing:
   so a large extract still travels as JSON.
 - **DA-08 as-of universes.**
 - **`data_snapshot_id`** on responses, so job manifests cannot yet pin a data version.
+
+---
+
+## Phase 2 completion (track LEGACY, 2026-10-03)
+
+The "What is not built" list above is **superseded** by this block. The DATA track had already
+added `coverage`, `universe`, `macro`, `prediction_markets`, `text`, `bars/derived` and
+`funding`; this track added the rest and the two cross-cutting items. All code is in
+`crates/api/src/routes/data.rs` (blocks marked "Set L Phase 2").
+
+| Endpoint | Status | Source of data |
+|---|---|---|
+| `GET /api/data/search` | `DONE` | `BarStore::list_coverage` (horizon-clipped) + `instruments.asset_class`; ranked exact > prefix > substring, then bars covered |
+| `GET /api/data/trades` | `DONE` | ClickHouse `market_trades`, point-in-time on `available_time`, `LIMIT 1 BY dedup_key`, an absent table is `null` + `measured:false`, never `[]` |
+| `GET /api/data/open_interest` | `DONE` | `storage::clickhouse::forward::read_open_interest` (same three outcomes as `funding`) |
+| `GET /api/data/option_chain` | `DONE` | `option_chain_snapshots`, newest snapshot with `knowledge_time <= as_of`; BSM greeks computed at read time from the stored IV, rate, dividend and underlying price (`dataplane::options::bsm_greeks`, INV-07), `null` when an input is missing |
+| `GET /api/data/fundamentals` | `DONE` (CIK keyed) | `dataplane.fundamentals_fact`, `accepted_at <= as_of`, latest filing per `(tag, unit, period_end)`. **Takes `cik`, not `ticker`**: the platform keeps no ticker-to-CIK map and a wrong guess attaches another company's numbers; a `ticker` is refused with that reason (ADR-L-DA-1) |
+| `GET /api/data/features` | `DONE` | `features::runtime` batch mode (`backfill_column`) over PIT bars densified on the master clock; scope `research:features`; `null` where a window is not full |
+| `GET /api/data/quotes`, `/book` | `BLOCKED:UPSTREAM` | No quote or book history is collected. The order book is a live-only stream (`book_feed.rs` -> `live_bus`); there is no table to read. Needs Set P's book lane (P-0.x) to store snapshots first. An endpoint returning an empty list would assert "measured and found nothing" |
+
+**Parquet.** Every endpoint above and `bars` accept `?format=json|parquet`. `parquet` encodes
+the rows (`decimal128(38,10)` for prices and sizes, `timestamp(ns, UTC)`, `float64` only for
+derived statistics, every column nullable so absent is null), stores them as a
+`parquet_extract` artifact through `ArtifactRegistry::put` (content-addressed, expiring), and
+answers `{handle, manifest, summary}` with a six-line summary. The default stays `json`
+(ADR-L-DA-2: DATA-005 says Parquet by default; changing the default would break the
+frontend and MCP clients that read `bars` rows, so the default moves when they do).
+`tbot data bars --format parquet` + `tbot artifact download` is the agent path.
+
+**`data_snapshot_id`.** Every manifest carries `data_snapshot_id` (`ds_` + 32 hex) and a
+`snapshot` descriptor `{endpoint, params, as_of, rows_sha256}`: the id is the sha256 of the
+canonical (RFC 8785) descriptor, so it pins *which version of the data* a read saw, and a
+late restatement changes it even when every parameter is the same. A job manifest carries it
+in `data_snapshot_id`, which is already part of the idempotency hash (JB-02), so two runs on
+different data versions are different jobs. **Not yet built:** re-verifying a snapshot at run
+time (recompute from the descriptor and compare). The descriptor carries what is needed.
+
+**Evidence.** `routes::data::data_v2_tests` (8 tests pass): snapshot id pins data and moves
+with rows/as_of/endpoint/window but not key order; Parquet round-trips a decimal exactly and
+keeps nulls null; the trades query is PIT and deduplicated and escapes its input; the chain
+query reads one snapshot known by `as_of`; greeks come from stored inputs and a missing IV is
+not a zero; search ranking; an absent table is unmeasured, not empty.
+
+**Route registration** is orchestrator-owned (`crates/api/src/routes/mod.rs`); the six lines are
+in the track report. Until they land the handlers are unreached: that is the one remaining
+step to close "built but unreached" for this block.
+
+**Not done.** DA-08 as-of universes beyond the `universe/{name}` route the DATA track built.
+Endpoint-level HTTP tests need the router (and so the registration above).

@@ -1,6 +1,6 @@
 # Phase 4 — Derived access and the source fence
 
-**Completion: 20% (1 / 5 tasks), plus 3 `PARTIAL` — 2026-09-28: the derivations and the fence are built and the storage half shipped. What is missing in each remaining task is a caller, and in P-4.1's case the caller is blocked on a read path that does not return provenance.**
+**Completion: 100% (5 / 5 tasks) — 2026-10-04 (track F-DATA-T): P-4.1 and P-4.2 closed; earlier line: 60% (3 / 5 tasks), plus 2 `PARTIAL` — 2026-10-03: P-4.3 was closed by Set U's selection runs, P-4.4 is enforced by migration 0155 and an xtask guard, and the provenance read P-4.1/P-4.2 were blocked on now exists.**
 
 **Requirement IDs:** DA-08, DA-10, DA-14.
 **Spec:** [DATA-005 §8 (universes), §11 (sources), §12](../../../specs/DATA-005-data-api-v2.md);
@@ -17,7 +17,22 @@ habit.
 ---
 
 ### P-4.1 Server-side resampling — M
-`PARTIAL` 2026-09-28 — **every acceptance clause is verified and the code has no caller**, which in
+`DONE` 2026-10-04 (track F-DATA-T) — **reachable, and the grade it needs now exists.** `GET /api/data/bars/derived` is registered (`routes/mod.rs`); `resample` refuses a series with no persisted grade, and the 2026-10-04 re-grade (P-1.7) gave every Coinbase 1m/1h/1d series a persisted B, so the route returns data for them (before, every derived read was refused as ungraded). The live read matches the venue's own 1h bars on 24 of 24 (`canonical_read_live`); worst-grade/largest-lag and the refusal to go finer have their `resample.rs` tests.
+
+Earlier: `PARTIAL` 2026-10-03 (track DATA) — **the blocker named below is removed; the route is written and awaits registration.**
+`storage::clickhouse::canonical_read::canonical_bars_as_of` returns `CanonicalBar` **with `source_id` and
+`vwap`**, point-in-time exactly as `BarStore` resolves it (knowledge_time <= as_of, whole-row `argMax` by
+`(knowledge_time, revision_seq)` so no restatement is assembled from two revisions), and `provenance` looks
+up each source's declared lag in `dataplane.source` and the series' persisted grade in `data_qc_reports` —
+returning nothing for an ungraded series, so `resample` refuses rather than this layer inventing a letter.
+`GET /api/data/bars/derived?tf=` drives `dataplane::resample::resample`; a refusal is a 422 with the reason.
+`derived_tests` pins the request parsing (exactly one derivation; unknown timeframes refused).
+**ADR (DATA, 2026-10-03):** the provenance read lives in `storage::clickhouse` rather than extending
+`backtest::store::LoadedBar`, which is outside this track; it repeats BarStore's PIT resolution in one
+query, and the two must agree. Rejected: inventing `source_id`/grade in the route.
+Clause 1 on the live store through this read: `storage/tests/canonical_read_live.rs` (read-only) resamples 2026-09-15's 1,440 Coinbase BTC-USD 1m bars to 1h and matches all 24 of Coinbase's own 1h bars on open/high/low/close, and the same read as of 2026-09-01 returns nothing. **Missing:** route registration (report).
+
+Earlier: `PARTIAL` 2026-09-28 — **every acceptance clause is verified and the code has no caller**, which in
 this repository is the failure mode worth naming rather than a technicality.
 
 `crates/dataplane/src/resample.rs` (23 tests): a 1m to 1h resample agrees bar for bar with the
@@ -60,7 +75,14 @@ timeframe is refused rather than interpolated.
 **Traces:** DA-10; DATA-005 §3, §7.
 
 ### P-4.2 Information-driven bars — S
-`PARTIAL` 2026-09-28 — all three acceptance clauses verified in
+`DONE` 2026-10-04 (track F-DATA-T) — **reachable through the same registered route** (`?kind=volume|dollar|tick&threshold=`) with the same persisted grades; a request without a threshold, and a metric the source does not supply (Coinbase has no trade count), are stated refusals (422), not empty series.
+
+Earlier: `PARTIAL` 2026-10-03 (track DATA) — **reachable through the same route as P-4.1** (`?kind=volume|dollar|tick&threshold=`), with the same
+provenance read; a request without a threshold is refused rather than defaulted
+(`an_information_bar_needs_its_threshold_stated`), and an absent input metric (Coinbase's trade count) is the
+generator's stated refusal, returned as a 422. **Missing:** route registration (report).
+
+Earlier: `PARTIAL` 2026-09-28 — all three acceptance clauses verified in
 `crates/dataplane/src/bars/information_driven.rs` (21 tests); no caller, for the same reason as
 P-4.1 and with the same fix.
 
@@ -87,7 +109,17 @@ generator whose inputs are absent returns a stated reason rather than an empty s
 **Traces:** DA-10; 06_DATA §2.
 
 ### P-4.3 As-of universes — M
-`PARTIAL` 2026-09-28 — clauses 1 and 3 verified, clause 2 needs the experiment evaluator.
+`DONE` 2026-10-03 (track DATA) — **clause 2 was closed by Set U and nobody moved this marker.** Experiment evaluation resolves universes
+through `dataplane::universe::members_known_as_of` (`strategy_engine::env::Membership::members_at`, loaded by
+`backtest::env::universe::load`), and
+`backtest/tests/selection_run.rs::as_of_a_past_date_the_run_sees_that_dates_membership_and_data_only` is the
+clause verbatim: the same log gives one member on day 5 and two on day 10, and the day-5 answer is unchanged
+by later bars. `backtest/tests/pg_universe.rs` loads a named universe from the append-only table. Clauses 1
+and 3 keep their `universe.rs` tests and 0104's insert-only trigger. Added: `GET /api/data/universe/{name}?as_of=`
+(`routes/data.rs::get_universe`, the same loader, `as_of` clipped to the horizon, each member labelled with
+its listing `status` so a delisted member is shown rather than dropped) — registration in the report.
+
+Earlier: `PARTIAL` 2026-09-28 — clauses 1 and 3 verified, clause 2 needs the experiment evaluator.
 
 **The write model this task sketches cannot satisfy its own acceptance, so it was not built.**
 `(name, instrument_id, valid_from, valid_to, reason)` fails clause 3 by construction: the `UPDATE`
@@ -125,7 +157,23 @@ test where the two answers differ; `valid_to` is never overwritten — a removal
 **Traces:** DA-08; DATA-005 §8.
 
 ### P-4.4 Delisted instruments are retained, not deleted — M
-`NOT STARTED`
+`DONE` 2026-10-03 (track DATA) — **all three clauses, with the rule in the database and not only in review.** Migration **0155**:
+`instruments` gains `status ('active'|'delisted')`, `delisted_at`, `delisting_reason`, with a CHECK tying
+them together (a delisted row has a date and is not `active`); a row trigger refuses DELETE and a statement
+trigger refuses TRUNCATE for every role including the owner; `app_role` loses DELETE/TRUNCATE;
+`delist_instrument(id, at, reason)` is the one way to delist (keeps the first date, refuses an empty reason).
+Exercised on a Postgres 17 scratch DB, applied twice: owner DELETE and TRUNCATE refused by the trigger,
+`app_role` DELETE refused by privilege, an inconsistent UPDATE refused by the CHECK, `app_role` delists
+through the function, and `active`-only listings exclude the delisted row while the table keeps it.
+Clause 2: universe membership as of a past date includes members since removed (`universe.rs`; P-4.3), and
+`get_universe` labels them `delisted`. Clause 3: `cargo xtask check-instruments-retained`
+(`xtask/src/instruments_retained.rs`, 5 tests) scans every tracked `.rs/.sql/.py/.ts` file plus untracked
+migrations for an instrument DELETE/TRUNCATE/DROP, or anything that drops 0155's guard or re-grants DELETE;
+`the_workspace_has_no_instrument_deletion_path` runs it inside `cargo test -p xtask`. Mutation-checked: a
+probe migration containing `DELETE FROM instruments` fails it. `dataplane.instrument` already refused
+deletion (0046).
+
+Earlier: `NOT STARTED`
 
 Dead and delisted instruments stay in `instruments` with their full history and
 `status='delisted'`. This is the only defence against survivorship bias that actually works,

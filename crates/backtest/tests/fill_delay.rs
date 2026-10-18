@@ -130,6 +130,7 @@ fn run_with(delay: u32) -> runner::V3Outcome {
             fill_policy: FillPolicy::NextBarOpen,
             strategy_id: "ema_cross".into(),
             sims: SimulatorSet::realistic(),
+            external: strategy_engine::ExternalData::default(),
         },
         &mut NoModels,
         delay,

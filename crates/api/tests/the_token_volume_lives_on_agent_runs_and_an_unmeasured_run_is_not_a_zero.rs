@@ -213,6 +213,7 @@ async fn the_read_matches_what_agent_runs_holds() {
         .await
         .expect("the dev database is up");
 
+    #[allow(clippy::type_complexity)]
     let users: Vec<(uuid::Uuid, i64, i64, Option<i64>, Option<i64>)> = sqlx::query_as(
         "SELECT user_id, \
                 count(*)::bigint, \

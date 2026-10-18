@@ -230,6 +230,20 @@ pub struct RunControl {
     /// stops, having been resumed. `borrow_and_update` marks the value seen, so
     /// `changed()` cannot miss the edit that follows it.
     tx: watch::Sender<State>,
+    /// Messages the user sent to this run while it was working (AGENT-010 §7;
+    /// S-2.14), delivered as `Input::Steer` at the next step boundary.
+    ///
+    /// A queue rather than a slot: two sentences typed in a row are two steers,
+    /// and a slot would silently keep only the second.
+    steers: std::sync::Mutex<std::collections::VecDeque<String>>,
+    /// Tools a human pinned from the desk's Tools tab (S-6.11), delivered as
+    /// `Input::Pin` at the next step boundary. Its own queue rather than a steer:
+    /// a steer is prose the model reads, a pin is a fact the router reads.
+    pins: std::sync::Mutex<std::collections::VecDeque<String>>,
+    /// Set by a draining platform (AGENT-010 §10.1; S-2.15): stop at the next
+    /// step boundary **without ending the run**, so the next process resumes it
+    /// from its effect log. Distinct from `cancel`, which ends it.
+    detached: std::sync::atomic::AtomicBool,
 }
 
 impl Default for RunControl {
@@ -247,7 +261,58 @@ impl RunControl {
                 paused_until: None,
             })
             .0,
+            steers: std::sync::Mutex::new(std::collections::VecDeque::new()),
+            pins: std::sync::Mutex::new(std::collections::VecDeque::new()),
+            detached: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Ask the driver to leave the run at its next boundary, still `running`,
+    /// for resume to pick up (S-2.15). A deploy is not a reason to end a run.
+    pub fn detach(&self) {
+        self.detached
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[must_use]
+    pub fn is_detached(&self) -> bool {
+        self.detached.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Queue a message for the run's next step boundary (S-2.14).
+    ///
+    /// Returns `false` when the run is already stopping — a steer to a run that
+    /// will never take another step would be accepted and read by nobody.
+    pub fn steer(&self, text: impl Into<String>) -> bool {
+        if self.is_cancelled() {
+            return false;
+        }
+        self.steers
+            .lock()
+            .map(|mut q| q.push_back(text.into()))
+            .is_ok()
+    }
+
+    /// Queue a tool pin for the run's next step boundary (S-6.11). `false` when
+    /// the run is already stopping, for the same reason [`Self::steer`] refuses.
+    pub fn pin(&self, tool: impl Into<String>) -> bool {
+        if self.is_cancelled() {
+            return false;
+        }
+        self.pins
+            .lock()
+            .map(|mut q| q.push_back(tool.into()))
+            .is_ok()
+    }
+
+    /// The oldest queued pin, if any. Called by the driver at a boundary.
+    pub fn take_pin(&self) -> Option<String> {
+        self.pins.lock().ok().and_then(|mut q| q.pop_front())
+    }
+
+    /// The oldest queued steer, if any. Called by the driver at a boundary.
+    pub fn take_steer(&self) -> Option<String> {
+        self.steers.lock().ok().and_then(|mut q| q.pop_front())
     }
 
     /// Ask the run to stop at its next boundary. Wakes a paused run so it stops
@@ -524,5 +589,39 @@ mod tests {
         assert!(known.contains(&StopReason::Cancelled.terminal_status()));
         assert!(StopReason::PauseExpired.error_text().is_some());
         assert!(StopReason::Cancelled.error_text().is_none());
+    }
+}
+
+#[cfg(test)]
+mod steer_tests {
+    use super::RunControl;
+
+    /// Two steers typed in a row are both delivered, in order; a stopping run
+    /// accepts none.
+    #[test]
+    fn steers_queue_in_order_and_a_stopping_run_refuses_them() {
+        let c = RunControl::new();
+        assert!(c.steer("only 1h bars"));
+        assert!(c.steer("and skip ETH"));
+        assert_eq!(c.take_steer().as_deref(), Some("only 1h bars"));
+        assert_eq!(c.take_steer().as_deref(), Some("and skip ETH"));
+        assert_eq!(c.take_steer(), None);
+        c.cancel();
+        assert!(!c.steer("too late"));
+    }
+
+    /// S-6.11: pins queue in order, are their own queue (not steers), and a
+    /// stopping run takes none.
+    #[test]
+    fn pins_queue_in_order_apart_from_steers_and_a_stopping_run_refuses_them() {
+        let c = RunControl::new();
+        assert!(c.pin("get_bars"));
+        assert!(c.pin("run_backtest"));
+        assert_eq!(c.take_steer(), None, "a pin is not a steer");
+        assert_eq!(c.take_pin().as_deref(), Some("get_bars"));
+        assert_eq!(c.take_pin().as_deref(), Some("run_backtest"));
+        assert_eq!(c.take_pin(), None);
+        c.cancel();
+        assert!(!c.pin("too_late"));
     }
 }

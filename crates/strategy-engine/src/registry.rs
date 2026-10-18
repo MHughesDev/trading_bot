@@ -24,6 +24,17 @@ pub struct ResolvedModel {
 pub trait Registries {
     /// Declared lookback of a DATA-006 indicator, `None` if no such indicator.
     fn feature_lookback(&self, name: &str) -> Option<u32>;
+    /// Declared lookback of an indicator on bars of `bar_secs` seconds. An
+    /// external input (`macro_<series>`, `fundamental_<cik>_<tag>`; P-3.6)
+    /// counts its source's publication lag in bars, so its lookback depends on
+    /// the bar size; every other indicator's is [`Self::feature_lookback`].
+    fn feature_lookback_at(&self, name: &str, bar_secs: u32) -> Option<u32> {
+        match features::external_features::resolve_external(name, bar_secs) {
+            Ok(Some(f)) => Some(f.def().lookback_bars),
+            Ok(None) => self.feature_lookback(name),
+            Err(_) => None,
+        }
+    }
     /// The ordered features of a named feature set.
     fn feature_set(&self, name: &str) -> Option<Vec<String>>;
     /// Resolve `name@version` or `name@alias` to a pinned model and contract.

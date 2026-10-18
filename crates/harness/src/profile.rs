@@ -428,6 +428,13 @@ pub struct MultiStepEvidence {
     pub detail: String,
 }
 
+/// Whether a profile's claims are backed by a scorecard row (S-4.13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Measurement {
+    Measured { row: String },
+    Unmeasured { why: String },
+}
+
 /// The floor for an attestation to mean anything. Three trials is an anecdote.
 const MIN_EVIDENCE_TRIALS: u32 = 10;
 
@@ -496,6 +503,16 @@ pub struct Profile {
     /// a profile on target hardware carries none and nothing changes for it.
     #[serde(default)]
     pub multi_step_evidence: Option<MultiStepEvidence>,
+    /// The scorecard row this profile's claims rest on, as
+    /// `<profile_id>/<suite>` (S-4.13, AGENT-009 section 5, P3).
+    ///
+    /// Prose about a run someone did once is not a measurement. A local profile
+    /// that names no row loads, with a warning, and reports its tier as
+    /// `unmeasured` ([`Profile::measurement`]); refusing to load would make the
+    /// evidence requirement a way to lose the profile instead of a way to say
+    /// what is unproved.
+    #[serde(default)]
+    pub scorecard_row: Option<String>,
     /// What this model needs to run: resident bytes at the deployed quantisation,
     /// and whether it assumes Ampere-or-newer.
     #[serde(default)]
@@ -836,6 +853,39 @@ impl Profile {
     /// it — an unlicensed claim then escalates or refuses through the same machinery
     /// as any other over-demand, instead of through a second failure mode that no
     /// test would exercise.
+    /// Whether this profile's claims are licensed by a scorecard row (S-4.13).
+    ///
+    /// A frontier profile is the permissive case and is not calibrated against
+    /// a local budget, so it is `Measured` only when it names a row too; the
+    /// distinction that matters is for local tiers, where `Unmeasured` is what
+    /// the desk's tier badge shows.
+    #[must_use]
+    pub fn measurement(&self) -> Measurement {
+        match self.scorecard_row.as_deref().map(str::trim) {
+            Some(row) if !row.is_empty() => Measurement::Measured {
+                row: row.to_string(),
+            },
+            _ => Measurement::Unmeasured {
+                why: if self.multi_step_evidence.is_some() {
+                    "the multi_step claim rests on a recorded eval run, not on a scorecard row".into()
+                } else {
+                    "no scorecard row backs this profile's budget or tool-calling claims".into()
+                },
+            },
+        }
+    }
+
+    /// The tier as the desk should label it: the declared tier, or `unmeasured`
+    /// for a local profile nothing measured.
+    #[must_use]
+    pub fn tier_label(&self) -> &'static str {
+        if self.tier.is_local() && matches!(self.measurement(), Measurement::Unmeasured { .. }) {
+            "unmeasured"
+        } else {
+            self.tier.as_str()
+        }
+    }
+
     #[must_use]
     pub fn effective_tool_calling(
         &self,
@@ -1104,6 +1154,7 @@ pub(crate) fn frontier_fixture() -> Profile {
         },
         tool_calling: crate::hardware::ToolCalling::MultiStep,
         multi_step_evidence: None,
+        scorecard_row: None,
         requires: None,
         escalate_to: None,
         budgets: Budgets {
@@ -1170,6 +1221,7 @@ pub(crate) fn degraded_fixture() -> Profile {
         },
         tool_calling: crate::hardware::ToolCalling::SingleShot,
         multi_step_evidence: None,
+        scorecard_row: None,
         requires: Some(crate::hardware::ModelRequirements {
             resident_bytes: 5 * 1024 * 1024 * 1024,
             requires_target_architecture: false,
@@ -1333,6 +1385,26 @@ mod evidence_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// S-4.13: a local profile with no scorecard row loads and says
+    /// `unmeasured`; naming a row is what changes it. A frontier profile keeps
+    /// its own tier label.
+    #[test]
+    fn an_uncalibrated_local_profile_reports_its_tier_as_unmeasured() {
+        let mut p = frontier_fixture();
+        p.tier = Tier::LocalMid;
+        assert!(matches!(p.measurement(), Measurement::Unmeasured { .. }));
+        assert_eq!(p.tier_label(), "unmeasured");
+        p.scorecard_row = Some("qwen3.6-35b-a3b/routing".into());
+        assert_eq!(
+            p.measurement(),
+            Measurement::Measured { row: "qwen3.6-35b-a3b/routing".into() }
+        );
+        assert_eq!(p.tier_label(), "local_mid");
+        p.scorecard_row = Some("   ".into());
+        assert_eq!(p.tier_label(), "unmeasured", "a blank row measures nothing");
+        assert_eq!(frontier_fixture().tier_label(), "frontier");
+    }
 
     #[test]
     fn the_fixture_is_valid() {

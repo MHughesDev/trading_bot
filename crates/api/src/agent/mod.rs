@@ -9,7 +9,6 @@ pub mod audit;
 pub mod bridge;
 pub mod control;
 pub mod conversations;
-pub mod driver;
 pub mod hardware_probe;
 pub mod local_driver;
 pub mod manager;
@@ -17,7 +16,16 @@ pub mod prompt;
 pub mod resume;
 pub mod routes;
 pub mod subrun;
+pub mod skills_mount;
 pub mod workspace_tools;
 
+/// The one driver, under the name the spec gives it (AGENT-010 §2; S-2.10).
+///
+/// `driver.rs` — the hosted provider loop — is deleted; every tier runs on
+/// `local_driver`. This alias keeps `agent::driver::truncate_result` resolving
+/// for `crate::auditor`, which is outside this module's territory; once that
+/// call site names `local_driver` the alias can go.
+pub use local_driver as driver;
+
 pub use control::{Hold, PauseRefused, PauseWindow, ResumeRefused, RunControl, StopReason};
-pub use manager::{AgentManager, StartError};
+pub use manager::{AgentManager, StartError, TurnOptions};

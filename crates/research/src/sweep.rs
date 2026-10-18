@@ -116,6 +116,14 @@ pub struct SweepReport {
     /// Constraint violations seen, by message, with counts — tells the agent
     /// *why* samples scored `-inf` (e.g. "42 trades < minimum 50" ×31).
     pub violation_counts: BTreeMap<String, u32>,
+    /// The sealed-metric score of every sampled Run, in draw order (a failed or
+    /// infeasible Run is `-inf`). **Never serialised**: INV-2 says the report an agent reads
+    /// holds no ranked list and no argmax, and a score per sample is both. It exists for the
+    /// platform's own record of a campaign's two arms (`agent_memory.campaign_arm_score`,
+    /// ADR-RB-11), which reads it in-process from the sweep manager and writes it under
+    /// `knowledge.write`.
+    #[serde(skip)]
+    pub sample_scores: Vec<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
@@ -335,6 +343,7 @@ pub fn run_sweep(
                     .into(),
         },
         violation_counts: violations,
+        sample_scores: samples.iter().map(|(_, sc)| *sc).collect(),
     })
 }
 
@@ -482,6 +491,18 @@ mod tests {
             report.violation_counts.keys().any(|k| k.contains("trades")) || report.n_feasible == 40
         );
         assert!(report.surface.text.contains("fast"));
+    }
+
+    /// The platform's own copy of every sample's score (for the campaign arms) is in memory
+    /// and one per sampled Run, and it is not in what is serialised.
+    #[test]
+    fn sample_scores_are_kept_in_process_and_never_serialised() {
+        let fake = Fake { calls: Mutex::new(Vec::new()) };
+        let report = run_sweep(&fake, &request(), &NoopObserver).unwrap();
+        assert_eq!(report.sample_scores.len(), report.n_sampled as usize);
+        assert!(report.sample_scores.iter().any(|s| s.is_finite()));
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(!json.contains("sample_scores"), "the per-sample scores leaked into the serialised report");
     }
 
     /// INV-2 property: the serialized report carries no per-sample score and no

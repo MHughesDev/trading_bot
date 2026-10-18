@@ -249,5 +249,10 @@ Read with `feature("<name>")`. A family with parameters is named with them: the 
 | `autocorr_20_1` | 22 | autocorrelation of bar returns at the given lag over n bars |
 | `variance_ratio_20_4` | 29 | Lo-MacKinlay variance ratio at horizon q; above 1 is trending, below 1 mean-reverting |
 | `efficiency_ratio_20` | 21 | net move over total path length, 0..1; the persistence filter a trend rule wants |
+| `yang_zhang_vol_20` | 20 | Yang-Zhang volatility over n bars; handles gaps between bars as well as the range |
+| `hurst_257` | 257 | rescaled-range Hurst exponent of bar returns; above 0.55 trending, below 0.45 mean-reverting |
+| `fracdiff_20_40` | 20 | fractional difference of log close, order d/100 over n bars; stationary but keeps memory |
+| `lookback_ensemble_zscore_10_20_40` | 40 | equal-weight mean of zscore over three lookbacks; a mean-reversion rule that does not hinge on one window |
+| `lookback_ensemble_returns_10_20_40` | 41 | equal-weight mean of simple returns over three lookbacks; a momentum rule that does not hinge on one window |
 
 <!-- end generated -->

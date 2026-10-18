@@ -34,9 +34,12 @@
 //! reconciliation mismatch, a lost lease, and data staleness past the hard
 //! multiple.
 
+pub mod activity;
 pub mod baseline;
 pub mod collect;
 pub mod control;
+pub mod daily;
+pub mod defects;
 pub mod drill;
 pub mod dwell;
 pub mod evaluate;
@@ -44,11 +47,13 @@ pub mod events;
 pub mod facts;
 pub mod family;
 pub mod feed;
+pub mod freshness;
 pub mod lease;
 pub mod limits;
 pub mod platform;
 pub mod pnl;
 pub mod precision;
+pub mod reconciled;
 pub mod rehearsal;
 pub mod service;
 pub mod state;

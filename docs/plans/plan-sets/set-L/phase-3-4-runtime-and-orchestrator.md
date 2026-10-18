@@ -87,3 +87,17 @@ works against the live platform.
 **Also not built:** the orchestrator's HTTP surface (`/api/agent/sessions/*`), the
 event bridge to the UI, steering and `ask_user`, the approval flow, resume-on-restart,
 the `final_report` validator (RT-15), sub-agent definitions, and skill materialisation.
+
+---
+
+## Live-credential items (track LEGACY, 2026-10-03)
+
+These need an agent session, which needs a frontier credential (gate H-2). Each is marked
+`BLOCKED:HUMAN` with the exact step that remains. None of them is blocked by missing code.
+
+| Item | Status | The exact remaining step |
+|---|---|---|
+| A live agent session end to end (proxy upstream path, SDK start, resume, steer, interrupt, hooks firing in a real session) | `BLOCKED:HUMAN` | Store an Anthropic credential through `PUT /api/llm/credentials/{provider}` (encrypted store, migration 0034), start a session from `/research`, and let it run one tool call. The same credential unblocks S-4.14. |
+| Exit criterion 1: a restart survives resume | `BLOCKED:HUMAN` | With the session above running, restart the platform and observe the session resume from `agent_events`. Needs the live session. |
+| Exit criterion 2: cost items | `BLOCKED:HUMAN` | Read `GET /api/agent/usage` after the live session and compare to the provider's own invoice. |
+| Exit criterion 5: a pure-noise task is reported as no edge | `BLOCKED:HUMAN` | `python evals/runner/run.py --suite noise` with a credential (not `--dry-run`). Passing is `pass^k`, not one run. |

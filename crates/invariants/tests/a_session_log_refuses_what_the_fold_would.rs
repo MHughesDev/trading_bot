@@ -66,7 +66,7 @@ async fn migrated() -> PgPool {
         .unwrap();
 
     pool.execute(
-        r#"
+        r"
         CREATE SCHEMA IF NOT EXISTS mlops;
         CREATE OR REPLACE FUNCTION mlops.refuse_mutation()
         RETURNS TRIGGER LANGUAGE plpgsql AS $fn$
@@ -92,7 +92,7 @@ async fn migrated() -> PgPool {
             turn_index INT NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT 'queued'
         );
-        "#,
+        ",
     )
     .await
     .expect("the four objects 0138 references");

@@ -397,7 +397,11 @@ pub async fn promote(
     token: BearerToken,
     Path((id, version)): Path<(String, i32)>,
     Json(req): Json<PromoteRequest>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
+    // Set N N-4.3: the production alias is a person's decision; an agent proposes.
+    if let Err(r) = super::models_studio::require_human(&token) {
+        return r;
+    }
     map_result(
         state
             .models
@@ -417,7 +421,11 @@ pub async fn rollback(
     State(state): State<AppState>,
     token: BearerToken,
     Path((id, alias)): Path<(String, String)>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
+    // Set N N-4.3: moving an alias back is as much a person's decision as moving it forward.
+    if let Err(r) = super::models_studio::require_human(&token) {
+        return r;
+    }
     map_action(state.models.rollback(&id, &alias, token.user_id()).await)
 }
 

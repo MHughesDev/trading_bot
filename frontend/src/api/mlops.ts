@@ -75,16 +75,53 @@ export interface ModelRunSnapshot {
   finished_at?: string
 }
 
+/// One persisted evaluation, as `GET /api/models/{id}/evaluations/{eval_id}`
+/// returns it. NB the *list* route returns run snapshots (`ModelRunSnapshot`),
+/// not this: they carry no `version`, so the version only comes from this read.
 export interface EvaluationRun {
   eval_id: string
   model_id: string
   version: number
-  dataset_id?: string
   status: string
-  metrics?: Record<string, number>
-  scorecard?: Scorecard
-  regression_ok?: boolean
+  metrics?: Record<string, unknown> | null
+  scorecard?: Scorecard | null
+  regression_report?: RegressionReport | null
+  baseline_version?: number | null
   created_at: string
+}
+
+export interface RegressionCheck {
+  metric: string
+  baseline?: number | null
+  candidate?: number | null
+  delta?: number
+  delta_pct?: number
+  verdict: string
+}
+
+export interface RegressionReport {
+  verdict: string
+  tolerance_pct?: number
+  checks?: RegressionCheck[]
+}
+
+/// One check the server's promotion gate evaluated.
+export interface GateCheck {
+  check: string
+  passed: boolean
+  required: boolean
+}
+
+/// What `POST .../promote` answers. A failed gate is HTTP 200 with
+/// `promoted: false`, so a caller that only checks the status code reports a
+/// promotion that did not happen.
+export interface PromoteResult {
+  promoted: boolean
+  reason?: string
+  version?: number
+  alias?: string
+  gate_checks?: GateCheck[]
+  override_reason?: string | null
 }
 
 export interface Scorecard {
@@ -110,9 +147,13 @@ export interface ModelDeployment {
   deployed_at: string
 }
 
+/// The lineage route currently answers `{ model_id, aliases, note }` with no
+/// `nodes`/`edges`; both are optional so a caller cannot read them as present.
 export interface LineageGraph {
-  nodes: Array<{ id: string; type: string; data: Record<string, unknown> }>
-  edges: Array<{ id: string; source: string; target: string }>
+  nodes?: Array<{ id: string; type: string; data: Record<string, unknown> }>
+  edges?: Array<{ id: string; source: string; target: string }>
+  aliases?: AliasMap
+  note?: string
 }
 
 export interface ForNodeModel {
@@ -142,6 +183,7 @@ export interface TestInferenceResponse {
   text?: string
   tokens?: number
   cost_usd?: string
+  trace_id?: string
 }
 
 /// The model's expected feature schema + (optionally) a computed sample vector.
@@ -233,14 +275,20 @@ export const modelsApi = {
   evaluate: (id: string, version: number) =>
     client.post(`/api/models/${id}/versions/${version}/evaluate`),
 
-  promote: (id: string, version: number, reason: string) =>
-    client.post(`/api/models/${id}/versions/${version}/promote`, { reason }),
+  // The server reads `environment` and `override_reason`. This used to send
+  // `reason`, which the server ignores, so an override was never logged.
+  promote: (
+    id: string,
+    version: number,
+    body: { environment?: 'paper' | 'live'; override_reason?: string },
+  ) => client.post<PromoteResult>(`/api/models/${id}/versions/${version}/promote`, body),
 
   // Test Lab inference — the backend expects a list of instances.
   testVersion: (
     id: string,
     version: number,
-    instances: Array<{ instrument_id: string; features: Record<string, number> }>,
+    // An LLM adapter reads `prompt`; every other kind reads instrument + features.
+    instances: Array<{ instrument_id?: string; features?: Record<string, number>; prompt?: string }>,
   ) =>
     client.post<TestInferenceResponse>(`/api/models/${id}/versions/${version}/test`, {
       instances,
@@ -266,11 +314,15 @@ export const modelsApi = {
     client.delete(`/api/models/${id}/test-cases/${caseId}`),
 
   // Evaluations
+  // Run snapshots of the evaluations this server process is holding (in memory).
   listEvals: (id: string) =>
-    client.get<{ evaluations: EvaluationRun[] }>(`/api/models/${id}/evaluations`),
+    client.get<{ evaluations: ModelRunSnapshot[] }>(`/api/models/${id}/evaluations`),
 
+  // The server reads `versions=a,b`; `a`/`b` params were silently ignored.
   compareEvals: (id: string, a: number, b: number) =>
-    client.get<unknown>(`/api/models/${id}/evaluations/compare`, { params: { a, b } }),
+    client.get<unknown>(`/api/models/${id}/evaluations/compare`, {
+      params: { versions: `${a},${b}` },
+    }),
 
   getEval: (id: string, evalId: string) =>
     client.get<EvaluationRun>(`/api/models/${id}/evaluations/${evalId}`),
@@ -292,13 +344,23 @@ export const modelsApi = {
   // Other
   lineage: (id: string) => client.get<LineageGraph>(`/api/models/${id}/lineage`),
 
-  traces: (id: string) =>
-    client.get<{ traces: unknown[] }>(`/api/models/${id}/traces`),
+  getEvalDetail: (id: string, evalId: string) =>
+    client.get<EvaluationRun>(`/api/models/${id}/evaluations/${evalId}`),
 
+  traces: (id: string, limit?: number) =>
+    client.get<{ traces: unknown[] }>(`/api/models/${id}/traces`, { params: { limit } }),
+
+  /** The recorded per-epoch loss curve of a run (`mlops.training_metric`). `null` loss is not measured. */
+  trainingCurve: (id: string, runId: string) =>
+    client.get<{ run_id: string; points: CurvePoint[] }>(`/api/models/${id}/runs/${runId}/curve`),
+
+  /** The model's event log (created, promoted, rolled back, archived, renamed), newest first. */
+  events: (id: string, limit?: number) =>
+    client.get<{ model_id: string; events: ModelEvent[] }>(`/api/models/${id}/events`, { params: { limit } }),
+
+  // Rows are `{ strategy_id, display_name }`; normalise with `normaliseUsedBy`.
   usedBy: (id: string) =>
-    client.get<{
-      strategies: Array<{ id: string; name: string; status: string }>
-    }>(`/api/models/${id}/used-by`),
+    client.get<{ strategies: unknown[] }>(`/api/models/${id}/used-by`),
 
   forNode: (kind: ModelKind, assetClass?: string) =>
     client.get<{ models: ForNodeModel[] }>('/api/models/for-node', {
@@ -310,4 +372,17 @@ export const modelsApi = {
 /// through the inference gateway.
 export const inferenceTargetsApi = {
   models: (assetClass?: string) => modelsApi.forNode('forecaster', assetClass),
+}
+
+export interface CurvePoint {
+  epoch: number
+  train_loss: number | null
+  val_loss: number | null
+}
+
+export interface ModelEvent {
+  kind: string
+  payload: Record<string, unknown>
+  actor: string | null
+  created_at: string
 }

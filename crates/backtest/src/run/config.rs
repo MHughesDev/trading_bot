@@ -182,10 +182,22 @@ pub struct RunConfig {
     /// Run that existed before it keeps its `run_id`.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub fill_delay_bars: u32,
+    /// The Run's trading costs, scaled by this many basis points of themselves,
+    /// hundredths of a percent (`+2000` is +20 %, `-2000` is -20 %). What a
+    /// cost-perturbation replicate varies (SPEC §11.5's nuisance product). 0, the
+    /// default, is the modelled cost; part of the content hash only when set, so
+    /// every Run that existed before it keeps its `run_id`.
+    #[serde(default, skip_serializing_if = "is_zero_i32")]
+    pub cost_scale_bp: i32,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
 const fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn is_zero_i32(n: &i32) -> bool {
     *n == 0
 }
 
@@ -222,6 +234,8 @@ impl RunConfig {
             target: &'a Option<domain::strategy_graph::deployment::DeploymentTarget>,
             #[serde(skip_serializing_if = "is_zero")]
             fill_delay_bars: &'a u32,
+            #[serde(skip_serializing_if = "is_zero_i32")]
+            cost_scale_bp: &'a i32,
         }
         let view = Hashable {
             strategy_ref: &self.strategy_ref,
@@ -238,6 +252,7 @@ impl RunConfig {
             null_world: &self.null_world,
             target: &self.target,
             fill_delay_bars: &self.fill_delay_bars,
+            cost_scale_bp: &self.cost_scale_bp,
         };
         let bytes = canonical_json(&view).expect("RunConfig is always JSON-serializable");
         RunId::from_canonical_bytes(&bytes)
@@ -290,6 +305,7 @@ pub struct RunConfigBuilder {
     unsafe_flags: UnsafeFlags,
     target: Option<domain::strategy_graph::deployment::DeploymentTarget>,
     fill_delay_bars: u32,
+    cost_scale_bp: i32,
 }
 
 impl RunConfigBuilder {
@@ -317,6 +333,7 @@ impl RunConfigBuilder {
             unsafe_flags: UnsafeFlags::default(),
             target: None,
             fill_delay_bars: 0,
+            cost_scale_bp: 0,
         }
     }
 
@@ -335,6 +352,14 @@ impl RunConfigBuilder {
     #[must_use]
     pub const fn fill_delay_bars(mut self, bars: u32) -> Self {
         self.fill_delay_bars = bars;
+        self
+    }
+
+    /// Scale the Run's trading costs by `bp` hundredths of a percent
+    /// (`+2000` = +20 %).
+    #[must_use]
+    pub const fn cost_scale_bp(mut self, bp: i32) -> Self {
+        self.cost_scale_bp = bp;
         self
     }
 
@@ -393,6 +418,7 @@ impl RunConfigBuilder {
             null_world: None,
             target: self.target,
             fill_delay_bars: self.fill_delay_bars,
+            cost_scale_bp: self.cost_scale_bp,
         };
         cfg.run_id = cfg.compute_id();
         cfg
@@ -436,6 +462,24 @@ mod tests {
             "absence hashes as before"
         );
     }
+    #[test]
+    fn a_cost_scale_is_a_different_run_and_its_absence_hashes_as_before() {
+        let plain = RunConfigBuilder::new("s", "v", slice(), "c", "z", "snap").build();
+        assert!(!serde_json::to_string(&plain).unwrap().contains("cost_scale"));
+        let dearer = RunConfigBuilder::new("s", "v", slice(), "c", "z", "snap")
+            .cost_scale_bp(2000)
+            .build();
+        let cheaper = RunConfigBuilder::new("s", "v", slice(), "c", "z", "snap")
+            .cost_scale_bp(-2000)
+            .build();
+        assert_ne!(dearer.run_id, plain.run_id);
+        assert_ne!(cheaper.run_id, dearer.run_id);
+        assert!(dearer.id_is_valid());
+        let mut back = dearer.clone();
+        back.cost_scale_bp = 0;
+        assert_eq!(back.rehashed().run_id, plain.run_id);
+    }
+
     use chrono::TimeZone;
     use serde_json::json;
 

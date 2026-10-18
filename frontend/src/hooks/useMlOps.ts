@@ -1,10 +1,12 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   modelsApi,
   type ModelKind,
+  type ModelRunSnapshot,
   type ModelStatus,
   type TrainDataSelection,
 } from '@/api/mlops'
+import { normaliseUsedBy } from '@/components/mlops/studio.helpers'
 
 export const MODEL_KEYS = {
   all: ['models'] as const,
@@ -46,9 +48,13 @@ export function useModelRuns(id: string) {
     queryKey: MODEL_KEYS.runs(id),
     queryFn: () => modelsApi.listRuns(id).then((r) => r.data.runs),
     enabled: !!id,
+    // Poll fast while a run is live, and keep retrying after a failed read: the
+    // registry's `models.jobs` WebSocket lane has no consumer, so this poll IS
+    // the live feed and must not stop because one request dropped.
     refetchInterval: (query) => {
+      if (query.state.status === 'error') return 5000
       const runs = query.state.data
-      const hasActive = runs?.some((r) => r.status === 'running')
+      const hasActive = runs?.some((r) => r.status === 'running' || r.status === 'queued')
       return hasActive ? 2000 : false
     },
   })
@@ -67,6 +73,55 @@ export function useModelEvals(id: string) {
     queryKey: MODEL_KEYS.evals(id),
     queryFn: () => modelsApi.listEvals(id).then((r) => r.data.evaluations),
     enabled: !!id,
+    refetchInterval: (query) =>
+      query.state.data?.some((r) => r.status === 'running' || r.status === 'queued') ? 2000 : false,
+  })
+}
+
+/**
+ * The persisted evaluation rows (with `version`, `scorecard`, regression) for
+ * every succeeded evaluation snapshot the list route returned. The list carries
+ * no version, so each snapshot is read once by id.
+ */
+export function useEvalDetails(id: string, snapshots: ModelRunSnapshot[] | undefined) {
+  const ids = (snapshots ?? []).filter((s) => s.status === 'succeeded').map((s) => s.run_id)
+  return useQueries({
+    queries: ids.map((evalId) => ({
+      queryKey: ['models', id, 'eval', evalId] as const,
+      queryFn: () => modelsApi.getEvalDetail(id, evalId).then((r) => r.data),
+      staleTime: 60_000,
+    })),
+  })
+}
+
+export function useModelTraces(id: string) {
+  return useQuery({
+    queryKey: ['models', id, 'traces'] as const,
+    queryFn: () => modelsApi.traces(id, 200).then((r) => r.data.traces),
+    enabled: !!id,
+    staleTime: 15_000,
+  })
+}
+
+/**
+ * The recorded loss curve of a run. Polled while the run is live, because the
+ * `models.jobs` lane has no socket consumer; read once when it is not.
+ */
+export function useTrainingCurve(id: string, runId: string | null, live: boolean) {
+  return useQuery({
+    queryKey: ['models', id, 'curve', runId] as const,
+    queryFn: () => modelsApi.trainingCurve(id, runId as string).then((r) => r.data.points),
+    enabled: !!id && !!runId,
+    refetchInterval: live ? 2_000 : false,
+  })
+}
+
+export function useModelEvents(id: string) {
+  return useQuery({
+    queryKey: ['models', id, 'events'] as const,
+    queryFn: () => modelsApi.events(id, 100).then((r) => r.data.events),
+    enabled: !!id,
+    staleTime: 15_000,
   })
 }
 
@@ -89,7 +144,7 @@ export function useModelDeployments(id: string) {
 export function useModelUsedBy(id: string) {
   return useQuery({
     queryKey: MODEL_KEYS.usedBy(id),
-    queryFn: () => modelsApi.usedBy(id).then((r) => r.data.strategies),
+    queryFn: () => modelsApi.usedBy(id).then((r) => normaliseUsedBy(r.data.strategies)),
     enabled: !!id,
   })
 }
@@ -171,9 +226,22 @@ export function useCancelRun(modelId: string) {
 export function usePromoteVersion(modelId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ version, reason }: { version: number; reason: string }) =>
-      modelsApi.promote(modelId, version, reason),
-    onSuccess: () => {
+    mutationFn: ({
+      version,
+      environment,
+      overrideReason,
+    }: {
+      version: number
+      environment?: 'paper' | 'live'
+      overrideReason?: string
+    }) =>
+      modelsApi
+        .promote(modelId, version, { environment, override_reason: overrideReason })
+        .then((r) => r.data),
+    onSuccess: (result) => {
+      // A refused gate changed nothing, so there is nothing to refresh.
+      if (!result.promoted) return
+      void qc.invalidateQueries({ queryKey: MODEL_KEYS.deployments(modelId) })
       void qc.invalidateQueries({ queryKey: MODEL_KEYS.versions(modelId) })
       void qc.invalidateQueries({ queryKey: MODEL_KEYS.aliases(modelId) })
       void qc.invalidateQueries({ queryKey: MODEL_KEYS.detail(modelId) })

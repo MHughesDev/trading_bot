@@ -36,6 +36,8 @@ pub const ARTIFACT_TYPES: &[&str] = &[
     "dossier",
     "skill_bundle",
     "code_snapshot",
+    // A Layer 1 target-position series with the bars it was decided on (Set M M-1.5).
+    "position_series",
     "log",
     "exploration_summary",
     // A snapshot of NOTEBOOK.md / RESEARCH_PLAN.json, pushed by the agent-host at

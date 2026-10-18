@@ -1,0 +1,305 @@
+{
+  "tier": "frontier",
+  "policy": "reference-frontier-v1",
+  "provenance": "synthetic_reference_policy",
+  "sealed": true,
+  "runs": {
+    "judgement/1c54451e930c": {
+      "verdict": {
+        "status": "refuted"
+      },
+      "workflow": "investigate",
+      "chain_links": 0,
+      "stopped_because": null,
+      "prospect": null,
+      "falsifier": {
+        "metric": "sharpe_after_costs",
+        "comparator": "at_most",
+        "threshold": 0.0
+      },
+      "retested_dead_idea": false,
+      "found_the_leak": false,
+      "ranked_first": null,
+      "yielded": {
+        "findings_established": 0,
+        "findings_suggestive": 0,
+        "findings_refuted": 0,
+        "negatives": 1,
+        "negatives_new_class": 1,
+        "questions_opened": 0,
+        "questions_closed": 0,
+        "contradictions_surfaced": 0,
+        "proposals": 0,
+        "hypotheses_tested": 0,
+        "hypotheses_refuted": 0,
+        "hypotheses_supported": 0,
+        "trials_spent": 3,
+        "cost_usd": null
+      }
+    },
+    "judgement/4132479f9371": {
+      "verdict": {
+        "status": "supported"
+      },
+      "workflow": "investigate",
+      "chain_links": 0,
+      "stopped_because": null,
+      "prospect": null,
+      "falsifier": {
+        "metric": "sharpe_after_costs",
+        "comparator": "at_most",
+        "threshold": 0.0
+      },
+      "retested_dead_idea": false,
+      "found_the_leak": false,
+      "ranked_first": null,
+      "yielded": {
+        "findings_established": 1,
+        "findings_suggestive": 0,
+        "findings_refuted": 0,
+        "negatives": 0,
+        "negatives_new_class": 0,
+        "questions_opened": 0,
+        "questions_closed": 0,
+        "contradictions_surfaced": 0,
+        "proposals": 0,
+        "hypotheses_tested": 0,
+        "hypotheses_refuted": 0,
+        "hypotheses_supported": 0,
+        "trials_spent": 3,
+        "cost_usd": null
+      }
+    },
+    "judgement/423ac00b8d0a": {
+      "verdict": {
+        "status": "supported"
+      },
+      "workflow": "investigate",
+      "chain_links": 0,
+      "stopped_because": null,
+      "prospect": null,
+      "falsifier": {
+        "metric": "sharpe_after_costs",
+        "comparator": "at_most",
+        "threshold": 0.0
+      },
+      "retested_dead_idea": false,
+      "found_the_leak": false,
+      "ranked_first": null,
+      "yielded": {
+        "findings_established": 1,
+        "findings_suggestive": 0,
+        "findings_refuted": 0,
+        "negatives": 0,
+        "negatives_new_class": 0,
+        "questions_opened": 0,
+        "questions_closed": 0,
+        "contradictions_surfaced": 0,
+        "proposals": 0,
+        "hypotheses_tested": 0,
+        "hypotheses_refuted": 0,
+        "hypotheses_supported": 0,
+        "trials_spent": 3,
+        "cost_usd": null
+      }
+    },
+    "judgement/55722be49810": {
+      "verdict": {
+        "status": "refuted"
+      },
+      "workflow": "investigate",
+      "chain_links": 0,
+      "stopped_because": null,
+      "prospect": null,
+      "falsifier": {
+        "metric": "sharpe_after_costs",
+        "comparator": "at_most",
+        "threshold": 0.0
+      },
+      "retested_dead_idea": false,
+      "found_the_leak": false,
+      "ranked_first": null,
+      "yielded": {
+        "findings_established": 0,
+        "findings_suggestive": 0,
+        "findings_refuted": 0,
+        "negatives": 1,
+        "negatives_new_class": 1,
+        "questions_opened": 0,
+        "questions_closed": 0,
+        "contradictions_surfaced": 0,
+        "proposals": 0,
+        "hypotheses_tested": 0,
+        "hypotheses_refuted": 0,
+        "hypotheses_supported": 0,
+        "trials_spent": 3,
+        "cost_usd": null
+      }
+    },
+    "judgement/772c6a838734": {
+      "verdict": {
+        "status": "supported"
+      },
+      "workflow": "investigate",
+      "chain_links": 0,
+      "stopped_because": null,
+      "prospect": null,
+      "falsifier": {
+        "metric": "sharpe_after_costs",
+        "comparator": "at_most",
+        "threshold": 0.0
+      },
+      "retested_dead_idea": false,
+      "found_the_leak": false,
+      "ranked_first": null,
+      "yielded": {
+        "findings_established": 1,
+        "findings_suggestive": 0,
+        "findings_refuted": 0,
+        "negatives": 0,
+        "negatives_new_class": 0,
+        "questions_opened": 0,
+        "questions_closed": 0,
+        "contradictions_surfaced": 0,
+        "proposals": 0,
+        "hypotheses_tested": 0,
+        "hypotheses_refuted": 0,
+        "hypotheses_supported": 0,
+        "trials_spent": 3,
+        "cost_usd": null
+      }
+    },
+    "judgement/7e996e967574": {
+      "verdict": {
+        "status": "refuted"
+      },
+      "workflow": "investigate",
+      "chain_links": 0,
+      "stopped_because": null,
+      "prospect": null,
+      "falsifier": {
+        "metric": "sharpe_after_costs",
+        "comparator": "at_most",
+        "threshold": 0.0
+      },
+      "retested_dead_idea": false,
+      "found_the_leak": false,
+      "ranked_first": null,
+      "yielded": {
+        "findings_established": 0,
+        "findings_suggestive": 0,
+        "findings_refuted": 0,
+        "negatives": 1,
+        "negatives_new_class": 1,
+        "questions_opened": 0,
+        "questions_closed": 0,
+        "contradictions_surfaced": 0,
+        "proposals": 0,
+        "hypotheses_tested": 0,
+        "hypotheses_refuted": 0,
+        "hypotheses_supported": 0,
+        "trials_spent": 3,
+        "cost_usd": null
+      }
+    },
+    "judgement/9eadd16d86fb": {
+      "verdict": {
+        "status": "refuted"
+      },
+      "workflow": "falsify",
+      "chain_links": 0,
+      "stopped_because": null,
+      "prospect": null,
+      "falsifier": {
+        "metric": "sharpe_after_costs",
+        "comparator": "at_most",
+        "threshold": 0.0
+      },
+      "retested_dead_idea": false,
+      "found_the_leak": true,
+      "ranked_first": null,
+      "yielded": {
+        "findings_established": 0,
+        "findings_suggestive": 0,
+        "findings_refuted": 0,
+        "negatives": 1,
+        "negatives_new_class": 1,
+        "questions_opened": 0,
+        "questions_closed": 0,
+        "contradictions_surfaced": 0,
+        "proposals": 0,
+        "hypotheses_tested": 0,
+        "hypotheses_refuted": 0,
+        "hypotheses_supported": 0,
+        "trials_spent": 3,
+        "cost_usd": null
+      }
+    },
+    "judgement/a48a1ef5f05c": {
+      "verdict": {
+        "status": "supported"
+      },
+      "workflow": "investigate",
+      "chain_links": 0,
+      "stopped_because": null,
+      "prospect": null,
+      "falsifier": {
+        "metric": "sharpe_after_costs",
+        "comparator": "at_most",
+        "threshold": 0.0
+      },
+      "retested_dead_idea": false,
+      "found_the_leak": false,
+      "ranked_first": null,
+      "yielded": {
+        "findings_established": 1,
+        "findings_suggestive": 0,
+        "findings_refuted": 0,
+        "negatives": 0,
+        "negatives_new_class": 0,
+        "questions_opened": 0,
+        "questions_closed": 0,
+        "contradictions_surfaced": 0,
+        "proposals": 0,
+        "hypotheses_tested": 0,
+        "hypotheses_refuted": 0,
+        "hypotheses_supported": 0,
+        "trials_spent": 3,
+        "cost_usd": null
+      }
+    },
+    "judgement/c8eac2cff6b6": {
+      "verdict": {
+        "status": "refuted"
+      },
+      "workflow": "investigate",
+      "chain_links": 0,
+      "stopped_because": null,
+      "prospect": null,
+      "falsifier": {
+        "metric": "sharpe_after_costs",
+        "comparator": "at_most",
+        "threshold": 0.0
+      },
+      "retested_dead_idea": false,
+      "found_the_leak": false,
+      "ranked_first": null,
+      "yielded": {
+        "findings_established": 0,
+        "findings_suggestive": 0,
+        "findings_refuted": 0,
+        "negatives": 1,
+        "negatives_new_class": 1,
+        "questions_opened": 0,
+        "questions_closed": 0,
+        "contradictions_surfaced": 0,
+        "proposals": 0,
+        "hypotheses_tested": 0,
+        "hypotheses_refuted": 0,
+        "hypotheses_supported": 0,
+        "trials_spent": 3,
+        "cost_usd": null
+      }
+    }
+  }
+}

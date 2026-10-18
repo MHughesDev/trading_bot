@@ -115,6 +115,15 @@ impl OrderJournal for TestJournal {
             .cloned()
             .collect())
     }
+
+    async fn record_audit(
+        &self,
+        _entries: &[execution::journal::AuditEntry],
+    ) -> Result<(), JournalError> {
+        // The audit trail is not what this file tests; `journal::memory` and
+        // `order_audit_trail` cover it.
+        Ok(())
+    }
 }
 
 // ── The observer under test ──────────────────────────────────────────────────

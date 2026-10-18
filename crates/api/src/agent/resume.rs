@@ -156,13 +156,21 @@ pub fn decide(rows: &[LogRow], current_version: &str) -> Resume {
         })
         .collect();
 
-    // The trailing effect, if the log ends on one. `Note` is excluded: a note is
-    // something the loop said, not something it was waiting on, so a log ending on
-    // one ends on whatever preceded it.
+    // The trailing effect, if the log ends on one. Three things are passed over:
+    // a `Note` is something the loop said, and `Remember` and `Spill` are things
+    // the driver does *because* of a decision rather than waits on, so a log
+    // ending on one ends on whatever preceded it. And a `state` row (a spend, a
+    // transcript turn, a suspension's resume contract) is the driver writing
+    // down context, not the loop deciding — skipping it is what lets a log that
+    // ends "CallModel, Spend" still say the model call was the thing outstanding.
     let pending = rows
         .iter()
         .rev()
-        .find(|r| !(r.direction == "effect" && r.kind == "Note"))
+        .find(|r| {
+            r.direction != "state"
+                && !(r.direction == "effect"
+                    && matches!(r.kind.as_str(), "Note" | "Remember" | "Spill"))
+        })
         .filter(|r| r.direction == "effect")
         .map(|r| PendingEffect {
             seq: r.seq,
@@ -181,6 +189,41 @@ pub fn decide(rows: &[LogRow], current_version: &str) -> Resume {
     Resume::Replay { inputs, pending }
 }
 
+/// [`decide`], with the one exception a suspended run is owed (AGENT-010 §5).
+///
+/// A run waiting on a forty-minute sweep holds no process, so a deploy inside
+/// that window is likely rather than exceptional. Refusing it because the
+/// harness version moved would make the platform's most expensive operation its
+/// least reliable. So a log that ends suspended on a job, under the **schema**
+/// this harness writes, is decided as its own harness would have decided it —
+/// and the replay that follows still checks every batch against the log, which
+/// is what keeps "compatible" from being a promise nobody verified.
+///
+/// Anything else under another version is interrupted, as `decide` says.
+#[must_use]
+pub fn decide_for_resume(rows: &[LogRow], current_version: &str, current_schema: u32) -> Resume {
+    let Some(written) = rows.first().map(|r| r.harness_version.clone()) else {
+        return decide(rows, current_version);
+    };
+    if written == current_version {
+        return decide(rows, current_version);
+    }
+    let suspended_schema = rows
+        .iter()
+        .rev()
+        .find(|r| r.direction == "state" && r.kind == "Suspended")
+        .and_then(|r| r.payload.get("schema"))
+        .and_then(Value::as_u64);
+    let ends_waiting = matches!(
+        decide(rows, &written),
+        Resume::Replay { pending: Some(ref p), .. } if p.kind == "Await"
+    );
+    if ends_waiting && suspended_schema == Some(u64::from(current_schema)) {
+        return decide(rows, &written);
+    }
+    decide(rows, current_version)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,6 +239,68 @@ mod tests {
             payload,
             harness_version: V.into(),
         }
+    }
+
+    fn row_v(seq: i32, direction: &str, kind: &str, payload: Value, v: &str) -> LogRow {
+        LogRow {
+            seq,
+            direction: direction.into(),
+            kind: kind.into(),
+            payload,
+            harness_version: v.into(),
+        }
+    }
+
+    /// A spend or a transcript turn written after a model call does not hide
+    /// the call: the run was waiting on the model, and that is what resumes.
+    #[test]
+    fn a_trailing_state_row_does_not_mask_the_outstanding_effect() {
+        let rows = vec![
+            row(1, "input", "Admission", json!({})),
+            row(2, "effect", "CallModel", json!({ "step": 1 })),
+            row(3, "state", "Spend", json!({ "tokens": 10 })),
+            row(4, "state", "Turn", json!({})),
+        ];
+        let Resume::Replay { pending, .. } = decide(&rows, V) else {
+            panic!("resumes");
+        };
+        assert_eq!(pending.expect("the call is outstanding").kind, "CallModel");
+    }
+
+    /// A suspended run survives a deploy when the schema it was written under is
+    /// the one this harness writes (AGENT-010 §5; S-2.6).
+    #[test]
+    fn a_suspended_run_resumes_across_a_harness_version_change() {
+        let rows = vec![
+            row_v(1, "input", "Admission", json!({}), "0.1.0"),
+            row_v(2, "effect", "ExecuteTool", json!({ "name": "run_sweep", "idempotent": false }), "0.1.0"),
+            row_v(3, "input", "JobAccepted", json!({ "job_id": "sweep:1" }), "0.1.0"),
+            row_v(4, "effect", "Await", json!({ "job_id": "sweep:1" }), "0.1.0"),
+            row_v(5, "state", "Suspended", json!({ "job_id": "sweep:1", "schema": 1 }), "0.1.0"),
+        ];
+        let Resume::Replay { pending, .. } = decide_for_resume(&rows, "0.2.0", 1) else {
+            panic!("a compatible schema resumes across the version change");
+        };
+        assert_eq!(pending.expect("waiting").kind, "Await");
+        // An incompatible schema does not.
+        assert!(matches!(
+            decide_for_resume(&rows, "0.2.0", 2),
+            Resume::Interrupted { .. }
+        ));
+    }
+
+    /// Only a *suspended* run gets the exception; a run that was mid-step under
+    /// another harness is interrupted as before.
+    #[test]
+    fn a_mid_step_run_under_another_harness_is_still_interrupted() {
+        let rows = vec![
+            row_v(1, "input", "Admission", json!({}), "0.1.0"),
+            row_v(2, "effect", "CallModel", json!({}), "0.1.0"),
+        ];
+        assert!(matches!(
+            decide_for_resume(&rows, "0.2.0", 1),
+            Resume::Interrupted { .. }
+        ));
     }
 
     fn write_effect(seq: i32, name: &str) -> LogRow {

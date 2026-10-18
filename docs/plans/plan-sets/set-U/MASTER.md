@@ -1,6 +1,6 @@
 # Unified Strategy Engine — Set U
 
-**Completion: 8% left (51 / 58 tasks). 51 done, 3 partial, 2 not started, 2 blocked.**
+**Completion: 6% left (53 / 58 tasks). 53 done, 2 partial, 1 not started, 2 blocked.**
 
 **Status:** ACCEPTED (2026-10-01) — Phase 0 starts immediately.
 **Created:** 2026-10-01
@@ -85,7 +85,7 @@ decide identically.
 | 1 | [The engine core](phase-1-engine-core.md) | 9 | — | DONE 2026-10-01 |
 | 2 | [Venues and the risk gate](phase-2-venues-and-risk.md) | 6 | — | DONE 2026-10-02 |
 | 3 | [The backtest environment](phase-3-backtest-environment.md) | 5 | — | DONE 2026-10-04 |
-| 4 | [Paper and live](phase-4-paper-and-live.md) | 7 | 0142–0144 | 5 / 7 — U-4.2 PARTIAL, U-4.7 open |
+| 4 | [Paper and live](phase-4-paper-and-live.md) | 7 | 0142–0144, 0188 | DONE 2026-10-04 |
 | 5 | [Models](phase-5-models.md) | 8 | 0146, 0189 | 7 / 8 — U-5.8 PARTIAL |
 | 6 | [Selection strategies](phase-6-selection.md) | 6 | 0147–0148, 0187 | DONE |
 | 7 | [Authoring — identical for people and models](phase-7-authoring.md) | 7 | — | 6 / 7 — U-7.7 open |

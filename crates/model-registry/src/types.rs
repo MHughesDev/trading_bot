@@ -121,6 +121,28 @@ pub struct TrainRequest {
     /// definition defaults (back-compat with older clients).
     #[serde(default)]
     pub data: Option<TrainDataSelection>,
+    /// A typed dataset declaration (Set N N-1.1). When present it replaces `data`: the
+    /// planner is handed what the declaration lowers to, and purge and embargo are the
+    /// declaration's derived figures. There is no field here to set either.
+    #[serde(default)]
+    pub declaration: Option<crate::dataset_declaration::DatasetDeclaration>,
+    /// The `(family, variant)` to train as (N-2.1). Absent: the model's legacy
+    /// `framework` resolves through the registry.
+    #[serde(default)]
+    pub family: Option<FamilyChoice>,
+    /// The Experiment this run belongs to. A declared run that adds features, transforms
+    /// or interactions beyond its parent declaration raises that Experiment's
+    /// specification count (N-1.6, BACKTEST_SUITE v2 section 2.3).
+    #[serde(default)]
+    pub experiment_id: Option<String>,
+}
+
+/// A chosen `(family, variant)` from the family registry.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct FamilyChoice {
+    pub family: String,
+    pub variant: String,
 }
 
 /// A model record as stored and served via the API.

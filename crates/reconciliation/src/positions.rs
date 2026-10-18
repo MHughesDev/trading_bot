@@ -158,6 +158,21 @@ pub async fn reconcile_all(
         }
         let halted = store.carry_out_mismatch(venue_id, kill_switch).await?;
         tracing::warn!(scope = %halted, instruments = diverged.len(), "venue halted and recorded");
+    } else if let Err(e) = store
+        .record_venue_check(
+            venue_id,
+            monitor::reconciled::VenueVerdict::Agreed,
+            outcomes.len(),
+            None,
+            monitor::reconciled::RECONCILIATION_ACTOR,
+        )
+        .await
+    {
+        // Not an error for the sweep: the books agree either way. But the venue
+        // keeps whatever its last recorded word was, so a venue halted for a
+        // mismatch stays un-resumable until an agreement is actually written —
+        // the conservative direction, and the log says why.
+        tracing::error!(%venue_id, error = %e, "venue agreed but the verdict could not be recorded");
     }
 
     Ok(outcomes)
@@ -176,7 +191,25 @@ pub async fn reconcile_with_broker(
     store: &MonitorStore,
     kill_switch: &Arc<KillSwitch>,
 ) -> Result<Vec<ReconcileOutcome>, SweepError> {
-    let broker_positions = broker.query_positions().await?;
+    let broker_positions = match broker.query_positions().await {
+        Ok(p) => p,
+        Err(e) => {
+            // An unread venue has not agreed, and its last word says so (0165).
+            if let Err(w) = store
+                .record_venue_check(
+                    venue_id,
+                    monitor::reconciled::VenueVerdict::Unreadable,
+                    0,
+                    Some(&e.to_string()),
+                    monitor::reconciled::RECONCILIATION_ACTOR,
+                )
+                .await
+            {
+                tracing::error!(%venue_id, error = %w, "an unreadable venue's verdict could not be recorded");
+            }
+            return Err(e.into());
+        }
+    };
     reconcile_all(
         internal_positions,
         venue_id,

@@ -140,7 +140,7 @@ async fn the_database_refuses_to_grant_monitor_control_to_any_service_session() 
     .await
     .expect("a research service session is legitimate");
 
-    let held: Vec<String> = sqlx::query("SELECT scopes FROM sessions WHERE token = $1")
+    let held: Vec<String> = sqlx::query("SELECT scopes FROM sessions WHERE token = session_token_hash($1)")
         .bind(&token)
         .fetch_one(&pg)
         .await

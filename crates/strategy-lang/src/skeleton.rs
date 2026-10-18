@@ -310,16 +310,18 @@ diagnostics will report it as \"loses in trending months\" rather than as a \
 missing clause.";
 
 const BREAKOUT: &str = "\
-# Breakout: take the move out of a channel, in whichever direction it leaves.
+# Breakout: take the move when price leaves the top or bottom of its recent
+# range, in whichever direction it leaves.
 strategy breakout_skeleton on $bound_at_init timeframe 1h
 param channel: int[10..200 step 10] = 20
-input upper = donchian_upper(close, channel)
-input lower = donchian_lower(close, channel)
-# Volume is the confirmation: a channel break on an ordinary bar is usually
-# noise, and `rel_volume` is 1.0 on an ordinary bar by construction.
+# Where this close sits among the last `channel` closes, 0 at the bottom and 1 at
+# the top: 1 is a close above every other close in the window, which is a new high.
+input rank = pct_rank(close, channel)
+# Volume is the confirmation: a break on an ordinary bar is usually noise, and
+# `rel_volume` is 1.0 on an ordinary bar by construction.
 input volume_surge = rel_volume(close, 20)
-entry long when close > upper and volume_surge > 1.5
-entry short when close < lower and volume_surge > 1.5
+entry long when rank > 0.95 and volume_surge > 1.5
+entry short when rank < 0.05 and volume_surge > 1.5
 size fixed 0.01
 # Trailing rather than a fixed target: the whole hypothesis is that the move
 # continues, so the exit should not cap it.
@@ -328,11 +330,15 @@ exit time 96 bars
 ";
 
 const BREAKOUT_NOTES: &str = "\
-`donchian_upper_N` is the highest high of the last N bars **including this \
-one**, so `close > donchian_upper(close, N)` is true only on a bar that closes \
-at a new high rather than on every bar above the old channel. That is the \
-rising edge this rule wants, and it is the one place the language gets one \
-without `crossed_above`.
+The textbook breakout is a close above the highest high of the *previous* N \
+bars, and the language cannot say it. `donchian_upper_N` is the highest high \
+of the last N bars **including this one**, so `close > donchian_upper(close, \
+N)` can never be true — a bar's close is never above its own high, and the \
+channel's high is at least that. An earlier version of this skeleton wrote \
+exactly that and could not fire on any market. Lagging the channel by one bar \
+would fix it and is a feature of a feature, which is not in the language.
+
+`pct_rank(close, N)` is the nearest thing that exists: the fraction of the other N - 1 closes that are below this one. It reads 1.0 on a close at a new N-bar closing high, and `rank > 0.95` allows a single miss in a long window. In a sustained run it fires on each new closing high rather than only on the first, which the exits and the risk gate then bound.
 
 Both sides share one `size` clause and one exit policy, because the canonical \
 order specification carries sizing per action and the exit policy is per \

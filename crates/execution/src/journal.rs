@@ -33,6 +33,8 @@ use domain::{
     order::{OrderIntent, OrderState, OrderType, Side},
 };
 
+pub use crate::audit::AuditEntry;
+
 /// The only execution mode this platform writes.  Paper, and the database
 /// agrees (see the `CHECK` in migration 0121).
 pub const PAPER_MODE: &str = "paper";
@@ -124,6 +126,13 @@ pub trait OrderJournal: Send + Sync {
 
     /// Every fill for one order, oldest first.
     async fn fills_for(&self, key: Uuid) -> Result<Vec<PersistedFill>, JournalError>;
+
+    /// Append audit entries to the durable, append-only order audit trail
+    /// (`order_audit`, migration 0152; Set E audit item #3).
+    ///
+    /// Required, with no default body: a journal that silently dropped the
+    /// trail is the defect this method exists to remove.
+    async fn record_audit(&self, entries: &[AuditEntry]) -> Result<(), JournalError>;
 }
 
 static JOURNAL: OnceLock<Arc<dyn OrderJournal>> = OnceLock::new();
@@ -354,6 +363,110 @@ impl OrderJournal for PgOrderJournal {
             )
             .collect()
     }
+
+    async fn record_audit(&self, entries: &[AuditEntry]) -> Result<(), JournalError> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let mut tx = self.pool.begin().await.map_err(db)?;
+        for e in entries {
+            let row = audit_row(e);
+            sqlx::query(
+                "INSERT INTO order_audit \
+                   (idempotency_key, kind, from_state, to_state, broker_order_id, reason, \
+                    entry, occurred_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            )
+            .bind(row.idempotency_key)
+            .bind(row.kind)
+            .bind(row.from_state)
+            .bind(row.to_state)
+            .bind(row.broker_order_id)
+            .bind(row.reason)
+            .bind(serde_json::to_value(e).map_err(db)?)
+            .bind(row.occurred_at)
+            .execute(&mut *tx)
+            .await
+            .map_err(db)?;
+        }
+        tx.commit().await.map_err(db)?;
+        Ok(())
+    }
+}
+
+/// The column view of one audit entry — what `order_audit` indexes and checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditRow<'a> {
+    pub idempotency_key: Uuid,
+    pub kind: &'static str,
+    pub from_state: Option<&'static str>,
+    pub to_state: Option<&'static str>,
+    pub broker_order_id: Option<&'a str>,
+    pub reason: Option<&'a str>,
+    pub occurred_at: DateTime<Utc>,
+}
+
+/// Flatten an [`AuditEntry`] into its `order_audit` columns.
+#[must_use]
+pub fn audit_row(e: &AuditEntry) -> AuditRow<'_> {
+    match e {
+        AuditEntry::StateTransition {
+            idempotency_key,
+            from,
+            to,
+            reason,
+            at,
+        } => AuditRow {
+            idempotency_key: *idempotency_key,
+            kind: "state_transition",
+            from_state: from.map(order_state_str),
+            to_state: Some(order_state_str(*to)),
+            broker_order_id: None,
+            reason: reason.as_deref(),
+            occurred_at: *at,
+        },
+        AuditEntry::FillReceived {
+            idempotency_key,
+            broker_order_id,
+            at,
+            ..
+        } => AuditRow {
+            idempotency_key: *idempotency_key,
+            kind: "fill_received",
+            from_state: None,
+            to_state: None,
+            broker_order_id: Some(broker_order_id),
+            reason: None,
+            occurred_at: *at,
+        },
+        AuditEntry::BrokerSubmit {
+            idempotency_key,
+            broker_order_id,
+            at,
+        } => AuditRow {
+            idempotency_key: *idempotency_key,
+            kind: "broker_submit",
+            from_state: None,
+            to_state: None,
+            broker_order_id: Some(broker_order_id),
+            reason: None,
+            occurred_at: *at,
+        },
+        AuditEntry::BrokerQuery {
+            idempotency_key,
+            broker_order_id,
+            reason,
+            at,
+        } => AuditRow {
+            idempotency_key: *idempotency_key,
+            kind: "broker_query",
+            from_state: None,
+            to_state: None,
+            broker_order_id: Some(broker_order_id),
+            reason: Some(reason),
+            occurred_at: *at,
+        },
+    }
 }
 
 /// Parse a persisted side.  An unrecognised value is an error.
@@ -404,6 +517,7 @@ pub mod memory {
         orders: HashMap<Uuid, RecordedOrder>,
         // (key, broker_order_id, price, size) → fill
         fills: Vec<(String, PersistedFill)>,
+        audit: Vec<AuditEntry>,
     }
 
     #[derive(Default)]
@@ -415,6 +529,19 @@ pub mod memory {
         #[must_use]
         pub fn new() -> Self {
             Self::default()
+        }
+
+        /// Every audit entry recorded for one order, in order.
+        #[must_use]
+        pub fn audit_for(&self, key: Uuid) -> Vec<AuditEntry> {
+            self.inner
+                .lock()
+                .unwrap()
+                .audit
+                .iter()
+                .filter(|e| audit_row(e).idempotency_key == key)
+                .cloned()
+                .collect()
         }
     }
 
@@ -496,6 +623,11 @@ pub mod memory {
                 .filter(|(_, f)| f.idempotency_key == key)
                 .map(|(_, f)| f.clone())
                 .collect())
+        }
+
+        async fn record_audit(&self, entries: &[AuditEntry]) -> Result<(), JournalError> {
+            self.inner.lock().unwrap().audit.extend_from_slice(entries);
+            Ok(())
         }
     }
 }

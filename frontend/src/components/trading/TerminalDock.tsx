@@ -17,11 +17,12 @@ import { Tabs } from '@/components/primitives/Segmented'
 import { Table, IdentityCell, TableScroll } from '@/components/primitives/Table'
 import { EmptyState } from '@/components/primitives/States'
 import { Tape } from './OrderBook'
+import { ExecQualityCard } from '@/components/ops/ExecQualityCard'
 import type { PlatformAssetClass } from '@/lib/assetClass'
 
 /* =============================================================================
    Spec §4.2 — the dock beneath the chart.
-   Tabs: Positions · Open orders · Fills · Automations · Time & sales.
+   Tabs: Positions · Open orders · Fills · Automations · Time & sales · Execution quality.
    Net exposure and margin used ride in the tab bar.
 
    Positions columns (spec MUST):
@@ -30,7 +31,7 @@ import type { PlatformAssetClass } from '@/lib/assetClass'
    automation, and it links to that automation.
    ============================================================================= */
 
-type DockTab = 'positions' | 'orders' | 'fills' | 'automations' | 'tape'
+type DockTab = 'positions' | 'orders' | 'fills' | 'automations' | 'tape' | 'execution'
 
 interface PaperOrderView {
   order_id?: string
@@ -126,6 +127,7 @@ export function TerminalDock({
           { value: 'fills', label: 'Fills', count: fills.length },
           { value: 'automations', label: 'Automations', count: related.length },
           { value: 'tape', label: 'Time & sales' },
+          { value: 'execution', label: 'Execution quality' },
         ]}
         right={
           <span className="row" style={{ gap: 'var(--s-4)', paddingRight: 'var(--s-4)', fontSize: 'var(--t-12)' }}>
@@ -334,6 +336,8 @@ export function TerminalDock({
         {tab === 'tape' && (
           <Tape instrument={instrument} />
         )}
+
+        {tab === 'execution' && <ExecQualityCard instrument={instrument} />}
       </PanelBody>
     </Panel>
   )

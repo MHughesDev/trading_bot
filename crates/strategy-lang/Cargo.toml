@@ -22,3 +22,10 @@ thiserror = { workspace = true }
 [dev-dependencies]
 # Only to check every code it emits has an equivalent here (U-7.2).
 strategy-validator = { workspace = true }
+# The production preview, to see a strategy fire and a clause block (S-5.12,
+# S-5.15). `backtest` already dev-depends on this crate (U-7.3); a dev-dependency
+# cycle is legal, and nothing outside tests links either direction.
+backtest = { workspace = true }
+# The real-bars acceptance of S-5.12 (ignored unless a ClickHouse is configured).
+tokio = { workspace = true }
+chrono = { workspace = true }

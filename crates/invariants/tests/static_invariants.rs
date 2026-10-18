@@ -81,6 +81,20 @@ fn at01_only_the_pit_reader_touches_raw_bar_tables() {
         "crates/storage/src/clickhouse/migrate.rs",
         "crates/storage/src/clickhouse/backfill.rs",
         "crates/storage/src/clickhouse/canonical.rs",
+        // Set P P-4.1/P-4.2 (recorded 2026-10-04). A point-in-time reader of its own:
+        // `knowledge_time <= as_of` and `argMax(tuple(..), (knowledge_time, revision_seq))`
+        // resolves each bar as a whole row, exactly as `BarStore` does, and it additionally
+        // returns `source_id` and `vwap`, which `LoadedBar` drops and the resample refusals
+        // need. The alternative (route it through `BarStore`) would force an invented source
+        // and grade: the laundering step those refusals exist to prevent.
+        "crates/storage/src/clickhouse/canonical_read.rs",
+        // Set P P-2.x (recorded 2026-10-04). The QC grader reads every revision of a bar on
+        // purpose (`revised` = more than one) because grading a series means grading its
+        // restatements too, and it returns each bar's `knowledge_ns` so nothing downstream can
+        // mistake it for an as-of view. Its output is a grade, never a model input. Its live
+        // test inserts the fixture rows it grades, like the other storage tests above.
+        "crates/storage/src/clickhouse/qc_reports.rs",
+        "crates/storage/tests/qc_reports_live.rs",
         "crates/storage/examples/backfill_bars_v2.rs",
         "crates/storage/tests/canonical_migration.rs",
         "crates/storage/tests/clickhouse_migrate.rs",

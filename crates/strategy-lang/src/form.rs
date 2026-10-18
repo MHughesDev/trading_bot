@@ -1737,6 +1737,175 @@ pub fn document_schema_with(cat: &Catalogue) -> Value {
     })
 }
 
+/// Replace every `{"$ref": "#/$defs/x"}` with the definition it names.
+///
+/// A sampler's grammar converter should not have to resolve references to be
+/// right, and a tool's `inputSchema` is read by more than one consumer. The
+/// schema is not recursive; the depth bound turns a loop introduced by a future
+/// edit into a panic here instead of an unbounded expansion somewhere a model is
+/// waiting.
+fn inline_refs(v: &Value, defs: &serde_json::Map<String, Value>, depth: usize) -> Value {
+    assert!(depth < 16, "a schema reference loops");
+    match v {
+        Value::Object(o) => {
+            if let Some(Value::String(r)) = o.get("$ref") {
+                let name = r.trim_start_matches("#/$defs/");
+                let target = defs
+                    .get(name)
+                    .unwrap_or_else(|| panic!("`{name}` is not defined in the schema"));
+                return inline_refs(target, defs, depth + 1);
+            }
+            Value::Object(
+                o.iter()
+                    .filter(|(k, _)| !matches!(k.as_str(), "$schema" | "$comment" | "$defs"))
+                    .map(|(k, x)| (k.clone(), inline_refs(x, defs, depth)))
+                    .collect(),
+            )
+        }
+        Value::Array(a) => Value::Array(a.iter().map(|x| inline_refs(x, defs, depth)).collect()),
+        other => other.clone(),
+    }
+}
+
+/// [`document_schema`], self-contained: no `$ref`, no `$defs`.
+///
+/// This is the form a tool declares as its `inputSchema`, so that a
+/// `select_fill` tier's arguments are decoded under it and the strategy it
+/// writes cannot name a feature the engine does not serve.
+#[must_use]
+pub fn document_schema_inlined() -> Value {
+    let doc = document_schema();
+    let defs = doc["$defs"].as_object().cloned().unwrap_or_default();
+    inline_refs(&doc, &defs, 0)
+}
+
+/// One clause's schema, self-contained. `None` for a name that is not a clause.
+#[must_use]
+pub fn clause_schema_inlined(name: &str) -> Option<Value> {
+    let doc = document_schema();
+    let defs = doc["$defs"].as_object().cloned().unwrap_or_default();
+    defs.get(name).map(|s| inline_refs(s, &defs, 0))
+}
+
+/// The feature, as a decoder-sized schema: the family is an enumeration of the
+/// engine's names, and the arguments are up to [`features::registry::MAX_PARAMS`]
+/// whole numbers or declared parameter names.
+///
+/// What it gives up against [`feature_schema`]'s one branch per family is the
+/// arity and the per-parameter range. What it keeps is the property S-5.9's
+/// acceptance names: **an unknown feature cannot be written**. A wrong number of
+/// arguments, or one out of range, reaches the compiler and comes back as
+/// `wrong_arity` / `bad_feature_param` with a fix, which is the same diagnostic
+/// free text gets.
+///
+/// The reason is size. The per-family form inlines to about 270 KB, because an
+/// operand carries every family and a filter has up to five operands; a tool's
+/// `inputSchema` is listed to every client, and a sampler's grammar of that size
+/// is slow to build. This one inlines to a few KB.
+fn compact_feature_schema(cat: &Catalogue) -> Value {
+    let mut names: Vec<&str> = cat.iter().map(|f| f.name.as_str()).collect();
+    names.sort_unstable();
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["family"],
+        "properties": {
+            "family": {"enum": names},
+            "args": {
+                "type": "array",
+                "maxItems": features::registry::MAX_PARAMS,
+                "items": {"oneOf": [
+                    {"type": "integer", "minimum": 1},
+                    {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+                ]},
+            },
+        },
+    })
+}
+
+/// [`operand_schema`] over [`compact_feature_schema`].
+fn compact_operand_schema(cat: &Catalogue) -> Value {
+    let identifier = json!({"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"});
+    let decimal = json!({"type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$"});
+    let mut feature = compact_feature_schema(cat);
+    if let Some(props) = feature.get_mut("properties").and_then(Value::as_object_mut) {
+        props.insert("operand".into(), json!({"const": "feature"}));
+    }
+    if let Some(req) = feature.get_mut("required").and_then(Value::as_array_mut) {
+        req.insert(0, json!("operand"));
+    }
+    json!({"oneOf": [
+        feature,
+        {"type": "object", "additionalProperties": false, "required": ["operand", "field"],
+         "properties": {"operand": {"const": "bar"},
+                        "field": {"enum": ["open", "high", "low", "close", "volume"]}}},
+        {"type": "object", "additionalProperties": false, "required": ["operand", "name"],
+         "properties": {"operand": {"const": "input"}, "name": identifier.clone()}},
+        {"type": "object", "additionalProperties": false, "required": ["operand", "name"],
+         "properties": {"operand": {"const": "param"}, "name": identifier}},
+        {"type": "object", "additionalProperties": false, "required": ["operand", "value"],
+         "properties": {"operand": {"const": "number"}, "value": decimal}},
+    ]})
+}
+
+/// The document schema with the compact feature, and the definitions it needs.
+fn compact_document() -> (Value, serde_json::Map<String, Value>) {
+    let cat = Catalogue::engine();
+    let mut doc = document_schema_with(&cat);
+    if let Some(defs) = doc.get_mut("$defs").and_then(Value::as_object_mut) {
+        defs.insert("feature".into(), compact_feature_schema(&cat));
+        let operand = compact_operand_schema(&cat);
+        // What is compared *to* may be a number; what is being tested may not.
+        // A filter of two numbers (`-1 < 1`) is well-formed and says nothing, and
+        // a small model reaches for the shortest branch of a `oneOf` unless the
+        // grammar removes it — measured, in `small_tier_eval`.
+        let mut lhs = operand.clone();
+        if let Some(a) = lhs.get_mut("oneOf").and_then(Value::as_array_mut) {
+            a.pop();
+        }
+        defs.insert("operand_lhs".into(), lhs);
+        defs.insert("operand".into(), operand);
+        let mut filter = filter_schema();
+        if let Some(branches) = filter.get_mut("oneOf").and_then(Value::as_array_mut) {
+            for (b, key) in branches.iter_mut().zip(["lhs", "value"]) {
+                if let Some(p) = b.get_mut("properties").and_then(Value::as_object_mut) {
+                    p.insert(key.into(), json!({"$ref": "#/$defs/operand_lhs"}));
+                }
+            }
+        }
+        defs.insert("filter".into(), filter);
+        // A distance is a positive percentage; the sign is the side, not the number.
+        if let Some(exit) = defs.get("exit").cloned() {
+            let text = exit.to_string().replace(
+                "^-?[0-9]+(\\\\.[0-9]+)?$",
+                "^[0-9]+(\\\\.[0-9]+)?$",
+            );
+            if let Ok(v) = serde_json::from_str(&text) {
+                defs.insert("exit".into(), v);
+            }
+        }
+    }
+    let defs = doc["$defs"].as_object().cloned().unwrap_or_default();
+    (doc, defs)
+}
+
+/// [`document_schema_inlined`] over the compact feature — the schema a tool
+/// declares and a small tier decodes under. See [`compact_feature_schema`] for
+/// what it keeps and what it gives up.
+#[must_use]
+pub fn document_schema_compact() -> Value {
+    let (doc, defs) = compact_document();
+    inline_refs(&doc, &defs, 0)
+}
+
+/// One clause's compact schema, self-contained. `None` for a name that is not a
+/// clause.
+#[must_use]
+pub fn clause_schema_compact(name: &str) -> Option<Value> {
+    let (_, defs) = compact_document();
+    defs.get(name).map(|s| inline_refs(s, &defs, 0))
+}
+
 /// One schema per clause kind: what a `select_fill` tier is shown, one fill at
 /// a time (AGENT-011 §3).
 #[must_use]

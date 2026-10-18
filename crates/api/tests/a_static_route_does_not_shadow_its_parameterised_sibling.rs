@@ -439,7 +439,7 @@ fn every_closed_vocabulary_names_a_function_that_really_enumerates_the_values() 
             .keys()
             .filter(|p| segments(p).len() == depth)
             .filter(|p| segments(p)[..position] == segments(param)[..position])
-            .filter(|p| values.contains(&segments(p)[position].to_string()))
+            .filter(|p| values.contains(segments(p)[position]))
             .cloned()
             .collect();
         assert!(

@@ -126,3 +126,105 @@ pub fn compute_scorecard_from_eval(eval_result: &Value) -> Value {
     }
     compute_scorecard(&json!({}))
 }
+
+/// A scorecard that has been checked against the baseline rule (Set N N-3.5), or the
+/// reason it was refused.
+#[derive(Clone, Debug)]
+pub struct EvalScorecard {
+    pub scorecard: Value,
+    /// `Some` when an evaluation that claims success carried no baseline: the run is
+    /// failed with this reason rather than stored as a scorecard that cannot be read
+    /// against the thing it has to beat.
+    pub refusal: Option<String>,
+}
+
+/// The scorecard for a finished evaluation.
+///
+/// A *successful* evaluation must carry at least one family baseline
+/// ([`crate::verdict::require_baselines`]); without one the scorecard is refused. A stub or
+/// failed evaluation falls back to [`compute_scorecard_from_eval`] unchanged: those never
+/// claimed a measurement. A checked scorecard also carries the baselines, the usage-rule
+/// verdict for `uses` and the complexity flag, so nothing downstream recomputes them.
+#[must_use]
+pub fn eval_scorecard(
+    status: &str,
+    eval_json: &Value,
+    metrics: &Value,
+    uses: &[crate::scoring_v2::ForecastUse],
+) -> EvalScorecard {
+    let mut scorecard = compute_scorecard_from_eval(eval_json);
+    if status != "succeeded" {
+        return EvalScorecard {
+            scorecard,
+            refusal: None,
+        };
+    }
+    match crate::verdict::require_baselines(metrics) {
+        Err(e) => {
+            if let Some(o) = scorecard.as_object_mut() {
+                o.insert("baselines_missing".into(), json!(true));
+            }
+            EvalScorecard {
+                scorecard,
+                refusal: Some(e.to_string()),
+            }
+        }
+        Ok(b) => {
+            let report = crate::verdict::judge_metrics(b.metrics(), uses);
+            if let Some(o) = scorecard.as_object_mut() {
+                o.insert("family_baselines".into(), json!(report.baselines));
+                o.insert("usage_verdict".into(), report.to_json());
+                o.insert(
+                    "complexity_unjustified".into(),
+                    json!(report
+                        .complexity
+                        .as_ref()
+                        .and_then(|c| c.get("unjustified"))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)),
+                );
+            }
+            EvalScorecard {
+                scorecard,
+                refusal: None,
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scoring_v2::ForecastUse;
+
+    #[test]
+    fn a_successful_evaluation_with_no_baseline_is_refused() {
+        let metrics = json!({"crps": 0.01, "pit": {"calibrated": true}});
+        let eval = json!({"status": "succeeded", "metrics": metrics});
+        let r = eval_scorecard("succeeded", &eval, &metrics, &[ForecastUse::Return]);
+        assert!(r.refusal.as_deref().unwrap().contains("baseline"));
+        assert_eq!(r.scorecard["baselines_missing"], json!(true));
+    }
+
+    #[test]
+    fn a_stub_evaluation_is_not_judged_it_never_claimed_a_measurement() {
+        let metrics = json!({"note": "sidecar offline"});
+        let r = eval_scorecard("stub", &json!({"metrics": metrics}), &metrics, &[ForecastUse::Return]);
+        assert!(r.refusal.is_none());
+    }
+
+    #[test]
+    fn a_baselined_scorecard_carries_its_baselines_and_its_verdict() {
+        let metrics = json!({
+            "crps": 0.01,
+            "family_baselines": [{"name": "mean", "family": "baseline", "variant": "mean", "scores": {"crps": 0.02}}],
+        });
+        let eval = json!({"status": "succeeded", "metrics": metrics});
+        let r = eval_scorecard("succeeded", &eval, &metrics, &[ForecastUse::Return]);
+        assert!(r.refusal.is_none());
+        assert_eq!(r.scorecard["family_baselines"][0]["name"], json!("mean"));
+        // No series was recorded, so the verdict exists and is not an allow.
+        assert_eq!(r.scorecard["usage_verdict"]["allowed"], json!(false));
+        assert_eq!(r.scorecard["usage_verdict"]["rules"][0]["status"], json!("not_computable"));
+    }
+}

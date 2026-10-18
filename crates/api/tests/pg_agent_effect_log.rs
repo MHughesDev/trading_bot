@@ -69,7 +69,7 @@ const TEST_HARNESS_VERSION: &str = "0.0.0-test-fixture";
 /// `.invalid` is reserved by RFC 2606 and can never resolve, so a row carrying
 /// one of these addresses is never a person.
 fn test_email(user_id: Uuid) -> String {
-    format!("test-fixture-{user_id}@test.invalid")
+    format!("test-fixture-effectlog-{user_id}@test.invalid")
 }
 
 fn url() -> String {
@@ -627,7 +627,9 @@ async fn the_suite_gives_the_database_back_unchanged() {
          permanent and every later count of agent runs is wrong by that much."
     );
 
-    // And nothing bearing this file's markers survived, on any path.
+    // And nothing bearing this file's markers survived, on any path. The marker is this
+    // file's own (`test-fixture-effectlog-`): other suites share the `test-fixture-` prefix
+    // and commit their users, so a prefix-wide count would fail on their rows.
     let marked_runs: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_runs WHERE goal = $1")
         .bind(TEST_GOAL)
         .fetch_one(&fresh)
@@ -636,7 +638,7 @@ async fn the_suite_gives_the_database_back_unchanged() {
     assert_eq!(marked_runs, 0, "a marked fixture run survived the rollback");
 
     let marked_users: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM users WHERE email LIKE 'test-fixture-%@test.invalid'",
+        "SELECT count(*) FROM users WHERE email LIKE 'test-fixture-effectlog-%@test.invalid'",
     )
     .fetch_one(&fresh)
     .await

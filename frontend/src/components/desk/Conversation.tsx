@@ -4,11 +4,12 @@
 // it. Everything a person needs to work with a run is on this screen and nothing
 // here requires reading a transcript.
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { invalidateApprovals } from '@/lib/desk/approvals'
 import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
 import { StaleBadge } from '@/components/primitives/States'
-import type { DeskCard, SessionDigestRef } from '@/api/desk'
+import type { DeskCard, SessionDigestRef, Stage } from '@/api/desk'
 import {
   charterView,
   deskApi,
@@ -23,14 +24,19 @@ import { useDeskAnnouncer } from '@/hooks/useDeskAnnouncer'
 import { CardStream } from './CardStream'
 import { Composer, type ComposerHandle, type ComposerSubmission } from './Composer'
 import { ControlsRow, type PauseState } from './ControlsRow'
-import { AgendaTab, CharterTab, CostTab, EvidenceTab, MemoryTab, RightPanel, StateTab, ToolsTab, type PanelTab, type StateAbsence } from './RightPanel'
+import { streamEvidence, evidenceEntries } from '@/lib/desk/evidence'
+import { daySpendFromDigests, sessionRefusal, slashAction } from '@/lib/desk/sessions'
+import { AgendaTab, CharterTab, CostTab, EvidenceTab, MemoryTab, RightPanel, StateTab, ToolsTab, type PanelTab, type RecordedLifecycle, type StateAbsence } from './RightPanel'
 import { DigestCards } from './DigestCard'
 import { DayBudgetBar, StageStrip, TierBadge } from './Shared'
-import { staleAge, makeResolver } from './Conversation.helpers'
+import { initialTab, staleAge, makeResolver } from './Conversation.helpers'
 import { isIrreversibleEnvelope } from '@/components/desk/Cards.helpers'
 import { useDeskKeymap } from '@/components/desk/useDeskKeymap'
 import { pendingApprovals } from '@/components/desk/RightPanel.helpers'
 import { tierTiles } from '@/components/desk/Shared.helpers'
+import { PROVIDERS_QUERY_KEY, llmKeysApi } from '@/api/llm'
+import { ConnectProviderCta } from '@/components/providers/ConnectProviderCta'
+import { conversationEngine } from '@/components/providers/engines'
 import { PANEL_BECOMES_DRAWER_PX, viewportIsAtMost } from '@/lib/desk/viewport'
 
 export function Conversation({
@@ -55,7 +61,10 @@ export function Conversation({
   /** Cards this screen renders itself, which are on no wire. See `onOffer`. */
   const [localCards, setLocalCards] = useState<DeskCard[]>([])
   const [events, setEvents] = useState<WireEvent[]>([])
-  const [tab, setTab] = useState<PanelTab>('state')
+  // `?tab=charter` is how desk home's **Amend** on a stalled session lands on
+  // the charter rather than on the State tab. Read once, from the address the
+  // desk was opened at; anything not a tab is ignored.
+  const [tab, setTab] = useState<PanelTab>(() => initialTab())
   const [detailsAll, setDetailsAll] = useState(false)
   /**
    * Open beside the conversation, closed over it.
@@ -72,6 +81,9 @@ export function Conversation({
   const [sideOpen, setSideOpen] = useState(() => !viewportIsAtMost(PANEL_BECOMES_DRAWER_PX))
   const [model, setModel] = useState('')
   const composer = useRef<ComposerHandle>(null)
+  const qc = useQueryClient()
+  // An answer here leaves every list of pending approvals at once (S-6.15).
+  const answered = useCallback(() => invalidateApprovals(qc), [qc])
 
   const convo = useQuery({
     queryKey: ['desk', 'conversation', conversationId],
@@ -82,6 +94,13 @@ export function Conversation({
     queryKey: ['desk', 'profiles'],
     queryFn: () => conversationsApi.listProfiles().then((r) => r.data),
     staleTime: 60_000,
+  })
+  // Whether this conversation's provider still has this user's key behind it
+  // (PROVIDERS track). Shared with every other reader of the provider list.
+  const providerStatus = useQuery({
+    queryKey: PROVIDERS_QUERY_KEY,
+    queryFn: () => llmKeysApi.status(),
+    staleTime: 30_000,
   })
 
   const latestTurn = convo.data?.turns?.[convo.data.turns.length - 1] ?? null
@@ -148,6 +167,22 @@ export function Conversation({
     refetchInterval: running ? 4_000 : false,
   })
 
+  // The run's memory brief, read only while the Memory tab is open.
+  const brief = useQuery({
+    queryKey: ['desk', 'brief', runId],
+    queryFn: () => deskApi.brief(runId as string),
+    enabled: !!runId && tab === 'memory',
+  })
+
+  // The run's hypotheses with the numbers that decided each verdict, read while
+  // the State tab is open (S-10.15). From the ledger, so it answers whether or
+  // not the working-state snapshot route is mounted.
+  const hypotheses = useQuery({
+    queryKey: ['desk', 'hypotheses', runId],
+    queryFn: () => deskApi.hypotheses(runId as string),
+    enabled: !!runId && tab === 'state',
+  })
+
   // `/api/catalogue` has been served since S-6.19 and nothing in the desk's own
   // conversation ever called it, so the Tools tab rendered "not built yet" over
   // a built endpoint. The catalogue is a registry, not a run, so it is cached
@@ -199,6 +234,24 @@ export function Conversation({
     refetchInterval: running ? 30_000 : false,
   })
 
+  // The session's own event log, pushed (AGENT-014 §10; S-11.14's "SSE delivers
+  // agenda transitions to an open journal within one event"). Each frame is a
+  // session event — a claim, a veto, a reorder, an amendment — and the journal
+  // re-reads the three things an event can change rather than folding the log
+  // a second time in the browser. The polls below stay as the fallback.
+  const refetchAgenda = agenda.refetch
+  const refetchSession = session.refetch
+  const refetchDigests = digests.refetch
+  const onSessionEvent = useCallback(() => {
+    void refetchAgenda()
+    void refetchSession()
+    void refetchDigests()
+  }, [refetchAgenda, refetchSession, refetchDigests])
+  useDeskStream({
+    url: sessionId && continuous ? `/api/research/sessions/${sessionId}/events` : null,
+    onEvent: onSessionEvent,
+  })
+
   const openDigestRef = useCallback(
     (ref: SessionDigestRef) => {
       const target = sessionDigestTarget(ref)
@@ -225,6 +278,15 @@ export function Conversation({
       ? 'not_served'
       : undefined
   const resolve = useMemo(() => makeResolver(workingState, cards), [workingState, cards])
+  // Every id the run's tools returned, with the stored result it opens.
+  const evidence = useMemo(() => streamEvidence(cards), [cards])
+  // The id a chip elsewhere on the desk asked to open. A chip that only switched
+  // tabs left the reader hunting for the id it was clicked on.
+  const [focusedId, setFocusedId] = useState<string | null>(null)
+  const openEvidence = useCallback((id: string) => {
+    setFocusedId(id)
+    setTab('evidence')
+  }, [])
   const approvals = useMemo(() => pendingApprovals(cards), [cards])
 
   // §15's live regions, and the browser notification behind them (S-6.22).
@@ -252,6 +314,35 @@ export function Conversation({
   // array since the desk was written — the Tools tab was handed `[]`.
   const searches = useMemo(() => toolSearches(wire), [wire])
 
+  // The stage of each running child, for the agenda board's running cards.
+  // `/api/desk/running` is the one served read that carries a run's stage; it
+  // is joined by conversation id because that is the key an agenda item has.
+  const running_ = useQuery({
+    queryKey: ['desk', 'running'],
+    queryFn: () => deskApi.running(),
+    // Read while this conversation has a live run (its own row carries mode,
+    // workflow, ring and stage) and while the agenda board is open.
+    enabled: (!!runId && running) || (continuous && tab === 'agenda'),
+    refetchInterval: running ? 10_000 : false,
+  })
+  const childStages = useMemo(() => {
+    const out: Record<string, Stage> = {}
+    for (const r of running_.data?.runs ?? []) {
+      if (r.conversation_id && r.stage) out[r.conversation_id] = r.stage as Stage
+    }
+    return out
+  }, [running_.data])
+
+  // This run's own row on the running list: the lifecycle columns the header
+  // and State tab show when the working state is not served (S-10.15).
+  const recorded = useMemo<RecordedLifecycle | null>(() => {
+    const r = running_.data?.runs.find((x) => x.run_id === runId)
+    return r ? { mode: r.mode, workflow: r.workflow, ring: r.ring ?? null, stage: r.stage as Stage } : null
+  }, [running_.data, runId])
+
+  /** What the last slash command or session action said, when it said no. */
+  const [slashNote, setSlashNote] = useState<string | null>(null)
+
   const steer = useCallback(
     (text: string) => {
       if (!runId) return
@@ -259,6 +350,47 @@ export function Conversation({
     },
     [runId],
   )
+
+  function runSlash(cmd: string, rest: string) {
+    setSlashNote(null)
+    const act = slashAction(cmd, rest, { continuous, hasRun: !!runId })
+    if (!act) return
+    const failed = (e: unknown) => setSlashNote(`${cmd}: ${sessionRefusal(e)}`)
+    switch (act.kind) {
+      case 'steer':
+        steer(act.text)
+        return
+      case 'tab':
+        setTab(act.tab)
+        return
+      case 'refuse':
+        setSlashNote(act.why)
+        return
+      case 'session':
+        if (!sessionId) return setSlashNote(`${cmd}: the session behind this journal could not be read.`)
+        deskApi
+          .sessionAction(sessionId, act.action)
+          .then(() => void session.refetch())
+          .catch(failed)
+        return
+      case 'run':
+        if (!runId) return
+        ;(act.action === 'pause' ? deskApi.pauseRun(runId) : deskApi.resumeRun(runId))
+          .then(() => void run.refetch())
+          .catch(failed)
+        return
+      case 'agenda_add':
+        if (!sessionId) return setSlashNote(`${cmd}: the session behind this journal could not be read.`)
+        deskApi
+          .addAgendaItem(sessionId, { question: act.question })
+          .then(() => {
+            void agenda.refetch()
+            setTab('agenda')
+          })
+          .catch(failed)
+        return
+    }
+  }
 
   // Whether the approval at the front of the queue is one the platform will
   // refuse without a written reason. The keyboard cannot supply one, so `a` and
@@ -303,12 +435,12 @@ export function Conversation({
       const id = (a?.detail?.approval_id as string) ?? null
       // No note from here, by construction: the row only offers this path for
       // approvals that do not need one.
-      if (id && !frontApprovalNeedsReason) void deskApi.answerApproval(id, 'approve')
+      if (id && !frontApprovalNeedsReason) void deskApi.answerApproval(id, 'approve').then(answered)
     },
     onDeny: () => {
       const a = approvals[0]
       const id = (a?.detail?.approval_id as string) ?? null
-      if (id) void deskApi.answerApproval(id, 'deny')
+      if (id) void deskApi.answerApproval(id, 'deny').then(answered)
     },
     onBudget: () => setTab('cost'),
     onToggleDetails: () => setDetailsAll((d) => !d),
@@ -338,13 +470,35 @@ export function Conversation({
       .filter(Boolean)
       .join(' ')
     if (s.continuous && s.charter) {
-      void deskApi.createSession({
-        mode: s.mode,
-        continuous: true,
-        charter: s.charter,
-        workflow: s.workflow,
-        model: chosen?.id,
-      })
+      // A new session is a new journal, so the desk goes there — and a refusal
+      // (a local profile, `replenish` before S-11.11) is printed, not dropped
+      // into a `void` where it read as a session that started.
+      setSlashNote(null)
+      // Opened on this conversation's provider and model. Without a
+      // `conversation_id` the server opens the journal on its default provider,
+      // whatever key this user connected (PROVIDERS track).
+      const opened = engine
+        ? conversationsApi
+            .create({ provider: engine.choice.provider, model: engine.choice.model })
+            .then((r) => r.data.conversation_id)
+        : Promise.resolve(undefined)
+      opened
+        .then((journal) => {
+          const body = {
+            mode: s.mode,
+            continuous: true,
+            charter: s.charter as NonNullable<typeof s.charter>,
+            workflow: s.workflow,
+            model: engine?.choice.model ?? chosen?.id,
+            ...(journal ? { conversation_id: journal } : {}),
+          }
+          return deskApi.createSession(body)
+        })
+        .then((created) => {
+          if (created) onOpenConversation?.(created.conversation_id)
+          else setSlashNote('The session route did not answer; no session was started.')
+        })
+        .catch((e: unknown) => setSlashNote(`No session was started: ${sessionRefusal(e)}`))
       return
     }
     void conversationsApi.send(conversationId, `${preamble}\n${s.question}`)
@@ -357,13 +511,27 @@ export function Conversation({
   // is the badge in the conversation header — the one beside a running turn,
   // and the one the composer's "unmeasured" warning is supposed to agree with.
   const profileList = tierTiles(profiles.data?.profiles)
-  const chosen = profileList.find((p) => p.id === model) ?? profileList[0]
+  // The engine this conversation was opened on. Its provider and model are
+  // fixed for its life, so the header badge and the composer show it rather
+  // than whichever profile happens to be first in the list.
+  const engine = conversationEngine(convo.data?.conversation, providerStatus.data, profiles.data?.profiles)
+  const chosen = engine?.choice ?? profileList.find((p) => p.id === model) ?? profileList[0]
 
   return (
     <>
       <div className="desk-hd">
         <span className="title">{convo.data?.conversation.title ?? 'Conversation'}</span>
         {chosen && <TierBadge tier={chosen.tier} measured={chosen.measured} detail={chosen.label} />}
+        {!workingState && recorded && (
+          <>
+            <Badge tone="outline">{recorded.mode}</Badge>
+            {recorded.workflow && <Badge tone="outline">{recorded.workflow}</Badge>}
+            <Badge tone={recorded.ring === 'research' ? 'neutral' : 'warn'} data-testid="header-ring">
+              ring: {recorded.ring ?? 'not reported'}
+            </Badge>
+            <StageStrip stage={recorded.stage} />
+          </>
+        )}
         {workingState && (
           <>
             <Badge tone="outline">{workingState.mode}</Badge>
@@ -398,7 +566,11 @@ export function Conversation({
                 `null` from here and the header says the budget and that the
                 spend is not recorded. An empty track would say nothing was
                 spent today, which nobody measured. */}
-            <DayBudgetBar usdPerDay={session.data?.budget?.usd_per_day ?? null} spentUsd={null} />
+            <DayBudgetBar
+              usdPerDay={session.data?.budget?.usd_per_day ?? null}
+              spentUsd={daySpendFromDigests(digests.data?.digests)}
+              basis="digests"
+            />
           </>
         )}
         {stream.state === 'stale' &&
@@ -461,23 +633,35 @@ export function Conversation({
             // twenty characters of it — saw an approval with no reason at all,
             // and the person watched their justification vanish between the
             // field and the wire.
-            onApprove: (id, note) => void deskApi.answerApproval(id, 'approve', note),
-            onDeny: (id) => void deskApi.answerApproval(id, 'deny'),
+            onApprove: (id, note) => void deskApi.answerApproval(id, 'approve', note).then(answered),
+            onDeny: (id) => void deskApi.answerApproval(id, 'deny').then(answered),
             onAnswer: (_id, text) => runId && void deskApi.steer(runId, { kind: 'answer', text }),
             onStartResearch: (q) => void conversationsApi.send(conversationId, `mode=research\n${q}`),
-            onOpenId: () => setTab('evidence'),
+            onOpenId: openEvidence,
           }}
         />
       </div>
 
       <div className="desk-dock">
         <ControlsRow {...controls} />
+        {slashNote && (
+          <p className="sub" role="alert" data-testid="slash-note">
+            {slashNote}
+          </p>
+        )}
         <Composer
           ref={composer}
           running={running}
-          profiles={profileList}
+          profiles={engine ? [engine.choice] : profileList}
           model={chosen?.id ?? ''}
           onModelChange={setModel}
+          connect={
+            engine?.keyMissing ? (
+              <ConnectProviderCta
+                detail="This chat was started on an AI service you have no API key for. Start a new chat, or add an API key to continue this one."
+              />
+            ) : undefined
+          }
           onSubmit={submit}
           // §3.3: "**Write strategy** is an action beside *attach* (opens the
           // SLv2 editor, §8)". That editor is `StrategyEditor`, mounted by
@@ -492,12 +676,7 @@ export function Conversation({
           // Passed only when a navigator was given, because `Composer` draws
           // the button only when it has somewhere to go.
           onWriteStrategy={onOpenPath ? () => onOpenPath('/desk/strategy') : undefined}
-          onSlash={(cmd, rest) => {
-            if (cmd === '/steer') steer(rest)
-            else if (cmd === '/budget') setTab('cost')
-            else if (cmd === '/why') steer('why did you do that?')
-            // `/pause` was removed with the button: the route is not mounted.
-          }}
+          onSlash={runSlash}
           onOffer={(q) => {
             // Until S-10.2 classifies server-side, the offer is rendered locally
             // as a card so the behaviour is real rather than promised.
@@ -527,21 +706,31 @@ export function Conversation({
               absence={stateAbsence}
               resolve={resolve}
               pendingApproval={approvals.length > 0}
-              onOpenId={() => setTab('evidence')}
+              recorded={recorded}
+              onOpenId={openEvidence}
+              verdicts={
+                hypotheses.isError ? 'unreadable' : hypotheses.data?.served ? hypotheses.data.data.hypotheses : null
+              }
             />
           )}
           {tab === 'evidence' && (
             <EvidenceTab
               resolve={resolve}
               absence={stateAbsence}
-              entries={(workingState?.evidence ?? []).map((e) => ({
-                id: e.id,
-                type: e.id.split('_')[0] ?? 'id',
-                summary: `produced by ${e.tool} at step ${e.step}`,
-              }))}
+              // The stored tool results on the stream, then whatever the working
+              // state adds. The state route is not mounted, so the stream is the
+              // source that actually answers on this platform.
+              entries={evidenceEntries(workingState, evidence)}
+              focusedId={focusedId}
             />
           )}
-          {tab === 'memory' && <MemoryTab />}
+          {tab === 'memory' && (
+            <MemoryTab
+              brief={runId ? (brief.isError ? null : brief.data) : undefined}
+              absence={runId ? undefined : 'no_run'}
+              onForget={(bucket, id) => deskApi.forget(bucket, id).then(() => void brief.refetch())}
+            />
+          )}
           {tab === 'tools' && (
             <ToolsTab
               mode={workingState?.mode ?? 'chat'}
@@ -550,6 +739,9 @@ export function Conversation({
               catalogue={catalogue.data?.tools ?? null}
               catalogueLoading={catalogue.isPending}
               searchedFor={searches}
+              // Only into a run this conversation has: a pin posted at nothing
+              // would be the inert button this prop replaced.
+              onPin={runId ? (tool) => deskApi.pinTool(runId, tool) : undefined}
             />
           )}
           {tab === 'cost' && (
@@ -580,6 +772,11 @@ export function Conversation({
                 void deskApi.reorderAgenda(sessionId, order).then(() => void agenda.refetch())
               }}
               onOpenChild={(cid) => onOpenConversation?.(cid)}
+              childStages={childStages}
+              onAdd={(question) => {
+                if (!sessionId) return Promise.reject(new Error('the session could not be read'))
+                return deskApi.addAgendaItem(sessionId, { question }).then(() => void agenda.refetch())
+              }}
             />
           )}
           {tab === 'charter' && (
@@ -589,6 +786,11 @@ export function Conversation({
               // diff on each. The tab reported the version number and said no
               // route read them back, which stopped being true.
               amendments={sessionAmendments(session.data)}
+              raw={session.data?.charter ?? null}
+              onAmend={(next) => {
+                if (!sessionId) return Promise.reject(new Error('the session could not be read'))
+                return deskApi.amendCharter(sessionId, next).then(() => void session.refetch())
+              }}
               loading={session.isPending && !!sessionId}
             />
           )}

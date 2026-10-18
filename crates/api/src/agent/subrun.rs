@@ -38,7 +38,7 @@ use uuid::Uuid;
 
 use harness::context::projection::{self, Projection};
 use harness::context::store::RunStore;
-use harness::subrun::{Delegation, DelegationError, Role};
+use harness::subrun::{BudgetLease, Delegation, DelegationError, LeaseError, Remaining, Role};
 
 /// sha256 of the brief's bytes, in the shape the rest of the platform writes
 /// digests.
@@ -112,6 +112,10 @@ pub enum BriefError {
     Refused(#[from] DelegationError),
     #[error("writing the campaign brief: {0}")]
     Db(#[from] sqlx::Error),
+    /// The parent has nothing left to give a worker. Refused rather than
+    /// dispatched on a budget that does not exist (S-2.12).
+    #[error("the parent run cannot fund this sub-run: {0}")]
+    Unfunded(#[from] LeaseError),
 }
 
 /// Write the campaign's row: the registration it came from, the job driving it,
@@ -218,9 +222,17 @@ pub async fn campaign_brief(
 }
 
 /// A claimed position in a campaign's fold.
-#[derive(Debug, Clone)]
+///
+/// Not `Clone`, because it may carry a [`BudgetLease`], which is spent by exactly
+/// one run.
+#[derive(Debug)]
 pub struct Claim {
     pub sub_run_id: Uuid,
+    /// What this sub-run may spend, split from its parent's remaining budget.
+    /// `Some` only on the call that created the claim (`fresh`): a lease handed
+    /// out once is not handed out again to the driver that finds the row. `None`
+    /// also when the parent recorded no cap to split from.
+    pub lease: Option<BudgetLease>,
     /// The job carrying it, if one has been dispatched for this position.
     pub job_id: Option<String>,
     /// True when this call created the row rather than finding it.
@@ -247,6 +259,135 @@ pub async fn claim(
     brief: &CampaignBrief,
     max_depth: u32,
 ) -> Result<Claim, BriefError> {
+    claim_leased(
+        pg,
+        campaign_id,
+        parent_run_id,
+        tenant_id,
+        phase,
+        seq,
+        brief,
+        max_depth,
+        WORKER_LEASE,
+    )
+    .await
+}
+
+/// What one worker generation is worth: it proposes one move, so it is given a
+/// fraction of the parent's remaining tokens, no trials (a proposal is not a
+/// look), and a short step ceiling.
+pub const WORKER_LEASE: LeasePolicy = LeasePolicy {
+    token_share_denominator: 4,
+    token_ceiling: 100_000,
+    steps: 12,
+};
+
+/// How a sub-run's lease is sized from its parent's remaining budget.
+#[derive(Debug, Clone, Copy)]
+pub struct LeasePolicy {
+    /// The lease asks for `remaining / this` tokens.
+    pub token_share_denominator: u64,
+    /// ...and never more than this, so one generation cannot take a whole
+    /// campaign's allowance.
+    pub token_ceiling: u64,
+    pub steps: u32,
+}
+
+/// What the parent started with and has used, read from its own rows.
+///
+/// The cap and the step ceiling come from the `RunSpec` the parent's effect log
+/// opens with (its profile, as it was when the run started, which is what a
+/// later edit to a profile file must not change). What it has spent comes from
+/// `agent_runs`, and what it has handed out from the sub-run rows. `None` when
+/// the parent has no `RunSpec`: there is no recorded cap to subtract from.
+async fn parent_remaining(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    parent_run_id: Uuid,
+) -> Result<Option<Remaining>, sqlx::Error> {
+    let spec: Option<Value> = sqlx::query_scalar(
+        "SELECT payload_json FROM agent_effect_log
+          WHERE run_id = $1 AND direction = 'state' AND kind = 'RunSpec'
+          ORDER BY seq LIMIT 1",
+    )
+    .bind(parent_run_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(spec) = spec else {
+        return Ok(None);
+    };
+    let cap_tokens = spec
+        .pointer("/profile/budgets/max_tokens_per_task")
+        .and_then(Value::as_u64)
+        .filter(|c| *c > 0);
+    let Some(cap_tokens) = cap_tokens else {
+        return Ok(None);
+    };
+    let max_steps = spec
+        .pointer("/profile/orchestration/max_steps")
+        .and_then(Value::as_u64)
+        .and_then(|s| u32::try_from(s).ok())
+        .unwrap_or(0);
+    let max_trials = spec
+        .pointer("/max_trials")
+        .and_then(Value::as_u64)
+        .and_then(|t| u32::try_from(t).ok());
+
+    let (spent_tokens, spent_trials, spent_steps): (i64, i32, i32) = sqlx::query_as(
+        "SELECT COALESCE(prompt_tokens, 0) + COALESCE(tokens_out, 0),
+                COALESCE(trials_spent, 0), COALESCE(iterations, 0)
+           FROM agent_runs WHERE run_id = $1",
+    )
+    .bind(parent_run_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    let (leased_tokens, leased_trials, leased_steps): (i64, i64, i64) = sqlx::query_as(
+        "SELECT COALESCE(SUM(lease_tokens), 0)::BIGINT, COALESCE(SUM(lease_trials), 0)::BIGINT,
+                COALESCE(SUM(lease_steps), 0)::BIGINT
+           FROM agent_lifecycle.sub_run WHERE parent_run_id = $1",
+    )
+    .bind(parent_run_id)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let left = |cap: u64, spent: i64, leased: i64| {
+        cap.saturating_sub(u64::try_from(spent.max(0)).unwrap_or(0))
+            .saturating_sub(u64::try_from(leased.max(0)).unwrap_or(0))
+    };
+    Ok(Some(Remaining {
+        tokens: left(cap_tokens, spent_tokens, leased_tokens),
+        trials: u32::try_from(left(
+            u64::from(max_trials.unwrap_or(0)),
+            i64::from(spent_trials),
+            leased_trials,
+        ))
+        .unwrap_or(0),
+        steps: u32::try_from(left(u64::from(max_steps), i64::from(spent_steps), leased_steps))
+            .unwrap_or(0),
+    }))
+}
+
+/// [`claim`] with an explicit lease policy.
+///
+/// The lease is split from the parent's remaining budget **in the same
+/// transaction that inserts the claim**, under an advisory lock on the parent, so
+/// two claims racing for one parent cannot both be told the same remainder. A
+/// claim that finds its row already there hands out nothing: the lease was
+/// issued the first time.
+///
+/// # Errors
+/// The delegation is refused, the parent cannot fund the lease, or a write fails.
+#[allow(clippy::too_many_arguments)]
+pub async fn claim_leased(
+    pg: &PgPool,
+    campaign_id: Uuid,
+    parent_run_id: Uuid,
+    tenant_id: &str,
+    phase: &str,
+    seq: i64,
+    brief: &CampaignBrief,
+    max_depth: u32,
+    policy: LeasePolicy,
+) -> Result<Claim, BriefError> {
     Delegation {
         role: Role::Worker,
         projection: Some(brief.projection.clone()),
@@ -255,6 +396,48 @@ pub async fn claim(
         depth: 1,
     }
     .check(max_depth)?;
+
+    let mut tx = pg.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(parent_run_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+
+    // Already claimed: the lease went out the first time.
+    let already: Option<(Uuid, String)> = sqlx::query_as(
+        "SELECT sub_run_id, job_id FROM agent_lifecycle.sub_run
+          WHERE campaign_id = $1 AND phase = $2 AND seq = $3",
+    )
+    .bind(campaign_id)
+    .bind(phase)
+    .bind(seq)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some((existing, job_id)) = already {
+        tx.commit().await?;
+        return Ok(Claim {
+            sub_run_id: existing,
+            lease: None,
+            job_id: (!job_id.starts_with("unclaimed:")).then_some(job_id),
+            fresh: false,
+        });
+    }
+
+    // Split before inserting, so an unfunded parent leaves no row behind.
+    let lease = match parent_remaining(&mut tx, parent_run_id).await? {
+        Some(mut remaining) => {
+            let want = Remaining {
+                tokens: (remaining.tokens / policy.token_share_denominator.max(1))
+                    .min(policy.token_ceiling),
+                trials: 0,
+                steps: policy.steps.min(remaining.steps),
+            };
+            Some(BudgetLease::split(&mut remaining, want)?)
+        }
+        // No recorded cap to split from; stated as a missing lease, never a
+        // zero one.
+        None => None,
+    };
 
     let sub_run_id = Uuid::new_v4();
     // `job_id` is NOT NULL on the table, and a claim exists precisely because
@@ -266,9 +449,10 @@ pub async fn claim(
     let inserted: Option<(Uuid,)> = sqlx::query_as(
         "INSERT INTO agent_lifecycle.sub_run
              (sub_run_id, parent_run_id, tenant_id, role, projection, job_id,
-              campaign_id, phase, seq, brief_digest, withheld)
-         VALUES ($1, $2, $3, 'worker', $4, $5, $6, $7, $8, $9, $10)
-         ON CONFLICT (campaign_id, phase, seq) DO NOTHING
+              campaign_id, phase, seq, brief_digest, withheld,
+              lease_tokens, lease_trials, lease_steps)
+         VALUES ($1, $2, $3, 'worker', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         ON CONFLICT (campaign_id, phase, seq) WHERE campaign_id IS NOT NULL DO NOTHING
          RETURNING sub_run_id",
     )
     .bind(sub_run_id)
@@ -281,31 +465,221 @@ pub async fn claim(
     .bind(seq)
     .bind(&brief.digest)
     .bind(brief.withheld)
+    .bind(lease.as_ref().map(|l| i64::try_from(l.tokens()).unwrap_or(i64::MAX)))
+    .bind(lease.as_ref().map(|l| i32::try_from(l.trials()).unwrap_or(i32::MAX)))
+    .bind(lease.as_ref().map(|l| i32::try_from(l.steps()).unwrap_or(i32::MAX)))
+    .fetch_optional(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    // The advisory lock made the pre-check authoritative, so a conflict here is
+    // not expected; if it happens the row is whoever's it is and the lease the
+    // loser split is dropped unspent, which is the safe direction.
+    let (sub_run_id, fresh, lease) = match inserted {
+        Some(_) => (sub_run_id, true, lease),
+        None => {
+            let existing: Uuid = sqlx::query_scalar(
+                "SELECT sub_run_id FROM agent_lifecycle.sub_run
+                  WHERE campaign_id = $1 AND phase = $2 AND seq = $3",
+            )
+            .bind(campaign_id)
+            .bind(phase)
+            .bind(seq)
+            .fetch_one(pg)
+            .await?;
+            (existing, false, None)
+        }
+    };
+    if fresh {
+        let persisted = lease.as_ref().map(|l| PersistedLease {
+            tokens: Some(l.tokens()),
+            steps: Some(l.steps()),
+        });
+        record_delegation(
+            pg,
+            parent_run_id,
+            sub_run_id,
+            &Delegation {
+                role: Role::Worker,
+                projection: Some(brief.projection.clone()),
+                brief_digest: brief.digest.clone(),
+                withheld: usize::try_from(brief.withheld).unwrap_or(0),
+                depth: 1,
+            },
+            &format!("propose one move for campaign {campaign_id}, {phase} #{seq}"),
+            persisted.as_ref(),
+        )
+        .await;
+    }
+    Ok(Claim {
+        sub_run_id,
+        lease,
+        job_id: None,
+        fresh,
+    })
+}
+
+// ── Both sides of a delegation, and the sub-run's own log (S-2.12) ──────────
+
+/// Append one row to a sub-run's own effect log (`agent_lifecycle.sub_run_effect`,
+/// migration 0235). The sequence is assigned here and a collision (two writers
+/// racing for one number) is retried, which is what the primary key is for.
+///
+/// A failed write is logged, not propagated: like the run effect log, a lost row
+/// costs a replay, and failing a worker's proposal to protect its record would
+/// trade the contingent thing for the certain one.
+pub async fn log_effect(pg: &PgPool, sub_run_id: Uuid, direction: &str, kind: &str, payload: &Value) {
+    for _ in 0..5 {
+        let r = sqlx::query(
+            "INSERT INTO agent_lifecycle.sub_run_effect
+                 (sub_run_id, seq, direction, kind, payload_json, harness_version)
+             SELECT $1, COALESCE(MAX(seq), 0) + 1, $2, $3, $4, $5
+               FROM agent_lifecycle.sub_run_effect WHERE sub_run_id = $1",
+        )
+        .bind(sub_run_id)
+        .bind(direction)
+        .bind(kind)
+        .bind(payload)
+        .bind(super::local_driver::HARNESS_VERSION)
+        .execute(pg)
+        .await;
+        match r {
+            Ok(_) => return,
+            Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {}
+            Err(e) => {
+                tracing::warn!(%sub_run_id, kind, error = %e, "the sub-run effect log did not record a row");
+                return;
+            }
+        }
+    }
+    tracing::warn!(%sub_run_id, kind, "the sub-run effect log lost five sequence races");
+}
+
+/// Record the dispatch on **both** sides (AGENT-010 §9: a `Delegation` trace on
+/// the parent and on the child).
+///
+/// The parent's side is a `state` / `Delegation` row in the parent run's own
+/// `agent_effect_log` — which `trace_from_effects` projects to
+/// `Event::Delegation` — and the child's is the first row of its own log. They
+/// carry the same digest, so "what did the worker see" is answerable from either
+/// end and checkable against the other.
+pub async fn record_delegation(
+    pg: &PgPool,
+    parent_run_id: Uuid,
+    sub_run_id: Uuid,
+    delegation: &Delegation,
+    goal: &str,
+    lease: Option<&PersistedLease>,
+) {
+    let lease_json = lease.map(|l| serde_json::json!({ "tokens": l.tokens, "steps": l.steps }));
+    let payload = serde_json::json!({
+        "child_trace_id": sub_run_id,
+        "goal": goal,
+        "tool_grant": Vec::<String>::new(),
+        "budget_usd": 0.0,
+        "role": delegation.role.as_str(),
+        "projection": delegation.projection,
+        "brief_digest": delegation.brief_digest,
+        "withheld": delegation.withheld,
+        "depth": delegation.depth,
+        "lease": lease_json,
+    });
+    for _ in 0..5 {
+        let r = sqlx::query(
+            "INSERT INTO agent_effect_log (run_id, seq, direction, kind, payload_json, harness_version)
+             SELECT $1, COALESCE(MAX(seq), 0) + 1, 'state', 'Delegation', $2, $3
+               FROM agent_effect_log WHERE run_id = $1",
+        )
+        .bind(parent_run_id)
+        .bind(&payload)
+        .bind(super::local_driver::HARNESS_VERSION)
+        .execute(pg)
+        .await;
+        match r {
+            Ok(_) => break,
+            Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {}
+            Err(e) => {
+                tracing::warn!(%parent_run_id, error = %e, "the parent's Delegation row was not recorded");
+                break;
+            }
+        }
+    }
+    let mut child = payload;
+    if let Some(o) = child.as_object_mut() {
+        o.insert("parent_run_id".into(), serde_json::json!(parent_run_id));
+    }
+    log_effect(pg, sub_run_id, "state", "Delegation", &child).await;
+}
+
+/// What a worker sub-run was leased, read back from its own row.
+///
+/// The in-memory [`BudgetLease`] is spent by the process that claimed the
+/// position, which is the campaign driver; the worker runs in a different job, so
+/// the lease reaches it through the row (migration 0171). `None` on an axis means
+/// the claim recorded no lease for it -- the parent had no recorded cap to split
+/// from -- and is **not** a zero: the worker is then bounded by the profile alone,
+/// which is the weaker guarantee and is stated, not hidden.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PersistedLease {
+    pub tokens: Option<u64>,
+    pub steps: Option<u32>,
+}
+
+/// Read a sub-run's persisted lease.
+///
+/// # Errors
+/// The read failed.
+pub async fn lease_of(pg: &PgPool, sub_run_id: Uuid) -> Result<PersistedLease, sqlx::Error> {
+    let row: Option<(Option<i64>, Option<i32>)> = sqlx::query_as(
+        "SELECT lease_tokens, lease_steps FROM agent_lifecycle.sub_run WHERE sub_run_id = $1",
+    )
+    .bind(sub_run_id)
     .fetch_optional(pg)
     .await?;
+    let (t, s) = row.unwrap_or((None, None));
+    Ok(PersistedLease {
+        tokens: t.and_then(|v| u64::try_from(v).ok()),
+        steps: s.and_then(|v| u32::try_from(v).ok()),
+    })
+}
 
-    if inserted.is_some() {
-        return Ok(Claim {
-            sub_run_id,
-            job_id: None,
-            fresh: true,
-        });
+impl PersistedLease {
+    /// Whether a worker that has made `attempts_made` model calls and spent
+    /// `tokens_spent` may make another. The refusal names the axis, because a
+    /// worker stopped by its lease and a worker that failed are different events.
+    ///
+    /// # Errors
+    /// The reason, when the lease is spent on an axis it carries.
+    pub fn admits(&self, attempts_made: u32, tokens_spent: u64) -> Result<(), String> {
+        if let Some(steps) = self.steps {
+            if attempts_made >= steps {
+                return Err(format!(
+                    "the lease allows {steps} model call(s) and {attempts_made} were made"
+                ));
+            }
+        }
+        if let Some(tokens) = self.tokens {
+            if tokens_spent >= tokens {
+                return Err(format!(
+                    "the lease allows {tokens} token(s) and {tokens_spent} were spent"
+                ));
+            }
+        }
+        Ok(())
     }
 
-    let (existing, job_id): (Uuid, String) = sqlx::query_as(
-        "SELECT sub_run_id, job_id FROM agent_lifecycle.sub_run
-          WHERE campaign_id = $1 AND phase = $2 AND seq = $3",
-    )
-    .bind(campaign_id)
-    .bind(phase)
-    .bind(seq)
-    .fetch_one(pg)
-    .await?;
-    Ok(Claim {
-        sub_run_id: existing,
-        job_id: (!job_id.starts_with("unclaimed:")).then_some(job_id),
-        fresh: false,
-    })
+    /// The most the next call may generate: the profile's reserve, narrowed to
+    /// what the lease has left. A lease narrows a call and never widens it.
+    #[must_use]
+    pub fn max_output(&self, reserve: u32, tokens_spent: u64) -> u32 {
+        match self.tokens {
+            Some(t) => {
+                let left = t.saturating_sub(tokens_spent);
+                u32::try_from(left).map_or(reserve, |l| l.min(reserve))
+            }
+            None => reserve,
+        }
+    }
 }
 
 /// Point a claim at the job that is carrying it.
@@ -470,5 +844,23 @@ mod tests {
             depth: 1,
         };
         assert!(d.check(1).is_err());
+    }
+
+    /// The persisted lease is enforced on the axes it carries and silent on the
+    /// ones it does not: a missing axis is "bounded by the profile", never zero.
+    #[test]
+    fn a_persisted_lease_refuses_past_its_steps_and_tokens_and_a_missing_axis_is_not_zero() {
+        let l = PersistedLease { tokens: Some(1_000), steps: Some(2) };
+        assert!(l.admits(0, 0).is_ok());
+        assert!(l.admits(1, 999).is_ok());
+        assert!(l.admits(2, 10).unwrap_err().contains("2 model call"));
+        assert!(l.admits(1, 1_000).unwrap_err().contains("1000 token"));
+        let open = PersistedLease { tokens: None, steps: None };
+        assert!(open.admits(500, u64::MAX).is_ok(), "no recorded lease is not a zero lease");
+        // The lease narrows a call and never widens it.
+        assert_eq!(l.max_output(2_000, 0), 1_000);
+        assert_eq!(l.max_output(2_000, 900), 100);
+        assert_eq!(l.max_output(50, 0), 50);
+        assert_eq!(open.max_output(2_000, 7), 2_000);
     }
 }

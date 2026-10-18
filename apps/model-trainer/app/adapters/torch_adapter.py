@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .. import engine
+from .. import engine, windows
 
 
 class MLP(nn.Module):
@@ -46,12 +46,16 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
     hp = p.hp
 
     arch = hp.get("arch", "mlp")
+    # N-2.5: rows become windows when the declaration carries `sequence`.
+    if windows.sequence_spec(definition) is not None and arch != "lstm":
+        raise ValueError(f"declaration.sequence needs a sequence arch, got arch={arch!r}")
+    p, seq = windows.apply_sequence(definition, p)
     epochs = int(hp.get("epochs", 50))
     lr = float(hp.get("learning_rate", 1e-3))
     batch_size = int(hp.get("batch_size", 64))
     hidden = int(hp.get("hidden_dim", 32))
     weight_decay = float(hp.get("weight_decay", 0.0))
-    input_dim = p.X_tr.shape[1] if p.X_tr.shape[1] else 1
+    input_dim = p.X_tr.shape[-1] if p.X_tr.shape[-1] else 1
 
     model = _build_model(arch, input_dim, hidden)
     model, loss_info = engine.train_torch_model(
@@ -67,6 +71,7 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
         emit_progress=emit_progress,
         weight_decay=weight_decay,
         sample_weight=p.w_tr,
+        checkpoint=definition.get("_checkpoint"),
     )
 
     def predict_scores(X):
@@ -98,7 +103,7 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
         n_train=len(p.X_tr),
         n_val=len(p.X_val),
         n_test=len(p.X_te),
-        extra={"arch": arch, "input_dim": int(input_dim), **loss_info},
+        extra={"arch": arch, "input_dim": int(input_dim), **loss_info, **({"sequence": seq} if seq else {})},
     )
 
     buf = io.BytesIO()
@@ -119,5 +124,6 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
         feature_order=p.feature_order,
         scaler=p.scaler,
         arch=arch,
+        sequence=seq,
     )
     return bundle, metrics

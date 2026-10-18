@@ -1,200 +1,164 @@
-# Docs Folder Map - Reorganized Structure
-**Last Updated:** 2026-06-11
+# Docs Folder Map
+
+**Last Updated:** 2026-10-03 (Set G task G-4.1, rebuilt from the tree on disk)
+
+> Start at [`README.md`](README.md) for navigation. For **what to work on**, read
+> [`plans/PLAN.md`](plans/PLAN.md) first, then [`plans/ROADMAP.md`](plans/ROADMAP.md).
+> This file only maps where things live. Counts below are file counts on 2026-10-03 and
+> will drift.
+>
+> **Case note:** on disk the spec folder is `docs/Specs/`, but git tracks it as `docs/specs/`.
+> Links in this repo use `specs/`, which resolves on the case-insensitive Windows checkout.
+> Git also tracks **both** `docs/specs/README.md` and `docs/specs/README.MD`, and only one
+> exists on a Windows checkout (see Set G MASTER, remainder item 4).
 
 ```
 docs/
 │
-├─ README.md                    # 📋 Main index (entry point per README.md)
-├─ artifact.md                  # 📍 Foundational project definition (SC-N, FM-N)
-├─ architecture.md              # 🏗️ System architecture & component map
-├─ glossary.md                  # 📚 Shared terminology
-├─ open-questions.md            # ❓ Living decision register (Q-N)
-├─ docs_home.md                 # 🏠 Alternative home/entry point
-├─ parity-matrix.md             # 📊 Parity/compatibility tracking
+├─ README.md                    # Main navigation hub
+├─ NEWCOMERS.md                 # Onboarding guide (moved from repo root by Set G G-1.2)
+├─ artifact.md                  # Foundational project definition (SC-N, FM-N)
+├─ architecture.md              # System architecture & component map
+├─ glossary.md                  # Shared terminology
+├─ open-questions.md            # Living decision register (Q-N)
+├─ docs_home.md                 # Older alternative entry point
+├─ parity-matrix.md             # Parity/compatibility tracking
+├─ HARNESS_CONFORMANCE.md       # Agent harness capability-profile results (ADR-0031)
+├─ LOCAL_TIER_FINDINGS.md       # Local-model tier findings (ADR-0032)
+├─ REORGANIZATION_SUMMARY.md    # Historical record of the 2026-06-11 docs reorganization
+├─ FOLDER_MAP.md                # This file
 │
-├─ QUEUE.MD                     # 🔄 Queue system: agent protocol & conventions
-├─ QUEUE_SCHEMA.md              # 🔄 Queue schema & structure definition
-├─ QUEUE_ARCHIVE.MD             # 🔄 Archived queue items (historical)
-├─ QUEUE_STACK.csv              # 🔄 Current queue stack (data file)
+├─ QUEUE.MD                     # Python-era queue protocol (historical; most rows superseded)
+├─ QUEUE_SCHEMA.md              # Queue row schema
+├─ QUEUE_ARCHIVE.MD             # Archived queue items
+├─ QUEUE_STACK.csv              # Queue stack data file
 │
-├─ adr/                         # 🏛️ Architecture Decision Records (ADR-0001 through 0038)
-│   ├─ 0001-rust-modular-monolith-with-satellite-collectors.md
-│   ├─ 0002-decimal-money-newtypes-no-f64.md
-│   ├─ ... (through 0011)
-│   ├─ 0012-canonical-bar-storage.md                 # (NEW - moved from root)
-│   └─ 0013-managed-data-services.md                 # (NEW - moved from root)
+├─ adr/                         # Architecture Decision Records 0001–0048 + README index
 │
-├─ architecture/                # 🏗️ System architecture & technical documentation
-│   ├─ system_walkthrough.md
-│   ├─ migration_to_spec_pipeline.md
-│   ├─ monitoring.md                                  # (NEW - moved from root as MONITORING_CANONICAL)
-│   ├─ risk_precedence.md
-│   ├─ pnl_ledger.md
-│   ├─ coinbase_granularity.md
-│   ├─ kraken_market_data.md
-│   └─ questdb_traces.md
+├─ agent/                       # Agent-facing authoring guides (slv3-guide.md)
 │
-├─ specs/                       # 📋 Feature, component, data, and integration specs
-│   ├─ COMP-001-data-quality-and-ingestion.md
-│   ├─ COMP-002-execution-and-risk-gate.md
-│   ├─ COMP-003-ui-streaming-gateway.md
-│   ├─ COMP-004-storage-and-replay.md
-│   ├─ DATA-001-event-envelope-and-payloads.md
-│   ├─ DATA-002-instrument-metadata.md
-│   ├─ DATA-003-timestamps-and-identity.md
-│   ├─ DATA-004-strategy-definition-format.md
-│   ├─ FEAT-001-strategy-system.md
-│   ├─ INTG-001-mcp-server.md
-│   ├─ APP_CONFIG_AND_CONTRACTS.MD                   # (NEW - from consolidated Specs/)
-│   ├─ CONTROL_PLANE.MD                              # (NEW - from consolidated Specs/)
-│   ├─ DATA_PLANE.MD                                 # (NEW - from consolidated Specs/)
-│   ├─ EXECUTION_LAYER.MD                            # (NEW - from consolidated Specs/)
-│   ├─ MODELS_AND_ORCHESTRATION.MD                   # (NEW - from consolidated Specs/)
-│   ├─ MULTI_ASSET_PORTFOLIO.MD                      # (NEW - from consolidated Specs/)
-│   ├─ OBSERVABILITY_AND_INFRA.MD                    # (NEW - from consolidated Specs/)
-│   ├─ RISK_ENGINE.MD                                # (NEW - from consolidated Specs/)
-│   ├─ SYSTEM_OVERVIEW.MD                            # (NEW - from consolidated Specs/)
-│   ├─ SYSTEM_SPECIFICATION.md                       # (NEW - moved from root)
-│   ├─ TESTING_AND_CI.MD                             # (NEW - from consolidated Specs/)
-│   ├─ CANONICAL_PRECEDENCE.MD                       # (NEW - from consolidated Specs/)
-│   └─ README.md                 # Spec index
+├─ architecture/                # Technical architecture notes
+│   ├─ latency-analysis.md      # (moved from root by Set G G-1.5)
+│   ├─ latency-table.md         # (moved from root by Set G G-1.5)
+│   ├─ paper_trading.md
+│   ├─ monitoring.md, risk_precedence.md, pnl_ledger.md, system_walkthrough.md
+│   └─ coinbase_granularity.md, kraken_market_data.md, questdb_traces.md,
+│      migration_to_spec_pipeline.md
 │
-├─ plans/                       # 📅 Formal plan copies (all plan sets A–G)
+├─ specs/   (on disk: Specs/)   # ~53 files: the canonical spec set
+│   ├─ README.md                # Spec index (README.MD case-variant, see note above)
+│   ├─ SYS-001 …                # System overview
+│   ├─ FEAT-001 … FEAT-007      # Feature specs (FEAT-007 = unified strategy engine, Set U)
+│   ├─ COMP-001 … COMP-007      # Component specs
+│   ├─ DATA-001 … DATA-006      # Data contracts (DATA-005 data API v2, DATA-006 feature engine)
+│   ├─ AGENT-001 … AGENT-014    # Agent runtime, tools, memory, evals, context, Research Desk, modes
+│   ├─ INTG-001                 # MCP server
+│   ├─ AI_MODELS_SUITE_CAPABILITY_SPEC.md, BACKTEST_SUITE_CORE_SPEC(_V2).md, set-H-api-contract.md
+│   └─ *.MD (APP_CONFIG_AND_CONTRACTS, CONTROL_PLANE, DATA_PLANE, …)   # older consolidated specs
+│
+├─ plans/                       # Every plan lives here
+│   ├─ PLAN.md                  # THE one map: read first, updated on every close
+│   ├─ ROADMAP.md               # Programme stages, ordered by the evidence clock
+│   ├─ EXECUTION-BOARD.md       # Parallel agent-track coordination
+│   ├─ OPEN-TASKS.md, TRACK-RULES.md   # Current backlog sweep and its rules
 │   ├─ README.md
-│   ├─ plan-sets/               # All plan sets live here
-│   │   ├─ set-A/               # Original Phase A–7 refactor plans
-│   │   ├─ set-B/ … set-E/      # Subsequent refactor and optimization sets
-│   │   ├─ set-F/               # AI Agent MCP Platform
-│   │   └─ set-G/               # Documentation restructuring
-│   ├─ reference/               # Checklists and quick-reference docs
-│   └─ special-plans/           # Microservices split and similar one-off plans
+│   ├─ plan-sets/
+│   │   ├─ set-A/               # Original Phase A–7 Rust refactor plans (README + phase files)
+│   │   ├─ set-B/               # Registry, paper engine, collectors, frontend (master-plan.md)
+│   │   ├─ set-C/               # Latency optimization
+│   │   ├─ set-D/               # Backtesting decoupling & hardening
+│   │   ├─ set-E/               # Production readiness: stubs, placeholders, tech debt
+│   │   ├─ set-F/               # AI agent MCP platform
+│   │   ├─ set-G/               # Documentation restructuring (this map is its G-4.1)
+│   │   ├─ set-H/               # AI Model Studio
+│   │   ├─ set-I/               # AI models: probabilistic forecasting suite
+│   │   ├─ set-J/               # Backtest suite: honest-evaluation core
+│   │   ├─ set-K/               # Backtest suite: make it real & unify
+│   │   ├─ set-L/               # Quant research agent: agent foundation
+│   │   ├─ set-P/               # Data reach
+│   │   ├─ set-S/               # The agent platform
+│   │   ├─ set-T/               # Forward evidence
+│   │   └─ set-U/               # Unified strategy engine
+│   │                           # (no sets M, N, O, Q or R exist)
+│   ├─ reference/               # rust-rewrite-master-plan.md, PHASE_DESIGN_CHECKLIST.md,
+│   │                           # PHASE_QUICK_REFERENCE.md
+│   └─ special-plans/           # MICROSERVICES_SPLIT_PLAN.MD,
+│                               # RESTART_DATA_HEALTH_AND_FORECASTER_PLAN.MD (superseded)
 │
-├─ procedures/                  # 🔧 Atomic step-by-step task instructions
+├─ ml-platform-context-pack/    # Spec-driven pack for the MLOps/data layer
+│   ├─ README.md, CLAUDE.md, GLOSSARY.md, MANIFEST.json
+│   ├─ spec/SPEC.md             # Authority order: INVARIANTS > SPEC > reference
+│   ├─ decisions/               # INVARIANTS, ADR-INDEX, HANDOFF, PROGRESS, CURRENT-STATE, …
+│   ├─ backlog/                 # Acceptance tests, implementation checklist, phase 2–5 plan
+│   ├─ reference/               # 00–08 research briefs
+│   └─ schemas/                 # 00–06 reference SQL
+│
+├─ mcp/                         # MCP server notes (README.md)
+│
+├─ meridian-design-system/      # Meridian UI design system: spec, agent brief, tokens,
+│                               # contrast report, screenshots, reference/ HTML mock-ups
+│
+├─ images/                      # Screenshots used by README files
+│
+├─ procedures/                  # Atomic step-by-step task instructions
 │   ├─ README.md
-│   ├─ add-a-venue.md
-│   ├─ add-adr.md
-│   ├─ add-doc.md
-│   ├─ ... (through execute-plan.md)
-│   └─ CI_ROOT_CAUSE_ANALYSIS_PROMPT.md              # (NEW - moved from root)
+│   ├─ AGENT.md                 # (moved from root by Set G G-1.1)
+│   ├─ add-a-venue, add-adr, add-doc, add-plan, add-research, add-spec
+│   ├─ analyze-impact, create-artifact, execute-plan, explain-provenance
+│   ├─ operate-the-stack, research-ledger, run-a-backtest-experiment
+│   ├─ trace-uncertainty, verify-traceability
+│   └─ CI_ROOT_CAUSE_ANALYSIS_PROMPT.md
 │
-├─ operations/                  # 🚀 Operational procedures, runbooks, deployment
-│   ├─ deploy_cloud.md
-│   ├─ runbooks.md
-│   ├─ graceful_shutdown.md
-│   ├─ ready_to_run.md
-│   ├─ windows_operator_ui.md
-│   ├─ per_asset_operator.md
-│   └─ rollback_playbooks.md
+├─ skills/                      # Agent skill definitions that compose procedures (14 files)
 │
-├─ governance/                  # 🏛️ Release governance, audits, MLflow promotion
-│   ├─ audit_code_review.md
-│   ├─ full_audit.md
-│   ├─ mlflow_promotion.md
-│   └─ release_and_experiments.md                    # (NEW - moved from root as GOVERNANCE_RELEASE_...)
+├─ research/                    # Research briefs & evaluations
+│   ├─ README.md, CONCLUSIONS.md (merged from root by Set G G-1.3), OPEN_QUESTIONS.md, SKILL.md
+│   ├─ DATA_SOURCES_REFERENCE.md, broker-venue-selection.md, rust-trading-stack-evaluation.md
+│   ├─ paper-trading-realism-audit.md, quant-agent-toolbox-uncommon-tools.md,
+│   │  strategy-search-study.md
+│   └─ prompts/
 │
-├─ reports/                     # 📊 Audit reports, coverage matrices, acceptance reports
-│   ├─ AUDIT_REPORT_2026-04-13_full.md
-│   ├─ AUDIT_REPORT_TEMPLATE.md
-│   ├─ CANONICAL_ACCEPTANCE_AUDIT_REPORT.json
-│   ├─ CANONICAL_SPEC_COVERAGE_MATRIX.MD
-│   ├─ IMPLEMENTATION_SUMMARY_2026-06-02.md
-│   └─ REPO_VS_CANONICAL_SPECS_GAP_AUDIT.md
+├─ BRAINSTORM/                  # Exploratory design thinking
+│   ├─ README.MD, TEMPLATE_BRAINSTORM.MD, AUTOMATION_QUEUE_SLICE_PROMPT.MD
+│   ├─ BS-001 … BS-006 (*.MD)
+│   └─ BS-007_QUANT_RESEARCH_AGENT/   # 00_INDEX → 17_BUILD_ORDER doc set
 │
-├─ research/                    # 🔬 Research briefs, technology evaluations, trade-off analyses
-│   ├─ README.md
-│   ├─ broker-venue-selection.md
-│   ├─ rust-trading-stack-evaluation.md
-│   ├─ CONCLUSIONS.md
-│   ├─ DATA_SOURCES_REFERENCE.md
-│   ├─ OPEN_QUESTIONS.md
-│   └─ SKILL.md
+├─ governance/                  # Audits, release governance, tech-debt log
+│   ├─ COMPLACENCY_LOG.md       # (moved from root by Set G G-1.4)
+│   └─ audit_code_review.md, full_audit.md, mlflow_promotion.md, release_and_experiments.md
 │
-├─ skills/                      # 🎯 Agent skill definitions that compose procedures
-│   ├─ README.md
-│   ├─ add-doc.md
-│   ├─ analyze-impact.md
-│   ├─ create-adr.md
-│   ├─ ... (through explain-provenance.md)
-│   └─ execute-plan.md
+├─ operations/                  # Runbooks, deployment, shutdown, rollback
 │
-├─ BRAINSTORM/                  # 💭 Exploratory options, brainstorming, design thinking
-│   ├─ README.md
-│   ├─ TEMPLATE_BRAINSTORM.md
-│   ├─ BS-001_CLOUD_OCI_WEB_DEPLOYMENT.MD
-│   ├─ BS-002_QUEUE_VS_UI_GAP_ANALYSIS.MD
-│   ├─ ... (through BS-006)
-│   └─ AUTOMATION_QUEUE_SLICE_PROMPT.MD              # (NEW - moved from root)
+├─ reports/                     # Audit reports and coverage matrices (2026-04 to 2026-06)
 │
-├─ backlog/                     # 📝 Deferred work items, future roadmap
-│   └─ deferred_roadmap.md
+├─ backlog/                     # deferred_roadmap.md
+├─ foundation/                  # commentary.md
 │
-├─ foundation/                  # 📖 Foundation notes, commentary, principles
-│   └─ commentary.md
+├─ Human Provided Specs/        # User-provided APEX specs (Python era)
+│   └─ new_specs/{canonical/, superseded/, MANIFEST.json, README.txt}
 │
-├─ Human Provided Specs/        # 🔐 User-provided APEX system specifications (canonical)
-│   ├─ README.md
-│   ├─ TEMPLATE_HUMAN_SPEC.md
-│   └─ new_specs/
-│       ├─ MANIFEST.json
-│       ├─ README.txt
-│       ├─ canonical/                 # APEX canonical system specs (v2.1)
-│       │   ├─ APEX_UNIFIED_Full_System_Master_Spec_v2_1_CANONICAL.md
-│       │   ├─ APEX_Auction_Scoring_Constraints_Detail_Spec_v1_0.md
-│       │   ├─ ... (9 spec documents)
-│       │   └─ APEX_Trigger_Math_Pseudocode_Detail_Spec_v1_0.md
-│       └─ superseded/               # Previous APEX spec versions
-│           ├─ APEX_UNIFIED_Full_System_Master_Spec_v2_0.md
-│           ├─ APEX_Decision_System_Master_Spec_v1_1_FINAL.md
-│           └─ ... (3 others)
-│
-├─ archive/                     # 📦 Old/obsolete documentation (historical reference)
-│   ├─ specs/
-│   ├─ canonical-metadata-archive/   # (NEW - archived obsolete metadata)
-│   │   ├─ CANONICAL_GLOSSARY.md
-│   │   ├─ CANONICAL_SPEC_INDEX.md
-│   │   ├─ CANONICAL_TOMBSTONE_INDEX.md
-│   │   ├─ CANONICAL_DELETION_LOG.md
-│   │   ├─ CANONICAL_MODULE_MAP.md
-│   │   └─ MODULE_INVENTORY.md
-│   └─ (other old files)
-│
-├─ REORGANIZATION_SUMMARY.md    # 📋 This reorganization (new file)
-└─ FOLDER_MAP.md                # 🗺️ This folder map (new file)
+└─ archive/                     # Superseded docs; see archive/README.md and AUDIT.md
+    ├─ specs/                   # Older consolidated spec versions
+    └─ canonical-metadata-archive/
 ```
 
-## 🎯 Key Improvements
+Outside `docs/`: the repo-root `research/` directory is a stale second research tree
+(`CONCLUSIONS.md`, `OPEN_QUESTIONS.md`, `SKILL.md`) shadowing `docs/research/`. Its fate is
+an open human decision recorded in Set G MASTER (remainder item 5).
 
-### Cleaner Root (76% reduction)
-- **Before:** 50+ scattered files in root
-- **After:** 12 focused core files + queue system
-
-### Single Source of Truth for Specs
-- **Before:** Specs/ and specs/ (duplicate folders)
-- **After:** specs/ only (24 consolidated files)
-
-### Proper Categorization
-- All planning docs → docs/plans/plan-sets/
-- All operational docs → operations/
-- All governance → governance/
-- All ADRs properly numbered → adr/
-
-### Obsolete Metadata Archived
-- Old canonical indexes consolidated to archive/
-- Canonical reference now: Human Provided Specs/ (APEX v2.1)
-
-## 📌 Quick Navigation
+## Quick Navigation
 
 | Need | Location |
 |------|----------|
+| What to work on now | `plans/PLAN.md`, then `plans/ROADMAP.md` |
 | System overview | `artifact.md` + `architecture.md` |
-| Architecture decisions | `adr/` (0001-0038) |
-| System specs | `specs/` (detailed) + `Specs/` README (overview) |
-| Implementation plans | `docs/plans/plan-sets/` (set-A through set-G) |
+| Architecture decisions | `adr/` (0001–0048, index in `adr/README.md`) |
+| Specs | `specs/` (on disk `Specs/`) |
+| Implementation plans | `plans/plan-sets/` (set-A … set-U) |
+| MLOps/data-layer authority | `ml-platform-context-pack/` |
 | How-to procedures | `procedures/` + `skills/` |
-| Operational docs | `operations/` + `runbooks.md` |
-| APEX canonical specs | `Human Provided Specs/new_specs/canonical/` |
+| Operational docs | `operations/` |
+| UI design system | `meridian-design-system/` |
 | Research & exploration | `research/` + `BRAINSTORM/` |
-| Approved decisions | `open-questions.md` |
+| Open decisions | `open-questions.md` |
 | Terminology | `glossary.md` |
-| Queue system | Root: `QUEUE.md`, `QUEUE_SCHEMA.md`, etc. |
-

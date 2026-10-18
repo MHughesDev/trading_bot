@@ -121,6 +121,28 @@ suites:
       - efficiency/refetch
     held_out: []
 
+  judgement:
+    description: >
+      Research decisions scored against PLANTED ground truth (AGENT-009 section 3;
+      S-10.16): a planted null reported `supported`, a planted leak missed, the
+      wrong workflow for the question's shape, an unevaluable falsifier, a dead
+      idea re-tested, a barren run. Six criteria, never one number. Scored per
+      (tier, workflow). 46 cases per tier, a fifth sealed by hash (section 4.2).
+      Scoring happens in Rust (`crates/harness`, binary `judgement_replay`)
+      because the answer key is generated from a seed that must never reach a
+      file or this process; the runner only invokes it and carries the cards.
+    runner: rust_replay
+    grader: crates/harness/src/eval/judgement_suite.rs
+    metric: per_criterion_all_applicable
+    # `pr_smoke` is the replay of the recorded tapes (synthetic reference policies,
+    # NOT a measurement of any model). `nightly` adds the sealed set. A LIVE run on
+    # a real tier needs a provider credential and is BLOCKED:HUMAN (gate H-2).
+    cadence: [pr_smoke, nightly]
+    tasks: []
+    held_out: []
+    tapes: judgement/tapes
+    baseline: results/judgement-baseline.json
+
 cadences:
   pr_smoke:
     description: One task per suite, one seed. Runs on every relevant PR.

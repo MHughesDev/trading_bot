@@ -8,21 +8,21 @@ This directory contains 15 standalone agent query files, each a complete self-co
 
 | File | Title | Issues | Phase |
 |------|-------|--------|-------|
-| [agent-01](agent-01-phase-a-jetstream-hot-path.md) | Remove JetStream from the decision path — in-process SPSC ring pipeline | #1 | A |
-| [agent-02](agent-02-phase-a-binary-envelope.md) | Replace JSON envelope with rkyv binary + interned u32 IDs | #2 | A |
-| [agent-03](agent-03-phase-b-bytecode-compiler.md) | Compile strategy expressions to postfix bytecode at init; execute per tick | #3, #24 | B |
-| [agent-04](agent-04-phase-b-slot-array-features.md) | Replace per-tick HashMap feature rebuild with a stable slot array | #4, #12, #17 | B |
-| [agent-05](agent-05-phase-b-dispatch-and-universe.md) | O(1) instrument-indexed dispatch + Arc<Universe> through pipeline stages | #5, #13, #18, #21 | B |
-| [agent-06](agent-06-phase-b-intent-filtering.md) | O(1) signal filtering with HashSet + eliminate strategy_id clone | #54, #55, #63 | B |
-| [agent-07](agent-07-phase-c-collector-hot-path.md) | Zero-alloc collector normalization: xxh3 identity + borrowed WS frames + direct Decimal | #6, #7, #11 | C |
-| [agent-08](agent-08-phase-c-scraper-and-reddit.md) | Web scraper trie + reddit mention table + credential borrow cleanup | #32, #46, #51, #52, #53, #61, #65 | C |
-| [agent-09](agent-09-phase-d-redis-and-storage.md) | Delete Redis from the write path; PnL lot move semantics | #8, #31, #35, #36 | D |
-| [agent-10](agent-10-phase-d-lock-free-registries.md) | Replace async Mutex in registries with DashMap + Arc<str> IDs | #22, #29, #30, #34, #40, #60, #66 | D |
-| [agent-11](agent-11-phase-d-execution-and-ratelimit.md) | Warm HTTP/2 order pools + atomic rate budget + atomic WS throttle | #9, #43, #45 | D |
-| [agent-12](agent-12-phase-e-build-config.md) | Apply full release profile + mimalloc + native CPU target | #10 | E |
-| [agent-13](agent-13-phase-e-subscriptions.md) | Arc<Subscription> through the UI gateway subscription lifecycle | #25, #26, #27, #28, #37, #48 | E |
-| [agent-14](agent-14-phase-e-api-and-misc.md) | API/WS hygiene sweep: binary WS frames, clone removal, format deferral, manifest dedup | #14–#23, #33, #38–#42, #44, #49, #50, #56–#59, #62, #67, #68 | E |
-| [agent-15](agent-15-phase-f-and-g.md) | Alpaca side inference + typed error chain | #47, #64, #65 | F+G |
+| [agent-01](agent-01.md) | Remove JetStream from the decision path — in-process SPSC ring pipeline | #1 | A |
+| [agent-02](agent-02.md) | Replace JSON envelope with rkyv binary + interned u32 IDs | #2 | A |
+| [agent-03](agent-03.md) | Compile strategy expressions to postfix bytecode at init; execute per tick | #3, #24 | B |
+| [agent-04](agent-04.md) | Replace per-tick HashMap feature rebuild with a stable slot array | #4, #12, #17 | B |
+| [agent-05](agent-05.md) | O(1) instrument-indexed dispatch + Arc<Universe> through pipeline stages | #5, #13, #18, #21 | B |
+| [agent-06](agent-06.md) | O(1) signal filtering with HashSet + eliminate strategy_id clone | #54, #55, #63 | B |
+| [agent-07](agent-07.md) | Zero-alloc collector normalization: xxh3 identity + borrowed WS frames + direct Decimal | #6, #7, #11 | C |
+| [agent-08](agent-08.md) | Web scraper trie + reddit mention table + credential borrow cleanup | #32, #46, #51, #52, #53, #61, #65 | C |
+| [agent-09](agent-09.md) | Delete Redis from the write path; PnL lot move semantics | #8, #31, #35, #36 | D |
+| [agent-10](agent-10.md) | Replace async Mutex in registries with DashMap + Arc<str> IDs | #22, #29, #30, #34, #40, #60, #66 | D |
+| [agent-11](agent-11.md) | Warm HTTP/2 order pools + atomic rate budget + atomic WS throttle | #9, #43, #45 | D |
+| [agent-12](agent-12.md) | Apply full release profile + mimalloc + native CPU target | #10 | E |
+| [agent-13](agent-13.md) | Arc<Subscription> through the UI gateway subscription lifecycle | #25, #26, #27, #28, #37, #48 | E |
+| [agent-14](agent-14.md) | API/WS hygiene sweep: binary WS frames, clone removal, format deferral, manifest dedup | #14–#23, #33, #38–#42, #44, #49, #50, #56–#59, #62, #67, #68 | E |
+| [agent-15](agent-15.md) | Alpaca side inference + typed error chain | #47, #64, #65 | F+G |
 
 ---
 

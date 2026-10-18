@@ -11,9 +11,16 @@
 //! ```
 
 pub mod evaluators;
+pub mod alpha_chain;
+pub mod dossier_clauses;
+pub mod model_binding;
 pub mod model_leakage;
+pub mod position_leakage;
 pub mod profile;
+pub mod random_arm_gate;
+pub mod reconciliation_gate;
 pub mod stack;
+pub mod theme_posterior;
 pub mod tickets;
 
 use chrono::{DateTime, Utc};
@@ -129,6 +136,12 @@ pub enum GateError {
     IntegrityHardStop,
     #[error("experiment error: {0}")]
     Experiment(ExperimentError),
+    /// A Layer 2 revision derived from a Layer 1 idea has no passed reconciliation (M-4.4).
+    #[error("reconciliation required: {0}")]
+    ReconciliationRequired(String),
+    /// A bound model failed its usage rules, so it may not size a position at Gate 3 (Set N N-3.6).
+    #[error("model binding refused: {0}")]
+    ModelBindingRefused(String),
 }
 
 /// The append-only record of gate verdicts for one Experiment.
@@ -259,6 +272,10 @@ pub struct GateRunner<'e> {
     ledger: GateLedger,
     /// The versioned threshold set this run is judged under (INV-23).
     profile: GateProfile,
+    /// Set when the strategy is a Layer 2 version of a Layer 1 idea (Set M M-4.4).
+    reconciliation: Option<reconciliation_gate::ReconciliationRequirement>,
+    /// The usage-rule verdicts for the models this strategy binds (Set N N-3.6).
+    model_bindings: Option<model_binding::BindingOutcome>,
 }
 
 /// The full Gate 3 outcome: one primary p-value + two corroborators.
@@ -304,7 +321,26 @@ impl<'e> GateRunner<'e> {
             experiment,
             ledger: GateLedger::new(),
             profile,
+            reconciliation: None,
+            model_bindings: None,
         }
+    }
+
+    /// This strategy is a Layer 2 version of a Layer 1 idea: Significance and the Vault are
+    /// refused until a passed reconciliation for exactly that pair stands (Set M M-4.4).
+    #[must_use]
+    pub fn with_reconciliation(mut self, req: reconciliation_gate::ReconciliationRequirement) -> Self {
+        self.reconciliation = Some(req);
+        self
+    }
+
+    /// The strategy binds models: Significance and the Vault are refused while any binding fails
+    /// its usage rules (Set N N-3.6). The outcome can only come from
+    /// [`model_binding::BindingOutcome::judge`], which asks the policy about every binding.
+    #[must_use]
+    pub fn with_model_bindings(mut self, outcome: model_binding::BindingOutcome) -> Self {
+        self.model_bindings = Some(outcome);
+        self
     }
 
     #[must_use]
@@ -319,6 +355,16 @@ impl<'e> GateRunner<'e> {
 
     /// Check that a gate's prerequisite has passed before it may be entered.
     fn enter(&self, gate: Gate) -> Result<(), GateError> {
+        if matches!(gate, Gate::Significance | Gate::Vault) {
+            if let Some(req) = &self.reconciliation {
+                req.satisfied().map_err(GateError::ReconciliationRequired)?;
+            }
+        }
+        if matches!(gate, Gate::Significance | Gate::Vault) {
+            if let Some(b) = &self.model_bindings {
+                b.satisfied().map_err(GateError::ModelBindingRefused)?;
+            }
+        }
         if let Some(required) = gate.prerequisite() {
             if !self.ledger.passed(required) {
                 return Err(GateError::PrerequisiteNotPassed { gate, required });
@@ -330,9 +376,40 @@ impl<'e> GateRunner<'e> {
     /// GATE 0 — integrity. Runs on every config; failure is a **hard stop**
     /// (no Gate 1). The integrity findings are returned so the caller can set
     /// `RunResult.status = rejected_integrity` and store the (counted) run.
+    ///
+    /// On a Layer 1 experiment (`strategy_family` starting with
+    /// [`position_leakage::LAYER1_FAMILY_PREFIX`]) this call carries **no truncation
+    /// verdict**, so it fails with `leakage.position_truncation_not_run`: the check
+    /// cannot be skipped by calling the plain method. Use
+    /// [`Self::gate0_position_series`] to supply the verdict (Set M M-1.7).
     pub fn gate0(&mut self, inputs: &IntegrityInputs<'_>) -> Result<&GateVerdict, GateError> {
+        let layer1 = position_leakage::is_layer1_family(&self.experiment.strategy_family);
+        self.gate0_checked(inputs, layer1.then_some(None))
+    }
+
+    /// GATE 0 for a Layer 1 research strategy: the integrity scan **and** the
+    /// truncation verdict. A `None` verdict is a flag, never a pass (Set M M-1.7).
+    pub fn gate0_position_series(
+        &mut self,
+        inputs: &IntegrityInputs<'_>,
+        truncation: Option<&crate::position_series::TruncationVerdict>,
+    ) -> Result<&GateVerdict, GateError> {
+        self.gate0_checked(inputs, Some(truncation))
+    }
+
+    /// `position`: `None` when the experiment is not a Layer 1 one and nothing is
+    /// checked; `Some(verdict)` when it is, where a `Some(None)` is a missing verdict.
+    #[allow(clippy::option_option)] // None = not Layer 1; Some(None) = missing verdict (documented above)
+    fn gate0_checked(
+        &mut self,
+        inputs: &IntegrityInputs<'_>,
+        position: Option<Option<&crate::position_series::TruncationVerdict>>,
+    ) -> Result<&GateVerdict, GateError> {
         self.enter(Gate::Integrity)?;
-        let flags = integrity_scan(inputs);
+        let mut flags = integrity_scan(inputs);
+        if let Some(verdict) = position {
+            flags.extend(position_leakage::check(verdict));
+        }
         let passed = flags.is_empty();
         let summary = if passed {
             "integrity clean: close-stamped, gross edge clears the cost floor, no label overlap"
@@ -760,6 +837,51 @@ mod tests {
         assert_eq!(vault_result.status, RunStatus::Ok);
         assert!(v.passed);
         assert_eq!(e.state, crate::experiment::ExperimentState::Validated);
+    }
+
+    /// Set M M-4.4: a Layer 2 version of a Layer 1 idea is refused at Significance until a passed
+    /// reconciliation for that pair stands, and the refusal names the reason.
+    #[test]
+    fn an_unreconciled_layer_2_version_cannot_enter_significance_and_a_reconciled_one_can() {
+        use reconciliation_gate::{ReconRecord, ReconciliationRequirement};
+        let run = |records: Vec<ReconRecord>| {
+            let mut e = experiment();
+            let mut runner = GateRunner::new(&mut e).with_reconciliation(ReconciliationRequirement {
+                layer2_revision: "L2".into(),
+                layer1_parent: "L1".into(),
+                records,
+            });
+            runner.gate0(&clean_integrity()).unwrap();
+            runner.gate1(&study("wf", vec![0.1], verdict(true, None))).unwrap();
+            runner
+                .gate2(
+                    &study("cpcv", vec![0.1, 0.2], verdict(true, None)),
+                    &study("syn", vec![0.1], verdict(true, None)),
+                    &study("nbhd", vec![0.1, 0.1], verdict(true, Some(true))),
+                    -1.0,
+                )
+                .unwrap();
+            let null: Vec<f64> = (0..99).map(f64::from).collect();
+            let perf = vec![vec![1.0; 6], vec![0.9; 6]];
+            runner
+                .gate3(
+                    -10.0,
+                    &null,
+                    crate::nulls::Null::new(crate::nulls::NullKind::SignalReturnDecouple, crate::nulls::NullParams::default())
+                        .unwrap()
+                        .null_id,
+                    &CorroboratorInputs { sharpe: 3.0, n_obs: 252, skew: 0.0, kurtosis: 3.0, sharpe_variance_across_trials: 0.01, pbo_performance: &perf, pbo_groups: 2 },
+                    &ledger::TrialLedger::n_eff(&InMemoryLedger::new(), "tenant-test").unwrap(),
+                    0.05,
+                )
+                .map(|(_, passed)| passed)
+        };
+        let refused = run(vec![]).unwrap_err();
+        assert!(matches!(&refused, GateError::ReconciliationRequired(why) if why.contains("no reconciliation")), "{refused}");
+        let failed = run(vec![ReconRecord { layer1_revision: "L1".into(), layer2_revision: "L2".into(), passed: false, created_at: Utc::now() }]);
+        assert!(matches!(failed, Err(GateError::ReconciliationRequired(_))), "a failed one stays refused");
+        let ok = run(vec![ReconRecord { layer1_revision: "L1".into(), layer2_revision: "L2".into(), passed: true, created_at: Utc::now() }]);
+        assert!(ok.is_ok(), "a passed one proceeds to the gate's own judgement: {ok:?}");
     }
 
     #[test]

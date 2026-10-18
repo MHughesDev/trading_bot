@@ -10,3 +10,5 @@ domain = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 rkyv = { workspace = true }
+# Order-book arithmetic (Set E 5.3). Pure.
+rust_decimal = { workspace = true }

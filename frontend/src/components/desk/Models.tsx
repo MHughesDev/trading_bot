@@ -1,127 +1,26 @@
 // Models and tiers (AGENT-012 §10; task S-6.20).
 //
-// Providers and keys move here from `LlmCredentialForm` on the retired agent
-// page — rebuilt on the primitives rather than copied, because the original was
-// written in the back-compat Tailwind aliases this phase exists to remove.
+// Providers and keys live in Settings -> AI providers (PROVIDERS track,
+// 2026-10-05), where each user connects their own key. This page shows which are
+// connected and links there, rather than holding a second form: two places to
+// set one key are two places for it to be wrong.
 //
 // The acceptance that shapes the page: **a profile with no calibration row
 // renders `unmeasured` rather than a default.** A default is a claim, and a
 // claim about a model nobody has measured is the kind of number that ends up in
 // a decision.
-import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
-import { Field, Input } from '@/components/primitives/Field'
 import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'
 import { EmptyState } from '@/components/primitives/States'
-import { LLM_PROVIDERS, conversationsApi, llmApi, type AgentProfile, type LlmProvider } from '@/api/agent'
+import { conversationsApi, type AgentProfile } from '@/api/agent'
+import { PROVIDERS, PROVIDERS_QUERY_KEY, llmKeysApi } from '@/api/llm'
+import { AI_PROVIDERS_SETTINGS_PATH } from '@/components/providers/ConnectProviderCta'
+import { cardState } from '@/components/providers/providers.helpers'
 import { TierBadge } from './Shared'
 import { profileIsMeasured } from '@/components/desk/Shared.helpers'
-
-/** Exported so its three credential states can be exercised without a network. */
-export function ProviderCard({
-  provider,
-  label,
-  needsKey,
-  configured,
-  keyLast4,
-  baseUrl,
-}: {
-  provider: LlmProvider
-  label: string
-  needsKey: boolean
-  /**
-   * `null` when `/api/llm/credentials` did not answer.
-   *
-   * Never folded into `false`. "not configured" is a statement about the
-   * platform's stored keys, and it was being made from a request that may never
-   * have come back — with a **Connect** button beside it inviting somebody to
-   * paste a key the platform may already hold.
-   */
-  configured: boolean | null
-  keyLast4: string | null
-  baseUrl: string | null
-}) {
-  const qc = useQueryClient()
-  const [apiKey, setApiKey] = useState('')
-  const [url, setUrl] = useState('')
-  const [error, setError] = useState('')
-
-  const save = useMutation({
-    mutationFn: async () => {
-      setError('')
-      const body: { api_key?: string; base_url?: string } = {}
-      if (apiKey.trim()) body.api_key = apiKey.trim()
-      if (url.trim()) body.base_url = url.trim()
-      return (await llmApi.saveCredential(provider, body)).data
-    },
-    onSuccess: () => {
-      setApiKey('')
-      void qc.invalidateQueries({ queryKey: ['llm-credentials'] })
-    },
-    onError: (e: unknown) => {
-      setError(
-        (e as { response?: { data?: { message?: string } } })?.response?.data?.message ??
-          'Verification failed — check the key and try again.',
-      )
-    },
-  })
-
-  const remove = useMutation({
-    mutationFn: () => llmApi.deleteCredential(provider),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['llm-credentials'] }),
-  })
-
-  return (
-    <details className="desk-card">
-      <summary className="desk-card-hd" style={{ cursor: 'pointer' }}>
-        <strong style={{ fontSize: 'var(--t-12)' }}>{label}</strong>
-        {configured === null ? (
-          <Badge tone="warn">state unknown</Badge>
-        ) : configured ? (
-          <Badge tone="pos">connected{keyLast4 ? ` ····${keyLast4}` : ''}</Badge>
-        ) : (
-          <Badge tone="neutral">not configured</Badge>
-        )}
-      </summary>
-      {needsKey && (
-        <Field label="API key" error={error || null}>
-          <Input
-            type="password"
-            autoComplete="off"
-            aria-label={`${label} API key`}
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-          />
-        </Field>
-      )}
-      <Field label={provider === 'ollama' || provider === 'vllm' ? 'Host' : 'Base URL (optional)'}>
-        <Input
-          aria-label={`${label} base URL`}
-          placeholder={baseUrl ?? (provider === 'ollama' ? 'http://localhost:11434' : 'provider default')}
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-        />
-      </Field>
-      <div className="desk-actions">
-        <Button
-          size="xs"
-          disabled={needsKey && !apiKey.trim()}
-          loading={save.isPending}
-          onClick={() => save.mutate()}
-        >
-          {configured === null ? 'Save' : configured ? 'Update' : 'Connect'}
-        </Button>
-        {configured === true && (
-          <Button size="xs" variant="secondary" loading={remove.isPending} onClick={() => remove.mutate()}>
-            Remove
-          </Button>
-        )}
-      </div>
-    </details>
-  )
-}
 
 // The measurement rule lives beside the badge it feeds, in `Shared.helpers.ts`,
 // because three surfaces drew this badge and all three had spelled it out
@@ -193,35 +92,45 @@ export function Models() {
     queryFn: () => conversationsApi.listProfiles().then((r) => r.data),
   })
   const creds = useQuery({
-    queryKey: ['llm-credentials'],
-    queryFn: () => llmApi.status().then((r) => r.data),
+    queryKey: PROVIDERS_QUERY_KEY,
+    queryFn: () => llmKeysApi.status(),
   })
 
   return (
     <div className="desk-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
       <Panel>
-        <PanelHeader title="Providers and keys" />
+        <PanelHeader title="AI providers" />
         <PanelBody>
-          {creds.data && !creds.data.encryption_available && (
-            <div className="callout warn">
-              Credential encryption is not configured on the platform (CRED_KEK unset) — keys cannot be stored
-              until the operator sets it.
-            </div>
-          )}
-          {LLM_PROVIDERS.map((p) => {
-            const s = creds.data?.providers.find((x) => x.provider === p.id)
-            return (
-              <ProviderCard
-                key={p.id}
-                provider={p.id}
-                label={p.label}
-                needsKey={p.needsKey}
-                configured={creds.data === undefined ? null : (s?.configured ?? false)}
-                keyLast4={s?.key_last4 ?? null}
-                baseUrl={s?.base_url ?? null}
-              />
-            )
-          })}
+          <p className="sub" data-testid="providers-live-in-settings">
+            Your own Anthropic or OpenAI API key runs the desk. Keys are connected, tested and removed in
+            Settings, which is the one place a key is set.
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--s-2)', margin: 'var(--s-2) 0' }}>
+            {PROVIDERS.filter((m) => m.hosted).map((m) => {
+              const s = creds.data?.providers.find((x) => x.provider === m.id) ?? null
+              const state = creds.data === undefined ? 'unknown' : cardState(s)
+              return (
+                <Badge
+                  key={m.id}
+                  tone={state === 'connected' ? 'pos' : state === 'rejected' ? 'neg' : state === 'unknown' ? 'warn' : 'neutral'}
+                >
+                  {m.label}:{' '}
+                  {state === 'connected'
+                    ? `connected${s?.key_last4 ? ` ····${s.key_last4}` : ''}`
+                    : state === 'rejected'
+                      ? 'key rejected'
+                      : state === 'unknown'
+                        ? 'state unknown'
+                        : 'not connected'}
+                </Badge>
+              )
+            })}
+          </div>
+          <Link to={AI_PROVIDERS_SETTINGS_PATH}>
+            <Button size="xs" variant="secondary">
+              Manage AI providers
+            </Button>
+          </Link>
         </PanelBody>
       </Panel>
 

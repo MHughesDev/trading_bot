@@ -746,6 +746,7 @@ pub fn preview_v3(
             crate::runner::drive(
                 &r.plan,
                 &r.bars,
+                &r.external,
                 &primary,
                 r.start_ns,
                 &mut v,

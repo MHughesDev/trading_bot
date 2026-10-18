@@ -62,7 +62,8 @@ describe('the reason typed on an approval survives the call site', () => {
 describe('the memory tab is not handed a literal null', () => {
   it('no longer passes items at all, because there are none to pass', () => {
     expect(conversation).not.toContain('items={null}')
-    expect(conversation).toContain('<MemoryTab />')
+    // It is passed the per-run brief read, not store rows and not a literal.
+    expect(conversation).toMatch(/<MemoryTab\s+brief=\{/)
   })
 })
 

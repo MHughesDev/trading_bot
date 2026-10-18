@@ -26,7 +26,7 @@ Highest migration on disk at the time of writing: **0140**.
 > **Implementation plan:** every open item below (plus 8 findings from the
 > 2026-06-13 sweep this log missed — dead `/auth/*` routes, frontend builder
 > gaps, parse-only sizing, hot-path stage-3, unused graph/semantic infra) is
-> sequenced in [`plans/set-E/`](plans/set-E/MASTER.md). See its Item → Phase Map
+> sequenced in [`docs/plans/plan-sets/set-E/`](../plans/plan-sets/set-E/MASTER.md). See its Item → Phase Map
 > for the cross-reference.
 
 ---
@@ -262,12 +262,35 @@ asked "what is wrong", and this asks "what did we ship knowing it was incomplete
 
 ---
 
+## Set S S-8.9 close-out — the `Verified by:` pass (2026-10-04)
+
+Added 2026-10-04 by the S-8.9 pass over AGENT-005 to AGENT-014 (ten specs, 104 acceptance
+criteria). **98 now carry a `Verified by:` naming tests that exist (each name was grepped
+against the tree), 33 are ticked, 6 still read `[--]`.** A criterion is ticked only when the
+tests in the tree prove all of it; anything resting on a live model, a live Postgres, a
+running platform or a browser says **Partial** in its own slot and stays unticked. Same
+question as the section above: not "what is wrong", but "what did we say was proved, and
+what is it actually resting on".
+
+| # | Exception | Why it is this way | What closes it |
+|---|---|---|---|
+| S8-9 | **The `judgement` suite's scorecard rows are synthetic.** `evals/judgement/tapes/*` are the outputs of five declared reference policies (`TierPolicy`), not recordings of any model; the cards are labelled `reference-policy/<tier>` and `not a model`. AGENT-009 AC-8 is therefore Partial: the machinery (46 cases a tier, 37 on a PR, 9 sealed, per-(tier, workflow) cells, the gate) is proved; no tier's judgement is measured. | A model run needs a provider credential nobody has stored (gate H-2). Labelling a hand-made tape as a frontier result would be the failure the suite exists to catch. | One frontier run over the 46 cases on a stated machine, n >= 30 per cell (S-10.16). ADR-S10-J1. |
+| S8-10 | **Sixty-five criteria are Partial, most because nothing has run against a live model.** AGENT-007 AC-2, AC-9 (a model writing the citing finding); AGENT-009 AC-1, AC-5, AC-6, AC-7; AGENT-010 AC-2, AC-3, AC-4, AC-7, AC-10 (kill and resume is simulated by replaying a truncated log); AGENT-013 AC-1 to AC-5, AC-13, AC-15; AGENT-014 AC-1, AC-5, AC-6; AGENT-011 AC-7 (measured once on a local 7B, not on the `research` suite). Every one of those slots says which half is proved. | Gate H-2 (an Anthropic credential) and S-4.14 (`BLOCKED:HUMAN`): one 30-iteration frontier run and one local run. | S-4.14, then each task's own live clause. |
+| S8-11 | **Many Partial slots rest on tests that need live Postgres and were not re-run in this pass.** They are written, CI runs them (`--ignored`), and the slot says "Written, not re-run". Re-run here: the harness crate, the desk's frontend tests (72 files, 681 tests), the evals runner (49 tests). | Postgres on 5433 has no pgvector and the platform DB is not on 5432, and the shared target directory's lock was held by other tracks for most of the pass. | `cargo test -p api -- --ignored` against a migrated database. |
+| S8-12 | **Six criteria still read `[--]`:** AGENT-005 AC-2 (a live 30-iteration cache run, S-4.14) and AC-10 (the twelve ADR-0034 conflicts: nobody re-checked them), AGENT-006 AC-5 (templated-tool header schemas), AC-9 (summary <= 400 tokens on the reference dataset) and AC-10 (the AGENT-002 pointer and the README listing), AGENT-008 AC-3 (a lookup on the 7B in <= 3 calls, live). | None of them is covered by phases 4, 9, 10 or 11, and a slot with no test to name stays empty rather than being filled with a plausible sentence. | The phase that owns each (AGENT-006 AC-5, AC-9 are phase 3's), or a live run. |
+| S8-13 | **The Proposed to Implemented move and the supersession marks are not done.** `docs/specs/README.MD` is the user's file and is under a standing no-touch rule; the nine specs stay `Proposed` there and AGENT-001 to 004 and COMP-006 are not marked superseded. | A standing instruction, recorded in `TRACK-RULES.md` and the project memory, outranks the S-8.9 body. | The owner makes the README edit, or lifts the rule. |
+| S8-14 | **AGENT-012 AC-7 and AC-8 (contrast, reflow, 375px) are proved statically.** The tests read `desk.css` and the token rules; no browser rendered the desk at 375px or switched the theme mid-run, because every desk surface sits behind sign-in and the platform binary starts live collectors and was not started. The contrast report and the icon-label sweep have no test at all. | Same as S-6.1's note. | A browser pass against a running platform, and a contrast check in CI. |
+| S8-15 | **AGENT-013 AC-8, AC-9, AC-12 lean on files another track was still writing** (`backtest/tests/reproduce.rs`, `api::repro_drift`, `api::compare_candidates`, all untracked during this pass). Their slots name tests that exist but say Partial and "owned by the S-LIFECYCLE track"; they were not run. | Concurrent work in the same tree. | That track's own close-out of S-10.8 and S-10.10; then re-read these three slots. |
+
+---
+
 ## Changelog
 
 | Date | Version | Changes |
 |------|---------|---------|
 | 2026-06-10 | v1 | Initial scan — 23 items found (3 CRITICAL, 7 HIGH, 6 MEDIUM, 4 LOW) |
 | 2026-09-17 | v3 | Set S phase 8 exit: eight recorded exceptions, each with the phase that would close it. Not a repository scan — these are things shipped knowingly incomplete, which is a different list from the one above. |
+| 2026-10-04 | v4 | Set S S-8.9 close-out: seven further recorded exceptions (S8-9 to S8-15) from filling the `Verified by:` slots of AGENT-005 to AGENT-014. |
 | 2026-06-10 | v2 | Post-implementation pass — 18 items completed/improved; 2 new findings added (freshness timezone, WS serialization); overall risk downgraded from HIGH to MEDIUM |
 
 ---

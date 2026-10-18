@@ -93,7 +93,7 @@ What options were on the table? What did you not want to decide?]
   ```
   And update the index entry for the old ADR.
 - **Re-derivation trigger:** If this ADR is `Accepted` and changes a constraint or decision that
-  affects how planned work is done, open `plans/README.md` and find every formal plan whose
+  affects how planned work is done, open `docs/plans/README.md` (and the set MASTERs under `docs/plans/plan-sets/`) and find every formal plan whose
   **Derived From** section lists this ADR. For each such plan, open the plan file and set:
   ```
   **Derivation Status:** STALE — [ADR-NNNN] accepted YYYY-MM-DD, re-derive before next execution

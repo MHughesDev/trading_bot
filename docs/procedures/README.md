@@ -14,7 +14,7 @@ A procedure is:
 
 A procedure is not:
 - A high-level overview (that belongs in a skill or README)
-- A project plan (that belongs in `plans/`)
+- A project plan (that belongs in `docs/plans/plan-sets/`)
 - A design decision (that belongs in `adr/`)
 
 ---

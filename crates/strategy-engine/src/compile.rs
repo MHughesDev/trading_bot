@@ -558,7 +558,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn compile_feature_named(&mut self, raw: &RawNode, input: InputIdx, name: &str) {
-        let Some(lookback) = self.reg.feature_lookback(name) else {
+        let Some(lookback) = self.lookback(input, name) else {
             let known = features::feature_sets::known_features();
             self.diag(
                 Diagnostic::new(
@@ -632,7 +632,7 @@ impl<'a> Compiler<'a> {
         }
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let name = format!("{family}_{}", n as u32);
-        self.reg.feature_lookback(&name).map(|_| (input, name))
+        self.lookback(input, &name).map(|_| (input, name))
     }
 
     fn compile_bar(&mut self, raw: &RawNode, spec: &OpSpec) {
@@ -729,7 +729,8 @@ impl<'a> Compiler<'a> {
             },
             None => PRIMARY,
         };
-        let Some(columns) = self.feature_list(&raw.id, &FeatureSource::Set { name: set }) else {
+        let Some(columns) = self.feature_list(&raw.id, input, &FeatureSource::Set { name: set })
+        else {
             return;
         };
         self.windows.insert(
@@ -767,7 +768,12 @@ impl<'a> Compiler<'a> {
     /// The feature names a source names, each checked against the indicator
     /// registry. A model input the engine cannot compute is a compile error —
     /// never a zero sent in its place (FEAT-007 §1 defect 4).
-    fn feature_list(&mut self, at: &str, src: &FeatureSource) -> Option<Vec<String>> {
+    fn feature_list(
+        &mut self,
+        at: &str,
+        input: InputIdx,
+        src: &FeatureSource,
+    ) -> Option<Vec<String>> {
         let names = match src {
             FeatureSource::Named { features } => features.clone(),
             FeatureSource::Set { name } => {
@@ -786,7 +792,7 @@ impl<'a> Compiler<'a> {
         };
         let unknown: Vec<String> = names
             .iter()
-            .filter(|n| self.reg.feature_lookback(n).is_none())
+            .filter(|n| self.lookback(input, n).is_none())
             .cloned()
             .collect();
         if !unknown.is_empty() {
@@ -1403,7 +1409,7 @@ impl<'a> Compiler<'a> {
             let arg = raw.args.get(&ci.name);
             match (&ci.shape, arg) {
                 (InputShape::Row { features }, None) => {
-                    let Some(names) = self.feature_list(&raw.id, features) else {
+                    let Some(names) = self.feature_list(&raw.id, PRIMARY, features) else {
                         ok = false;
                         continue;
                     };
@@ -1436,7 +1442,7 @@ impl<'a> Compiler<'a> {
                         }
                         None => PRIMARY,
                     };
-                    let Some(names) = self.feature_list(&raw.id, features) else {
+                    let Some(names) = self.feature_list(&raw.id, input, features) else {
                         ok = false;
                         continue;
                     };
@@ -1597,11 +1603,18 @@ impl<'a> Compiler<'a> {
         );
     }
 
+    /// An indicator's lookback on `input`'s bars (an external input's
+    /// depends on the bar size; P-3.6).
+    fn lookback(&self, input: InputIdx, name: &str) -> Option<u32> {
+        let secs = self.inputs.get(input).map_or(0, |i| i.timeframe.seconds());
+        self.reg.feature_lookback_at(name, secs)
+    }
+
     fn columns_for(&mut self, input: InputIdx, names: &[String]) -> Vec<(String, usize)> {
         names
             .iter()
             .map(|n| {
-                let lb = self.reg.feature_lookback(n).unwrap_or(1);
+                let lb = self.lookback(input, n).unwrap_or(1);
                 (n.clone(), self.column(input, n, lb))
             })
             .collect()
@@ -1610,7 +1623,7 @@ impl<'a> Compiler<'a> {
     fn input_lookback(&self, input: InputIdx, names: &[String]) -> u32 {
         let lb = names
             .iter()
-            .filter_map(|n| self.reg.feature_lookback(n))
+            .filter_map(|n| self.lookback(input, n))
             .max()
             .unwrap_or(1);
         if input == PRIMARY {
@@ -1624,7 +1637,7 @@ impl<'a> Compiler<'a> {
     fn add_window(&mut self, input: InputIdx, names: &[String], lookback: u32) -> u32 {
         let lb = names
             .iter()
-            .filter_map(|n| self.reg.feature_lookback(n))
+            .filter_map(|n| self.lookback(input, n))
             .max()
             .unwrap_or(1);
         let need = lb + lookback.saturating_sub(1);

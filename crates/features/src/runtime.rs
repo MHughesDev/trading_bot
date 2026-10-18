@@ -193,6 +193,12 @@ enum Kind {
     Autocorr(usize),
     VarianceRatio(usize),
     EfficiencyRatio,
+    // Yang-Zhang, Hurst, fractional difference and the two ensembles live in `families`.
+    YangZhang,
+    Hurst,
+    Fracdiff(usize),
+    EnsembleZscore { n1: usize, n2: usize, n3: usize },
+    EnsembleReturns { n1: usize, n2: usize, n3: usize },
 }
 
 /// Which line of a two-sided band a feature returns.
@@ -657,6 +663,23 @@ impl Feature for Windowed {
                     }
                 }
             }
+            Kind::YangZhang => {
+                crate::families::yang_zhang::yang_zhang_vol(&s.open, &s.high, &s.low, &s.close)
+            }
+            Kind::Hurst => {
+                let oldest = s.closes_oldest_first();
+                let r: Vec<f64> = oldest.windows(2).map(|w| w[1].ln() - w[0].ln()).collect();
+                crate::families::hurst::hurst_rs(&r)
+            }
+            Kind::Fracdiff(d) => {
+                crate::families::fracdiff::fracdiff_log_close(&s.close, d as f64 / 100.0)
+            }
+            Kind::EnsembleZscore { n1, n2, n3 } => {
+                crate::families::ensemble::mean_zscore(&s.close, &[n1, n2, n3])
+            }
+            Kind::EnsembleReturns { n1, n2, n3 } => {
+                crate::families::ensemble::mean_return(&s.close, &[n1, n2, n3])
+            }
             Kind::EfficiencyRatio => {
                 let net = (c[0] - c[w - 1]).abs();
                 let path: f64 = c.windows(2).map(|x| (x[0] - x[1]).abs()).sum();
@@ -785,6 +808,11 @@ fn construct(name: &str) -> Option<Arc<dyn Feature>> {
         "autocorr" => windowed(Kind::Autocorr(p[1])),
         "variance_ratio" => windowed(Kind::VarianceRatio(p[1])),
         "efficiency_ratio" => windowed(Kind::EfficiencyRatio),
+        "yang_zhang_vol" => windowed(Kind::YangZhang),
+        "hurst" => windowed(Kind::Hurst),
+        "fracdiff" => windowed(Kind::Fracdiff(p[1])),
+        "lookback_ensemble_zscore" => windowed(Kind::EnsembleZscore { n1: p[0], n2: p[1], n3: p[2] }),
+        "lookback_ensemble_returns" => windowed(Kind::EnsembleReturns { n1: p[0], n2: p[1], n3: p[2] }),
 
         // Unreachable while the catalogue and this match agree, which
         // `the_catalogue_and_the_constructor_agree_in_both_directions` asserts.
@@ -808,6 +836,15 @@ pub fn feature(name: &str) -> Result<Arc<dyn Feature>, FeatureError> {
         .get(name)
     {
         return Ok(Arc::clone(f));
+    }
+    // A name that declares an external input is not a windowed feature: computing it
+    // from bars alone would answer with a guess, so say where it lives (P-3.6).
+    if crate::external_features::is_external_name(name) {
+        return Err(FeatureError::Registration {
+            feature: name.to_string(),
+            reason: "declares an external input; resolve it with                      features::external_features::resolve_external and evaluate it with                      evaluate_external, handing in the point-in-time rows"
+                .into(),
+        });
     }
     let f = construct(name).ok_or_else(|| FeatureError::Unknown(name.to_string()))?;
     register_check(f.as_ref())?;

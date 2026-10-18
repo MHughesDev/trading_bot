@@ -53,6 +53,7 @@ import { RunDetail } from '../RunDetail'
 import { Card } from '../Cards'
 import { ApprovalCard } from '../ApprovalsInbox'
 import { SLASH_COMMANDS } from '@/components/desk/Composer.helpers'
+import { slashAction } from '@/lib/desk/sessions'
 import { useDeskKeymap } from '@/components/desk/useDeskKeymap'
 
 // The inbox answers through `researchApi`, not `deskApi`.
@@ -146,16 +147,22 @@ describe('a slash command nobody answers does not eat the question', () => {
     expect(box.value).toBe('')
   })
 
-  it('[was failing] lists only commands that are answered, and never the pause', () => {
-    // `/pause` posted to a route that was not mounted; it left the list with the
-    // handler. The route exists since ADR-D-27 and the *button* is back, but the
-    // command is not: re-adding it means wiring `onSlash('/pause')` through the
-    // composer, and a command in this list with no handler is the defect this
-    // whole file is about. The button and `space` cover the control; the command
-    // comes back when something answers it.
-    expect([...SLASH_COMMANDS]).not.toContain('/pause')
+  it('[was failing] lists only commands that are answered', () => {
+    // `/pause` left this list when its route was unmounted, and came back
+    // 2026-10-03 with a handler: `slashAction` maps every entry to what it does
+    // in this conversation, and an entry it maps to nothing is the defect this
+    // whole file is about. `/pin` stays out — nothing records a per-run pin.
     expect([...SLASH_COMMANDS]).not.toContain('/pin')
-    expect([...SLASH_COMMANDS]).toEqual(['/steer', '/why', '/budget'])
+    for (const cmd of SLASH_COMMANDS) {
+      for (const ctx of [
+        { continuous: true, hasRun: true },
+        { continuous: false, hasRun: true },
+        { continuous: false, hasRun: false },
+      ]) {
+        expect(slashAction(cmd, 'add a question', ctx), `${cmd} in ${JSON.stringify(ctx)}`).not.toBeNull()
+      }
+    }
+    expect(slashAction('/pin', 'x', { continuous: true, hasRun: true })).toBeNull()
   })
 })
 
@@ -427,15 +434,47 @@ describe('the memory tab does not offer the store as the brief', () => {
     // and whether it was cited), and nothing records that per run. Filling the
     // panel with store rows would put something that looks like the answer
     // where the answer is not known.
-    render(<MemoryTab />)
+    //
+    // 2026-10-03: the per-run record exists after all — `memory_retrievals`,
+    // written before every run — and `GET /api/desk/runs/{id}/brief` serves it.
+    // While that route is unregistered it answers 404, and the tab still says
+    // what it said, rather than showing the store.
+    render(<MemoryTab brief={{ served: false }} />)
     expect(screen.getByText(/No endpoint reports what this run's brief contained/i)).toBeTruthy()
   })
 
-  it('[was failing] takes no items, so nothing can hand it the wrong ones', () => {
-    // `onForget` could not have worked either: it was `(id: string) => void`
-    // and the delete route needs the bucket as well, which `BriefItem` carried
-    // and the callback dropped.
-    expect(MemoryTab.length).toBe(0)
+  it('[was failing] forget names the bucket, which the delete route needs', async () => {
+    // `onForget` could not have worked: it was `(id: string) => void` and the
+    // delete route needs the bucket as well. The brief route sends the bucket
+    // with each entry, and the callback takes both.
+    const onForget = vi.fn(() => Promise.resolve())
+    render(
+      <MemoryTab
+        brief={{
+          served: true,
+          data: {
+            run_id: 'r1',
+            entries_readable: true,
+            not_recorded: [],
+            items: [
+              {
+                entry_id: 'f_1',
+                rank: 1,
+                slot: 'finding',
+                why: 'same instrument',
+                cited: null,
+                cited_at: null,
+                retrieved_at: '2026-10-03T00:00:00Z',
+                entry: { kind: 'finding', bucket: 'findings', subject: 'BTC-USD', claim: 'gap fades', archived: false, superseded: false },
+              },
+            ],
+          },
+        }}
+        onForget={onForget}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Forget' }))
+    expect(onForget).toHaveBeenCalledWith('findings', 'f_1')
   })
 })
 

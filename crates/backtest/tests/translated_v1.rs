@@ -94,6 +94,7 @@ fn a_translated_v1_ema_cross_backtests() {
             fill_policy: FillPolicy::NextBarOpen,
             strategy_id: "ema_cross_v1".into(),
             sims: SimulatorSet::realistic(),
+            external: strategy_engine::ExternalData::default(),
         },
         &mut NoModels,
     )

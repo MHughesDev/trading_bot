@@ -37,7 +37,7 @@ use crate::spec::ToolSpec;
 use crate::taxonomy::Risk;
 
 fn missing(field: &str, why: &str) -> Value {
-    json!({ "error": "missing_field", "field": field, "fix": why })
+    crate::tool_error::missing_field_because(field, why)
 }
 
 fn number(params: &Value, key: &str) -> Option<f64> {
@@ -94,33 +94,34 @@ pub fn check_definition(params: &Value) -> Result<(), Value> {
         match number(params, field) {
             None => return Err(missing(field, why)),
             Some(v) if v < 0.0 => {
-                return Err(json!({
-                    "error": "negative_budget",
-                    "field": field,
-                    "value": v,
-                    "fix": "a budget dimension is zero or more"
-                }))
+                return Err(crate::tool_error::refuse_extra(
+                    "negative_budget",
+                    format!("`{field}` is {v}; a budget dimension cannot be negative."),
+                    format!("set `{field}` to zero or more"),
+                    json!({ "field": field, "value": v }),
+                ))
             }
             Some(_) => {}
         }
     }
 
     if number(params, "wall_clock_hours").is_some_and(|v| v <= 0.0) {
-        return Err(json!({
-            "error": "no_time_to_run",
-            "field": "wall_clock_hours",
-            "fix": "a campaign with no wall-clock budget cannot run a single phase"
-        }));
+        return Err(crate::tool_error::refuse_extra(
+            "no_time_to_run",
+            "wall_clock_hours is zero or negative, so the campaign cannot run a single phase.",
+            "set wall_clock_hours to a positive number of hours",
+            json!({ "field": "wall_clock_hours" }),
+        ));
     }
 
     // The trial budget is the registration's, and there is exactly one of it.
     if params.get("trial_budget").is_some() || params.get("max_trials").is_some() {
-        return Err(json!({
-            "error": "budget_already_registered",
-            "fix": "the trial budget comes from your pre-registration, which is this campaign's \
-                    DEFINE. Two numbers would give the trial counter two ceilings and the lower \
-                    one would win by accident. Amend the registration if the budget is wrong."
-        }));
+        return Err(crate::tool_error::refuse(
+            "budget_already_registered",
+            "the trial budget comes from your pre-registration, which is this campaign's DEFINE. \
+             Two numbers would give the trial counter two ceilings and the lower one would win by accident.",
+            "remove `trial_budget` and `max_trials` from this call; amend the registration if the budget is wrong",
+        ));
     }
     // Same argument, for the five other fields the registration already fixes.
     for field in [
@@ -132,22 +133,24 @@ pub fn check_definition(params: &Value) -> Result<(), Value> {
         "hypothesis",
     ] {
         if params.get(field).is_some() {
-            return Err(json!({
-                "error": "already_registered",
-                "field": field,
-                "fix": "this is part of your pre-registration, which IS the campaign's DEFINE \
-                        (AGENT-013 §8.5). Restating it here would let the campaign search under \
-                        a protocol you did not register. Amend the registration instead."
-            }));
+            return Err(crate::tool_error::refuse_ids(
+                "already_registered",
+                format!(
+                    "`{field}` is part of your pre-registration, which IS the campaign's DEFINE \
+                     (AGENT-013 §8.5); restating it would let the campaign search under an unregistered protocol."
+                ),
+                format!("remove `{field}` from this call; amend the registration instead if it is wrong"),
+                &[("field", field)],
+            ));
         }
     }
     if params.get("exploration_floor").is_some() {
-        return Err(json!({
-            "error": "floor_is_not_yours",
-            "fix": "the exploration floor is the platform's and is not settable from a tool \
-                    (INV-21). A campaign that could choose its own floor could choose not to \
-                    explore, which is the one thing the floor exists to prevent."
-        }));
+        return Err(crate::tool_error::refuse(
+            "floor_is_not_yours",
+            "the exploration floor is the platform's and is not settable from a tool (INV-21); \
+             a campaign that chose its own floor could choose not to explore.",
+            "remove `exploration_floor` from this call",
+        ));
     }
     Ok(())
 }
@@ -295,7 +298,7 @@ mod tests {
             let mut p = good();
             p[field] = json!("anything");
             let err = check_definition(&p).expect_err("already registered");
-            assert_eq!(err["error"], "already_registered", "{field}");
+            assert_eq!(err["error"]["code"], "already_registered", "{field}");
             assert_eq!(err["field"], field);
         }
     }
@@ -306,7 +309,7 @@ mod tests {
             let mut p = good();
             p[field] = json!(64);
             let err = check_definition(&p).expect_err("one ceiling");
-            assert_eq!(err["error"], "budget_already_registered", "{field}");
+            assert_eq!(err["error"]["code"], "budget_already_registered", "{field}");
         }
     }
 
@@ -323,7 +326,7 @@ mod tests {
         let mut p = good();
         p["exploration_floor"] = json!(0.05);
         let err = check_definition(&p).expect_err("not settable");
-        assert_eq!(err["error"], "floor_is_not_yours");
+        assert_eq!(err["error"]["code"], "floor_is_not_yours");
     }
 
     /// The schema asks for what a registration has no room for, and nothing else.

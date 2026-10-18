@@ -14,7 +14,6 @@ import { ASSET_CLASSES } from '@/lib/assetClass'
 import { TIMEFRAMES } from '@/hooks/useBars'
 import { DASH, clockTime, dateTime, money, pct, price as fmtPrice, signedMoney, signedPct } from '@/lib/format'
 import { Panel, PanelBody, PanelFooter, PanelHeader } from '@/components/primitives/Panel'
-import { Link } from 'react-router-dom'
 import { Button } from '@/components/primitives/Button'
 import { Badge, KeyValue, StatusDot } from '@/components/primitives/Badge'
 import { Label } from '@/components/primitives/Num'
@@ -26,6 +25,7 @@ import { EmptyState } from '@/components/primitives/States'
 import { VenueCredentials } from '@/components/settings/VenueCredentials'
 import { ApiAccessCard } from '@/components/settings/ApiAccessCard'
 import { BrowserNotifications } from '@/components/settings/BrowserNotifications'
+import { AiProvidersPanel } from '@/components/providers/AiProvidersPanel'
 import { cn } from '@/lib/utils'
 
 /* =============================================================================
@@ -55,7 +55,7 @@ const SECTIONS = [
   { id: 'storage', label: 'Local data', icon: Database, group: 'Data' },
 
   { id: 'venues', label: 'Venues', icon: Plug, group: 'Connections' },
-  { id: 'ai', label: 'AI providers', icon: KeyRound, group: 'Connections' },
+  { id: 'ai', label: 'API keys', icon: KeyRound, group: 'Connections' },
   { id: 'agent', label: 'Research agent', icon: Bot, group: 'Connections' },
   { id: 'api', label: 'API access', icon: Globe, group: 'Connections' },
 
@@ -68,8 +68,16 @@ const SECTIONS = [
 
 type SectionId = (typeof SECTIONS)[number]['id']
 
+/** The section named by the address's `#hash`, when it names one. */
+function hashSection(): SectionId | null {
+  const id = typeof window === 'undefined' ? '' : window.location.hash.replace('#', '')
+  return SECTIONS.find((s) => s.id === id)?.id ?? null
+}
+
 export function SettingsPage() {
-  const [active, setActive] = useState<SectionId>('appearance')
+  // `/settings#ai` lands on that section: the desk's "Add an API key" and
+  // the Models page link here by hash.
+  const [active, setActive] = useState<SectionId>(() => hashSection() ?? 'appearance')
   const refs = useRef<Partial<Record<SectionId, HTMLElement | null>>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -98,6 +106,12 @@ export function SettingsPage() {
     )
     Object.values(refs.current).forEach((el) => el && io.observe(el))
     return () => io.disconnect()
+  }, [])
+
+  // …and scrolls there, once, on arrival.
+  useEffect(() => {
+    const id = hashSection()
+    if (id) refs.current[id]?.scrollIntoView({ block: 'start' })
   }, [])
 
   function go(id: SectionId) {
@@ -156,7 +170,7 @@ export function SettingsPage() {
           <S id="storage" title="Local data" register={register} blurb="What this browser is holding, and how to clear it."><StorageSection /></S>
 
           <S id="venues" title="Venues" register={register} blurb="Credentials are verified at the venue before they are saved."><VenuesSection /></S>
-          <S id="ai" title="AI providers" register={register} blurb="Encrypted at rest, verified on save, never returned."><AiSection /></S>
+          <S id="ai" title="API keys" register={register} blurb="Add an API key to power the AI. It is checked when you save it, encrypted, and never shown again."><AiSection /></S>
           <S id="agent" title="Research agent" register={register} blurb="What the agent may do without asking, and what it costs."><AgentSection /></S>
           <S id="api" title="API access" register={register} blurb="Service tokens for headless and MCP access."><ApiAccessCard /></S>
 
@@ -1111,27 +1125,12 @@ function VenuesSection() {
   )
 }
 
-// Providers and keys live on the desk now (AGENT-012 §10, task S-6.20). This
-// section points there rather than holding a second form: two places to set one
-// key is two places for it to be wrong, and the desk's page is the one that also
-// shows which profile is calibrated and which reads `unmeasured`.
+// AI providers (PROVIDERS track, 2026-10-05). Each user connects their own
+// Anthropic and/or OpenAI API key here, and the desk runs on it. This is the one
+// place a key is set: the desk's "Add an API key" call to action and the
+// Models page both link here (`/settings#ai`) rather than holding a second form.
 function AiSection() {
-  return (
-    <Panel>
-      <PanelBody>
-        <p className="sec" style={{ fontSize: 'var(--t-12)', lineHeight: 1.55, marginBottom: 'var(--s-4)' }}>
-          Providers and keys moved to the desk, where they sit beside the model tiers they
-          configure. Keys are verified against the provider, encrypted at rest, and never
-          returned.
-        </p>
-        <Link to="/desk/models">
-          <Button size="xs" variant="secondary">
-            Open Models and tiers
-          </Button>
-        </Link>
-      </PanelBody>
-    </Panel>
-  )
+  return <AiProvidersPanel />
 }
 
 function AgentSection() {

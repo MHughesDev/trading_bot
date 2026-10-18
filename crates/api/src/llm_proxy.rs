@@ -168,7 +168,7 @@ async fn resolve_session(
 
     let row = sqlx::query_as::<_, (Uuid, Option<Uuid>, Vec<String>)>(
         "SELECT user_id, project_id, scopes FROM sessions \
-         WHERE token = $1 AND (expires_at IS NULL OR expires_at > now())",
+         WHERE token = session_token_hash($1) AND (expires_at IS NULL OR expires_at > now())",
     )
     .bind(token)
     .fetch_optional(&state.pg)
@@ -311,6 +311,20 @@ pub async fn messages(
                 .into_response()
         }
     };
+
+    // The model policy, enforced here too: this path calls Anthropic directly
+    // rather than through `model_policy::client`.
+    let requested = payload.get("model").and_then(Value::as_str).unwrap_or("");
+    if !crate::model_policy::is_allowed("anthropic", requested) {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "model_not_enabled",
+                "message": crate::model_policy::not_enabled_message("anthropic", requested),
+            })),
+        )
+            .into_response();
+    }
 
     // The context budget, enforced where every call is visible (ADR-0031; harness
     // guide §4.1 and anti-pattern 4: no code path may send an unbudgeted prompt).

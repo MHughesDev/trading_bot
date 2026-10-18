@@ -42,7 +42,11 @@ async fn an_instrument_is_found_by_its_id_with_its_sizes() {
         .await
         .expect("runs")
         .is_none());
-    sqlx::query("DELETE FROM instruments WHERE instrument_id = $1")
+    // An instrument row is never deleted (migration 0155, P-4.4); the fixture is delisted
+    // instead. Its id is unique per run, so the row cannot collide with the next one.
+    sqlx::query(
+        "UPDATE instruments SET active = false, status = 'delisted', delisted_at = now(), delisting_reason = 'pg_instruments test fixture' WHERE instrument_id = $1",
+    )
         .bind(&id)
         .execute(&pool)
         .await

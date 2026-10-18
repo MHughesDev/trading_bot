@@ -218,7 +218,7 @@ pub fn opening_message(prior: Option<&str>, constraints: &Value, goal: &str) -> 
     // lines here read as a working check and was one off from being a no-op.
     if has_any_constraint(constraints) {
         s.push_str(&run_constraints(constraints));
-        s.push_str("\n");
+        s.push('\n');
     }
     if s.is_empty() {
         // Nothing to frame it with: the goal IS the message, unchanged. Wrapping a

@@ -27,3 +27,17 @@ pub fn init(service_name: &str) {
 pub fn init_json(service_name: &str) {
     tracing_setup::init_tracing(service_name, true);
 }
+
+/// Serve `GET /metrics` for this process on `addr` (Set E 5.1).
+///
+/// One listener per binary, matching [`init`]: the collectors are separate
+/// processes and each exposes its own registry. Loopback only — the
+/// exposition is unauthenticated. Returns the bound address.
+///
+/// # Errors
+/// A non-loopback address or a failed bind.
+pub async fn init_metrics(
+    addr: std::net::SocketAddr,
+) -> Result<std::net::SocketAddr, metrics::ExporterError> {
+    metrics::serve(addr).await
+}

@@ -1,6 +1,6 @@
 # Phase 3 — Simulation Fidelity
 
-**Completion: 60% (3 / 5 — 3.1, 3.2, 3.4 done; 3.3/3.5 deferred for the reasons below & in FEAT-002 §6)**
+**Completion: 80% (4 / 5 — 3.1, 3.2, 3.4, 3.5 done; 3.3 `BLOCKED:UPSTREAM` on the market_simulator SDK)**
 
 **Goal:** Bring backtest behavior closer to live, and fix the fidelity-affecting
 heuristics. **Addresses:** #4, #5, #6, #7, #9, #14
@@ -35,7 +35,28 @@ heuristics. **Addresses:** #4, #5, #6, #7, #9, #14
 - **Files:** `crates/backtest/src/gaps.rs`.
 - **Verify:** test the N+1 / N+3 continuous-market case stays two ranges.
 
-### ☐ 3.3 Tick / quote replay — L (deferred: needs an out-of-scope SDK change)
+### ☐ 3.3 Tick / quote replay — L (`BLOCKED:UPSTREAM`: needs an out-of-repo SDK change)
+
+> `BLOCKED:UPSTREAM` 2026-10-03 (track LEGACY). Re-verified in code: neither backtest engine
+> consumes ticks or quotes. v1 `sim.rs` is bar-only through the pinned SDK; the Set U engine's
+> `Event` enum (`crates/strategy-engine/src/engine.rs`) is `Bar | Fill | OrderClosed | Timer`,
+> so Set U does **not** cover this. Nothing in this repo can close it. **What the
+> `market_simulator` SDK needs** (separate repo, `crates/backtest/src/sdk.rs`):
+> 1. A `TickHandler`/`QuoteHandler` registered next to `BarHandler`, taking `TradeTick`
+>    (`ts_event`, `price`, `size`, `aggressor_side`, `trade_id`) and `QuoteTick`
+>    (`ts_event`, `bid`, `ask`, `bid_size`, `ask_size`).
+> 2. A `SimDataFeed::push_trade_tick` / `push_quote_tick` intake that merges ticks and bars into one
+>    time-ordered stream (stable by `ts_event`, then by feed kind) so a bar never precedes the
+>    ticks it was built from.
+> 3. Fill model: a market order fills at the touch of the last `QuoteTick` (not the bar close);
+>    a resting limit fills when a `TradeTick` crosses it. Keep `SimOrderCommand` unchanged.
+> 4. A new immutable tag (D-0.1/0.2) so this repo bumps the pinned `rev` once.
+>
+> **This repo's half, after the SDK ships:** `BarStore::load_trades` (from `market_trades`,
+> dedup `argMax(.., ingested_time)`), the manager's LoadingData phase, a `requirements.rs`
+> coverage rule for the tick lane, and a Set U engine `Event::Trade`/`Event::Quote` variant
+> (U-territory, to be requested from the Set U owner). Quote history does not exist in the
+> store yet (Set P book/quote lane), so quote replay also waits on Set P.
 **Addresses #5.**
 - Feed `QuoteTick`/`TradeTick` from `market_trades` when a strategy subscribes to
   those lanes, not just OHLCV bars; route them through the SDK.
@@ -55,7 +76,20 @@ heuristics. **Addresses:** #4, #5, #6, #7, #9, #14
   convergence (or expose them as config) and document the rationale.
 - **Files:** `crates/backtest/src/requirements.rs`.
 
-### ☐ 3.5 Broaden & pin down the strategy surface — M (partially landed)
+### ☑ 3.5 Broaden & pin down the strategy surface — M (`DONE` 2026-10-03, absorbed by Set U)
+
+> `DONE` 2026-10-03 (track LEGACY). The deferred item was non-`Fixed` sizing, blocked on the
+> shared runtime. Both halves have since landed: the shared `strategy-runtime` builds
+> `PercentOfBalance` intents from a `SizingContext` (Set E 4.2; `intents.rs`, and the live
+> stage 3 sets the context -- `hot_path::percent_of_balance_sizes_a_real_order`), and the Set U
+> engine plans `units | notional | equity_fraction | risk | vol_target` sizes
+> (`strategy-engine/src/planner.rs::qty`, pinned by `tests/phase1_acceptance.rs` and
+> `crates/backtest/tests/portfolio.rs`) for the **same** engine in backtest, paper and live, so
+> the parity concern in the note below is met by construction. The legacy v1 `sim.rs` path stays
+> fixed-size on purpose: it fails fast with a plain-language message
+> (`manager.rs::humanize_error`), and v1 strategies are superseded by v3 authoring. Not
+> re-implementing sizing in `sim.rs` is the decision (ADR-D-3.5: rejected alternative was a
+> backtest-only `PercentOfBalance` in `sim.rs`, which would diverge from the one engine).
 **Addresses #6, #7.**
 - ☑ **Rising-edge semantics pinned** against a deterministic EMA-cross case
   (`sim.rs::ema_cross_over_rising_bars_places_one_order`, 4.2) — one crossover ⇒

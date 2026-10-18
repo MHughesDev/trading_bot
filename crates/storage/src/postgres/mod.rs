@@ -1,6 +1,7 @@
 //! sqlx pool + transaction helpers. (0032 seed complex strategies)
 pub mod decision_journal;
 pub mod deployments;
+pub mod fundamentals;
 pub mod instruments;
 pub mod models;
 pub mod orders;

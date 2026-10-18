@@ -1,7 +1,7 @@
 # Data Reach — Set P
 
-**Completion: 57% left (9 / 30 tasks). 9 done, 9 partial, 1 BLOCKED:UPSTREAM, 11 not started.**
-**Migrations shipped:** 0100 — `data_qc_reports` (P-2.2), 2026-09-15; 0104 — `cost_class` plus the
+**Completion: 17% left by units (22 / 30 tasks). 22 done, 5 partial, 3 blocked (P-0.4 upstream; P-3.1 and P-3.3 need a human: a FRED key, Alpaca credentials), 0 not started (2026-10-04, track F-DATA-T; earlier: 12 / 30, 2026-10-03, track DATA).**
+**Migrations shipped:** 0155 — `instruments` delisting + no-delete guard (P-4.4), 0156 — alternative-data sources and `fundamentals_fact` (P-3.x, P-1.3), 2026-10-03; 0100 — `data_qc_reports` (P-2.2), 2026-09-15; 0104 — `cost_class` plus the
 universe event log (P-4.3, P-4.5), 2026-09-28.
 
 > **This line read `0% (0 / 30 tasks). NOT STARTED.` until 2026-09-21** — while
@@ -198,3 +198,4 @@ As [Set S §5](../set-S/MASTER.md#5-the-agent-contract), with these differences:
 | Date | Phase | Task | Note |
 |---|---|---|---|
 | 2026-09-15 | — | — | Set P created from DATA-005 §7/§8/§11/§12 and 06_DATA §6, placed at Stage 0 of the roadmap ahead of Set S on the evidence-clock argument. Nothing implemented. |
+| 2026-10-03 | 0–4 | P-0.1…P-4.4 | Track DATA. **The forward clock started** (Kraken Futures funding/OI, 66 min live, 0 rows before); the census wrote its first rows; **3.09 years of BTC-USD/ETH-USD 1m backfilled from Coinbase** (99.94 % coverage, survived a SIGKILL) and graded **D** — DATA-005 §10.3 depth met, grade not, escalated as a user decision; four real defects fixed on the way (backfill `rows_written` triangle sum, fixed 5 h paging, re-polled funding settlements duplicated, `kraken_archive` unroutable). Migrations 0155 (delisting, no-delete guard), 0156 (alt-data sources, `fundamentals_fact`); ClickHouse `10_alt_data.sql`. P-1.2, P-4.3, P-4.4 → DONE; 9 → 12 done. |

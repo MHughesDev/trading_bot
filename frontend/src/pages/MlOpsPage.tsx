@@ -1,223 +1,223 @@
-import { useState, useMemo } from 'react'
+// Command Center -- /mlops
+//
+// Discovery for the Model Studio: every model as a card (default) or a sortable
+// table, with its status, headline metric, accuracy trend and the strategies
+// that use it. Every figure here is read from a registry route; a figure the
+// platform has not measured shows a dash, never zero (Set H H-5.2).
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
-import {
-  Brain,
-  BarChart2,
-  Zap,
-  Shield,
-  Code2,
-  Bot,
-  Plus,
-  LayoutGrid,
-  List,
-  Search,
-  Loader2,
-  ExternalLink,
-  ChevronRight,
-} from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import { Brain, LayoutGrid, List, Plus, ArrowDownUp } from 'lucide-react'
+import { Button } from '@/components/primitives/Button'
+import { Panel } from '@/components/primitives/Panel'
+import { Table, type Column } from '@/components/primitives/Table'
+import { SearchInput } from '@/components/primitives/Field'
+import { EmptyState, ErrorState, Skeleton } from '@/components/primitives/States'
 import { useModels } from '@/hooks/useMlOps'
+import { useModelSummaries } from '@/hooks/useModelSummaries'
 import { ModelStatusPill } from '@/components/mlops/ModelStatusPill'
 import { PlatformHealthPanel } from '@/components/mlops/PlatformHealthPanel'
 import { FalsificationPanel } from '@/components/mlops/FalsificationPanel'
+import { Sparkline, UsedByChips } from '@/components/mlops/StudioBits'
+import { KIND_ICONS } from '@/components/mlops/kindIcons'
+import {
+  ALL_KINDS,
+  ALL_STATUSES,
+  KIND_LABELS,
+  assetClassOptions,
+  formatMetric,
+  metricLabel,
+  readViewMode,
+  sortModels,
+  writeViewMode,
+  type ModelSummary,
+  type SortDir,
+  type SortKey,
+  type ViewMode,
+} from '@/components/mlops/studio.helpers'
 import type { AiModel, ModelKind, ModelStatus } from '@/api/mlops'
 import { format } from 'date-fns'
 
-const KIND_ICONS: Record<ModelKind, React.ElementType> = {
-  forecaster: Brain,
-  signal_ranker: BarChart2,
-  trade_decision: Zap,
-  risk_sizing: Shield,
-  embedding: Code2,
-  external_llm_adapter: Bot,
-}
-
-const KIND_LABELS: Record<ModelKind, string> = {
-  forecaster: 'Forecaster',
-  signal_ranker: 'Signal Ranker',
-  trade_decision: 'Trade Decision',
-  risk_sizing: 'Risk Sizing',
-  embedding: 'Embedding',
-  external_llm_adapter: 'LLM Adapter',
-}
-
-const ALL_KINDS: ModelKind[] = [
-  'forecaster',
-  'signal_ranker',
-  'trade_decision',
-  'risk_sizing',
-  'embedding',
-  'external_llm_adapter',
-]
-
-const ALL_STATUSES: ModelStatus[] = [
-  'draft',
-  'training',
-  'evaluating',
-  'candidate',
-  'active',
-  'archived',
-  'failed',
-]
-
 const SPRING = { type: 'spring' as const, stiffness: 380, damping: 30 }
 
-function ModelCardSkeleton() {
+const SORT_LABELS: Record<SortKey, string> = {
+  updated: 'Updated',
+  name: 'Name',
+  kind: 'Kind',
+  status: 'Status',
+  metric: 'Primary metric',
+  version: 'Version',
+}
+
+function storage(): Storage | null {
+  try {
+    return typeof window === 'undefined' ? null : window.localStorage
+  } catch {
+    return null
+  }
+}
+
+function MetricCell({ summary }: { summary: ModelSummary | undefined }) {
+  const p = summary?.primary
+  if (!p) return <span className="mut">—</span>
   return (
-    <div className="panel p-5 animate-pulse">
-      <div className="flex items-start gap-3 mb-4">
-        <div className="h-9 w-9 rounded-lg bg-sunken" />
-        <div className="flex-1 space-y-2">
-          <div className="h-4 w-3/4 rounded bg-sunken" />
-          <div className="h-3 w-1/2 rounded bg-sunken" />
-        </div>
-        <div className="h-5 w-16 rounded-full bg-sunken" />
-      </div>
-      <div className="space-y-2">
-        <div className="h-3 w-full rounded bg-sunken" />
-        <div className="h-3 w-2/3 rounded bg-sunken" />
-      </div>
-      <div className="mt-4 flex gap-2">
-        <div className="h-8 w-16 rounded bg-sunken" />
-        <div className="h-8 w-24 rounded bg-sunken" />
-      </div>
-    </div>
+    <span className="num" title={p.key}>
+      <span className="mut" style={{ fontSize: 'var(--t-11)' }}>
+        {metricLabel(p.key)}{' '}
+      </span>
+      {formatMetric(p.key, p.value)}
+    </span>
   )
 }
 
-function ModelCard({ model }: { model: AiModel }) {
+function versionLabel(s: ModelSummary | undefined): string {
+  if (!s) return '—'
+  if (s.productionVersion !== null) return `v${s.productionVersion}`
+  if (s.latestVersion !== null) return `v${s.latestVersion} (not promoted)`
+  return 'no versions'
+}
+
+function ModelCardSkeleton() {
+  return (
+    <Panel aria-hidden>
+      <div style={{ padding: 'var(--s-4)', display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
+        <Skeleton width="70%" height={16} />
+        <Skeleton width="40%" height={11} />
+        <Skeleton width="100%" height={28} />
+        <Skeleton width="60%" height={12} />
+      </div>
+    </Panel>
+  )
+}
+
+function ModelCard({ model, summary }: { model: AiModel; summary: ModelSummary | undefined }) {
   const navigate = useNavigate()
-  const shouldReduce = useReducedMotion()
+  const reduce = useReducedMotion()
   const Icon = KIND_ICONS[model.model_kind]
+  const open = (tab?: string) =>
+    navigate(`/mlops/${model.model_id}${tab ? `?tab=${tab}` : ''}`)
 
   return (
     <motion.div
       layoutId={model.model_id}
       layout
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={shouldReduce ? { duration: 0.001 } : SPRING}
-      className="group rounded-xl border border-border bg-surface p-5 hover:border-border-2 hover:shadow-sm transition-shadow cursor-pointer"
-      onClick={() => navigate(`/mlops/${model.model_id}`)}
+      exit={{ opacity: 0, y: -6 }}
+      transition={reduce ? { duration: 0.001 } : SPRING}
     >
-      {/* Header */}
-      <div className="flex items-start gap-3 mb-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sunken text-accent shrink-0">
-          <Icon className="h-4.5 w-4.5" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-text truncate text-sm leading-5">
-            {model.display_name}
-          </h3>
-          <p className="text-xs text-fg-secondary font-mono">{model.slug}</p>
-        </div>
-        <ModelStatusPill status={model.status} />
-      </div>
-
-      {/* Description */}
-      {model.description && (
-        <p className="text-xs text-fg-secondary line-clamp-2 mb-3">{model.description}</p>
-      )}
-
-      {/* Badges */}
-      <div className="flex flex-wrap gap-1.5 mb-4">
-        <span className="inline-flex items-center rounded-md bg-sunken px-2 py-0.5 text-xs text-fg-secondary border border-border">
-          {KIND_LABELS[model.model_kind]}
-        </span>
-        {model.asset_class && (
-          <span className="inline-flex items-center rounded-md bg-sunken px-2 py-0.5 text-xs text-fg-secondary border border-border">
-            {model.asset_class}
-          </span>
-        )}
-        {model.definition.framework && (
-          <span className="inline-flex items-center rounded-md bg-sunken px-2 py-0.5 text-xs font-mono text-fg-tertiary border border-border">
-            {model.definition.framework}
-          </span>
-        )}
-      </div>
-
-      <div className="text-xs text-fg-tertiary mb-4">
-        Updated {format(new Date(model.updated_at), 'MMM d, yyyy')}
-      </div>
-
-      {/* Actions */}
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          className="flex-1 text-xs h-7"
-          onClick={(e) => {
-            e.stopPropagation()
-            navigate(`/mlops/${model.model_id}`)
+      <Panel data-testid="model-card">
+        <div
+          role="link"
+          tabIndex={0}
+          aria-label={`Open ${model.display_name}`}
+          onClick={() => open()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') open()
           }}
+          style={{ padding: 'var(--s-4)', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}
         >
-          Open
-          <ChevronRight className="h-3 w-3 ml-1" />
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          className="text-xs h-7"
-          onClick={(e) => {
-            e.stopPropagation()
-            navigate(`/mlops/${model.model_id}?tab=test`)
-          }}
-        >
-          <ExternalLink className="h-3 w-3 mr-1" />
-          Test
-        </Button>
-      </div>
-    </motion.div>
-  )
-}
-
-function ModelTableRow({ model }: { model: AiModel }) {
-  const navigate = useNavigate()
-  const Icon = KIND_ICONS[model.model_kind]
-
-  return (
-    <tr
-      className="border-b border-border hover:bg-sunken cursor-pointer transition-colors"
-      onClick={() => navigate(`/mlops/${model.model_id}`)}
-    >
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Icon className="h-4 w-4 text-accent shrink-0" />
-          <div>
-            <div className="text-sm font-medium text-text">{model.display_name}</div>
-            <div className="text-xs text-fg-tertiary font-mono">{model.slug}</div>
+          <div style={{ display: 'flex', gap: 'var(--s-3)', alignItems: 'flex-start' }}>
+            <Icon size={18} aria-hidden style={{ flex: 'none', marginTop: 2, color: 'var(--fg-accent)' }} />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div className="h2 truncate-1">{model.display_name}</div>
+              <div className="mut truncate-1" style={{ fontSize: 'var(--t-11)' }}>
+                {KIND_LABELS[model.model_kind]} · {model.asset_class || 'any asset'} · {versionLabel(summary)}
+              </div>
+            </div>
+            <ModelStatusPill status={model.status} />
           </div>
+
+          <Sparkline points={summary?.series ?? []} label={summary?.primary ? metricLabel(summary.primary.key) : 'metric'} width={240} />
+
+          <div style={{ display: 'flex', gap: 'var(--s-4)', alignItems: 'baseline' }}>
+            <MetricCell summary={summary} />
+            <span className="mut" style={{ fontSize: 'var(--t-11)' }} title="Latency and cost per 1k come from inference traces, which are not rolled up per model yet.">
+              p95 · cost/1k not measured
+            </span>
+          </div>
+
+          <UsedByChips usedBy={summary?.usedBy ?? null} />
         </div>
-      </td>
-      <td className="px-4 py-3 text-sm text-fg-secondary">{KIND_LABELS[model.model_kind]}</td>
-      <td className="px-4 py-3">
-        <ModelStatusPill status={model.status} />
-      </td>
-      <td className="px-4 py-3 text-sm text-fg-secondary">{model.asset_class}</td>
-      <td className="px-4 py-3 text-xs text-fg-tertiary font-mono">
-        {format(new Date(model.updated_at), 'MMM d, yyyy')}
-      </td>
-    </tr>
+        <div style={{ display: 'flex', gap: 'var(--s-2)', padding: '0 var(--s-4) var(--s-4)' }}>
+          <Button size="sm" onClick={() => open()}>Open</Button>
+          <Button size="sm" onClick={() => open('test')}>Test</Button>
+          <Button size="sm" onClick={() => open('train')}>Train</Button>
+        </div>
+      </Panel>
+    </motion.div>
   )
 }
 
 export function MlOpsPage() {
   const navigate = useNavigate()
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid')
-  const [kindFilter, setKindFilter] = useState<ModelKind | ''>('')
-  const [statusFilter, setStatusFilter] = useState<ModelStatus | ''>('')
+  const [view, setView] = useState<ViewMode>(() => readViewMode(storage()))
+  const [kind, setKind] = useState<ModelKind | ''>('')
+  const [status, setStatus] = useState<ModelStatus | ''>('')
+  const [assetClass, setAssetClass] = useState('')
   const [search, setSearch] = useState('')
+  const [sortKey, setSortKey] = useState<SortKey>('updated')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
 
-  const { data, isLoading } = useModels({
-    kind: kindFilter || undefined,
-    status: statusFilter || undefined,
-    q: search || undefined,
-  })
-
+  const filters = {
+    kind: kind || undefined,
+    status: status || undefined,
+    asset_class: assetClass || undefined,
+    q: search.trim() || undefined,
+  }
+  const { data, isLoading, isError, refetch } = useModels(filters)
   const models = useMemo(() => data?.models ?? [], [data])
+  const { summaries } = useModelSummaries(models)
+  const sorted = useMemo(
+    () => sortModels(models, summaries, sortKey, sortDir),
+    [models, summaries, sortKey, sortDir],
+  )
+  const assetClasses = useMemo(() => assetClassOptions(models, assetClass), [models, assetClass])
+  const anyFilter = Boolean(filters.kind || filters.status || filters.asset_class || filters.q)
+
+  function changeView(next: ViewMode) {
+    setView(next)
+    writeViewMode(storage(), next)
+  }
+  function clearFilters() {
+    setKind('')
+    setStatus('')
+    setAssetClass('')
+    setSearch('')
+  }
+
+  const columns: Column<AiModel>[] = [
+    {
+      key: 'name',
+      header: 'Model',
+      cell: (m) => {
+        const Icon = KIND_ICONS[m.model_kind]
+        return (
+          <span style={{ display: 'inline-flex', gap: 'var(--s-2)', alignItems: 'center' }}>
+            <Icon size={14} aria-hidden style={{ color: 'var(--fg-accent)' }} />
+            <span className="truncate-1">{m.display_name}</span>
+          </span>
+        )
+      },
+    },
+    { key: 'kind', header: 'Kind', numeric: false, align: 'left', cell: (m) => KIND_LABELS[m.model_kind] },
+    { key: 'status', header: 'Status', numeric: false, align: 'left', cell: (m) => <ModelStatusPill status={m.status} /> },
+    { key: 'metric', header: 'Primary metric', cell: (m) => <MetricCell summary={summaries[m.model_id]} /> },
+    { key: 'version', header: 'Version', cell: (m) => versionLabel(summaries[m.model_id]) },
+    {
+      key: 'usedby',
+      header: 'Used by',
+      cell: (m) => {
+        const u = summaries[m.model_id]?.usedBy
+        return u === null || u === undefined ? '…' : u.length
+      },
+    },
+    {
+      key: 'updated',
+      header: 'Updated',
+      cell: (m) => format(new Date(m.updated_at), 'MMM d, yyyy'),
+    },
+  ]
 
   return (
     <>
@@ -225,159 +225,117 @@ export function MlOpsPage() {
         <h1 className="h1">Models</h1>
         <span className="lbl">Train, evaluate and deploy the models your strategies call</span>
         <div className="spacer" />
-        <button type="button" className="btn sm" onClick={() => navigate('/mlops/leaderboard')}>
-          Leaderboard
-        </button>
-        <button type="button" className="btn sm" onClick={() => navigate('/mlops/graph')}>
-          Lineage
-        </button>
-        <button type="button" className="btn sm primary" onClick={() => navigate('/mlops/create')}>
-          <Plus className="h-3.5 w-3.5" />
+        <Button size="sm" onClick={() => navigate('/mlops/leaderboard')}>Leaderboard / compare</Button>
+        <Button size="sm" onClick={() => navigate('/mlops/graph')}>Lineage</Button>
+        <Button size="sm" variant="primary" icon={<Plus size={13} aria-hidden />} onClick={() => navigate('/mlops/create')}>
           New model
-        </button>
+        </Button>
       </div>
 
       <div className="page-body">
-      {/* The platform's report on its own judgment, above the models rather than
-          behind a tab (SPEC §16.2, ADR-P5-01). A self-monitoring panel nobody
-          navigates to is a self-monitoring panel nobody reads, and §16.2's whole
-          observation is that this is the layer that gets skipped. */}
-      <PlatformHealthPanel className="mb-4" />
-      <FalsificationPanel className="mb-4" />
+        {/* The platform's report on its own judgment, above the models rather than
+            behind a tab (SPEC §16.2, ADR-P5-01). */}
+        <PlatformHealthPanel className="mb-4" />
+        <FalsificationPanel className="mb-4" />
 
-      {/* Filter bar */}
-      <div className="mb-5 flex flex-wrap items-center gap-3">
-        {/* Search */}
-        <div className="relative flex-1 min-w-[200px] max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-fg-tertiary" />
-          <input
-            type="text"
-            placeholder="Search models…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 h-8 rounded-lg border border-border bg-surface text-sm text-text placeholder:text-fg-tertiary focus:outline-none focus:border-accent transition-colors"
-          />
-        </div>
-
-        {/* Kind filter */}
-        <select
-          value={kindFilter}
-          onChange={(e) => setKindFilter(e.target.value as ModelKind | '')}
-          className="h-8 rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:border-accent"
-        >
-          <option value="">All kinds</option>
-          {ALL_KINDS.map((k) => (
-            <option key={k} value={k}>
-              {KIND_LABELS[k]}
-            </option>
-          ))}
-        </select>
-
-        {/* Status filter */}
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as ModelStatus | '')}
-          className="h-8 rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:border-accent"
-        >
-          <option value="">All statuses</option>
-          {ALL_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {s.charAt(0).toUpperCase() + s.slice(1)}
-            </option>
-          ))}
-        </select>
-
-        {/* View toggle */}
-        <div className="ml-auto flex rounded-lg border border-border overflow-hidden">
-          <button
-            onClick={() => setViewMode('grid')}
-            className={cn(
-              'flex items-center justify-center w-8 h-8 transition-colors',
-              viewMode === 'grid'
-                ? 'bg-sunken text-text'
-                : 'bg-surface text-fg-secondary hover:text-text',
-            )}
-          >
-            <LayoutGrid className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={() => setViewMode('table')}
-            className={cn(
-              'flex items-center justify-center w-8 h-8 transition-colors border-l border-border',
-              viewMode === 'table'
-                ? 'bg-sunken text-text'
-                : 'bg-surface text-fg-secondary hover:text-text',
-            )}
-          >
-            <List className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-
-      {/* Body */}
-      {isLoading ? (
-        viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <ModelCardSkeleton key={i} />
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--s-3)', alignItems: 'center', marginBottom: 'var(--s-4)' }}>
+          <SearchInput value={search} onValueChange={setSearch} placeholder="Search models…" aria-label="Search models" />
+          <select aria-label="Kind" value={kind} onChange={(e) => setKind(e.target.value as ModelKind | '')}>
+            <option value="">All kinds</option>
+            {ALL_KINDS.map((k) => (
+              <option key={k} value={k}>{KIND_LABELS[k]}</option>
             ))}
-          </div>
-        ) : (
-          <div className="flex items-center justify-center py-20 text-fg-tertiary">
-            <Loader2 className="h-6 w-6 animate-spin" />
-          </div>
-        )
-      ) : models.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border py-24 text-center">
-          <Brain className="h-12 w-12 text-fg-tertiary" />
-          <div>
-            <p className="text-base font-medium text-text">No models yet</p>
-            <p className="mt-1 text-sm text-fg-secondary">
-              Create your first model to get started with AI-powered trading.
-            </p>
-          </div>
-          <Button onClick={() => navigate('/mlops/create')}>
-            <Plus className="h-4 w-4" />
-            Create Model
-          </Button>
-        </div>
-      ) : viewMode === 'grid' ? (
-        <AnimatePresence mode="popLayout">
-          <motion.div
-            layout
-            className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"
-          >
-            {models.map((model) => (
-              <ModelCard key={model.model_id} model={model} />
+          </select>
+          <select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as ModelStatus | '')}>
+            <option value="">All statuses</option>
+            {ALL_STATUSES.map((s) => (
+              <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
             ))}
-          </motion.div>
-        </AnimatePresence>
-      ) : (
-        <div className="rounded-xl border border-border bg-surface overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border bg-sunken">
-                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Model</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Kind</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Asset Class</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Updated</th>
-              </tr>
-            </thead>
-            <tbody>
-              {models.map((model) => (
-                <ModelTableRow key={model.model_id} model={model} />
+          </select>
+          <select aria-label="Asset class" value={assetClass} onChange={(e) => setAssetClass(e.target.value)}>
+            <option value="">All asset classes</option>
+            {assetClasses.map((a) => (
+              <option key={a} value={a}>{a}</option>
+            ))}
+          </select>
+
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--s-2)', alignItems: 'center' }}>
+            <select aria-label="Sort by" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
+              {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+                <option key={k} value={k}>{`Sort: ${SORT_LABELS[k]}`}</option>
               ))}
-            </tbody>
-          </table>
+            </select>
+            <Button
+              size="sm"
+              aria-label={sortDir === 'asc' ? 'Ascending' : 'Descending'}
+              icon={<ArrowDownUp size={13} aria-hidden />}
+              onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+            >
+              {sortDir === 'asc' ? 'Asc' : 'Desc'}
+            </Button>
+            <Button size="sm" active={view === 'cards'} aria-label="Card view" icon={<LayoutGrid size={13} aria-hidden />} onClick={() => changeView('cards')} />
+            <Button size="sm" active={view === 'table'} aria-label="Table view" icon={<List size={13} aria-hidden />} onClick={() => changeView('table')} />
+          </div>
         </div>
-      )}
 
-      {!isLoading && models.length > 0 && (
-        <p className="mt-4 text-xs text-fg-tertiary text-right">
-          {data?.total ?? models.length} model{(data?.total ?? models.length) !== 1 ? 's' : ''}
-        </p>
-      )}
+        {isError ? (
+          <ErrorState message="The model list could not be loaded." detail="This is a failed request, not an empty registry." onRetry={() => void refetch()} />
+        ) : isLoading ? (
+          view === 'cards' ? (
+            <div style={{ display: 'grid', gap: 'var(--s-4)', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))' }}>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <ModelCardSkeleton key={i} />
+              ))}
+            </div>
+          ) : (
+            <Panel>
+              <Table columns={columns} rows={[]} rowKey={(m) => m.model_id} loading sortable={false} />
+            </Panel>
+          )
+        ) : models.length === 0 ? (
+          anyFilter ? (
+            <EmptyState
+              message="No models match these filters."
+              action={<Button size="sm" onClick={clearFilters}>Clear filters</Button>}
+            />
+          ) : (
+            <EmptyState
+              icon={<Brain size={20} aria-hidden />}
+              message="No models yet"
+              detail="Create your first model to train, evaluate and deploy it."
+              action={
+                <Button variant="primary" icon={<Plus size={13} aria-hidden />} onClick={() => navigate('/mlops/create')}>
+                  Create model
+                </Button>
+              }
+            />
+          )
+        ) : view === 'cards' ? (
+          <AnimatePresence mode="popLayout">
+            <motion.div layout style={{ display: 'grid', gap: 'var(--s-4)', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))' }}>
+              {sorted.map((m) => (
+                <ModelCard key={m.model_id} model={m} summary={summaries[m.model_id]} />
+              ))}
+            </motion.div>
+          </AnimatePresence>
+        ) : (
+          <Panel>
+            <Table
+              columns={columns}
+              rows={sorted}
+              rowKey={(m) => m.model_id}
+              sortable={false}
+              onRowClick={(m) => navigate(`/mlops/${m.model_id}`)}
+              caption="Models"
+            />
+          </Panel>
+        )}
+
+        {!isLoading && !isError && models.length > 0 && (
+          <p className="mut" style={{ marginTop: 'var(--s-3)', textAlign: 'right', fontSize: 'var(--t-11)' }}>
+            {data?.total ?? models.length} model{(data?.total ?? models.length) !== 1 ? 's' : ''}
+          </p>
+        )}
       </div>
     </>
   )

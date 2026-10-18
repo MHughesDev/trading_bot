@@ -17,7 +17,7 @@ const MAX_WAIT_SECS: u64 = 600;
 const POLL_SECS: u64 = 5;
 
 fn missing(field: &str) -> Value {
-    json!({ "error": "missing_field", "field": field })
+    crate::tool_error::missing_field(field)
 }
 
 fn str_field(params: &Value, key: &str) -> Option<String> {
@@ -327,7 +327,7 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
         )
         .internal()
     };
-    vec![
+    crate::result_shape::declared(vec![
         // `backtest_strategy` is namespace `backtest`, not `research`: a step
         // that wants "backtest this" routes to the namespace with the word in
         // it, and the whole point of this tool is that the honest path was too
@@ -533,7 +533,7 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
         )
         .internal()
         .notes("choose_null"),
-    ]
+    ])
 }
 
 // ── The backtest pipeline ───────────────────────────────────────────────────
@@ -565,11 +565,7 @@ pub async fn backtest_strategy(
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if strategy_id.is_empty() {
-        return json!({
-            "error": "missing_field",
-            "field": "strategy_id",
-            "fix": "the slug you passed to create_strategy"
-        });
+        return crate::tool_error::missing_field_because("strategy_id", "it is the slug you passed to create_strategy");
     }
     let instrument = params
         .get("instrument_id")
@@ -639,11 +635,12 @@ pub async fn backtest_strategy(
             match found {
                 Some(u) => u,
                 None => {
-                    return json!({
-                        "error": "experiment_failed",
-                        "detail": "could not create or find the experiment for this strategy",
-                        "response": created
-                    })
+                    return crate::tool_error::refuse_extra(
+                        "experiment_failed",
+                        "could not create or find the experiment for this strategy.",
+                        "check that `strategy_id` is a stored strategy slug (list_strategies), then call again",
+                        json!({ "response": created }),
+                    )
                 }
             }
         }

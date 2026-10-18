@@ -1,6 +1,6 @@
 # Phase 2 — Quality and eligibility
 
-**Completion: 83% (4 / 6 tasks). P-2.3 `NOT STARTED` — enforcement, deliberately last; see P-2.6.** P-2.2 was downgraded from `DONE` on 2026-09-21: `data_qc_reports` has no reader and no writer anywhere outside its own migration.
+**Completion: 100% (6 / 6 tasks) — 2026-10-04 (track F-DATA-T): P-2.2 and P-2.3 closed; earlier line: 67% (4 / 6 tasks), plus 2 `PARTIAL` — 2026-10-03: `data_qc_reports` has a writer and a reader, and the bars manifest carries the grade (P-2.2); enforcement (P-2.3) is outside track DATA. The previous headline said 83% over the same 4 / 6.**
 
 **Requirement IDs:** DA-07.
 **Spec:** [DATA-005 §7](../../../specs/DATA-005-data-api-v2.md) (the checks, the grades, the
@@ -46,7 +46,26 @@ report; the config version is recorded on every report.
 **Traces:** DATA-005 §7; DA-07.
 
 ### P-2.2 Grades A–D and `data_qc_reports` — M
-`PARTIAL` — **downgraded from `DONE` on 2026-09-21.** The acceptance is
+`DONE` 2026-10-04 (track F-DATA-T) — **reports exist for every series that holds bars, and are written without anyone asking.** `census_jobs::run_once` grades every historical series with the `dataplane::qc` battery after the nightly census (expected bars from the census, not the bars' own ends) and persists to `data_qc_reports`; the 2026-10-04 live pass wrote 11 reports (Coinbase BTC/ETH 1m/1h/1d B, `SYN-PLANTED` B, `BTC-USDT` B, `BTC-USD/binance` B, Kraken 1m D x2). `DataQcWorker` (`.with_pool(app_state.pg)` is in `main.rs`) writes on demand. `latest_grade` now reads the report over the **deepest** series (most bars examined, then newest; **ADR-P2-3a**: ordering by recency alone let a dead 13k-bar Kraken series graded D last decide a 1.6M-bar Coinbase series' admission). Rejected: the worst letter across venues (a dead venue would refuse every Experiment on its pair).
+
+Earlier: `PARTIAL` 2026-10-03 (track DATA) — **`data_qc_reports` has a writer, a reader and a manifest that carries it; the job worker still grades with
+the old function.**
+New `crates/storage/src/clickhouse/qc_reports.rs`: `load_qc_bars` (latest revision per bar from
+`market_bar`), `grade_and_persist` (the `dataplane::qc` battery — not `data_admission::grade`'s four
+thresholds — with `expected_bars` supplied, never derived from the bars' own ends), `persist` (idempotent
+under one config version; the table refuses UPDATE, so it is `DO NOTHING` + read-back), and
+`latest_grade`. `GET /api/data/bars`'s manifest now carries `qc_grade`, `qc_report_id` and the reasons, or
+`"ungraded"` — never a letter it did not earn. `storage/tests/qc_reports_live.rs` runs it end to end
+(scratch ClickHouse + Postgres on 5433): a day with a planted 200-minute hole grades **D**, persists with
+reasons, re-grading returns the same id, and `app_role` can read the table. Clauses 1 and 2 keep their
+`grade.rs` tests.
+**Missing:** `api::workers::DataQcWorker` should call `grade_and_persist` instead of
+`data_admission::grade` (not DATA territory — exact edit in the report), and a census-driven
+`expected_bars` for it. Until then reports are written only by callers of the storage function.
+
+**Wave 2 (2026-10-03, track DATA):** `api::workers::DataQcWorker` now runs the battery and persists the report when it is given a pool (`.with_pool(pg)`) and the manifest names a `venue`; its result carries `grade_source`, `report_id` and the old four-threshold letter as `legacy_grade`. **Still missing:** `main.rs` constructs it with `DataQcWorker::new(..)` only; it needs `.with_pool(app_state.pg.clone())`.
+
+Earlier: `PARTIAL` — **downgraded from `DONE` on 2026-09-21.** The acceptance is
 *"persisted to `data_qc_reports` … every manifest carries the grade and the
 report id"*. The string `data_qc_reports` appears **nowhere in `crates/`,
 `frontend/src/` or `xtask/`** — only inside its own migration. The table is live
@@ -69,7 +88,21 @@ passing; every manifest carries the grade and the report id.
 **Traces:** DATA-005 §7, §6 (manifests); DA-07.
 
 ### P-2.3 Refusal at Experiment creation, and the waiver — M
-`NOT STARTED`
+`DONE` 2026-10-04 (track F-DATA-T) — **`REFUSE_UNGRADED` is `true`.** Reports now exist (P-2.2), so the flip the 2026-10-03 wave deferred is made, with its test line: `an_ungraded_series_is_refused_and_told_how_to_get_graded` (refusal code `data_ungraded`, with the fix: the nightly census grades every series that holds bars, or submit a `data_qc` job). **ADR-P2-3a:** refuse ungraded. Rejected: leaving it open (an Experiment on data nobody graded is the case DA-07 exists to stop). `api` data_admission: 16 tests passed. Risk to watch: any HTTP test that creates an Experiment against a database with no `data_qc_reports` rows is now refused with 422 (none found in this pass; `api` integration suites were not all re-run).
+
+Earlier: `PARTIAL` 2026-10-03 (track DATA) — **re-checked; the work is entirely outside DATA's territory.** The refusal logic exists —
+`api::data_admission::admit_experiment` (D refused, C needs a `Waiver` naming who and why) — and its only
+caller is the auditor's fixture runner; `POST /api/hypotheses` and `POST /api/backtest/experiments` never
+call it. `approval_requests.kind` is free text, so `qc_waiver` needs no migration. What is needed: in both
+create handlers, look up `storage::clickhouse::qc_reports::latest_grade` for every declared
+`(instrument, timeframe)`, call `admit_experiment`, return 422 `data_quality_insufficient` with the
+report's `reasons`, and record an approved `qc_waiver` id on the lineage; plus one test per token scope.
+Note the two grade functions disagree (`data_admission::grade` vs the `dataplane::qc` battery) — the
+enforcement must read the persisted battery grade (P-2.2), not recompute with the thresholds.
+
+**Wave 2 (2026-10-03, track DATA):** built, not yet exercised end to end. `POST /api/backtest/experiments` now calls `data_admission::check_experiment_data` **before** `suite.create_experiment`. Every series named by the `universe_ref` (comma-separated symbols, at the `eval_resolution`) is checked against its persisted battery grade. D is refused outright. C needs `qc_waiver_id` naming an approved `approval_requests` row: kind `qc_waiver`, answered by a human with an `approve` option and a note, payload naming that exact instrument, timeframe and grade C. The 422 `data_quality_insufficient` lists **every** failing series with its report id and reasons. Migration **0157** `experiment_data_admission` records report, grade and waiver id per series, append-only, with CHECKs that a waiver exists only against a C and a grade only with a report (exercised on a scratch Postgres: the constraints, the immutability trigger, `app_role`). 7 new tests in `data_admission.rs`: D refused with reasons; C fails without and passes with a waiver; a waiver neither decorates a B nor rescues a D; all failing series listed; selections skipped, not cleaned; and `no_token_scope_can_bypass_the_creation_gate` (the decision has no scope input, the handler gates before it creates with no scope branch between, each of `RESEARCH_SCOPES`, `web:full` and the reader scope named). **ADR 1:** the plan's `POST /api/hypotheses` does not exist, and a hypothesis declares a falsifier but no data series, so there is nothing to grade there; the gate sits where the data is declared. **ADR 2:** a series with no persisted report is **not** refused (`REFUSE_UNGRADED = false`) and is listed as `ungraded` in the response: until P-2.2 nothing wrote reports, so refusing it would refuse every Experiment (P-2.6's sequencing rule); flipping it is one constant and one test assertion. Rejected: refusing ungraded now. **Missing:** 0157 applied to the platform database; a Postgres-level test of `find_waiver` / `record_admission` through the real `approval_requests` table (the scratch DB lacks its parents); the waiver id appearing in the Experiment's *report* (it is in the creation response and the lineage table, not yet read by the report builder).
+
+Earlier: `NOT STARTED`
 
 `POST /api/hypotheses` and `POST /api/backtest/experiments` refuse grade D outright and refuse
 grade C without an approved waiver, returning `422 data_quality_insufficient` **listing the

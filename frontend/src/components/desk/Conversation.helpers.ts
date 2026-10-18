@@ -1,5 +1,6 @@
 import type { DeskCard, ProvenanceMark, WorkingState } from '@/api/desk'
 import type { IdResolver } from './Shared'
+import { streamEvidence } from '@/lib/desk/evidence'
 
 /**
  * The set of ids the platform can actually open.
@@ -51,5 +52,25 @@ export function makeResolver(state: WorkingState | null, cards: DeskCard[]): IdR
       known.set(handle, { label: `full result of ${c.headline}`, kind: 'handle', mark: c.mark ?? null })
     }
   }
+  // The stored ToolResult one level down — `content_json.content.ids` and
+  // `.handle`, where the drivers actually write them. The two reads above look
+  // at the outer object, where neither field has ever been, so without this
+  // every id a tool returned rendered struck through as "not found".
+  for (const e of streamEvidence(cards)) {
+    if (known.has(e.id)) continue
+    known.set(e.id, {
+      label: e.key === 'handle' ? `full result of ${e.tool}, step ${e.step}` : `${e.key} from ${e.tool}, step ${e.step}`,
+      kind: e.key === 'handle' ? 'handle' : 'tool result',
+      mark: e.mark,
+    })
+  }
   return (id) => known.get(id) ?? null
+}
+
+const TABS = ['state', 'evidence', 'memory', 'tools', 'cost', 'agenda', 'charter'] as const
+
+/** The right panel's opening tab, from `?tab=` on the current address. */
+export function initialTab(search: string = typeof window === 'undefined' ? '' : window.location.search) {
+  const t = new URLSearchParams(search).get('tab')
+  return ((TABS as readonly string[]).includes(t ?? '') ? t : 'state') as (typeof TABS)[number]
 }

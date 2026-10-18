@@ -24,7 +24,7 @@ pub async fn estimate_cost(api: &ApiClient, params: &Value) -> Value {
         .map(str::trim)
         .filter(|s| !s.is_empty())
     else {
-        return json!({ "error": "missing_field", "field": "tool" });
+        return crate::tool_error::missing_field("tool");
     };
     let body = json!({
         "tool": tool,

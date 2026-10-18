@@ -31,6 +31,7 @@
 use std::collections::BTreeMap;
 
 use chrono::NaiveDate;
+use harness::memory::conflict::{corroborate, decide_write, link_conflict, WriteAction};
 use harness::memory::{
     Confidence, DataWindow, Direction, Entry, EntryError, EvidenceClass, Kind, Measurement,
     Provenance,
@@ -53,6 +54,26 @@ pub enum MemoryError {
         field: &'static str,
         value: String,
     },
+}
+
+/// The `extra.directive` of a preference that skips the Research offer (S-10.2).
+pub const ALWAYS_START_DIRECTIVE: &str = "always_start_research";
+
+/// What [`MemoryStore::put_checked`] did with a finding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteOutcome {
+    /// A row was written (or replaced), linked to these contradicting ids.
+    Inserted { conflicts_with: Vec<String> },
+    /// No row was written: this stored entry's corroboration count rose.
+    Corroborated { into: String },
+}
+
+/// What one [`MemoryStore::sweep_retention`] pass did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct SweepReport {
+    pub examined: u64,
+    pub archived_now: u64,
+    pub staled_now: u64,
 }
 
 pub struct MemoryStore {
@@ -159,7 +180,85 @@ impl MemoryStore {
     /// refusal the database would give, with a message naming the field;
     /// [`MemoryError::Sqlx`] for anything the database refuses that this did not.
     pub async fn put(&self, user_id: Uuid, entry: &Entry) -> Result<(), MemoryError> {
-        Self::write(&self.pool, user_id, entry).await
+        self.put_checked(user_id, entry).await.map(|_| ())
+    }
+
+    /// [`Self::put`], and says what the write did (S-4.15, S-4.16).
+    ///
+    /// This is the one door a finding goes through, so it is where the
+    /// memory-poisoning guard lives. For a measured `finding` it asks
+    /// [`harness::memory::conflict::decide_write`] what the existing live
+    /// findings on the subject say:
+    ///
+    /// * a **contradiction** (opposing direction, disjoint intervals, overlapping
+    ///   horizon, both `established`) inserts the row linked both ways in
+    ///   `conflicts_with`, in one transaction, and downgrades neither;
+    /// * a **near-duplicate** inserts nothing: the stored row's corroboration
+    ///   count rises and it gains the writing run's id;
+    /// * anything else inserts.
+    ///
+    /// Everything else (non-findings, findings with no measurement, a re-write
+    /// of an id that already exists) is the plain upsert it always was.
+    ///
+    /// # Errors
+    /// As [`Self::put`].
+    pub async fn put_checked(
+        &self,
+        user_id: Uuid,
+        entry: &Entry,
+    ) -> Result<WriteOutcome, MemoryError> {
+        entry.validate()?;
+        if entry.kind != Kind::Finding || entry.measurement.is_none() {
+            Self::write(&self.pool, user_id, entry).await?;
+            return Ok(WriteOutcome::Inserted {
+                conflicts_with: entry.conflicts_with.clone(),
+            });
+        }
+        // Including tainted entries: a contradiction with a finding derived from a
+        // fetched page is still a contradiction, and the guard must not be blind to it.
+        let existing = self
+            .for_subject_including_tainted(user_id, &entry.subject, 200)
+            .await?;
+        match decide_write(entry, &existing) {
+            WriteAction::Corroborate { entry_id } => {
+                let Some(mut stored) = existing.into_iter().find(|e| e.id == entry_id) else {
+                    // decide_write only names ids it was given.
+                    Self::write(&self.pool, user_id, entry).await?;
+                    return Ok(WriteOutcome::Inserted {
+                        conflicts_with: entry.conflicts_with.clone(),
+                    });
+                };
+                corroborate(&mut stored, entry);
+                Self::write(&self.pool, user_id, &stored).await?;
+                Ok(WriteOutcome::Corroborated { into: entry_id })
+            }
+            WriteAction::Insert { conflicts_with } => {
+                if conflicts_with.is_empty() {
+                    Self::write(&self.pool, user_id, entry).await?;
+                    return Ok(WriteOutcome::Inserted {
+                        conflicts_with: entry.conflicts_with.clone(),
+                    });
+                }
+                let mut new = entry.clone();
+                let mut tx = self.pool.begin().await?;
+                let mut linked = Vec::new();
+                for mut stored in existing
+                    .into_iter()
+                    .filter(|e| conflicts_with.contains(&e.id))
+                {
+                    link_conflict(&mut new, &mut stored);
+                    linked.push(stored);
+                }
+                Self::write(&mut *tx, user_id, &new).await?;
+                for stored in &linked {
+                    Self::write(&mut *tx, user_id, stored).await?;
+                }
+                tx.commit().await?;
+                Ok(WriteOutcome::Inserted {
+                    conflicts_with: new.conflicts_with,
+                })
+            }
+        }
     }
 
     /// The one INSERT, over any executor.
@@ -324,6 +423,142 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// Apply the retention rule to every entry of every user (S-4.16, §2.4).
+    ///
+    /// `today` is an ISO date, supplied rather than read: the rule is a pure
+    /// function of it, and a sweep whose answer depended on when the test ran
+    /// could not be asserted. `last_cited` is the latest `cited_at` of any
+    /// retrieval of the entry, or its creation day when it has never been cited.
+    ///
+    /// Archiving sets a flag and nothing else. No row is deleted, so a dossier
+    /// citing an archived entry still resolves it through [`Self::get`].
+    ///
+    /// # Errors
+    /// [`MemoryError::Sqlx`] if the read or an update fails;
+    /// [`MemoryError::Unreadable`] for a row no enum accepts.
+    pub async fn sweep_retention(&self, today: &str) -> Result<SweepReport, MemoryError> {
+        let rows = sqlx::query(
+            "SELECT e.*, e.user_id AS owner, e.created_at::date::text AS created_day,                     (SELECT max(r.cited_at)::date::text FROM memory_retrievals r                       WHERE r.entry_id = e.entry_id AND r.cited) AS last_cited_day                FROM agent_memory.entry e",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut report = SweepReport::default();
+        for row in &rows {
+            let owner: Uuid = row.get("owner");
+            let created: String = row.get("created_day");
+            let last_cited: Option<String> = row.try_get("last_cited_day").ok().flatten();
+            let mut entry = row_to_entry(row)?;
+            report.examined += 1;
+            let before = (entry.stale, entry.archived);
+            let decision = harness::memory::retention::retention(
+                &entry,
+                today,
+                last_cited.as_deref().unwrap_or(&created),
+            );
+            harness::memory::retention::apply(&mut entry, decision);
+            if before == (entry.stale, entry.archived) {
+                continue;
+            }
+            sqlx::query(
+                "UPDATE agent_memory.entry SET stale = $1, archived = $2, updated_at = now()                   WHERE user_id = $3 AND entry_id = $4",
+            )
+            .bind(entry.stale)
+            .bind(entry.archived)
+            .bind(owner)
+            .bind(&entry.id)
+            .execute(&self.pool)
+            .await?;
+            if entry.archived && !before.1 {
+                report.archived_now += 1;
+            } else if entry.stale && !before.0 {
+                report.staled_now += 1;
+            }
+        }
+        Ok(report)
+    }
+
+    /// The monthly store report for one user (§2.4's last paragraph, S-4.16):
+    /// store size, archive rate, and the share of retrievals that were cited.
+    ///
+    /// Counts archived rows too, because the archive rate is a share of the
+    /// whole store.
+    ///
+    /// # Errors
+    /// As [`Self::sweep_retention`].
+    pub async fn store_report(
+        &self,
+        user_id: Uuid,
+    ) -> Result<harness::memory::retention::StoreReport, MemoryError> {
+        let rows = sqlx::query("SELECT * FROM agent_memory.entry WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_all(&self.pool)
+            .await?;
+        let entries = rows
+            .iter()
+            .map(row_to_entry)
+            .collect::<Result<Vec<_>, _>>()?;
+        let counts = sqlx::query(
+            "SELECT count(*)::bigint AS shown, count(*) FILTER (WHERE r.cited)::bigint AS cited                FROM memory_retrievals r JOIN agent_memory.entry e ON e.entry_id = r.entry_id               WHERE e.user_id = $1",
+        )
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+        let shown: i64 = counts.try_get("shown").unwrap_or(0);
+        let cited: i64 = counts.try_get("cited").unwrap_or(0);
+        Ok(harness::memory::retention::store_report(
+            &entries,
+            usize::try_from(shown).unwrap_or(0),
+            usize::try_from(cited).unwrap_or(0),
+        ))
+    }
+
+    /// Write the monthly store report for every user who has entries and no report
+    /// for `today`'s month yet. Returns how many were written.
+    ///
+    /// Size, archive rate and cited share, as [`Self::store_report`] computes them,
+    /// stored once per `(user, month)` and never edited: the month-over-month series
+    /// is what shows a store degrading, and a row that could be rewritten would let a
+    /// bad month be tidied away. `ON CONFLICT DO NOTHING` makes the daily call that
+    /// finds the month already reported a no-op.
+    ///
+    /// # Errors
+    /// As [`Self::store_report`], or the insert failing.
+    pub async fn publish_monthly_reports(&self, today: &str) -> Result<usize, MemoryError> {
+        use chrono::Datelike;
+        let day = NaiveDate::parse_from_str(today, "%Y-%m-%d").map_err(|_| {
+            MemoryError::Unreadable {
+                id: "monthly_report".into(),
+                field: "today",
+                value: today.to_string(),
+            }
+        })?;
+        let month = day.with_day(1).unwrap_or(day);
+        let users: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT DISTINCT e.user_id FROM agent_memory.entry e
+              WHERE NOT EXISTS (SELECT 1 FROM agent_memory.monthly_report r
+                                 WHERE r.user_id = e.user_id AND r.month = $1)",
+        )
+        .bind(month)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut written = 0;
+        for user in users {
+            let report = self.store_report(user).await?;
+            let body = serde_json::to_value(&report).unwrap_or(Value::Null);
+            let done = sqlx::query(
+                "INSERT INTO agent_memory.monthly_report (user_id, month, report)
+                 VALUES ($1, $2, $3) ON CONFLICT (user_id, month) DO NOTHING",
+            )
+            .bind(user)
+            .bind(month)
+            .bind(body)
+            .execute(&self.pool)
+            .await?;
+            written += usize::try_from(done.rows_affected()).unwrap_or(0);
+        }
+        Ok(written)
+    }
+
     /// One entry by id, superseded or not.
     ///
     /// The audit read: `by_kind` and `for_subject` show the current view, and
@@ -356,17 +591,70 @@ impl MemoryStore {
         subject: &str,
         limit: i64,
     ) -> Result<Vec<Entry>, MemoryError> {
+        self.subject_rows(user_id, subject, limit, false).await
+    }
+
+    /// [`Self::for_subject`] including entries derived from untrusted text (KM-10).
+    /// The default retrieval excludes them; the conflict guard and the browser, which
+    /// must see everything that exists, call this one.
+    ///
+    /// # Errors
+    /// As [`Self::for_subject`].
+    pub async fn for_subject_including_tainted(
+        &self,
+        user_id: Uuid,
+        subject: &str,
+        limit: i64,
+    ) -> Result<Vec<Entry>, MemoryError> {
+        self.subject_rows(user_id, subject, limit, true).await
+    }
+
+    async fn subject_rows(
+        &self,
+        user_id: Uuid,
+        subject: &str,
+        limit: i64,
+        include_tainted: bool,
+    ) -> Result<Vec<Entry>, MemoryError> {
         let rows = sqlx::query(
             "SELECT * FROM agent_memory.entry \
-              WHERE user_id = $1 AND subject = $2 AND NOT archived \n                AND superseded_by IS NULL \
+              WHERE user_id = $1 AND subject = $2 AND NOT archived \
+                AND superseded_by IS NULL \
+                AND ($4 OR NOT COALESCE((extra ->> 'tainted')::boolean, false)) \
               ORDER BY created_at DESC LIMIT $3",
         )
         .bind(user_id)
         .bind(subject)
         .bind(limit)
+        .bind(include_tainted)
         .fetch_all(&self.pool)
         .await?;
         rows.iter().map(row_to_entry).collect()
+    }
+
+    /// Whether the user has told the platform to start Research without
+    /// asking, for this subject (S-10.2: "a `user_preference` 'always start' per
+    /// scope skips the offer").
+    ///
+    /// A live `user_preference` whose `extra.directive` is
+    /// `always_start_research` and whose subject is `scope` (or `*` for every
+    /// scope). Archived (deleted) preferences do not count, so deleting it
+    /// restores the offer. The driver calls this where it would emit
+    /// `Outcome::Offered`; the read is here so that decision is one query and
+    /// not a scan of the preference list in the driver.
+    ///
+    /// # Errors
+    /// As [`Self::by_kind`].
+    pub async fn prefers_always_start(
+        &self,
+        user_id: Uuid,
+        scope: &str,
+    ) -> Result<bool, MemoryError> {
+        let prefs = self.by_kind(user_id, Kind::UserPreference, 200).await?;
+        Ok(prefs.iter().any(|e| {
+            e.extra.get("directive").and_then(Value::as_str) == Some(ALWAYS_START_DIRECTIVE)
+                && (e.subject == scope || e.subject == "*")
+        }))
     }
 
     /// Entries of one kind, newest first.
@@ -379,18 +667,79 @@ impl MemoryStore {
         kind: Kind,
         limit: i64,
     ) -> Result<Vec<Entry>, MemoryError> {
+        self.kind_rows(user_id, kind, limit, false).await
+    }
+
+    /// [`Self::by_kind`] including entries derived from untrusted text (KM-10).
+    ///
+    /// # Errors
+    /// As [`Self::by_kind`].
+    pub async fn by_kind_including_tainted(
+        &self,
+        user_id: Uuid,
+        kind: Kind,
+        limit: i64,
+    ) -> Result<Vec<Entry>, MemoryError> {
+        self.kind_rows(user_id, kind, limit, true).await
+    }
+
+    async fn kind_rows(
+        &self,
+        user_id: Uuid,
+        kind: Kind,
+        limit: i64,
+        include_tainted: bool,
+    ) -> Result<Vec<Entry>, MemoryError> {
         let rows = sqlx::query(
             "SELECT * FROM agent_memory.entry \
-              WHERE user_id = $1 AND kind = $2 AND NOT archived \n                AND superseded_by IS NULL \
+              WHERE user_id = $1 AND kind = $2 AND NOT archived \
+                AND superseded_by IS NULL \
+                AND ($4 OR NOT COALESCE((extra ->> 'tainted')::boolean, false)) \
               ORDER BY created_at DESC LIMIT $3",
         )
         .bind(user_id)
         .bind(kind.as_str())
         .bind(limit)
+        .bind(include_tainted)
         .fetch_all(&self.pool)
         .await?;
         rows.iter().map(row_to_entry).collect()
     }
+}
+
+/// One retention sweep, as of `today` (an ISO date), logged; then the month's report
+/// for every user who does not have one yet (S-4.16).
+pub async fn run_retention_once(pool: &PgPool, today: &str) {
+    let store = MemoryStore::new(pool.clone());
+    match store.sweep_retention(today).await {
+        Ok(r) => tracing::info!(
+            examined = r.examined,
+            archived = r.archived_now,
+            staled = r.staled_now,
+            "memory retention sweep"
+        ),
+        Err(e) => tracing::warn!(error = %e, "memory retention sweep failed"),
+    }
+    match store.publish_monthly_reports(today).await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(reports = n, "memory store monthly report written"),
+        Err(e) => tracing::warn!(error = %e, "memory store monthly report failed"),
+    }
+}
+
+/// Spawn the daily retention loop (S-4.16): `memory::retention::retention` decided
+/// what to do with an entry and nothing ever asked it, so no row ever archived.
+/// The first sweep runs a minute after boot. Needs one line in the platform's
+/// `main.rs`: `api::memory_store::spawn_retention_sweep(pg.clone());`.
+pub fn spawn_retention_sweep(pool: PgPool) {
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        loop {
+            let today = chrono::Utc::now().date_naive().to_string();
+            run_retention_once(&pool, &today).await;
+            tokio::time::sleep(std::time::Duration::from_secs(24 * 3600)).await;
+        }
+    });
 }
 
 fn evidence_class_str(c: EvidenceClass) -> &'static str {

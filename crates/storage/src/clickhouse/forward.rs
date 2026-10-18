@@ -193,8 +193,71 @@ fn epoch_days(d: chrono::NaiveDate) -> u16 {
     u16::try_from((d - epoch).num_days()).unwrap_or(u16::MAX)
 }
 
-/// Append funding observations. Idempotent on `(venue, instrument, kind,
-/// event_time, knowledge_time)`.
+#[derive(Row, Deserialize)]
+struct StoredRate {
+    venue: String,
+    instrument: String,
+    kind: String,
+    event_ns: i64,
+    rate: String,
+}
+
+/// The latest stored rate for each `(venue, instrument, kind, event_time)` the
+/// batch touches, as `Decimal(38, 18)` mantissas.
+async fn stored_rates(
+    client: &ChClient,
+    rows: &[FundingRow],
+) -> Result<std::collections::HashMap<(String, String, String, i64), i128>, ChError> {
+    let esc = |s: &str| s.replace('\\', "\\\\").replace('\'', "\\'");
+    let keys: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            format!(
+                "('{}','{}','{}',fromUnixTimestamp64Nano(toInt64({})))",
+                esc(&r.venue),
+                esc(&r.instrument),
+                r.kind.as_str(),
+                ns(r.event_time)
+            )
+        })
+        .collect();
+    let stored: Vec<StoredRate> = client
+        .query(&format!(
+            "SELECT venue, instrument, kind,
+                    toInt64(toUnixTimestamp64Nano(event_time)) AS event_ns,
+                    toString(argMax(rate, (knowledge_time, ingest_time))) AS rate
+               FROM funding_rates
+              WHERE (venue, instrument, kind, event_time) IN ({})
+              GROUP BY venue, instrument, kind, event_time",
+            keys.join(",")
+        ))
+        .fetch_all()
+        .await
+        .map_err(|e| ChError::Client(e.to_string()))?;
+    let mut out = std::collections::HashMap::with_capacity(stored.len());
+    for r in stored {
+        let d: Decimal = r
+            .rate
+            .parse()
+            .map_err(|e| ChError::Decode(format!("stored rate {:?}: {e}", r.rate)))?;
+        out.insert((r.venue, r.instrument, r.kind, r.event_ns), mantissa(d)?);
+    }
+    Ok(out)
+}
+
+/// Append funding observations. **Idempotent on `(venue, instrument, kind,
+/// event_time)`** for an unchanged value: a row whose rate equals the latest one
+/// already stored for that settlement is not written again. A *changed* rate for
+/// the same settlement is a restatement and is written as a new row with its own
+/// `knowledge_time`, never an overwrite.
+///
+/// The check matters because `knowledge_time` is in the sorting key (so
+/// restatements survive merges): without it, a restart — or any poll more frequent
+/// than the settlement interval — re-observed an unchanged settlement as a new
+/// row, which on 2026-10-03 doubled every realized rate the first live run
+/// collected (P-0.3 clause 3).
+///
+/// Returns the rows actually written.
 ///
 /// # Errors
 /// A value that does not fit `Decimal(38, 18)`, or a backend failure.
@@ -203,10 +266,27 @@ pub async fn write_funding(url: &str, rows: &[FundingRow]) -> Result<usize, ChEr
         return Ok(0);
     }
     let client = super::connect(url);
+    let stored = stored_rates(&client, rows).await?;
+    let mut fresh: Vec<&FundingRow> = Vec::with_capacity(rows.len());
+    for r in rows {
+        let key = (
+            r.venue.clone(),
+            r.instrument.clone(),
+            r.kind.as_str().to_string(),
+            ns(r.event_time),
+        );
+        if stored.get(&key) != Some(&mantissa(r.rate)?) {
+            fresh.push(r);
+        }
+    }
+    if fresh.is_empty() {
+        return Ok(0);
+    }
+    let rows = fresh;
     let mut insert = client
         .insert("funding_rates")
         .map_err(|e| ChError::Insert(e.to_string()))?;
-    for r in rows {
+    for r in &rows {
         insert
             .write(&WireFunding {
                 venue: r.venue.clone(),

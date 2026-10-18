@@ -93,6 +93,93 @@ const MUST_BE_CALLED: &[(&str, &str)] = &[
         "§4.9 and §7 rows 4-5: what a drained agenda means",
         "replenish::on_drain(",
     ),
+    // Closed 2026-10-03 (S-11.3, S-11.4, S-11.5). Each was an `UNWIRED` row.
+    (
+        "§5.1: novelty from both inputs, the precheck factor beside the signal",
+        "select::novelty_from(",
+    ),
+    (
+        "P3: the scorecard of which layer caught each duplicate, on the digest",
+        "DedupeScorecard::from_log(",
+    ),
+    (
+        "§5.1: the selection policy's conformance reader, before anything is selected",
+        "SelectionPolicy::current().nonconformances(",
+    ),
+    (
+        "§6.3: the per-task cap in the unit a run is metered in",
+        "execute::per_task_bound(",
+    ),
+    (
+        "§12.1 / §12.4: one child, one lease, and the committed leases summed",
+        "self.record_lease(",
+    ),
+    (
+        "§12.4: the committed leases of running children, read back",
+        "self.committed_leases(",
+    ),
+    (
+        "§6.2: the child's brief — standing constraints, sibling verdicts, why now",
+        "execute::brief(",
+    ),
+    // Closed 2026-10-03, wave 2, on RUNTIME's manager API.
+    (
+        "§6.3: the lease's trial count is the child's cap — it may not borrow",
+        ".send_turn(",
+    ),
+    (
+        "§7 rows 1, 8, 10: live children are stopped at a step boundary, not killed",
+        ".drain_run(",
+    ),
+    (
+        "§7 row 1: the next window resumes suspended children before claiming anything new",
+        ".resume_drained(",
+    ),
+    (
+        "§7 row 10: the breaker's pause files a `platform_defect` entry",
+        ".entry_claim(",
+    ),
+    // Closed 2026-10-04 (Set S phase 11 finish).
+    (
+        "§4.9: a survey's proposals are absorbed into the agenda with their estimates",
+        "replenish::absorb(",
+    ),
+    (
+        "§8: a harvested proposal is an instance of a standing rule that always asks",
+        "AlwaysAsks::for_proposal_kind(",
+    ),
+    (
+        "§8: whether a human is asked, under this session's autonomy",
+        ".asks(autonomy)",
+    ),
+    (
+        "§4.7: regime flips from the regime record",
+        "session_regime::flips(",
+    ),
+    (
+        "§4.5: the unresolved contradiction pairs",
+        "session_contradictions::open_pairs(",
+    ),
+    (
+        "P3 / §12.2: two sessions, one question, one item",
+        "session_dedupe::offer(",
+    ),
+    (
+        "§7 rows 8-10: the driver wakes on the monitor's notification, not only on its poll",
+        "Wake::open(",
+    ),
+    (
+        "§7 row 9: a recorded degraded or withdrawn standing, or a removed credential, pauses",
+        "session_profile::health_from(",
+    ),
+    (
+        "§2.1 / §7 row 2: the day budget in trials, read from its own table",
+        "session_day::trials_per_day(",
+    ),
+    (
+        "§6.1: up to `max_concurrent_runs` children are awaited together",
+        "tokio::join!(",
+    ),
 ];
 
 /// A decision with no caller here, and the symbol that would have to exist.
@@ -102,106 +189,23 @@ const MUST_BE_CALLED: &[(&str, &str)] = &[
 /// anything.
 const UNWIRED: &[(&str, &str)] = &[
     (
-        "select::novelty_from",
-        "The driver calls `select::novelty_from_prior` at `session_driver.rs:641`, \
-         which is the one-argument form: it applies the prior-statement half of \
-         §5.1's novelty and **not** the hypothesis-precheck factor. So a question \
-         whose precheck said `proceed_as_variant` is scored as though it had said \
-         `proceed_new`, and a variant of something already asked ranks as high as \
-         a fresh line of enquiry. `novelty_from` exists, returns \
-         `(Signal, PrecheckFactor)` and applies §5.1's 1.0 / 0.6 — it hands the \
-         factor back *beside* the signal precisely so that dropping it is a \
-         visible act rather than a silent one, and dropping it is what this call \
-         site currently does. MISSING: the item's `hypothesis_precheck` verdict \
-         threaded to line 641. The driver already reads it in `intake_check`, so \
-         this is a parameter, not a new query — and `PrecheckFactor::NotRecorded` \
-         must ride on the `decision` row beside the score it did not contribute \
-         to, or the absence becomes indistinguishable from a factor of 1.0.",
-    ),
-    (
-        "agenda::DedupeScorecard",
-        "S-11.4's object is built and tested (`a_layer_nobody_asked_is_not_a_layer_\
-         that_caught_nothing`) and has no reader. It assembles P3's \"which layer \
-         caught each duplicate\" out of facts this driver already writes — \
-         `dedupe_layer` on every insert, and `trials_charged: 0` — so nothing has \
-         to be measured again. Its natural home is the digest. MISSING: a field on \
-         `digest::DigestInput`, which is a struct literal in this file, so the two \
-         sides have to move together — which is why it is recorded here rather \
-         than half-added.",
-    ),
-    (
-        "select::SelectionPolicy::nonconformances",
-        "The per-field conformance reader is built and tested (`the_conformance_\
-         reader_would_catch_a_drift`) and nothing calls it, so a policy that \
-         drifted from AGENT-014 §5.1's table would drift unobserved — which is the \
-         one thing the reader exists to prevent. MISSING: a caller. It does not \
-         belong in this driver: a policy nonconformance is a fact about the build, \
-         not about a session, so it belongs in `crates/invariants` beside the \
-         other spec-mirroring guards, and that crate would need a \
-         `research-session` dev-dependency.",
-    ),
-    (
         "charter::admit",
-        "Two reasons, and either alone is enough. Its call site is session \
-         *creation* — `routes::desk_charter::translate` builds the charter and \
-         `routes::research_sessions` writes the row — which is not this file. \
-         And its `Profile::judgement` input has no store: nothing on this \
-         platform records a `judgement` pass rate per (profile, workflow). \
-         `eval_scorecards` carries `profile_id` and `tier`, but its `metrics` \
-         are a harness-version aggregate. Handed an empty map, `admit` answers \
-         `TierRefusal::NothingPermittedRemains` for every charter ever \
-         written — a refusal manufactured by the absence of the reader rather \
-         than by the profile. MISSING: a per-(profile, workflow) judgement \
-         table, and a `From<harness::Profile>` that reads it. The half of §8 \
-         that *is* readable — frontier-only — reaches production through \
-         `health_of` and `couplings::PauseReason::Tier`.",
-    ),
-    (
-        "replenish::absorb",
-        "It takes a `replenish::SurveyReport`: the `{question, subject, \
-         workflow, value_estimate}` rows a `survey` run proposed. Nothing \
-         stores them. A survey's output reaches the agenda through the \
-         ordinary harvest, as the `open_question` entries it wrote, so the \
-         questions are not lost — the estimates are. MISSING: a per-run store \
-         of a survey's proposals, plus the three things \
-         `Replenished::value_estimates` names for the estimate to have a \
-         column to live in.",
-    ),
-    (
-        "execute::brief",
-        "§6.2's brief is handed to the *child*, and this driver starts its \
-         child through `AgentManager::send_message`, which takes a question \
-         and not a brief. MISSING: a way to seed a conversation's first turn \
-         with preferences and sibling verdicts — `agent::manager` is another \
-         track's territory.",
+        "Not this file's: its call site is session *creation*, and it is called \
+         there - `routes::research_sessions::admit_at_creation`, with a \
+         `charter::Profile` built from what the platform has recorded \
+         (`session_profile::charter_profile`: `profile_standing` and \
+         `profile_judgement`, 0163). `autonomous` is granted only on a recorded, \
+         passing `judgement`. MISSING: a *producer* - nothing yet runs the \
+         `judgement` suite and posts its scorecard to \
+         `POST /api/research/profiles/{profile}/scorecard`; until it does every \
+         profile is unmeasured and `autonomous` is refused (ADR-P11-04).",
     ),
     (
         "execute::redirect",
-        "§6.4's steer is a human action on a live item and belongs on the \
-         route that serves the desk's *Steer* control, not in the loop. \
-         MISSING: a caller in `routes::research_sessions`.",
-    ),
-    (
-        "couplings::DefectBreaker::entry_claim",
-        "§7 row 10 asks for a `platform_defect` memory entry beside the pause. \
-         The breaker's pause *is* recorded — `PauseReason::PlatformDefect` \
-         names the tool and every run in the streak on the `session_paused` \
-         event — but the memory row is not written. `agent_memory.entry` \
-         requires a four-part `Provenance` whose `prov_tool`, \
-         `prov_tool_version` and `prov_template_hash` describe the thing that \
-         produced the claim, and a session driver is not a tool that produced \
-         one. MISSING: a provenance for a claim the platform makes about \
-         itself, and a caller in `memory_store` — another track's territory.",
-    ),
-    (
-        "charter::AlwaysAsks::asks",
-        "Its three decisions — a sealed holdout, a promotion, and spend above \
-         the ask line — are not made in this loop. The loop sees a proposal as \
-         `harvest::AwaitingHuman` with a `Ring`, routes it to *Needs you* and \
-         touches no decision column, which is the same outcome; the mapping \
-         from a proposal to one of the three words is what does not exist. \
-         MISSING: a `From<harvest::RunProposal> for Option<AlwaysAsks>`, or the \
-         three decisions reaching `routes::proposals` where they are made.",
+        "§6.4's steer is a human action on a live item and belongs on a route, \
+         not in the loop: `routes::research_sessions::redirect_item` calls it and \
+         `POST /api/research/sessions/{id}/agenda/{item}/redirect` is registered. \
+         MISSING: a desk *Steer* control that posts to it (S-11.13).",
     ),
     (
         "couplings::refuses_ring",

@@ -119,7 +119,7 @@ pub async fn exposure(
     };
 
     let (namespaces, pinned) = registry.route_goal(&q.goal);
-    let exposed = match registry.expose_pinned(&profile, &namespaces, &pinned) {
+    let exposed = match registry.expose_pinned(profile, &namespaces, &pinned) {
         Ok(e) => e,
         Err(e) => {
             // A `routing: none` profile whose catalogue outgrew its budget. That

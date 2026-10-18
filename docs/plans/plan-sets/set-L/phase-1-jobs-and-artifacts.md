@@ -86,5 +86,52 @@ finding, that BTC-USD 1m is **grade D** at 59.7% coverage.
   in-flight Study state.
 - **NATS/SSE event streaming.** `GET /api/jobs/events` is a resumable cursor feed,
   which is what `tbot jobs wait` needs. The SSE lane for the UI is Phase 6.
-- **Budget admission at submission** (`409 budget_exhausted`). Estimates are carried
-  but not yet checked against the project's compute budget.
+- ~~**Budget admission at submission** (`409 budget_exhausted`).~~ **`DONE` 2026-10-03
+  (track LEGACY), see the block below.**
+
+---
+
+## JB-08 budget admission (track LEGACY, 2026-10-03) -- `DONE`
+
+`crates/jobs/src/store.rs`: `check_budget` (the pure rule) and `admit_budget` (the
+transactional check), called from `JobStore::submit` **inside the submission transaction,
+before the trial is registered and before the row is inserted**, so a refused submission
+counts no trial and leaves no row.
+
+- **What is limited.** `research_projects.budget_compute_s`, `budget_usd_day` and
+  `budget_usd_total` (migration 0036; they existed and nothing read them). `NULL` on an axis
+  means unlimited; a job with no `project_id` (system work) is never budgeted.
+- **What counts as spent.** Per project, over every job that is not `cancelled`: the job's
+  `actual` where it has finished, else its `estimate`. A job that is queued or running is
+  committed spend, not free.
+- **Refusal.** `JobStoreError::BudgetExhausted` -> `409 budget_exhausted`
+  (`routes/jobs.rs`, already mapped), whose message names the axis, what was used, what was
+  asked and the limit. A spent axis refuses even a job with **no estimate**: an exhausted
+  budget has no room for work nobody can price. A job with no estimate on an open axis is
+  admitted and charged its `actual` on completion.
+- **Where estimates come from.** `WorkerPool::register` now also hands the worker to the store
+  (`JobStore::register_estimator`), so a submission that carries no estimate is priced by its
+  kind's own `Worker::estimate`. Before this the trait method existed and nothing called it.
+  A prediction with no figure in it is `None`, not a zero.
+- **Races.** A transaction-scoped advisory lock keyed on the project serialises the check.
+- **A duplicate spends nothing.** An identical resubmission returns the existing job before
+  admission runs, so a fully committed budget does not refuse a retry of the same work.
+
+**Evidence.** 4 unit tests in `store::admission_tests` (75 `jobs` lib tests pass) and 7
+integration tests in `crates/jobs/tests/budget_admission.rs` against a real PostgreSQL 17
+(scratch database, migrations 0001-0045; gated on `JOBS_BUDGET_TEST_DATABASE_URL`):
+`an_estimate_past_the_remaining_budget_is_refused_409_and_leaves_no_row`,
+`a_spent_budget_refuses_even_a_job_with_no_estimate`,
+`a_project_with_no_budget_is_unlimited_and_a_system_job_is_not_budgeted`,
+`a_duplicate_submission_spends_nothing_and_is_not_refused`,
+`concurrent_submissions_cannot_both_take_the_last_of_the_budget` (10 racers, 100s budget, 30s
+each: exactly 3 admitted), `the_usd_total_budget_binds_too`,
+`a_registered_worker_prices_a_submission_that_carries_no_estimate`. **Mutation-checked:**
+commenting out the `admit_budget` call fails 5 of the 7.
+
+**Still open.** Most worker `estimate` implementations return `Cost::default()` today, so in
+practice the rule currently bites on callers that pass an estimate and on the *spent* check.
+Giving each kind a real estimate (backtest from window and bars, trainer from `max_gpu_hours`)
+is a per-kind task, not part of the admission mechanism. `budget_usd_day` rolls over at UTC
+midnight (`date_trunc('day', now())`), which is a decision: the alternative, a trailing 24 h
+window, was rejected because "the day's budget" is read by humans as a calendar day.

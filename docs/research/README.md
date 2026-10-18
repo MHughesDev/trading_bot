@@ -17,7 +17,7 @@ Research briefs, technology evaluations, and findings from discovery work. This 
 ## What Does Not Belong Here
 
 - Decisions — record those in `adr/`
-- Plans that act on the research — record those in `plans/`
+- Plans that act on the research — record those in `docs/plans/plan-sets/`
 - Specifications derived from research — record those in `specs/`
 
 ---

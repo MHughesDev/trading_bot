@@ -1,0 +1,50 @@
+{
+  "cases_per_tier": 46,
+  "dead_idea_cases": 6,
+  "generated_cases": 40,
+  "holdout": {
+    "corpus_size": 46,
+    "drawn_on": "2026-10-04",
+    "requested_by": "set-s-s-10.16",
+    "salt": "judgement-holdout-2026-10-04-a"
+  },
+  "open_cases_per_tier": 37,
+  "provenance": "synthetic_reference_policy: these tapes were NOT recorded from a model; the live run is gate H-2",
+  "scorecard_cells": "judgement/<workflow>, one replay suite per workflow per tier card",
+  "sealed_cases": 9,
+  "spec": "AGENT-009 section 3; Set S S-10.16",
+  "suite": "judgement",
+  "tiers": [
+    {
+      "open_tape": "tapes/degraded.open.json",
+      "policy": "reference-degraded-v1",
+      "sealed_tape": "tapes/degraded.sealed.json",
+      "tier": "degraded"
+    },
+    {
+      "open_tape": "tapes/local_small.open.json",
+      "policy": "reference-local-small-v1",
+      "sealed_tape": "tapes/local_small.sealed.json",
+      "tier": "local_small"
+    },
+    {
+      "open_tape": "tapes/local_mid.open.json",
+      "policy": "reference-local-mid-v1",
+      "sealed_tape": "tapes/local_mid.sealed.json",
+      "tier": "local_mid"
+    },
+    {
+      "open_tape": "tapes/local_high.open.json",
+      "policy": "reference-local-high-v1",
+      "sealed_tape": "tapes/local_high.sealed.json",
+      "tier": "local_high"
+    },
+    {
+      "open_tape": "tapes/frontier.open.json",
+      "policy": "reference-frontier-v1",
+      "sealed_tape": "tapes/frontier.sealed.json",
+      "tier": "frontier"
+    }
+  ],
+  "truth_location": "not on disk: the corpus seed is a const in crates/harness/src/eval/judgement_suite.rs (scorer side, evals.truth)"
+}

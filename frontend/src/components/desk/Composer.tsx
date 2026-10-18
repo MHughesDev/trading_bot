@@ -11,7 +11,7 @@
 // Internally both are one object, `ResearchSession { continuous }`, and a bounded
 // Research run is the one-item case. That is why toggling does not discard what
 // was typed: there is one session being described, in two levels of detail.
-import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from 'react'
 import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
 import { Input, Switch, TextArea } from '@/components/primitives/Field'
@@ -21,7 +21,7 @@ import type { Charter, Mode, Workflow } from '@/api/desk'
 import { WORKFLOWS, emptyCharter } from '@/api/desk'
 import { modeMaySpendTrials } from '@/lib/desk/rings'
 import { CharterForm } from './CharterForm'
-import { EMPTY_CONSTRAINTS, classifyNeedsResearch, defaultWorkflow, SLASH_COMMANDS } from './Composer.helpers'
+import { CHARTER_REFUSED, EMPTY_CONSTRAINTS, classifyNeedsResearch, defaultWorkflow, SLASH_COMMANDS } from './Composer.helpers'
 
 /** What a send carries. One shape for both toggle positions (ADR-0037 §3). */
 export interface ComposerSubmission {
@@ -64,10 +64,17 @@ export interface ComposerProps {
   onWriteStrategy?: () => void
   /** Rendered when a Chat question looks like it needs a run (stubbed offer). */
   onOffer?: (question: string) => void
+  /**
+   * Nothing can run: no provider key is connected for this user (PROVIDERS
+   * track). When given, this is drawn **in place of** the question box and the
+   * send button, so there is no send button that fails after the person has
+   * typed their question.
+   */
+  connect?: ReactNode
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
-  { running, profiles, model, onModelChange, onSubmit, onSlash, onWriteStrategy, onOffer },
+  { running, profiles, model, onModelChange, onSubmit, onSlash, onWriteStrategy, onOffer, connect },
   ref,
 ) {
   const [mode, setMode] = useState<Mode>('chat')
@@ -199,8 +206,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         </p>
       )}
 
-      {mode === 'research' && continuous ? (
-        <CharterForm value={charter} onChange={setCharter} />
+      {connect ? (
+        connect
+      ) : mode === 'research' && continuous ? (
+        <CharterForm
+          value={charter}
+          onChange={setCharter}
+          autonomousDisabledReason={CHARTER_REFUSED.autonomous}
+          replenishDisabledReason={CHARTER_REFUSED.replenish}
+        />
       ) : (
         <TextArea
           ref={area}
@@ -218,6 +232,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         />
       )}
 
+      {!connect && (
       <div className="row">
         <Button size="sm" variant="primary" onClick={send} disabled={!!continuousRefused} data-testid="send">
           {running ? 'Steer' : continuous ? 'Start continuous research' : 'Send'}
@@ -240,6 +255,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         )}
         {running && <span className="sub">Sending will steer the running turn.</span>}
       </div>
+      )}
     </div>
   )
 })

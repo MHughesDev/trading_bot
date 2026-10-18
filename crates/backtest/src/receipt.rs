@@ -30,6 +30,28 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// The trading calendar a run on this asset class was evaluated under.
+///
+/// The producer `calendar_version` lacked (S-10.8): until a function named one, a
+/// receipt could not carry the field and so could not detect the one class of drift
+/// this platform has actually seen. Continuous markets name the dataplane's own
+/// 24/7 calendar; session markets name the session calendar this platform ships.
+/// **Bump the number when the calendar's content changes** — that is the signal
+/// `reproduce` reads.
+#[must_use]
+pub fn calendar_version(asset_class: &str) -> String {
+    let continuous = dataplane::calendar::CalendarVersion::crypto_24_7();
+    match asset_class.to_ascii_lowercase().as_str() {
+        "equity" | "equities" | "stock" | "etf" | "future" | "futures" | "option" | "options" => {
+            format!("sessions@{SESSION_CALENDAR_VERSION}")
+        }
+        _ => format!("{}@{}", continuous.calendar_id, continuous.version),
+    }
+}
+
+/// The session-calendar version this platform ships. See [`calendar_version`].
+pub const SESSION_CALENDAR_VERSION: &str = "1";
+
 /// Every input that can change a backtest's number.
 ///
 /// Field order is the hash's order and is deliberately stable — see

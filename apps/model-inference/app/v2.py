@@ -118,9 +118,31 @@ def _forecaster_outputs(inner: bytes, header: dict, rows: list[dict], model_kind
     return out
 
 
+def _vol_answers(inner: bytes, header: dict, rows: list[dict]) -> list[dict]:
+    """GARCH-family rows: conditional sigma from the row's recent bars, or abstain (N-4.2)."""
+    from .predictors import garch_predictor
+
+    try:
+        results = garch_predictor.serve_rows(inner, header, rows)
+    except base.Abstain as a:
+        return [{"key": r.get("key"), "status": "abstained", "outputs": {}, "detail": a.reason} for r in rows]
+    answers = []
+    for r, res in zip(rows, results):
+        if res["abstain"]:
+            answers.append({"key": r.get("key"), "status": "abstained", "outputs": {}, "detail": res["reason"]})
+            continue
+        q = res["mu"] + res["sigma"] * res["z"]
+        answers.append({"key": r.get("key"), "status": "answered", "detail": None, "outputs": {
+            "sigma": float(res["sigma"]), "median_return": float(np.interp(0.5, res["levels"], q)),
+            "quantiles": {"levels": list(res["levels"]), "values": [float(v) for v in q]}}})
+    return answers
+
+
 def predict_v2(artifact_bytes: bytes, rows: list[dict], model_kind: str) -> list[dict]:
     """Answer every row. Each answer: ``{"key", "status", "outputs", "detail"}``."""
     header, inner = bundle_mod.read_bundle(artifact_bytes)
+    if header is not None and header.get("framework") == "garch":
+        return _vol_answers(inner, header, rows)
     if header is None or not header.get("feature_order"):
         return [
             {"key": r.get("key"), "status": "unavailable", "outputs": {},
@@ -129,6 +151,8 @@ def predict_v2(artifact_bytes: bytes, rows: list[dict], model_kind: str) -> list
             for r in rows
         ]
     order = list(header["feature_order"])
+    if header.get("sequence"):
+        return _sequence_answers(inner, header, rows, order, model_kind)
     answers: list[dict | None] = [None] * len(rows)
     ready: list[int] = []
     for i, r in enumerate(rows):
@@ -171,6 +195,30 @@ def predict_v2(artifact_bytes: bytes, rows: list[dict], model_kind: str) -> list
                 answers[i] = {"key": rows[i].get("key"), "status": "unavailable", "outputs": {},
                               "detail": f"the model failed: {e}"}
     return [a for a in answers if a is not None]
+
+
+def _sequence_answers(inner: bytes, header: dict, rows: list[dict], order: list[str], model_kind: str) -> list[dict]:
+    """A windowed model: the rows are the recent bars, oldest first, and the one answer is for
+    the last row. Fewer than ``window`` bars abstains (N-2.5); earlier rows are context."""
+    key = rows[-1].get("key") if rows else None
+    abstain = lambda why: [  # noqa: E731
+        {"key": r.get("key"), "status": "abstained", "outputs": {}, "detail": why} for r in rows
+    ]
+    bad = [i for i, r in enumerate(rows) if any(not _finite((r.get("features") or {}).get(k)) for k in order)]
+    if bad:
+        return abstain(f"missing required feature(s) in row {bad[0]}")
+    try:
+        outs = _forecaster_outputs(inner, header, rows, model_kind)
+    except base.Abstain as a:
+        return abstain(a.reason)
+    except Unavailable as e:
+        return [{"key": r.get("key"), "status": "unavailable", "outputs": {}, "detail": str(e)} for r in rows]
+    answers = [
+        {"key": r.get("key"), "status": "abstained", "outputs": {},
+         "detail": "context row of the window; the answer is on the last row"} for r in rows[:-1]
+    ]
+    answers.append({"key": key, "status": "answered", "outputs": outs[-1], "detail": None})
+    return answers
 
 
 class MissingFeatures(ValueError):

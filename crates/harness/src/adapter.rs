@@ -380,10 +380,316 @@ pub fn for_profile(profile: &Profile) -> Box<dyn ModelAdapter> {
     }
 }
 
+// ── Prices (AGENT-010 §6, ADR-D-03; Set S task S-2.12) ──────────────────────
+
+/// How old a price row may be and still be enforced against.
+///
+/// Ninety days. A provider repricing is announced, not silent, but nobody on this
+/// platform is paid to watch for it, so a row is trusted for one quarter and then
+/// treated as absent until a person re-verifies it. Absent prices nothing — the
+/// dollar cap stops being enforced and tokens stay binding — which is the honest
+/// failure; a stale row would enforce a number that is no longer true.
+pub const MAX_PRICE_AGE_DAYS: i64 = 90;
+
+/// The per-model and per-hardware-class price table (`config/prices.yaml`).
+///
+/// Parsed from text rather than read from disk, so the harness stays sans-IO:
+/// the driver reads the file and hands it over.
+///
+/// **Money is never `f64` here (SC-1).** Prices are written as decimal strings and
+/// parsed into integer micro-dollars; a call's cost is rounded **up** to the
+/// tenth of a cent, so the accumulated spend can only over-state, which is the
+/// direction that makes a cap fire early rather than late.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct PriceTable {
+    #[serde(default)]
+    pub models: Vec<ModelPrice>,
+    #[serde(default)]
+    pub hardware: Vec<HardwarePrice>,
+}
+
+/// One provider model's token prices, per million tokens, in dollars.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ModelPrice {
+    pub model: String,
+    pub input_usd_per_mtok: String,
+    pub output_usd_per_mtok: String,
+    /// Absent: charged at the input rate. Over-states a cache read, which is the
+    /// safe direction for a cap.
+    #[serde(default)]
+    pub cache_read_usd_per_mtok: Option<String>,
+    /// Absent: charged at twice the input rate, the one-hour write premium the
+    /// Anthropic adapter's breakpoints pay (S-2.7).
+    #[serde(default)]
+    pub cache_write_usd_per_mtok: Option<String>,
+    pub source_url: String,
+    /// `YYYY-MM-DD`. `None` is unverified, and an unverified row is absent.
+    #[serde(default)]
+    pub verified_at: Option<String>,
+}
+
+/// One hardware class's price per second of compute, in dollars.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct HardwarePrice {
+    pub hardware_class: String,
+    pub usd_per_second: String,
+    pub source_url: String,
+    #[serde(default)]
+    pub verified_at: Option<String>,
+}
+
+/// Token counts for one call, as the provider reported them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CallTokens {
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+}
+
+/// Why the table refused to load.
+#[derive(Debug, thiserror::Error)]
+pub enum PriceError {
+    #[error("config/prices.yaml does not parse: {0}")]
+    Parse(String),
+    #[error("price {value:?} for {what} is not a plain decimal number of dollars")]
+    BadDecimal { what: String, value: String },
+}
+
+/// `"15.00"` → 15_000_000 micro-dollars. Integer arithmetic only.
+fn micro_dollars(what: &str, value: &str) -> Result<i64, PriceError> {
+    let bad = || PriceError::BadDecimal {
+        what: what.to_string(),
+        value: value.to_string(),
+    };
+    let v = value.trim();
+    let (whole, frac) = v.split_once('.').unwrap_or((v, ""));
+    if whole.is_empty() || !whole.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(bad());
+    }
+    if frac.len() > 6 || !frac.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(bad());
+    }
+    let whole: i64 = whole.parse().map_err(|_| bad())?;
+    let mut f = frac.to_string();
+    while f.len() < 6 {
+        f.push('0');
+    }
+    let frac: i64 = f.parse().map_err(|_| bad())?;
+    whole
+        .checked_mul(1_000_000)
+        .and_then(|w| w.checked_add(frac))
+        .ok_or_else(bad)
+}
+
+/// Days since 1970-01-01 for a `YYYY-MM-DD` date, without a date library.
+fn days_from_civil(date: &str) -> Option<i64> {
+    let mut it = date.trim().splitn(3, '-');
+    let y: i64 = it.next()?.parse().ok()?;
+    let m: i64 = it.next()?.parse().ok()?;
+    let d: i64 = it.next()?.parse().ok()?;
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some(era * 146_097 + doe - 719_468)
+}
+
+fn fresh(verified_at: Option<&str>, today: &str) -> bool {
+    match (verified_at.and_then(days_from_civil), days_from_civil(today)) {
+        (Some(v), Some(t)) => t >= v && t - v <= MAX_PRICE_AGE_DAYS,
+        _ => false,
+    }
+}
+
+/// A model's prices in integer micro-dollars per million tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TokenRates {
+    pub input: i64,
+    pub output: i64,
+    pub cache_read: i64,
+    pub cache_write: i64,
+}
+
+impl TokenRates {
+    /// What one call cost, in tenths of a cent, rounded up.
+    #[must_use]
+    pub fn cost_tenth_cents(&self, t: CallTokens) -> i64 {
+        let sum: i128 = i128::from(t.input) * i128::from(self.input)
+            + i128::from(t.output) * i128::from(self.output)
+            + i128::from(t.cache_read) * i128::from(self.cache_read)
+            + i128::from(t.cache_write) * i128::from(self.cache_write);
+        // tokens × micro-dollars-per-Mtok / 1e6 = micro-dollars, and
+        // micro-dollars / 1000 = tenths of a cent. One division, rounded up.
+        let denom: i128 = 1_000_000 * 1_000;
+        let tenth = (sum + denom - 1) / denom;
+        i64::try_from(tenth).unwrap_or(i64::MAX)
+    }
+}
+
+impl PriceTable {
+    /// Parse `config/prices.yaml`. Every price must be a plain decimal, checked
+    /// here so a typo refuses to load rather than pricing a model at zero.
+    pub fn from_yaml(text: &str) -> Result<Self, PriceError> {
+        let t: Self = serde_yaml::from_str(text).map_err(|e| PriceError::Parse(e.to_string()))?;
+        for m in &t.models {
+            micro_dollars(&m.model, &m.input_usd_per_mtok)?;
+            micro_dollars(&m.model, &m.output_usd_per_mtok)?;
+            for v in [&m.cache_read_usd_per_mtok, &m.cache_write_usd_per_mtok]
+                .into_iter()
+                .flatten()
+            {
+                micro_dollars(&m.model, v)?;
+            }
+        }
+        for h in &t.hardware {
+            micro_dollars(&h.hardware_class, &h.usd_per_second)?;
+        }
+        Ok(t)
+    }
+
+    /// The model's rates, **only** from a verified row no older than
+    /// [`MAX_PRICE_AGE_DAYS`] at `today` (`YYYY-MM-DD`, supplied by the caller —
+    /// the harness reads no clock). `None` is "not priced", never "free".
+    #[must_use]
+    pub fn token_rates(&self, model: &str, today: &str) -> Option<TokenRates> {
+        let row = self
+            .models
+            .iter()
+            .find(|m| m.model == model && fresh(m.verified_at.as_deref(), today))?;
+        let input = micro_dollars(&row.model, &row.input_usd_per_mtok).ok()?;
+        let output = micro_dollars(&row.model, &row.output_usd_per_mtok).ok()?;
+        let cache_read = match &row.cache_read_usd_per_mtok {
+            Some(v) => micro_dollars(&row.model, v).ok()?,
+            None => input,
+        };
+        let cache_write = match &row.cache_write_usd_per_mtok {
+            Some(v) => micro_dollars(&row.model, v).ok()?,
+            None => input.saturating_mul(2),
+        };
+        Some(TokenRates {
+            input,
+            output,
+            cache_read,
+            cache_write,
+        })
+    }
+
+    /// Dollars per second for a hardware class, as integer micro-dollars, from a
+    /// fresh verified row only.
+    #[must_use]
+    pub fn hardware_micro_usd_per_second(&self, class: &str, today: &str) -> Option<i64> {
+        let row = self
+            .hardware
+            .iter()
+            .find(|h| h.hardware_class == class && fresh(h.verified_at.as_deref(), today))?;
+        micro_dollars(&row.hardware_class, &row.usd_per_second).ok()
+    }
+}
+
+/// A profile's dollar cap in tenths of a cent, or `None` when it sets none.
+#[must_use]
+pub fn usd_cap_tenth_cents(profile: &Profile) -> Option<i64> {
+    let usd = profile.budgets.max_usd_per_task;
+    if !usd.is_finite() {
+        return None;
+    }
+    // The one place an `f64` from a profile becomes money: rounded down to a
+    // whole tenth of a cent, so a cap can only be read as tighter, never looser.
+    #[allow(clippy::cast_possible_truncation)]
+    let t = (usd * 1000.0).floor() as i64;
+    (t > 0).then_some(t)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::profile::frontier_fixture;
+
+    // ── Prices (S-2.12) ─────────────────────────────────────────────────────
+
+    const TABLE: &str = r#"
+models:
+  - model: claude-opus-5
+    input_usd_per_mtok: "5.00"
+    output_usd_per_mtok: "25.00"
+    source_url: https://example.invalid/pricing
+    verified_at: "2026-09-25"
+  - model: stale-model
+    input_usd_per_mtok: "1"
+    output_usd_per_mtok: "1"
+    source_url: https://example.invalid/pricing
+    verified_at: "2025-01-01"
+  - model: unverified
+    input_usd_per_mtok: "1"
+    output_usd_per_mtok: "1"
+    source_url: https://example.invalid/pricing
+hardware:
+  - hardware_class: rtx4090
+    usd_per_second: "0.000025"
+    source_url: https://example.invalid/power
+    verified_at: "2026-09-25"
+"#;
+
+    #[test]
+    fn a_fresh_row_prices_a_call_in_integer_tenths_of_a_cent_rounded_up() {
+        let t = PriceTable::from_yaml(TABLE).unwrap();
+        let r = t.token_rates("claude-opus-5", "2026-10-03").unwrap();
+        // 1M input at $5 + 100k output at $25 = $7.50 = 7500 tenth-cents.
+        let c = r.cost_tenth_cents(CallTokens {
+            input: 1_000_000,
+            output: 100_000,
+            ..CallTokens::default()
+        });
+        assert_eq!(c, 7_500);
+        // One token is a fraction of a tenth of a cent and rounds UP, never to 0.
+        assert_eq!(
+            r.cost_tenth_cents(CallTokens {
+                input: 1,
+                ..CallTokens::default()
+            }),
+            1
+        );
+        // Unlisted cache rates are charged conservatively.
+        assert_eq!(r.cache_read, r.input);
+        assert_eq!(r.cache_write, r.input * 2);
+    }
+
+    /// A stale or unverified row is absent, never a zero price.
+    #[test]
+    fn a_stale_or_unverified_row_prices_nothing() {
+        let t = PriceTable::from_yaml(TABLE).unwrap();
+        assert!(t.token_rates("stale-model", "2026-10-03").is_none());
+        assert!(t.token_rates("unverified", "2026-10-03").is_none());
+        assert!(t.token_rates("no-such-model", "2026-10-03").is_none());
+        assert_eq!(
+            t.hardware_micro_usd_per_second("rtx4090", "2026-10-03"),
+            Some(25)
+        );
+    }
+
+    #[test]
+    fn a_price_that_is_not_a_plain_decimal_refuses_to_load() {
+        let bad = TABLE.replace("\"25.00\"", "\"25,00\"");
+        assert!(PriceTable::from_yaml(&bad).is_err());
+        let neg = TABLE.replace("\"25.00\"", "\"-1\"");
+        assert!(PriceTable::from_yaml(&neg).is_err());
+    }
+
+    /// The shipped table loads, so a typo in it fails CI rather than a run.
+    #[test]
+    fn the_shipped_price_table_loads() {
+        let text = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/prices.yaml"),
+        )
+        .expect("config/prices.yaml is shipped");
+        PriceTable::from_yaml(&text).expect("and parses");
+    }
 
     #[test]
     fn the_sdk_adapter_verifies_against_a_frontier_profile() {

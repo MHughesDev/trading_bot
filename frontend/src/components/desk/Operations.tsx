@@ -21,6 +21,7 @@ import {
 } from '@/api/desk'
 import { formatRate, nothingRecordedInLlmUsage, usageRows, killSwitchBadge, monitorRow, environmentBadge, strategyScope, strategyActionBody, strategyActionRefusal, globalActionBody } from './Operations.helpers'
 import { GLOBAL_SCOPE } from './Operations.helpers'
+import { MonitorLive } from './MonitorLive'
 
 // ── What the runs produced (AGENT-013 §10; S-10.13) ──────────────────────────
 //
@@ -636,6 +637,10 @@ export function Monitor() {
           </p>
         </PanelBody>
       </Panel>
+
+      {/* What the monitor knows: the live stream, feeds, venues, coverage,
+          defects and drills (S-7.10). */}
+      <MonitorLive />
 
       <StrategyActionDialog
         key={pending ? `${pending.action}:${pending.row.strategy_id}` : 'none'}

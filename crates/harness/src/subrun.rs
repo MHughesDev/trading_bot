@@ -162,9 +162,224 @@ impl Delegation {
     }
 }
 
+/// What a run has left to give (S-2.12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Remaining {
+    pub tokens: u64,
+    pub trials: u32,
+    pub steps: u32,
+}
+
+/// A slice of a parent's remaining budget, spent by exactly one run
+/// (SUBAGENTS-DESIGN §6; AGENT-010 §9; S-2.12).
+///
+/// **Not `Clone`, not `Copy`, and consumed by value** — those three properties are
+/// the type. A lease that could be copied would let two sub-runs spend the same
+/// tokens and the parent's total be spent twice over; one that could be spent
+/// twice would let a retried dispatch quietly double its allowance. Splitting
+/// *subtracts* from the parent's [`Remaining`], so the sum of the leases handed out
+/// can never exceed what the parent had, which is the property a tree of runs needs
+/// and a tree of runs with a shared counter never has.
+///
+/// Fields are private: the only ways to get one are [`BudgetLease::split`] and
+/// nothing else, so no caller can mint budget it was not given.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct BudgetLease {
+    tokens: u64,
+    trials: u32,
+    steps: u32,
+}
+
+/// Why a lease could not be split.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum LeaseError {
+    #[error(
+        "the parent has {have} {axis} left and the lease asks for {want}: a sub-run cannot be given what its parent does not have"
+    )]
+    Overdrawn {
+        axis: &'static str,
+        have: u64,
+        want: u64,
+    },
+    #[error("a lease of nothing delegates nothing")]
+    Empty,
+}
+
+impl BudgetLease {
+    /// Take `want` out of the parent's remaining budget. On success the parent's
+    /// `Remaining` has been reduced by exactly that; on failure it is untouched.
+    ///
+    /// # Errors
+    /// [`LeaseError::Overdrawn`] when any axis asks for more than is left, and
+    /// [`LeaseError::Empty`] when every axis is zero.
+    pub fn split(parent: &mut Remaining, want: Remaining) -> Result<Self, LeaseError> {
+        if want.tokens == 0 && want.trials == 0 && want.steps == 0 {
+            return Err(LeaseError::Empty);
+        }
+        if want.tokens > parent.tokens {
+            return Err(LeaseError::Overdrawn {
+                axis: "tokens",
+                have: parent.tokens,
+                want: want.tokens,
+            });
+        }
+        if want.trials > parent.trials {
+            return Err(LeaseError::Overdrawn {
+                axis: "trials",
+                have: u64::from(parent.trials),
+                want: u64::from(want.trials),
+            });
+        }
+        if want.steps > parent.steps {
+            return Err(LeaseError::Overdrawn {
+                axis: "steps",
+                have: u64::from(parent.steps),
+                want: u64::from(want.steps),
+            });
+        }
+        parent.tokens -= want.tokens;
+        parent.trials -= want.trials;
+        parent.steps -= want.steps;
+        Ok(Self {
+            tokens: want.tokens,
+            trials: want.trials,
+            steps: want.steps,
+        })
+    }
+
+    #[must_use]
+    pub fn tokens(&self) -> u64 {
+        self.tokens
+    }
+
+    #[must_use]
+    pub fn trials(&self) -> u32 {
+        self.trials
+    }
+
+    #[must_use]
+    pub fn steps(&self) -> u32 {
+        self.steps
+    }
+
+    /// What was not spent, to hand back to the parent. Consumes the lease, so it
+    /// can be returned once.
+    #[must_use]
+    pub fn settle(self, spent: Remaining) -> Remaining {
+        Remaining {
+            tokens: self.tokens.saturating_sub(spent.tokens),
+            trials: self.trials.saturating_sub(spent.trials),
+            steps: self.steps.saturating_sub(spent.steps),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A lease is spent by exactly one run: it is moved into the loop, and the
+    /// type derives neither `Clone` nor `Copy` (checked in source below, since
+    /// "this does not compile" cannot be asserted from inside a test).
+    #[test]
+    fn a_lease_cannot_be_cloned() {
+        let src = include_str!("subrun.rs");
+        let decl = src
+            .split("pub struct BudgetLease")
+            .next()
+            .unwrap()
+            .rsplit("///")
+            .next()
+            .unwrap();
+        assert!(
+            !decl.contains("Clone") && !decl.contains("Copy"),
+            "BudgetLease must not derive Clone or Copy: {decl}"
+        );
+        fn takes_by_value(_: BudgetLease) {}
+        let mut parent = Remaining {
+            tokens: 100,
+            trials: 2,
+            steps: 10,
+        };
+        let lease = BudgetLease::split(
+            &mut parent,
+            Remaining {
+                tokens: 10,
+                trials: 1,
+                steps: 2,
+            },
+        )
+        .unwrap();
+        takes_by_value(lease);
+        // `lease` is moved: using it again would not compile.
+    }
+
+    /// Splitting subtracts, so the leases handed out can never sum past the
+    /// parent's remaining; an overdraw fails and leaves the parent untouched.
+    #[test]
+    fn a_split_subtracts_from_the_parent_and_an_overdraw_changes_nothing() {
+        let mut parent = Remaining {
+            tokens: 1_000,
+            trials: 3,
+            steps: 20,
+        };
+        let a = BudgetLease::split(
+            &mut parent,
+            Remaining {
+                tokens: 400,
+                trials: 2,
+                steps: 8,
+            },
+        )
+        .unwrap();
+        assert_eq!((a.tokens(), a.trials(), a.steps()), (400, 2, 8));
+        assert_eq!(
+            parent,
+            Remaining {
+                tokens: 600,
+                trials: 1,
+                steps: 12
+            }
+        );
+        let before = parent;
+        let err = BudgetLease::split(
+            &mut parent,
+            Remaining {
+                tokens: 100,
+                trials: 2,
+                steps: 1,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, LeaseError::Overdrawn { axis: "trials", .. }));
+        assert_eq!(parent, before, "a refused split takes nothing");
+        assert_eq!(
+            BudgetLease::split(
+                &mut parent,
+                Remaining {
+                    tokens: 0,
+                    trials: 0,
+                    steps: 0
+                }
+            )
+            .unwrap_err(),
+            LeaseError::Empty
+        );
+        // What the child did not spend goes back, once.
+        let back = a.settle(Remaining {
+            tokens: 150,
+            trials: 1,
+            steps: 3,
+        });
+        assert_eq!(
+            back,
+            Remaining {
+                tokens: 250,
+                trials: 1,
+                steps: 5
+            }
+        );
+    }
 
     fn worker(projection: Option<&str>) -> Delegation {
         Delegation {

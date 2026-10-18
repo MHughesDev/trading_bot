@@ -16,7 +16,6 @@ pub mod envelope;
 pub mod error;
 pub mod fees;
 pub mod forward;
-pub mod ids;
 pub mod instrument;
 pub mod interned;
 pub mod lanes;
@@ -36,7 +35,6 @@ pub use access::{access_trusted, decode_from_bytes};
 pub use data_type::{DataType, UnknownDataType};
 pub use envelope::EventEnvelope;
 pub use error::{NormalizeError, RiskRejection, ValidationError};
-pub use ids::{event_id_from_key, onchain_key, sequenced_key, trade_key, DedupKey};
 pub use instrument::{
     AssetClass, HaltPolicy, Instrument, InstrumentId, MarketStructure, SourceId, TradingSchedule,
     VenueId,

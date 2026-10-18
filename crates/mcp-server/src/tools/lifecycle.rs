@@ -23,11 +23,11 @@
 
 use serde_json::{json, Value};
 
-use crate::spec::ToolSpec;
+use crate::spec::{ToolSpec, TrialKind};
 use crate::taxonomy::Risk;
 
 fn missing(field: &str, why: &str) -> Value {
-    json!({ "error": "missing_field", "field": field, "fix": why })
+    crate::tool_error::missing_field_because(field, why)
 }
 
 fn text(params: &Value, key: &str) -> Option<String> {
@@ -92,12 +92,12 @@ pub fn check_registration(params: &Value) -> Result<(), Value> {
             ))
         }
         Some(d) if !(d.is_finite() && d > 0.0) => {
-            return Err(json!({
-                "error": "invalid_delta_practical",
-                "value": d,
-                "fix": "it must be finite and positive. Zero means every difference matters, \
-                        which is the same as none of them mattering."
-            }))
+            return Err(crate::tool_error::refuse_extra(
+                "invalid_delta_practical",
+                format!("delta_practical {d} is not a finite positive number."),
+                "set delta_practical to a finite number above zero; zero means every difference matters",
+                json!({ "value": d }),
+            ))
         }
         Some(_) => {}
     }
@@ -110,12 +110,12 @@ pub fn check_registration(params: &Value) -> Result<(), Value> {
     match (start, end) {
         (Some(s), Some(e)) if s <= e => {}
         (Some(s), Some(e)) => {
-            return Err(json!({
-                "error": "backwards_window",
-                "start": s,
-                "end": e,
-                "fix": "the window runs from start to end"
-            }))
+            return Err(crate::tool_error::refuse_extra(
+                "backwards_window",
+                format!("window.start {s} is after window.end {e}."),
+                "swap them so window.start is the earlier instant",
+                json!({ "start": s, "end": e }),
+            ))
         }
         _ => {
             return Err(missing(
@@ -162,38 +162,32 @@ pub fn check_hypothesis(params: &Value, vocabulary: &[&str]) -> Result<(), Value
         .find(|m| falsifier.contains(*m))
         .map(|m| (*m).to_string());
     let Some(metric) = metric else {
-        return Err(json!({
-            "error": "falsifier_names_no_metric",
-            "falsifier": falsifier,
-            "known_metrics": vocabulary,
-            "fix": "name a metric the platform computes. A falsifier nothing can evaluate \
-                    reads like a commitment and is not one: it can never refute anything, \
-                    so the run keeps the appearance of pre-registration with none of it."
-        }));
+        return Err(crate::tool_error::refuse_extra(
+            "falsifier_names_no_metric",
+            "the falsifier names no metric the platform computes, so nothing could ever refute it.",
+            "rewrite `falsifier` around one of `known_metrics`, e.g. `<metric> <= 0`",
+            json!({ "falsifier": falsifier, "known_metrics": vocabulary }),
+        ));
     };
     // A metric with no comparator is a noun, not a claim. `sharpe_after_costs`
     // says nothing that could turn out false; `sharpe_after_costs <= 0` does.
     const COMPARATORS: &[&str] = &["<=", ">=", "<", ">", "==", "!=", " below ", " above "];
     if !COMPARATORS.iter().any(|c| falsifier.contains(c)) {
-        return Err(json!({
-            "error": "falsifier_names_no_comparator",
-            "falsifier": falsifier,
-            "metric": metric,
-            "comparators": COMPARATORS,
-            "fix": "say which way it would have to go. A metric with no comparator is a \
-                    noun, not a claim: `sharpe_after_costs` cannot turn out false and \
-                    `sharpe_after_costs <= 0` can."
-        }));
+        return Err(crate::tool_error::refuse_extra(
+            "falsifier_names_no_comparator",
+            "the falsifier names a metric but not which way it would have to go; a metric alone cannot turn out false.",
+            format!("add a comparator, e.g. `{metric} <= 0` (one of {})", COMPARATORS.join(" ").trim()),
+            json!({ "falsifier": falsifier, "metric": metric, "comparators": COMPARATORS }),
+        ));
     }
     match text(params, "role").as_deref() {
         None | Some("primary" | "secondary" | "exploratory") => Ok(()),
-        Some(other) => Err(json!({
-            "error": "unknown_role",
-            "role": other,
-            "roles": ["primary", "secondary", "exploratory"],
-            "fix": "secondary and exploratory results cap at `suggestive`; only a primary \
-                    hypothesis can produce an established finding."
-        })),
+        Some(other) => Err(crate::tool_error::refuse_extra(
+            "unknown_role",
+            format!("role `{other}` is not a hypothesis role."),
+            "set role to \"primary\", \"secondary\" or \"exploratory\"; only a primary hypothesis can produce an established finding",
+            json!({ "role": other, "roles": ["primary", "secondary", "exploratory"] }),
+        )),
     }
 }
 
@@ -271,11 +265,12 @@ pub async fn propose(api: &crate::ApiClient, params: &Value) -> Value {
         return missing("kind", "promote_strategy, change_limits or deploy_paper");
     };
     if !["promote_strategy", "change_limits", "deploy_paper"].contains(&kind.as_str()) {
-        return json!({
-            "error": "unknown_proposal_kind",
-            "kind": kind,
-            "kinds": ["promote_strategy", "change_limits", "deploy_paper"],
-        });
+        return crate::tool_error::refuse_extra(
+            "unknown_proposal_kind",
+            format!("proposal kind `{kind}` is not one this tool files."),
+            "set kind to \"promote_strategy\", \"change_limits\" or \"deploy_paper\"",
+            json!({ "kind": kind, "kinds": ["promote_strategy", "change_limits", "deploy_paper"] }),
+        );
     }
     if text(params, "dossier_ref").is_none() {
         return missing(
@@ -353,13 +348,12 @@ pub fn check_question(params: &Value) -> Result<(), Value> {
     match text(params, "value").as_deref() {
         None | Some("curious" | "useful" | "decisive") => {}
         Some(other) => {
-            return Err(json!({
-                "error": "unknown_value",
-                "value": other,
-                "values": VALUES,
-                "fix": "`decisive` means something is being decided on an assumption nobody \
-                        has checked; `useful` would change how a future run is designed."
-            }))
+            return Err(crate::tool_error::refuse_extra(
+                "unknown_value",
+                format!("value `{other}` is not a question value."),
+                "set value to \"curious\", \"useful\" or \"decisive\"; `decisive` means something is being decided on an unchecked assumption",
+                json!({ "value": other, "values": VALUES }),
+            ))
         }
     }
     // `status` is not a field on this request, and neither is `closed_by`. A run
@@ -368,13 +362,12 @@ pub fn check_question(params: &Value) -> Result<(), Value> {
     // verdict.
     for field in ["status", "closed_by", "how"] {
         if params.get(field).is_some() {
-            return Err(json!({
-                "error": "not_yours_to_set",
-                "field": field,
-                "fix": "a question is closed by the platform when a later finding cites it. \
-                        A run that could close its own would close the ones it had been \
-                        thinking about longest, which is not the same as the ones it answered."
-            }));
+            return Err(crate::tool_error::refuse_ids(
+                "not_yours_to_set",
+                format!("`{field}` is not a field a run may set; the platform closes a question when a later finding cites it."),
+                format!("remove `{field}` from this call and cite the question in a finding instead"),
+                &[("field", field)],
+            ));
         }
     }
     Ok(())
@@ -445,7 +438,7 @@ pub async fn prior_negative_results(api: &crate::ApiClient, params: &Value) -> V
 /// attribution (`/api/research/sessions/current`) — the run does not have to
 /// have been told an id, and cannot name another session by mistake. With one,
 /// it is used as given and ownership is checked at the boundary.
-async fn session_of(api: &crate::ApiClient, params: &Value) -> Result<String, Value> {
+pub(crate) async fn session_of(api: &crate::ApiClient, params: &Value) -> Result<String, Value> {
     if let Some(id) = text(params, "session_id") {
         return Ok(id);
     }
@@ -455,11 +448,11 @@ async fn session_of(api: &crate::ApiClient, params: &Value) -> Result<String, Va
             .and_then(Value::as_str)
             .map(str::to_string)
             .ok_or_else(|| {
-                json!({
-                    "error": "no_session",
-                    "message": "this run is not part of a research session, and no session_id was                                 given",
-                    "fix": "a bounded Research run is its own session; a child of a continuous                             one is told which. If you are neither, there is nothing to read.",
-                })
+                crate::tool_error::refuse(
+                    "no_session",
+                    "this run is not part of a research session, and no session_id was given",
+                    "pass `session_id`; a bounded Research run is its own session, and if you are neither there is nothing to read",
+                )
             }),
         Err(e) => Err(e.to_tool_error()),
     }
@@ -545,6 +538,51 @@ pub async fn get_digest(api: &crate::ApiClient, params: &Value) -> Value {
         }
         Err(e) => e.to_tool_error(),
     }
+}
+
+/// `compare_candidates` — SPEC §11.5 as one door (AGENT-013 §8.3).
+///
+/// N candidates are measured on the same paired replicate grid (windows crossed
+/// with a -20 % / modelled / +20 % cost perturbation) and judged pairwise with Holm
+/// across the pairs. **There is no seed, no `delta_practical`, no ROPE bound and no
+/// replicate count in the schema**, and the route refuses one sent anyway: the seed
+/// is the platform's (ADR-P2-02) and the effect size is the Experiment's, declared
+/// before any trial ran.
+pub async fn compare_candidates(api: &crate::ApiClient, params: &Value) -> Value {
+    let Some(experiment) = text(params, "experiment_id") else {
+        return missing(
+            "experiment_id",
+            "the Experiment whose research slice the candidates are measured on; its declared              delta_practical is the effect size the comparison asks about",
+        );
+    };
+    let Some(candidates) = params.get("candidates").filter(|c| c.is_array()) else {
+        return missing(
+            "candidates",
+            "two or more `{name, params}` objects: what to compare, each under its own parameters",
+        );
+    };
+    post(
+        api,
+        "/api/lifecycle/compare",
+        json!({ "experiment": experiment, "candidates": candidates }),
+    )
+    .await
+}
+
+/// `reproduce` — re-run a stored result under its own config and report whether
+/// the platform still computes the same thing (AGENT-013 §6.9, §8.4).
+///
+/// Spends no trial: a reproduction is not a look (ADR-P2-17, ADR-S10-18). There is
+/// no tolerance argument, deliberately — it asks whether the platform computed the
+/// same number, not whether it computed a close one.
+pub async fn reproduce(api: &crate::ApiClient, params: &Value) -> Value {
+    let Some(run_id) = text(params, "run_id") else {
+        return missing(
+            "run_id",
+            "the stored Run to re-run, as a Study's member list names it",
+        );
+    };
+    post(api, "/api/lifecycle/reproduce", json!({ "run_id": run_id })).await
 }
 
 /// The catalogue entries for this namespace.
@@ -810,6 +848,50 @@ pub fn specs() -> Vec<ToolSpec> {
             }),
         )
         .internal(),
+        ToolSpec::new(
+            "compare_candidates",
+            "lifecycle",
+            Risk::Write,
+            "Rank two or more candidates by SPEC §11.5: every one measured on the same paired              replicates (windows x -20% / modelled / +20% cost), every pair judged with an              anytime-valid confidence sequence against the Experiment's own delta_practical,              Holm across the pairs. `indistinguishable` is a real and common answer. You              cannot choose the seed, the effect size or the replicate count; they are the              platform's and the Experiment's. Counted trials.",
+            json!({
+                "type": "object",
+                "required": ["experiment_id", "candidates"],
+                "properties": {
+                    "experiment_id": { "type": "string", "description": "The Experiment (its research slice and declared delta_practical are used)." },
+                    "candidates": {
+                        "type": "array",
+                        "minItems": 2,
+                        "items": {
+                            "type": "object",
+                            "required": ["name"],
+                            "properties": {
+                                "name": { "type": "string", "description": "A label; must be distinct." },
+                                "params": { "type": "object", "description": "The parameters this candidate runs under." }
+                            }
+                        }
+                    }
+                }
+            }),
+        )
+        .internal()
+        .spends_trial(TrialKind::Search)
+        .evidence(&["matrix"])
+        .max_calls_per_run(3),
+        ToolSpec::new(
+            "reproduce",
+            "lifecycle",
+            // It appends a finding row; it changes nothing a run reads as a result.
+            Risk::Write,
+            "Re-run a stored result under its own config and report whether the platform still              computes the same thing: bit-identical, a named receipt difference, or drift.              Spends no trial - a reproduction is not a look. There is no tolerance: close              enough is not an outcome.",
+            json!({
+                "type": "object",
+                "required": ["run_id"],
+                "properties": {
+                    "run_id": { "type": "string", "description": "A stored Run id, as a Study's member list names it." }
+                }
+            }),
+        )
+        .internal(),
     ]
 }
 
@@ -847,7 +929,7 @@ mod tests {
         let err = check_registration(&r).expect_err("refused");
         assert_eq!(err["field"], "falsifier");
         assert!(
-            err["fix"]
+            err["error"]["message"]
                 .as_str()
                 .unwrap()
                 .contains("after a result is not"),
@@ -863,7 +945,7 @@ mod tests {
         let err = check_registration(&r).expect_err("refused");
         assert_eq!(err["field"], "delta_practical");
         assert!(
-            err["fix"]
+            err["error"]["message"]
                 .as_str()
                 .unwrap()
                 .contains("a decision nobody made"),
@@ -872,7 +954,7 @@ mod tests {
 
         r["delta_practical"] = json!(0.0);
         let err = check_registration(&r).expect_err("zero is refused too");
-        assert_eq!(err["error"], "invalid_delta_practical");
+        assert_eq!(err["error"]["code"], "invalid_delta_practical");
     }
 
     /// A scalar objective is refused: ADR-012.
@@ -882,7 +964,7 @@ mod tests {
         r["objective"] = Value::Null;
         let err = check_registration(&r).expect_err("refused");
         assert_eq!(err["field"], "objective");
-        assert!(err["fix"]
+        assert!(err["error"]["message"]
             .as_str()
             .unwrap()
             .contains("never a scalar score"));
@@ -893,10 +975,10 @@ mod tests {
     fn a_falsifier_naming_no_metric_is_refused_with_the_list() {
         let err = check_hypothesis(&json!({"falsifier": "it does not work very well"}), VOCAB)
             .expect_err("refused");
-        assert_eq!(err["error"], "falsifier_names_no_metric");
+        assert_eq!(err["error"]["code"], "falsifier_names_no_metric");
         assert_eq!(err["known_metrics"], json!(VOCAB));
         assert!(
-            err["fix"].as_str().unwrap().contains("can never refute"),
+            err["error"]["message"].as_str().unwrap().contains("refute"),
             "the reason is the point: {err}"
         );
     }
@@ -906,7 +988,7 @@ mod tests {
     fn a_falsifier_needs_a_direction() {
         let err = check_hypothesis(&json!({"falsifier": "sharpe_after_costs"}), VOCAB)
             .expect_err("refused");
-        assert_eq!(err["error"], "falsifier_names_no_comparator");
+        assert_eq!(err["error"]["code"], "falsifier_names_no_comparator");
         check_hypothesis(&json!({"falsifier": "sharpe_after_costs <= 0"}), VOCAB)
             .expect("a metric and a direction is a claim");
         check_hypothesis(
@@ -931,7 +1013,7 @@ mod tests {
             VOCAB,
         )
         .expect_err("refused");
-        assert_eq!(err["error"], "unknown_role");
+        assert_eq!(err["error"]["code"], "unknown_role");
     }
 
     /// Neither tool spends a trial.
@@ -941,7 +1023,16 @@ mod tests {
     /// mean anything.
     #[test]
     fn sealing_a_commitment_is_not_a_look() {
+        // `compare_candidates` is the one tool here that *is* a look: it measures N
+        // candidates on real Runs (counted trials, S-10.10), so it declares one and
+        // the gate refuses it without a sealed registration. It is named, not
+        // inferred, so a second spending tool arriving in this namespace fails here.
+        const SPENDS: &[&str] = &["compare_candidates"];
         for spec in specs() {
+            if SPENDS.contains(&spec.name) {
+                assert_eq!(spec.spends_trial, crate::spec::TrialKind::Search);
+                continue;
+            }
             assert_eq!(
                 spec.spends_trial,
                 crate::spec::TrialKind::None,
@@ -1010,7 +1101,7 @@ mod tests {
             });
             p[field] = json!("closed");
             let err = check_question(&p).expect_err("not yours");
-            assert_eq!(err["error"], "not_yours_to_set", "{field}");
+            assert_eq!(err["error"]["code"], "not_yours_to_set", "{field}");
         }
     }
 

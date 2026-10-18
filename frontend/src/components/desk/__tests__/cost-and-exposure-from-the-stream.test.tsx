@@ -93,6 +93,24 @@ describe('the Cost tab tells three states apart', () => {
     expect(screen.getByText(/has not been read/)).toBeInTheDocument()
   })
 
+  it('prices and splits a call only when its own note says so (S-6.12)', () => {
+    const calls = costCalls([
+      usage({ usd_tenth_cents: 250, layers: { charter: 10, schemas: 20, body: 900, output: 70 } }),
+      usage({ layers: { charter: 10, schemas: 20 } }, 2),
+    ])
+    expect(calls[0].usd_tenth_cents).toBe(250)
+    expect(calls[0].layers).toEqual({ charter: 10, schemas: 20, body: 900, output: 70 })
+    // A half-split is not drawn as a whole one, and no figure is not a free call.
+    expect(calls[1].layers).toBeNull()
+    expect(calls[1].usd_tenth_cents).toBeNull()
+    render(<CostTab calls={calls} bytesPerTokenCalibrated={null} bytesPerTokenEstimate={null} />)
+    expect(screen.getAllByTestId('layer-split')[0].textContent).toBe('10 · 20 · 900 · 70')
+    expect(screen.getAllByTestId('layer-split')[1].textContent).toBe('not split')
+    // S-6.12's acceptance, as a stated share: 930 estimated of the provider's 1,000.
+    expect(screen.getByTestId('layer-reassembly').textContent).toMatch(/930 tokens against\s+the provider's 1,000 over 1 call \(93%\)/)
+    expect(screen.queryByTestId('cost-unpriced')).toBeNull()
+  })
+
   it('says no call has been made when the run has made none', () => {
     render(<CostTab calls={[]} bytesPerTokenCalibrated={null} bytesPerTokenEstimate={null} />)
     expect(screen.getByText(/no model call yet/)).toBeInTheDocument()

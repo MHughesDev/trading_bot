@@ -23,6 +23,7 @@ pub mod diagnostic;
 pub mod engine;
 pub mod env;
 pub mod eval;
+pub mod external;
 mod history;
 mod instance;
 pub mod models;
@@ -37,6 +38,7 @@ pub mod trace;
 
 pub use checkpoint::{Checkpoint, RestoreError};
 pub use compile::compile;
+pub use external::ExternalData;
 pub use diagnostic::Diagnostic;
 pub use engine::{Engine, EngineError, Event, Step};
 pub use env::{

@@ -379,17 +379,33 @@ pub fn catalog() -> &'static [ToolSpec] {
         specs.extend(crate::tools::audit::specs());
         specs.extend(crate::tools::venues::specs());
         specs.extend(crate::tools::strategy::specs());
+        // Set S S-5.8/S-5.11–S-5.13: skeletons, the SLv2 guide, the blocking
+        // profile and suggest_moves. Reads, and none spends a trial.
+        specs.extend(crate::tools::strategy_lang::specs());
         // Set U U-7.4: v3 authoring, thin clients of /api/v3.
         specs.extend(crate::tools::strategy_v3::specs());
+        // Set U U-7.7: ask for a paper deployment; a person decides.
+        specs.extend(crate::tools::deployment_proposals::specs());
         // Set U U-6.3: the screener, through the same route a person uses.
         specs.extend(crate::tools::selections::specs());
         specs.extend(crate::tools::falsification::specs());
+        // Set M M-1.8 / Set Q Q-1.7, Q-1.8: Layer 1 submit, the alpha-chain audit, the
+        // robustness suite. New files, thin clients of existing routes and studies.
+        specs.extend(crate::tools::layer1::specs());
+        specs.extend(crate::tools::explain_trade::specs());
+        specs.extend(crate::tools::alpha_chain::specs());
+        specs.extend(crate::tools::robustness::specs());
         // S-3.12. Statistics over a run the ledger already holds, so both
         // declare `TrialKind::None`; see the module docs for why that is a
         // correctness claim rather than a default.
         specs.extend(crate::tools::path_risk::specs());
         specs.extend(crate::tools::lifecycle::specs());
+        specs.extend(crate::tools::lifecycle_sessions::specs());
         specs.extend(crate::tools::campaign::specs());
+        // Set R-a: propose, search and rate registry skills; admission is not a tool.
+        specs.extend(crate::tools::skills_registry::specs());
+        // Set R-b: questions over move memory, analogs, regimes and the random arm.
+        specs.extend(crate::tools::knowledge_model::specs());
         specs.extend(crate::tools::research_tools::specs());
         // The batteries (S-8.1). Only the ones that can actually run: a
         // workflow with a step nothing performs is absent rather than offered
@@ -742,6 +758,100 @@ pub const ERROR_CODES: &[&str] = &[
     "unknown_tool",
     // The audit envelope.
     "audit_unavailable",
+    // The tool handlers (S-1.19): codes `tool_error::TOOL_ERROR_CODES` refuses with.
+    "missing_field",
+    "invalid_request",
+    "validation_failed",
+    "invalid_definition",
+    "serialization_error",
+    "draft_not_found",
+    "duplicate_node_id",
+    "invalid_side",
+    "invalid_size_mode",
+    "invalid_decimal",
+    "invalid_window",
+    "invalid_timestamp",
+    "invalid_position",
+    "invalid_fractions",
+    "invalid_shift_bars",
+    "invalid_max_delay_bars",
+    "invalid_interval_hours",
+    "invalid_delta_practical",
+    "bad_multipliers",
+    "backwards_window",
+    "empty_window",
+    "window_too_short",
+    "unknown_window",
+    "unknown_venue",
+    "unknown_value",
+    "unknown_timeframe",
+    "unknown_section",
+    "unknown_role",
+    "unknown_proposal_kind",
+    "unknown_mode",
+    "unknown_family",
+    "unknown_cost",
+    "n_paths_out_of_range",
+    "negative_budget",
+    "too_many_probes",
+    "too_many_positions",
+    "too_few_trades",
+    "ambiguous_source",
+    "empty_source",
+    "source_too_large",
+    "source_not_offered",
+    "malformed_funding_response",
+    "cadence_unknown",
+    "funding_unmeasured",
+    "costs_not_recorded",
+    "no_costs_charged",
+    "perturbation_not_applied",
+    "params_do_not_materialise",
+    "probes_disagree",
+    "baseline_never_fires",
+    "variant_not_registered",
+    "unsupported_metric",
+    "full_window_refused",
+    "must_not_run",
+    "not_falsifiable",
+    "falsifier_names_no_metric",
+    "falsifier_names_no_comparator",
+    "already_registered",
+    "budget_already_registered",
+    "not_yours_to_set",
+    "floor_is_not_yours",
+    "not_writable_yet",
+    "mode_required",
+    "live_automations_disabled",
+    "no_bars",
+    "no_samples",
+    "no_trades",
+    "no_steps",
+    "no_plan",
+    "no_outputs",
+    "no_entry",
+    "no_feature_columns",
+    "no_selector",
+    "no_session",
+    "no_workspace",
+    "no_time_to_run",
+    "unreadable_regimes",
+    "unreadable_preview",
+    "unreadable_form",
+    "unreadable_exit_reasons",
+    "unreadable_edit",
+    "compile_failed",
+    "classification_failed",
+    "experiment_failed",
+    "study_failed",
+    "create_model_failed",
+    "start_train_failed",
+    "not_expressible_in_slv2",
+    "this_is_slv3",
+    "workflow_incomplete",
+    "workflow_step_owed",
+    "network_error",
+    "backend_unavailable",
 ];
 
 /// Whether a string is shaped like a code rather than like a sentence.

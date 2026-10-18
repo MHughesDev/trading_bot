@@ -36,8 +36,14 @@ export function defaultWorkflow(question: string): Workflow {
  * gone".
  *
  * Asserted by `a_slash_command_nobody_answers_does_not_eat_the_question`.
+ *
+ * **`/pause`, `/resume`, `/agenda` and `/charter` came back 2026-10-03**, each
+ * with its handler: `slashAction` (`lib/desk/sessions.ts`) maps every entry
+ * here to what it does, the journal's are the session routes served since
+ * S-11.14, and a run's pause is the route ADR-D-27 mounted. A test asserts no
+ * entry maps to nothing.
  */
-export const SLASH_COMMANDS = ['/steer', '/why', '/budget'] as const
+export const SLASH_COMMANDS = ['/steer', '/why', '/budget', '/pause', '/resume', '/agenda', '/charter'] as const
 
 /**
  * A crude classifier, replaced by the harness's own at S-10.2.
@@ -48,3 +54,15 @@ export const SLASH_COMMANDS = ['/steer', '/why', '/budget'] as const
  */
 const RESEARCH_SHAPED =
   /\b(backtest|sweep|optimi[sz]e|walk[- ]forward|edge|alpha|does .* predict|is .* profitable|compare .* against|falsif|replicate|hypothes)/i
+
+/**
+ * What `POST /api/research/sessions` refuses today, said in the form before the
+ * request rather than as a 400 after it. Each names the task whose landing
+ * lifts it; the route's own refusal text says the same.
+ */
+export const CHARTER_REFUSED = {
+  autonomous:
+    'refused by the platform until S-11.9 reads the judgement threshold — notify starts items and tells you about each one',
+  replenish:
+    'refused by the platform until S-11.11 builds the run that refills a drained agenda; with it off the session completes when the agenda empties',
+} as const

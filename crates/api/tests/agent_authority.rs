@@ -74,7 +74,7 @@ async fn a_minted_session_token_carries_exactly_the_research_scopes() {
     expected.sort();
     assert_eq!(granted, expected);
 
-    let stored: Vec<String> = sqlx::query("SELECT scopes FROM sessions WHERE token=$1")
+    let stored: Vec<String> = sqlx::query("SELECT scopes FROM sessions WHERE token = session_token_hash($1)")
         .bind(&minted.token)
         .fetch_one(&pool)
         .await
@@ -168,7 +168,7 @@ async fn revoking_a_token_makes_it_unusable() {
         .await
         .expect("revoke");
 
-    let remaining: i64 = sqlx::query("SELECT count(*) AS n FROM sessions WHERE token=$1")
+    let remaining: i64 = sqlx::query("SELECT count(*) AS n FROM sessions WHERE token = session_token_hash($1)")
         .bind(&minted.token)
         .fetch_one(&pool)
         .await
@@ -201,7 +201,7 @@ async fn a_session_token_is_bound_to_one_project() {
         .await
         .expect("mint");
 
-    let bound: Uuid = sqlx::query("SELECT project_id FROM sessions WHERE token=$1")
+    let bound: Uuid = sqlx::query("SELECT project_id FROM sessions WHERE token = session_token_hash($1)")
         .bind(&minted.token)
         .fetch_one(&pool)
         .await

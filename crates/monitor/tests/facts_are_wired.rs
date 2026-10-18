@@ -16,8 +16,8 @@
 //! 2. Every table a `FactAction` writes to is one `LeaseWatcher::refresh` reads,
 //!    because a decision written anywhere else never reaches the order gate.
 //!
-//! Two of the three are unwired today and that is the correct answer: their
-//! producers live in crates this track may not edit. A guard that passed because
+//! One of the three is unwired today and that is the correct answer: no venue
+//! exists whose positions are not ours by construction (ADR-0048). A guard that passed because
 //! it matched nothing would be worse than no guard, so the scan asserts it found
 //! the variants it was written for before it asserts anything about them.
 
@@ -31,7 +31,7 @@ use monitor::family::{FactKind, Wiring};
 ///
 /// Shrinking this list is the work. Growing it is a regression, and the test
 /// below refuses it.
-const KNOWN_UNWIRED: &[&str] = &["ReconciliationMismatch", "HardDataStaleness"];
+const KNOWN_UNWIRED: &[&str] = &["ReconciliationMismatch"];
 
 /// The variants the scan was written for. If the scan stops finding these, it is
 /// broken rather than satisfied.

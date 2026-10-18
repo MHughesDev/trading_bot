@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { motion, useReducedMotion } from 'framer-motion'
+import { format } from 'date-fns'
 import {
   Brain,
   BarChart2,
@@ -22,9 +23,19 @@ import {
   useModelAliases,
   useModelUsedBy,
   useModelEvals,
+  useEvalDetails,
+  useModelVersions,
+  useModelRuns,
+  useModelDeployments,
+  useModelTraces,
+  useModelEvents,
   useArchiveModel,
   usePatchModel,
 } from '@/hooks/useMlOps'
+import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'
+import { Badge } from '@/components/primitives/Badge'
+import { EmptyState, ErrorState, PanelLoading } from '@/components/primitives/States'
+import { KIND_LABELS, buildActivity, pinProduction, toEvalRow, traceStats } from '@/components/mlops/studio.helpers'
 import { ModelStatusPill } from '@/components/mlops/ModelStatusPill'
 import { ModelVersionsTab } from '@/components/mlops/ModelVersionsTab'
 import { ModelTrainTab } from '@/components/mlops/ModelTrainTab'
@@ -41,15 +52,6 @@ const KIND_ICONS: Record<ModelKind, React.ElementType> = {
   risk_sizing: Shield,
   embedding: Code2,
   external_llm_adapter: Bot,
-}
-
-const KIND_LABELS: Record<ModelKind, string> = {
-  forecaster: 'Forecaster',
-  signal_ranker: 'Signal Ranker',
-  trade_decision: 'Trade Decision',
-  risk_sizing: 'Risk Sizing',
-  embedding: 'Embedding',
-  external_llm_adapter: 'LLM Adapter',
 }
 
 type Tab = 'overview' | 'versions' | 'train' | 'test' | 'evaluations' | 'deployments' | 'forecast'
@@ -75,7 +77,8 @@ function ScorecardRing({
 }) {
   const r = 28
   const circumference = 2 * Math.PI * r
-  const offset = circumference - (value / 100) * circumference
+  const clamped = Math.max(0, Math.min(100, value))
+  const offset = circumference - (clamped / 100) * circumference
 
   return (
     <div className="flex flex-col items-center gap-2">
@@ -170,119 +173,156 @@ function InlineEdit({
 function OverviewTab({ modelId }: { modelId: string }) {
   const { data: model } = useModel(modelId)
   const { data: aliases } = useModelAliases(modelId)
-  const { data: usedBy } = useModelUsedBy(modelId)
-  const { data: evals } = useModelEvals(modelId)
+  const usedBy = useModelUsedBy(modelId)
+  const evals = useModelEvals(modelId)
+  const details = useEvalDetails(modelId, evals.data)
+  const versions = useModelVersions(modelId)
+  const runs = useModelRuns(modelId)
+  const deployments = useModelDeployments(modelId)
+  const traces = useModelTraces(modelId)
+  const events = useModelEvents(modelId)
 
   if (!model) return null
 
-  const latestEval = evals?.[evals.length - 1]
-  const scorecard = latestEval?.scorecard
+  const prod = typeof aliases?.production === 'number' ? aliases.production : null
+  // The scorecard shown is the PRODUCTION version's latest evaluation when there
+  // is one, else the newest evaluation, and it says which version it describes.
+  const evalRows = pinProduction(
+    details.flatMap((d) => (d.data ? [toEvalRow(d.data)] : [])),
+    prod,
+  ).filter((r) => r.scorecard !== null)
+  const shown = evalRows[0] ?? null
+  const scorecard = shown?.scorecard ?? null
   const aliasEntries = aliases ? Object.entries(aliases) : []
+  const stats = traceStats(traces.data)
+  const activity = buildActivity({
+    runs: runs.data ?? [],
+    versions: versions.data ?? [],
+    deployments: deployments.data ?? [],
+    events: events.data ?? null,
+  })
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {/* Identity */}
-      <div className="rounded-xl border border-border bg-surface p-5">
-        <h3 className="text-sm font-medium text-text mb-4">Identity</h3>
-        <dl className="space-y-2.5">
-          {[
-            { label: 'Kind', value: KIND_LABELS[model.model_kind] },
-            { label: 'Asset class', value: model.asset_class, mono: true },
-            {
-              label: 'Framework',
-              value: model.definition.framework ?? '—',
-              mono: true,
-            },
-            { label: 'Runtime', value: model.definition.runtime ?? '—', mono: true },
-            {
-              label: 'Auto-retrain',
-              value: model.definition.auto_retrain ? 'Yes' : 'No',
-            },
-            { label: 'Slug', value: model.slug, mono: true },
-          ].map(({ label, value, mono }) => (
-            <div key={label} className="flex items-start justify-between gap-4">
-              <dt className="text-xs text-fg-secondary shrink-0">{label}</dt>
-              <dd
-                className={cn(
-                  'text-sm text-text text-right truncate',
-                  mono && 'font-mono text-xs',
-                )}
-              >
-                {value}
-              </dd>
-            </div>
-          ))}
-        </dl>
-
-        {/* Aliases */}
-        {aliasEntries.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-border">
-            <p className="text-xs text-fg-secondary mb-2">Aliases</p>
-            <div className="flex flex-wrap gap-2">
+    <div style={{ display: 'grid', gap: 'var(--s-4)', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))' }}>
+      <Panel>
+        <PanelHeader title="Identity" />
+        <PanelBody>
+          <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '6px var(--s-4)', margin: 0 }}>
+            {[
+              { label: 'Kind', value: KIND_LABELS[model.model_kind] },
+              { label: 'Asset class', value: model.asset_class },
+              { label: 'Framework', value: model.definition.framework ?? '—' },
+              { label: 'Runtime', value: model.definition.runtime ?? '—' },
+              { label: 'Auto-retrain', value: model.definition.auto_retrain ? 'Yes' : 'No' },
+              { label: 'Slug', value: model.slug },
+              { label: 'Production version', value: prod !== null ? `v${prod}` : 'none promoted' },
+            ].map(({ label, value }) => (
+              <div key={label} style={{ display: 'contents' }}>
+                <dt className="mut">{label}</dt>
+                <dd style={{ margin: 0 }}>{value}</dd>
+              </div>
+            ))}
+          </dl>
+          {aliasEntries.length > 0 && (
+            <div style={{ display: 'flex', gap: 'var(--s-2)', flexWrap: 'wrap', marginTop: 'var(--s-3)' }}>
               {aliasEntries.map(([alias, version]) => (
-                <span
-                  key={alias}
-                  className="inline-flex items-center gap-1 rounded-full border border-border bg-sunken px-2 py-0.5 text-xs text-fg-secondary"
-                >
-                  {alias}
-                  <span className="font-mono text-accent">→ v{version}</span>
-                </span>
+                <Badge key={alias} tone={alias === 'production' ? 'pos' : 'outline'}>
+                  {alias} → v{version}
+                </Badge>
               ))}
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </PanelBody>
+      </Panel>
 
-      {/* Health panel */}
-      <div className="rounded-xl border border-border bg-surface p-5">
-        <h3 className="text-sm font-medium text-text mb-4">Health</h3>
-        {scorecard ? (
-          <div className="grid grid-cols-3 gap-4">
-            <ScorecardRing label="Quality" value={scorecard.quality * 100} />
-            <ScorecardRing label="Speed" value={scorecard.speed * 100} />
-            <ScorecardRing label="Cost" value={scorecard.cost * 100} />
-            <ScorecardRing label="Safety" value={scorecard.safety * 100} />
-            <ScorecardRing label="Reliability" value={scorecard.reliability * 100} />
-            <ScorecardRing label="Overall" value={scorecard.overall * 100} />
+      <Panel>
+        <PanelHeader
+          title="Health"
+          badges={shown ? <Badge tone="neutral">evaluation of v{shown.version}</Badge> : undefined}
+        />
+        <PanelBody>
+          <div style={{ display: 'flex', gap: 'var(--s-4)', flexWrap: 'wrap', marginBottom: 'var(--s-3)', fontSize: 'var(--t-12)' }} data-testid="trace-stats">
+            {traces.isError ? (
+              <span className="mut">Inference traces could not be read.</span>
+            ) : stats === null || stats.n === 0 ? (
+              <span className="mut">No inference traces yet, so latency and error rate are not measured.</span>
+            ) : (
+              <>
+                <span>p95 latency <span className="num">{stats.p95LatencyMs === null ? '—' : `${Math.round(stats.p95LatencyMs)} ms`}</span></span>
+                <span>error rate <span className="num">{stats.errorRate === null ? '—' : `${(stats.errorRate * 100).toFixed(1)}%`}</span></span>
+                <span className="mut">over the last {stats.n} traces; cost per 1k is not recorded</span>
+              </>
+            )}
           </div>
-        ) : (
-          <div className="flex items-center justify-center py-10">
-            <p className="text-sm text-fg-tertiary">
-              No evaluation data yet. Run an evaluation to see health metrics.
-            </p>
-          </div>
-        )}
-      </div>
+          {evals.isError ? (
+            <ErrorState message="Evaluations could not be loaded." onRetry={() => void evals.refetch()} />
+          ) : scorecard ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--s-3)' }}>
+              <ScorecardRing label="Quality" value={scorecard.quality} />
+              <ScorecardRing label="Speed" value={scorecard.speed} />
+              <ScorecardRing label="Cost" value={scorecard.cost} />
+              <ScorecardRing label="Safety" value={scorecard.safety} />
+              <ScorecardRing label="Reliability" value={scorecard.reliability} />
+              <ScorecardRing label="Overall" value={scorecard.overall} />
+            </div>
+          ) : (
+            <EmptyState
+              message="No scorecard yet"
+              detail="Run an evaluation from the Versions tab. Latency, error rate and cost per 1k are not rolled up per model yet, so they are not shown."
+            />
+          )}
+        </PanelBody>
+      </Panel>
 
-      {/* Used by */}
-      {usedBy && usedBy.length > 0 && (
-        <div className="rounded-xl border border-border bg-surface p-5">
-          <h3 className="text-sm font-medium text-text mb-3">Used by strategies</h3>
-          <div className="flex flex-wrap gap-2">
-            {usedBy.map((s) => (
-              <span
-                key={s.id}
-                className="inline-flex items-center rounded-full border border-border bg-sunken px-3 py-1 text-xs text-fg-secondary"
-              >
-                {s.name}
-                <span
-                  className={cn(
-                    'ml-1.5 h-1.5 w-1.5 rounded-full',
-                    s.status === 'active' ? 'bg-pos' : 'bg-fg-tertiary',
-                  )}
-                />
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+      <Panel>
+        <PanelHeader title="Used by strategies" />
+        <PanelBody>
+          {usedBy.isError ? (
+            <ErrorState message="Used-by could not be read." onRetry={() => void usedBy.refetch()} />
+          ) : usedBy.isLoading ? (
+            <PanelLoading lines={2} />
+          ) : (usedBy.data ?? []).length === 0 ? (
+            <span className="mut">No strategy references this model.</span>
+          ) : (
+            <div style={{ display: 'flex', gap: 'var(--s-2)', flexWrap: 'wrap' }}>
+              {(usedBy.data ?? []).map((s) => (
+                <span key={s.id} className="chip">{s.name}</span>
+              ))}
+            </div>
+          )}
+        </PanelBody>
+      </Panel>
 
-      {/* Description */}
+      <Panel>
+        <PanelHeader title="Recent activity" />
+        <PanelBody>
+          {activity.length === 0 ? (
+            <span className="mut">Nothing recorded yet.</span>
+          ) : (
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--s-2)' }}>
+              {activity.slice(0, 8).map((a) => (
+                <li key={a.key} style={{ display: 'flex', gap: 'var(--s-3)' }}>
+                  <span className="mut num" style={{ flex: 'none', fontSize: 'var(--t-11)' }}>
+                    {format(new Date(a.at), 'MMM d, HH:mm')}
+                  </span>
+                  <span>{a.text}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mut" style={{ fontSize: 'var(--t-11)', marginTop: 'var(--s-3)' }}>
+            {events.isError
+              ? 'The registry’s event log could not be read, so renames, promotions and rollbacks are missing from this feed.'
+              : 'Training runs, versions and deployments, joined with the registry’s event log (renames, promotions, rollbacks).'}
+          </p>
+        </PanelBody>
+      </Panel>
+
       {model.description && (
-        <div className="rounded-xl border border-border bg-surface p-5">
-          <h3 className="text-sm font-medium text-text mb-3">Description</h3>
-          <p className="text-sm text-fg-secondary leading-relaxed">{model.description}</p>
-        </div>
+        <Panel>
+          <PanelHeader title="Description" />
+          <PanelBody>{model.description}</PanelBody>
+        </Panel>
       )}
     </div>
   )
@@ -368,6 +408,14 @@ export function ModelDetailPage() {
 
           {/* Actions */}
           <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate(`/mlops/graph?model=${model.model_id}`)}
+              className="text-xs"
+            >
+              Lineage
+            </Button>
             {model.status !== 'archived' && (
               <Button
                 variant="outline"

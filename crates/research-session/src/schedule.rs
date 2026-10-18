@@ -340,6 +340,42 @@ impl OpenHours {
         self.max_concurrent_runs
     }
 
+    /// The instant "today" began, for the day budget (§7 row 2), and the zone
+    /// that decided it.
+    ///
+    /// The day is the **local** day of the schedule's own zone, so a session in
+    /// `Asia/Tokyo` spends against a Tokyo day rather than the database
+    /// server's. When the schedule names no windows, or its windows disagree
+    /// about the zone, there is no zone the charter can be said to live in and
+    /// the day is the UTC day — returned with `"UTC"` so the caller can say so
+    /// rather than leave a reader to assume a midnight in a zone nobody named.
+    #[must_use]
+    pub fn day_start(&self, at: DateTime<Utc>) -> (DateTime<Utc>, &'static str) {
+        use chrono::TimeZone;
+        let zone = match self.windows.split_first() {
+            Some((first, rest)) if rest.iter().all(|w| w.tz() == first.tz()) => Some(first.tz()),
+            _ => None,
+        };
+        let Some(tz) = zone else {
+            let midnight = at
+                .date_naive()
+                .and_hms_opt(0, 0, 0)
+                .map_or(at, |n| Utc.from_utc_datetime(&n));
+            return (midnight, "UTC");
+        };
+        let local_date = at.with_timezone(&tz).date_naive();
+        // A DST gap can swallow local midnight; the earliest instant that
+        // exists on that date is the start of the day then.
+        let start = (0..=3)
+            .find_map(|h| {
+                local_date
+                    .and_hms_opt(h, 0, 0)
+                    .and_then(|n| tz.from_local_datetime(&n).earliest())
+            })
+            .map_or(at, |t| t.with_timezone(&Utc));
+        (start, tz.name())
+    }
+
     /// Whether this schedule names no windows, and is therefore always open.
     #[must_use]
     pub fn is_always_open(&self) -> bool {
@@ -885,6 +921,26 @@ mod tests {
             OpenHours::always_open().next_open_on_a_later_day(spent_at),
             None
         );
+    }
+
+    #[test]
+    fn the_day_the_budget_resets_on_is_the_schedules_own_local_day() {
+        let tokyo = hours(vec![window(&[1, 2, 3], "09:00", "17:00", "Asia/Tokyo")]);
+        // 2026-01-05 18:30 UTC is 03:30 on the 6th in Tokyo: the Tokyo day began
+        // at 2026-01-05 15:00 UTC, not at UTC midnight.
+        let (start, zone) = tokyo.day_start(utc(2026, 1, 5, 18, 30));
+        assert_eq!(zone, "Asia/Tokyo");
+        assert_eq!(start, utc(2026, 1, 5, 15, 0));
+
+        // Windows that disagree about the zone have no zone, and that is said.
+        let mixed = hours(vec![
+            window(&[1], "09:00", "12:00", "UTC"),
+            window(&[1], "09:00", "12:00", "Asia/Tokyo"),
+        ]);
+        let (start, zone) = mixed.day_start(utc(2026, 1, 5, 18, 30));
+        assert_eq!((start, zone), (utc(2026, 1, 5, 0, 0), "UTC"));
+        let (start, zone) = OpenHours::always_open().day_start(utc(2026, 1, 5, 18, 30));
+        assert_eq!((start, zone), (utc(2026, 1, 5, 0, 0), "UTC"));
     }
 
     #[test]

@@ -219,3 +219,21 @@ accordingly rather than executing it separately.
 | Date | Phase | Task | Note |
 |---|---|---|---|
 | 2026-09-11 | — | plan | Set L created. Phase 0 (`market_bars_v2`) pulled to the front: the collapse bug was confirmed on the live table and the 18 at-risk rows rescued to a snapshot; the v2 cutover must precede the bar backfill. Set K B and C folded into Phase 1. DA-16 and DA-17 added to 06_DATA for the schema fix. |
+| 2026-10-03 | 1, 2, 5 | LEGACY track | **JB-08 budget admission `DONE`** (409 `budget_exhausted` at submit, advisory-locked, workers price their own submissions; 7 PG integration tests, mutation-checked). **Phase 2:** search, trades, open_interest, option_chain, fundamentals, features built; `?format=parquet` -> `parquet_extract`; `data_snapshot_id` on every manifest (`quotes`/`book` `BLOCKED:UPSTREAM` on Set P). **Phase 0 tail:** `bars.rs` already gone; v1 `market_bars` drop `BLOCKED:HUMAN` (still read by the boot backfill, irreversible). **Phase 5:** core skills + v0 materialiser (`PARTIAL`: no caller in session start), `tbot memory` read/prefer/forget (`PARTIAL`, ADR-L-KM-1), new `tbot data` reads. Live-credential items marked `BLOCKED:HUMAN`. Route registration for the six new endpoints is an orchestrator edit. |
+
+---
+
+## 8. ADR rows added by track LEGACY (2026-10-03)
+
+| ID | Decision | Rejected alternative |
+|---|---|---|
+| ADR-L-JB-1 | `budget_usd_day` is the **calendar day** (UTC midnight), and a spent axis refuses even an unestimated job | A trailing 24 h window; admitting unestimated jobs against a spent budget |
+| ADR-L-DA-1 | `fundamentals` is keyed by **`cik`**; a `ticker` is refused with the reason | Guessing a ticker-to-CIK mapping from memory, which attaches one company's numbers to another |
+| ADR-L-DA-2 | `?format` **defaults to `json`**; `parquet` is opt-in | Parquet by default as DATA-005 §5 says: it would break every current reader of `bars` rows (frontend, MCP) in the same change |
+| ADR-L-DA-3 | `data_snapshot_id` is a **content address of the read** (endpoint + params + `as_of` + sha256 of the rows), not a pointer to stored data | Minting an opaque id and storing a copy of the data (a second store to keep consistent), or using the table's `snapshot_id` column (it identifies a row's ingestion instant, not a read) |
+| ADR-L-DA-4 | `quotes`/`book` are **not served** until a store exists | An endpoint returning `[]`, which reads as "measured and found nothing" |
+| ADR-L-KM-1 | `tbot memory` is read/prefer/forget; **no `add --claim`** | Building `POST /api/memory/findings` per AGENT-003 §5: AGENT-007 §2.2 (newer, stricter) says findings are written by the loop, never posted by a client |
+| ADR-L-SK-1 | The v0 core-skill materialiser **verifies digests, not signatures**, and ships without a caller | Claiming signed bundles; calling it wired |
+| ADR-L-C2-1 | **`crates/api/src/features_compute.rs` is kept.** DATA-006 "Deletes" described a zero-filled *subset* implementation; the file today is the serving adapter over `features::runtime` (densify, `value_at`, `FeatureRuntime::serve_live`) plus the `feature_def` / `feature_serving_log` persistence, which cannot live in the pure `features` crate. The computing already is the unified engine's (INV-13/14); `a_live_serve_is_logged_and_the_nightly_diff_recomputes_it` in `pg_feature_consistency.rs` holds it (a live ClickHouse + PG test, not run here). Callers: `routes/models.rs`, `tests/pg_feature_consistency.rs` | Deleting it and moving the Postgres writes into `features` (breaks that crate's purity contract) |
+| ADR-L-C2-2 | **`crates/features-py` (the PyO3 wheel `tbot_features`) is not built.** `pyo3` is not in the cargo registry on this machine and a workspace member is an orchestrator `Cargo.toml` edit. More to the point, the one-engine goal it serves is met differently: the Python analysis templates are reconciled against `crates/features` by `apps/skill-runner/reconcile_f2.py` (it runs the templates' own functions on the same bars) and the Rust-side `features_f2_reconciliation` MCP tool compares. The wheel would replace that comparison with a shared implementation, which is better but is a build-system project, not a retirement | Building a stub crate that compiles but exports nothing (a package that exists to satisfy a checklist) |
+

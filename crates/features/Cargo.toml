@@ -10,3 +10,8 @@ chrono = { workspace = true }
 serde = { workspace = true }
 once_cell = "1"
 dataplane = { workspace = true }
+# Set P P-3.6: external inputs are PIT decimals handed in by the caller. No I/O crate.
+rust_decimal = { workspace = true }
+
+[dev-dependencies]
+rust_decimal_macros = { workspace = true }

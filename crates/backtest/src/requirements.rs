@@ -23,6 +23,14 @@ pub struct FeatureSpec {
 pub enum FeatureKind {
     Ema,
     Rsi,
+    /// Simple moving average (`sma_N`, the registry's alias of `rolling_mean_N`).
+    Sma,
+    /// Wilder average true range (`atr_N`) — needs high/low/close, which every
+    /// simulated bar carries.
+    Atr,
+    /// Any other family in the feature registry (`zscore_N`, `bb_width_N_K`, …).
+    /// What a name means is the registry's to say, not this enum's.
+    Registry,
 }
 
 /// Everything the data pipeline must provide for one backtest run.
@@ -38,7 +46,7 @@ pub struct DataRequirements {
 
 #[derive(Debug, Error)]
 pub enum RequirementsError {
-    #[error("strategy references unsupported feature '{0}' (supported: ema_N, rsi_N)")]
+    #[error("strategy references unsupported feature '{0}' (supported: every name `list_features` returns)")]
     UnsupportedFeature(String),
 }
 
@@ -90,7 +98,7 @@ pub fn derive_requirements(
 
     let warmup_bars = specs
         .iter()
-        .map(|s| warmup_bars_for(s.kind, s.period as u64))
+        .map(|s| warmup_bars_for(&s.name))
         .max()
         .map_or(0, |w| w.max(MIN_WARMUP_BARS));
 
@@ -107,12 +115,8 @@ const MIN_WARMUP_BARS: u64 = 30;
 
 /// Bars of warm-up lead-in an indicator needs: its declared lookback in the single
 /// feature runtime, which is also the first bar at which it has a value at all.
-fn warmup_bars_for(kind: FeatureKind, period: u64) -> u64 {
-    let name = match kind {
-        FeatureKind::Ema => format!("ema_{period}"),
-        FeatureKind::Rsi => format!("rsi_{period}"),
-    };
-    features::runtime::lookback_bars(&name).map_or(0, u64::from)
+fn warmup_bars_for(name: &str) -> u64 {
+    features::runtime::lookback_bars(name).map_or(0, u64::from)
 }
 
 /// Extracts the names inside `feature('...')` calls from an expression.
@@ -131,21 +135,23 @@ fn feature_refs(expr: &str) -> Vec<String> {
 }
 
 fn parse_feature(name: &str) -> Result<FeatureSpec, RequirementsError> {
-    let unsupported = || RequirementsError::UnsupportedFeature(name.to_string());
-    let (prefix, period) = name.rsplit_once('_').ok_or_else(unsupported)?;
-    let period: usize = period.parse().map_err(|_| unsupported())?;
-    let kind = match prefix {
+    // One answer to "is this a feature": the registry the engine and
+    // `list_features` read. This used to be a hand-kept list of four prefixes, so
+    // a strategy naming `zscore_20` was refused before a bar was loaded although
+    // the engine computes it and `list_features` advertises it (S-5.2).
+    let resolved = features::registry::resolve(name)
+        .ok_or_else(|| RequirementsError::UnsupportedFeature(name.to_string()))?;
+    let kind = match name.split('_').next().unwrap_or_default() {
         "ema" => FeatureKind::Ema,
         "rsi" => FeatureKind::Rsi,
-        _ => return Err(unsupported()),
+        "sma" => FeatureKind::Sma,
+        "atr" => FeatureKind::Atr,
+        _ => FeatureKind::Registry,
     };
-    if period == 0 || (kind == FeatureKind::Rsi && period < 2) {
-        return Err(unsupported());
-    }
     Ok(FeatureSpec {
         name: name.to_string(),
         kind,
-        period,
+        period: resolved.params().first().copied().unwrap_or(0),
     })
 }
 
@@ -221,6 +227,55 @@ mod tests {
             "actions": []
         }"#);
         assert!(derive_requirements(&d, Timeframe::Minutes1).is_err());
+    }
+
+    #[test]
+    fn sma_and_atr_are_derivable_with_the_runtimes_own_warmup() {
+        let d = def(r#"{
+            "strategy_id": "s",
+            "definition_version": "1.0",
+            "asset_class": "crypto_spot_cex",
+            "inputs": [],
+            "nodes": [
+                { "id": "n1", "type": "condition", "expr": "feature('sma_20') > feature('atr_14')" }
+            ],
+            "actions": []
+        }"#);
+        let req = derive_requirements(&d, Timeframe::Minutes1).unwrap();
+        let kinds: Vec<FeatureKind> = req.features.iter().map(|f| f.kind).collect();
+        assert!(kinds.contains(&FeatureKind::Sma) && kinds.contains(&FeatureKind::Atr));
+        let atr_lookback = u64::from(features::runtime::lookback_bars("atr_14").unwrap());
+        assert!(req.warmup_bars >= atr_lookback, "{} < {atr_lookback}", req.warmup_bars);
+    }
+
+    #[test]
+    fn sma_and_atr_periods_outside_the_registry_bounds_are_refused() {
+        for bad in ["sma_0", "atr_1", "atr_0", "sma_x", "sma"] {
+            let d = def(&format!(r#"{{
+                "strategy_id": "s", "definition_version": "1.0",
+                "asset_class": "crypto_spot_cex", "inputs": [],
+                "nodes": [{{ "id": "n1", "type": "condition", "expr": "feature('{bad}') > 1" }}],
+                "actions": []
+            }}"#));
+            assert!(derive_requirements(&d, Timeframe::Minutes1).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn every_family_in_the_registry_is_derivable_with_the_runtimes_warmup() {
+        for f in features::registry::families() {
+            let name = f.example();
+            let d = def(&format!(r#"{{
+                "strategy_id": "s", "definition_version": "1.0",
+                "asset_class": "crypto_spot_cex", "inputs": [],
+                "nodes": [{{ "id": "n1", "type": "condition", "expr": "feature('{name}') > 1" }}],
+                "actions": []
+            }}"#));
+            let req = derive_requirements(&d, Timeframe::Minutes1)
+                .unwrap_or_else(|e| panic!("`{name}`: {e}"));
+            let lookback = u64::from(features::runtime::lookback_bars(&name).unwrap());
+            assert!(req.warmup_bars >= lookback, "{name}: {} < {lookback}", req.warmup_bars);
+        }
     }
 
     #[test]

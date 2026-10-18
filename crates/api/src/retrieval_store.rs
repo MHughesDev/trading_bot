@@ -159,6 +159,41 @@ impl RetrievalStore {
     }
 }
 
+/// Record which retrieved entries one core-tool call's evidence names (S-6.10).
+///
+/// Called by the run recorder with the arguments of every `record_finding` and
+/// `finish_task` note: the ids the brief showed that the evidence names (whole
+/// tokens only, see `harness::memory::cited_ids`) become
+/// `memory_retrievals.cited`. A write failure is a warning: citation is a
+/// measurement, and losing one must not end a run.
+pub async fn record_citations(
+    pg: &PgPool,
+    run_id: uuid::Uuid,
+    retrieved: &[Retrieval],
+    tool: &str,
+    args: &serde_json::Value,
+) {
+    if retrieved.is_empty()
+        || !matches!(
+            tool,
+            harness::registry::RECORD_FINDING | harness::registry::FINISH_TASK
+        )
+    {
+        return;
+    }
+    let Some(evidence) = args.get("evidence").and_then(serde_json::Value::as_str) else {
+        return;
+    };
+    let ids = harness::memory::cited_ids(retrieved, evidence);
+    if ids.is_empty() {
+        return;
+    }
+    let store = RetrievalStore::new(pg.clone());
+    if let Err(e) = store.mark_cited(&run_id.to_string(), &ids).await {
+        tracing::warn!(error = %e, run_id = %run_id, "citation not recorded");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

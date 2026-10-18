@@ -70,6 +70,7 @@ pub mod cases;
 pub mod discrimination;
 pub mod holdout;
 pub mod judgement;
+pub mod judgement_suite;
 pub mod planted;
 pub mod scorecard;
 pub mod tape;

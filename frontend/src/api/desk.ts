@@ -1095,6 +1095,11 @@ export interface DeskRunningRun {
   status: string
   mode: string
   stage: string
+  /**
+   * What the run may modify (AGENT-013 §4). Optional because a server built
+   * before 2026-10-03 does not send it — absent is "not reported", not ring 0.
+   */
+  ring?: string | null
   model: string
   /** `null` for a Chat turn, which is not doing one of the seven workflows. */
   workflow: string | null
@@ -1250,6 +1255,70 @@ async function optional<T>(p: Promise<{ data: T }>): Promise<T | null> {
  * ever make it appear.
  */
 export type ServedRead<T> = { served: true; data: T } | { served: false }
+
+/**
+ * One hypothesis with the platform's verdict and the numbers that decided it,
+ * from `GET /api/desk/runs/{id}/hypotheses` (S-10.15). `parsed` is the falsifier
+ * read as metric / comparator / threshold, `null` (with `parse_error`) when its
+ * text does not read; `observed` is every ledger value for that metric recorded
+ * up to the verdict, each marked `fired` when it satisfied the falsifier (which
+ * refutes the hypothesis).
+ */
+export interface HypothesisVerdict {
+  hypothesis_id: string
+  statement: string
+  role: string
+  falsifier: string
+  status: HypothesisStatus
+  inconclusive_why: string | null
+  created_at: string
+  decided_at: string | null
+  parsed: { metric: string; comparator: string; threshold: number } | null
+  parse_error: string | null
+  observed: Array<{ ticket_id: string; value: number; recorded_at: string; fired: boolean }>
+}
+
+/**
+ * One entry of a run's memory brief, as `GET /api/desk/runs/{id}/brief`
+ * answers it — from `memory_retrievals`, which the driver writes before the run
+ * starts (AGENT-007 §4).
+ */
+export interface BriefItem {
+  entry_id: string
+  rank: number
+  slot: string
+  /** P4: why retrieval chose it. Required by the table's CHECK. */
+  why: string
+  /**
+   * `null` while nothing in production records a citation — unmeasured, which
+   * is not the same as "not cited". The route says so in `not_recorded`.
+   */
+  cited: boolean | null
+  cited_at: string | null
+  retrieved_at: string
+  /**
+   * The entry, or `null` when the store holds no such entry for this user. The
+   * whole field is `null`-valued per item, and `entries_readable` says whether
+   * the store could be read at all.
+   */
+  entry: {
+    kind: string
+    /** The `/api/memory/{bucket}` the entry lives in — what **forget** calls. */
+    bucket: string | null
+    subject: string
+    claim: string
+    /** Forgotten (or archived) since: the next brief will not carry it. */
+    archived: boolean
+    superseded: boolean
+  } | null
+}
+
+export interface RunBrief {
+  run_id: string
+  items: BriefItem[]
+  entries_readable: boolean
+  not_recorded: NotRecordedNote[]
+}
 
 async function served<T>(p: Promise<{ data: T }>): Promise<ServedRead<T>> {
   try {
@@ -1541,6 +1610,17 @@ export const deskApi = {
    */
   state: (runId: string, step?: number) =>
     served<WorkingState>(client.get(`/api/agent/runs/${runId}/state`, { params: { step } })),
+  /**
+   * The run's memory brief (S-6.10). Through `served()`: until this route is
+   * registered a 404 is "not served", which the Memory tab says, rather than an
+   * empty brief, which would read as "retrieval chose nothing".
+   */
+  brief: (runId: string) => served<RunBrief>(client.get(`/api/desk/runs/${runId}/brief`)),
+  /** The run's hypotheses with the numbers behind each verdict (S-10.15). */
+  hypotheses: (runId: string) =>
+    served<{ run_id: string; hypotheses: HypothesisVerdict[] }>(
+      client.get(`/api/desk/runs/${runId}/hypotheses`),
+    ),
   trajectory: (runId: string) =>
     optional<{ steps: TrajectoryStep[] }>(client.get(`/api/agent/runs/${runId}/trajectory`)),
   lifecycle: (runId: string) =>
@@ -1712,6 +1792,42 @@ export const deskApi = {
     optional<{ digests: SessionDigestRow[] }>(
       client.get(`/api/research/sessions/${sessionId}/digests`),
     ),
+  /**
+   * The session's three lifecycle words (AGENT-014 §10), served since S-11.14
+   * and called by nothing until the journal's `/pause` and `/resume` and desk
+   * home's stalled row needed them.
+   *
+   * **Not routed through `optional()`.** A 409 here is the transition trigger
+   * refusing — "cannot resume a stopped session" — and its message is the most
+   * specific sentence anyone will write about it. Folding it to `null` would
+   * turn a refusal into a click that did nothing.
+   */
+  //
+  // Spelled out three times rather than as `${action}`: the route scan in
+  // `the_desk_calls_routes_that_exist` matches literals, and a computed last
+  // segment is a path it cannot check.
+  sessionAction: (sessionId: string, action: 'pause' | 'resume' | 'stop') =>
+    action === 'pause'
+      ? client.post<{ ok: boolean; event: string }>(`/api/research/sessions/${sessionId}/pause`)
+      : action === 'resume'
+        ? client.post<{ ok: boolean; event: string }>(`/api/research/sessions/${sessionId}/resume`)
+        : client.post<{ ok: boolean; event: string }>(`/api/research/sessions/${sessionId}/stop`),
+  /**
+   * Source 4.2, the human's own question (`POST …/{id}/agenda`). It enters
+   * `queued`, not `proposed`, and bypasses scoring — the board's **Add a
+   * question** has drawn a button for this since it was written and passed it
+   * nothing.
+   */
+  addAgendaItem: (sessionId: string, body: { question: string; subject?: string; workflow?: Workflow }) =>
+    client.post<{ item_id: string }>(`/api/research/sessions/${sessionId}/agenda`, body),
+  /**
+   * `PUT …/{id}/charter` — an amendment. The body is the **stored** charter
+   * shape (`WireCharter`), not the composer's flat form: the route deserialises
+   * `research_session::Charter` directly and bumps the version itself, computing
+   * the field-level diff before it overwrites.
+   */
+  amendCharter: (sessionId: string, charter: WireCharter) =>
+    client.put<Record<string, unknown>>(`/api/research/sessions/${sessionId}/charter`, charter),
 
   /**
    * Scale, halt or resume one strategy under the monitor (COMP-007 §6).
@@ -1820,4 +1936,17 @@ export const deskApi = {
   /** Lift a pause this process is holding. 409 if the run has since ended. */
   resumeRun: (runId: string) =>
     client.post<{ resumed: true }>(`/api/agent/runs/${runId}/resume`),
+
+  /**
+   * Pin a tool for this run (S-6.11). The platform queues it for the run's next
+   * step boundary and the loop's router exposes it first from then on. `queued`
+   * is the honest word: a ring or the paper gate can still hide a tool, so the
+   * answer is "delivered", not "the model can now call it" — the exposure note
+   * on the next step is what says that.
+   */
+  pinTool: (runId: string, tool: string) =>
+    client.post<{ pinned: true; tool: string; queued: true; message: string }>(
+      `/api/agent/runs/${runId}/pins`,
+      { tool },
+    ),
 }

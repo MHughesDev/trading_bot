@@ -139,6 +139,7 @@ fn v3_run(reg: &RegistrySnapshot, start_ns: i64) -> V3Run {
         fill_policy: FillPolicy::NextBarOpen,
         strategy_id: "model_sized".into(),
         sims: SimulatorSet::realistic(),
+        external: strategy_engine::ExternalData::default(),
     }
 }
 
@@ -363,6 +364,7 @@ fn a_series_covers_exactly_the_out_of_sample_window_and_a_backtest_then_asks_not
         AssetClass::CryptoSpotCex,
         bars(120),
         ns(t0()),
+        strategy_engine::ExternalData::default(),
         &mut series_models,
     )
     .unwrap();
@@ -618,6 +620,7 @@ fn a_fold_versions_series_covers_every_folds_window_once_each_by_its_own_fold() 
         AssetClass::CryptoSpotCex,
         bars(120),
         ns(t0()),
+        strategy_engine::ExternalData::default(),
         &mut models,
     )
     .unwrap();

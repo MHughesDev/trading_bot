@@ -139,9 +139,18 @@ fn both_sockets_take_the_verified_session_extractor() {
 fn the_resolver_reads_the_sessions_table_and_checks_expiry() {
     let text = src("ws/auth.rs");
     assert!(
-        text.contains("FROM sessions WHERE token = $1 AND expires_at > now()"),
-        "`resolve_ws_session` no longer selects from `sessions` with an expiry check. The \
-         extractor's whole content is that query; without it the type is a name."
+        text.contains("crate::auth::session::resolve(pg, token)"),
+        "`resolve_ws_session` no longer goes through the one session resolver. The \
+         extractor's whole content is that lookup; without it the type is a name."
+    );
+    // And the one resolver is the hashed, expiry-checked lookup (Set E 1.1).
+    let session = src("auth/session.rs");
+    assert!(
+        session.contains(
+            "FROM sessions WHERE token = session_token_hash($1) AND expires_at > now()"
+        ),
+        "`auth::session::resolve` no longer selects from `sessions` by the token's digest \
+         with an expiry check"
     );
     assert!(
         text.contains("StatusCode::UNAUTHORIZED"),

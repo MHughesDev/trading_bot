@@ -52,9 +52,9 @@ glyphs buy a model nothing and cost portability.
 
 ## Phase 5 — what is not built
 
-- **`tbot memory`** and the core skills (SK-01, SK-09, KM-01). No skill files are
-  materialised into the container and there is no research-memory surface.
-- **The MCP server** view of the same tools (TB §3.9).
+- ~~**`tbot memory`** and the core skills (SK-01, SK-09, KM-01).~~ Built 2026-10-03
+  (track LEGACY), `PARTIAL`: see "Phase 5 completion" below.
+- **The MCP server** view of the same tools (TB §3.9): not built, see below.
 - **Write-side data tools**, features, strategies and models (TB §3.4–3.8) — those
   belong to Sets M and N anyway.
 
@@ -280,3 +280,22 @@ second answer a 409.
 - **`AgentPage.tsx` is not yet retired** (COMP-006 §7). It stays until a live session
   has run through the new workspace; removing the only working agent view before its
   replacement has been exercised end to end would be a bad trade.
+
+---
+
+## Phase 5 completion (track LEGACY, 2026-10-03)
+
+| Item | Status | What exists / what remains |
+|---|---|---|
+| **SK-01** core skill sources | `DONE` | `skills/core/<category>/<name>/SKILL.md`: `qc-rules-and-pitfalls`, `tbot-howto` (data), `skill-finder`, `skill-authoring` (meta), `playbook` (research). Each is validated on load: name equals directory, description at most 100 tokens (estimated), body at most 500 lines, no `allowed-tools`/hooks/shell lines |
+| **SK-09** v0 materialiser | `PARTIAL` | `crates/skills/src/core.rs`: `load_core_dir`, `glossary`, `materialise`, `manifest`. Writes every core skill plus a generated `skill-finder/GLOSSARY.md`; **verifies each bundle's sha256 against the release manifest and aborts before writing anything on a mismatch**; byte-identical across sessions (no clock, user or directory-order input). 6 tests pass (`core::tests`), including two-session byte identity, a tampered bundle writing nothing, and the shipped set loading. **Missing: the caller.** Nothing in the session start path calls `skills::core::materialise` yet. That is `crates/api/src/agent/**` / `session_driver.rs` (not this track's territory); the exact call is `skills::core::materialise(&skills::core::load_core_dir(root)?, &skills::core::manifest(&skills), &workspace.join(".claude/skills"))` at session creation, with `root` = the repo's `skills/core`. Also not built: signing the manifest with the release key (digests are checked, not signatures), scopes, the resident-set cap of 40 and the per-project frozen selection (those are Set R-a) |
+| **KM-01** `tbot memory` | `PARTIAL` (by decision) | `tbot memory list <bucket> [--subject]`, `tbot memory prefer --scope --statement`, `tbot memory forget <bucket> <id>` over the existing `/api/memory/{bucket}` routes. **`tbot memory add --claim ... --evidence ...` is deliberately not built (ADR-L-KM-1):** AGENT-003 §5 specifies `POST /api/memory/findings`, but the memory API the platform actually built (AGENT-007 §2.2, Set S phase 4) refuses a user write to every bucket but `preferences` (`bucket_is_not_user_writable`), because a finding is recorded by the research loop out of a measurement it took, and a claim posted by a client is a measurement nobody made. Authority order puts the newer, stricter spec ahead of AGENT-003 §5 here. Findings search with metadata filters + rerank (`GET /api/memory/findings/search`) is not built either: the store has `subject` filtering only |
+| **`tbot data`** new reads | `DONE` (client) | `search`, `trades`, `open-interest`, `option-chain`, `fundamentals`, `features`, and `--format parquet` on `bars` and the others, each printing a handful of lines with the `data_snapshot_id` |
+| **TB §3.9** MCP view of `tbot` | `NOT STARTED` (outside this track) | `crates/mcp-server/src/tools/**` and `taxonomy.rs`/`spec.rs` are not this track's files. The MCP server is a thin HTTP client (ADR-0022), so the view is mechanical: one tool per `tbot data *` read and `memory list`, each calling the same `/api/data/*` and `/api/memory/*` routes with the caller's token, with the same manifest passed through. Do it after the six routes are registered |
+
+## Live-credential items (track LEGACY, 2026-10-03)
+
+| Item | Status | The exact remaining step |
+|---|---|---|
+| Live eval trials (`noise`, `planted_edge`) | `BLOCKED:HUMAN` | A frontier credential in the encrypted store (H-2), then `python evals/runner/run.py --suite noise` and `--suite planted_edge` without `--dry-run`; `noise` is scored `pass^k`, `planted_edge` `pass@k`, so run k trials, not one |
+| Ph6 decision: eval margin 2 pp vs 5 pp | `BLOCKED:HUMAN` | A money/scope decision (189 paired trials per arm per gated PR, about $1,100-1,500, vs moving the gated metrics to a continuous score). Left at 5 pp with `spec_margin: 0.02` recorded |

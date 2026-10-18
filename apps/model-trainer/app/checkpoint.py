@@ -311,3 +311,281 @@ def validate(manifest: dict[str, Any]) -> None:
         raise ValueError(
             "a boosting checkpoint must declare the determinism flags in effect"
         )
+
+
+# ---------------------------------------------------------------------------
+# The producing half (checklist 2.4/2.5; OPEN-TASKS C1.2)
+#
+# Everything above says what a checkpoint *is*. Nothing wrote one: AT-61 proved
+# torch resumes bit-identically and put it in `BIT_IDENTICAL_FRAMEWORKS`, so a
+# manifest could honestly say `bit_identical`, and there was still no stored
+# state for a re-queued job to find. This is the writer, driven from the epoch
+# loop in `engine.train_torch_model`.
+#
+# The *decision* to resume is not made here. `jobs::checkpoint::plan_resume` on
+# the Rust side is the one place that judges whether a checkpoint matches the
+# computation about to run, and it hands the manifest back in
+# `definition["_checkpoint"]["resume"]`. A second implementation of that rule in
+# Python would be a second standard, and the looser one would be the one used.
+# ---------------------------------------------------------------------------
+
+import io  # noqa: E402
+import json  # noqa: E402
+import time  # noqa: E402
+from typing import Callable  # noqa: E402
+
+
+def young_daly_interval(checkpoint_cost_s: float, mtbf_s: float) -> float | None:
+    """Seconds between checkpoints: `sqrt(2 * C * M)` (Young 1974, Daly 2006).
+
+    Mirrors `jobs::checkpoint::checkpoint_interval_seconds`. `None` for an
+    unmeasured cost or an unknown MTBF: a made-up interval is indistinguishable
+    from a measured one once it is in a config file.
+    """
+    if not (checkpoint_cost_s > 0 and mtbf_s > 0):
+        return None
+    if not (np.isfinite(checkpoint_cost_s) and np.isfinite(mtbf_s)):
+        return None
+    return float((2.0 * checkpoint_cost_s * mtbf_s) ** 0.5)
+
+
+class TorchCheckpointer:
+    """Writes mid-run checkpoints from an epoch loop, on the Young-Daly cadence.
+
+    The first call after the first epoch is **always** taken: the interval needs
+    the cost of a checkpoint, the cost is only known by writing one, and a run
+    that waited for an interval before measuring would never measure. After that
+    the next checkpoint is due `young_daly_interval(cost, mtbf)` seconds after
+    the last finished. With no MTBF configured there is no interval, and no
+    further checkpoint is taken - an unknown failure rate gets one checkpoint and
+    an honest silence, not a guess.
+    """
+
+    def __init__(
+        self,
+        *,
+        store,
+        key_prefix: str,
+        code_hash: str,
+        image_digest: str,
+        dataset_id: str,
+        mtbf_s: float | None = None,
+        publish: Callable[[dict], None] | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        hyperparameters: dict[str, Any] | None = None,
+    ) -> None:
+        self.store = store
+        self.key_prefix = key_prefix.rstrip("/")
+        self.code_hash = code_hash
+        self.image_digest = image_digest
+        self.dataset_id = dataset_id
+        self.mtbf_s = mtbf_s
+        self.publish = publish
+        self.clock = clock
+        self.hyperparameters = hyperparameters
+        self.pct = 0.0  # the run's progress when a checkpoint is published
+        self.cost_s: float | None = None
+        self._last_end: float | None = None
+        self.written: list[dict[str, Any]] = []
+
+    # -- cadence -------------------------------------------------------------
+    def interval_s(self) -> float | None:
+        if self.cost_s is None or self.mtbf_s is None:
+            return None
+        return young_daly_interval(self.cost_s, self.mtbf_s)
+
+    def due(self) -> bool:
+        if self._last_end is None:
+            return True  # the first one measures the cost
+        interval = self.interval_s()
+        return interval is not None and (self.clock() - self._last_end) >= interval
+
+    # -- writing -------------------------------------------------------------
+    def maybe_write(self, *, epoch: int, model, optimizer, dataloader_position: int):
+        if not self.due():
+            return None
+        return self.write(
+            epoch=epoch,
+            model=model,
+            optimizer=optimizer,
+            dataloader_position=dataloader_position,
+        )
+
+    def write(self, *, epoch: int, model, optimizer, dataloader_position: int) -> dict[str, Any]:
+        import torch
+
+        started = self.clock()
+        state = io.BytesIO()
+        torch.save(
+            {
+                "step": int(epoch),
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "torch_cpu_rng": torch.get_rng_state(),
+                "torch_cuda_rng": (
+                    torch.cuda.get_rng_state_all() if torch.cuda.is_available() else []
+                ),
+                "numpy_rng": np.random.get_state(),
+                "python_rng": random.getstate(),
+                "dataloader_position": int(dataloader_position),
+            },
+            state,
+        )
+        base = f"{self.key_prefix}/step-{int(epoch):08d}"
+        state_uri, _, _ = self.store.put(f"{base}/state.pt", state.getvalue())
+        # The loop has no LR schedule and no AMP scaler. The contract still wants
+        # a reference for each, so each is a small artifact saying so - an empty
+        # string would be refused as "not a reference", and omitting the field
+        # would be a claim that nobody thought about it.
+        sched_uri, _, _ = self.store.put(
+            f"{base}/scheduler.json", json.dumps({"scheduler": "none"}).encode()
+        )
+        amp_uri, _, _ = self.store.put(
+            f"{base}/amp.json", json.dumps({"amp_scaler": "none"}).encode()
+        )
+        manifest = build_manifest(
+            framework="torch",
+            step=int(epoch),
+            optimizer_state_ref=state_uri,
+            lr_scheduler_state_ref=sched_uri,
+            dataloader_position=int(dataloader_position),
+            amp_scaler_state=amp_uri,
+            code_hash=self.code_hash,
+            image_digest=self.image_digest,
+            dataset_id=self.dataset_id,
+            hyperparameters=self.hyperparameters,
+        )
+        validate(manifest)
+        self.store.put(f"{base}/manifest.json", json.dumps(manifest).encode())
+        ended = self.clock()
+        self.cost_s = max(ended - started, 1e-9)
+        self._last_end = ended
+        self.written.append(manifest)
+        if self.publish is not None:
+            self.publish(manifest)
+        return manifest
+
+
+def restore_torch_checkpoint(store, manifest: dict[str, Any], model, optimizer) -> int:
+    """Load a checkpoint into `model` and `optimizer`, and every RNG, in place.
+
+    Returns the epoch the run had completed, which is where the loop resumes.
+    The manifest is trusted to have passed `plan_resume`: this executes a
+    decision, it does not make one. It does refuse a checkpoint whose own state
+    disagrees with its manifest, because that is corruption and not a judgement.
+    """
+    import torch
+
+    blob = torch.load(
+        io.BytesIO(store.get(manifest["optimizer_state_ref"])), weights_only=False
+    )
+    if int(blob["step"]) != int(manifest["step"]):
+        raise ValueError(
+            f"checkpoint state is at step {blob['step']} but its manifest says {manifest['step']}"
+        )
+    model.load_state_dict(blob["model"])
+    optimizer.load_state_dict(blob["optimizer"])
+    torch.set_rng_state(blob["torch_cpu_rng"])
+    if blob.get("torch_cuda_rng") and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all(blob["torch_cuda_rng"])
+    np.random.set_state(blob["numpy_rng"])
+    random.setstate(blob["python_rng"])
+    return int(blob["step"])
+
+
+def checkpointer_from_config(cfg: dict[str, Any] | None, *, emit_progress=None, store=None):
+    """The `TorchCheckpointer` a request asked for, or `None`.
+
+    `cfg` is `definition["_checkpoint"]`, set by `worker.run_training`. Absent
+    means checkpointing is off, which is the right default for a short job.
+    """
+    if not cfg:
+        return None
+    if store is None:
+        from .artifact_store import get_store
+
+        store = get_store()
+
+    holder: dict[str, Any] = {}
+
+    def publish(manifest: dict[str, Any]) -> None:
+        if emit_progress is not None:
+            # At the run's current progress, not 0: the platform stores the last
+            # percentage it saw, and a checkpoint frame that said 0 would rewind
+            # the progress bar of a run that is 60% done.
+            emit_progress(
+                "checkpoint", holder["ck"].pct, {"checkpoint": manifest}
+            )
+
+    ck = TorchCheckpointer(
+        store=store,
+        key_prefix=cfg["key_prefix"],
+        code_hash=cfg["code_hash"],
+        image_digest=cfg["image_digest"],
+        dataset_id=cfg["dataset_id"],
+        mtbf_s=cfg.get("mtbf_s"),
+        publish=publish,
+    )
+    holder["ck"] = ck
+    return ck
+
+
+def code_hash() -> str:
+    """Identity of the code that writes and reads checkpoints.
+
+    A checkpoint is only resumable into the same computation (`plan_resume`
+    compares this). The hash covers the files whose behaviour a resumed run
+    depends on: the loop, the writer, and the two torch adapters. Computed from
+    source bytes rather than a version string, so an edit that changes
+    behaviour changes the hash without anybody remembering to bump anything.
+    """
+    import hashlib
+    import pathlib
+
+    here = pathlib.Path(__file__).resolve().parent
+    h = hashlib.sha256()
+    for rel in ("engine.py", "checkpoint.py", "adapters/torch_adapter.py", "adapters/forecaster.py"):
+        h.update(rel.encode())
+        h.update((here / rel).read_bytes())
+    return f"sha256:{h.hexdigest()}"
+
+
+def request_config(
+    *, framework: str, output_prefix: str, dataset_hash: str, resume: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """The `_checkpoint` block for a training request, or `None` when off.
+
+    Off for a framework whose resume AT-61 has not shown bit-identical: a
+    checkpoint of a run that cannot honestly resume is storage with a hopeful
+    name. `TRAINER_CHECKPOINTS=0` turns it off everywhere; `TRAINER_MTBF_S` is the
+    mean time between failures the Young-Daly interval needs, and without it only
+    the cost-measuring first checkpoint is taken.
+    """
+    import os
+
+    if os.environ.get("TRAINER_CHECKPOINTS", "1") == "0":
+        return None
+    if resume_support(framework) != "bit_identical":
+        return None
+    mtbf = os.environ.get("TRAINER_MTBF_S")
+    image = image_digest()
+    return {
+        "key_prefix": f"{output_prefix.rstrip('/')}/checkpoints".replace("file://", ""),
+        "code_hash": code_hash(),
+        "image_digest": image,
+        "dataset_id": dataset_hash,
+        "mtbf_s": float(mtbf) if mtbf else None,
+        "resume": resume,
+    }
+
+
+def image_digest() -> str:
+    """The image this process runs in (`IMAGE_DIGEST`, else `local-dev`).
+
+    Reported by `/capabilities` and written into every checkpoint manifest, so
+    `plan_resume` compares like with like.
+    """
+    import os
+
+    return os.environ.get("IMAGE_DIGEST", "local-dev")
+

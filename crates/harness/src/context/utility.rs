@@ -185,6 +185,77 @@ fn engaged_with_subject(record: &super::store::Record, later: &[&Action]) -> boo
         .any(|a| a.mentions.iter().any(|m| label.contains(m.as_str())))
 }
 
+/// Every string value in a JSON tree, flattened (§19's "mentions").
+fn flatten_strings(v: &serde_json::Value, out: &mut BTreeSet<String>) {
+    match v {
+        serde_json::Value::String(s) => {
+            out.insert(s.clone());
+        }
+        serde_json::Value::Array(a) => a.iter().for_each(|x| flatten_strings(x, out)),
+        serde_json::Value::Object(o) => o.values().for_each(|x| flatten_strings(x, out)),
+        _ => {}
+    }
+}
+
+/// The actions of a recorded trajectory, for attribution (S-9.10: "attribution
+/// runs offline over recorded trajectories").
+///
+/// A tool call's arguments are its mentions. A harness-owned `record_finding` or
+/// `finish_task` contributes its arguments the same way (the evidence a finding
+/// cites is a use). An `expand` names the record it wanted back through its
+/// `record_id` argument, which the caller resolves to a [`RecordId`] with
+/// `resolve`; an id that does not resolve is simply not an expansion.
+///
+/// No model is consulted: the trajectory already holds what was done.
+#[must_use]
+pub fn actions_from_spans(
+    spans: &[crate::trace::Span],
+    resolve: impl Fn(&str) -> Option<RecordId>,
+) -> Vec<Action> {
+    use crate::trace::Event;
+    let mut out = Vec::new();
+    for span in spans {
+        let (tool, args) = match &span.event {
+            Event::ToolCall { name, args, .. } => (name.as_str(), args),
+            Event::CoreTool { name, args, .. } => (name.as_str(), args),
+            _ => continue,
+        };
+        let mut mentions = BTreeSet::new();
+        flatten_strings(args, &mut mentions);
+        let mut a = Action::new(span.step, tool);
+        if tool == "expand" {
+            if let Some(id) = args
+                .get("record_id")
+                .and_then(serde_json::Value::as_str)
+                .and_then(&resolve)
+            {
+                a.expanded.push(id);
+            }
+        }
+        a.mentions = mentions;
+        out.push(a);
+    }
+    out
+}
+
+/// `utility_rate` per tier over a corpus of `(tier, attribution)` (S-9.10).
+///
+/// Sums tokens, so the result is independent of the corpus order and
+/// reproducible from it. A tier with no rendered tokens is **absent**, not `0.0`.
+#[must_use]
+pub fn utility_by_tier(runs: &[(String, Attribution)]) -> BTreeMap<String, f64> {
+    let mut sums: BTreeMap<&str, (u64, u64)> = BTreeMap::new();
+    for (tier, a) in runs {
+        let e = sums.entry(tier.as_str()).or_insert((0, 0));
+        e.0 += a.used_tokens;
+        e.1 += a.rendered_tokens;
+    }
+    sums.into_iter()
+        .filter(|(_, (_, rendered))| *rendered > 0)
+        .map(|(tier, (used, rendered))| (tier.to_string(), used as f64 / rendered as f64))
+        .collect()
+}
+
 /// `utility_rate` aggregated over a corpus, per bucket (§19).
 ///
 /// The bucket key is the caller's — `(GoalKind, RecordKind, signal bucket)` is
@@ -256,6 +327,75 @@ mod tests {
             step: 2,
             ids: ids.to_vec(),
         }]
+    }
+
+    /// S-9.10's acceptance, end to end and offline: a recorded trajectory (the
+    /// spans a run's effect log projects to) becomes actions, the actions are
+    /// attributed, and the per-tier rate comes out the same whichever order the
+    /// corpus is read in.
+    #[test]
+    fn a_recorded_trajectory_is_attributed_offline_and_the_tier_rate_is_reproducible() {
+        use crate::trace::{Event, Span};
+        let (s, cited, _, elsewhere) = store();
+        let spans = vec![Span::new(
+            "t",
+            "t:1",
+            "orchestrator",
+            3,
+            Event::ToolCall {
+                name: "compare_backtests".into(),
+                namespace: "backtest".into(),
+                risk: crate::registry::Risk::Read,
+                args: serde_json::json!({"backtest_ids": ["exp_7"]}),
+                result_bytes: 0,
+                truncated: false,
+                provenance: crate::provenance::Provenance::ToolInternal,
+                latency_ms: 0,
+                ok: true,
+            },
+        )];
+        let actions = actions_from_spans(&spans, |_| None);
+        assert_eq!(actions.len(), 1);
+        assert!(actions[0].mentions.contains("exp_7"));
+
+        let a = attribute(&s, &renders(&[cited, elsewhere]), &actions);
+        assert_eq!(a.per_record[&cited], Utility::Used);
+        assert_eq!(a.per_record[&elsewhere], Utility::Unused);
+
+        let corpus = vec![
+            ("degraded".to_string(), a.clone()),
+            ("frontier".to_string(), a.clone()),
+            ("degraded".to_string(), Attribution::default()),
+        ];
+        let mut reversed = corpus.clone();
+        reversed.reverse();
+        let one = utility_by_tier(&corpus);
+        assert_eq!(one, utility_by_tier(&reversed), "order does not matter");
+        assert!((one["degraded"] - 0.5).abs() < 1e-9);
+        assert!((one["frontier"] - 0.5).abs() < 1e-9);
+        // A tier nobody rendered for has no rate at all.
+        assert!(!utility_by_tier(&[("x".into(), Attribution::default())]).contains_key("x"));
+    }
+
+    /// An `expand` call resolves to the record it wanted.
+    #[test]
+    fn an_expand_span_names_the_record_it_wanted() {
+        use crate::trace::{Event, Span};
+        let (_, cited, _, _) = store();
+        let spans = vec![Span::new(
+            "t",
+            "t:1",
+            "orchestrator",
+            3,
+            Event::CoreTool {
+                name: "expand".into(),
+                args: serde_json::json!({"record_id": "r_cited", "level": "full"}),
+                reply: String::new(),
+                accepted: true,
+            },
+        )];
+        let actions = actions_from_spans(&spans, |s| (s == "r_cited").then_some(cited));
+        assert_eq!(actions[0].expanded, vec![cited]);
     }
 
     /// An id in the next call is the clearest signal there is.

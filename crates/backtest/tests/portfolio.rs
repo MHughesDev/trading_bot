@@ -447,8 +447,7 @@ fn a_member_reads_the_attribute_its_latest_selection_gave_it() {
         let latest = o
             .selections
             .iter()
-            .filter(|s| s.as_of.timestamp_nanos_opt().unwrap() <= trace.at_ns)
-            .next_back()
+            .rfind(|s| s.as_of.timestamp_nanos_opt().unwrap() <= trace.at_ns)
             .expect("a member decides only after a selection");
         let given = latest
             .selected
@@ -456,14 +455,16 @@ fn a_member_reads_the_attribute_its_latest_selection_gave_it() {
             .find(|s| s.instrument == member)
             .and_then(|s| s.attributes.get("w"))
             .cloned();
-        match given {
-            Some(Value::Num(x)) => {
-                assert_eq!(trace.values["w"], Value::num(x.get(), "w"), "{instance} at {}", trace.at_ns);
-                read += 1;
-            }
-            // An exiting member its latest selection no longer names reads
-            // what the selection last said about it; nothing to compare here.
-            _ => {}
+        // An exiting member its latest selection no longer names reads what
+        // the selection last said about it; nothing to compare there.
+        if let Some(Value::Num(x)) = given {
+            assert_eq!(
+                trace.values["w"],
+                Value::num(x.get(), "w"),
+                "{instance} at {}",
+                trace.at_ns
+            );
+            read += 1;
         }
     }
     assert!(read > 10, "members read their attribute ({read} decisions)");
@@ -485,5 +486,8 @@ fn a_member_naming_another_selection_reads_missing_with_the_reason() {
     let Value::Missing(MissingReason::NoData { what }) = &trace.values["w"] else {
         panic!("{:?}", trace.values["w"]);
     };
-    assert!(what.contains("highest_w") && what.contains("some_other_screener"), "{what}");
+    assert!(
+        what.contains("highest_w") && what.contains("some_other_screener"),
+        "{what}"
+    );
 }

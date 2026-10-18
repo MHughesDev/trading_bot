@@ -53,11 +53,9 @@ const VOL_WINDOW: usize = 21;
 /// How much history to label on each pass.
 const LOOKBACK_DAYS: i64 = 400;
 
-/// The tenant the separation test is run for.
-///
-/// Single-tenant today; when a second appears this becomes a loop over the
-/// tenants that have trials, not a default that quietly means the first one.
-const TENANT: &str = "default";
+// The separation test runs for one tenant. Single-tenant today; when a second appears
+// this becomes a loop over the tenants that have trials, not a default that quietly
+// means the first one.
 
 /// Start the daily loop.
 ///
@@ -114,6 +112,7 @@ async fn run_once(pg: &PgPool, clickhouse_url: &str, config_scopes: &[String]) {
                 {
                     Ok(n) => {
                         info!(scope = %scope.market_scope, days = n, "regime labels written");
+                        jump_labels(pg, scope, &returns).await;
                         separation(pg, scope).await;
                     }
                     Err(e) => {
@@ -135,6 +134,37 @@ async fn run_once(pg: &PgPool, clickhouse_url: &str, config_scopes: &[String]) {
     }
 }
 
+/// Label the same series with the filtered jump model (Set R-b RB-4.2, RB-4.4), refitting
+/// when there is no fit or the last is older than `REFIT_PERIOD_DAYS`.
+///
+/// A failure here is logged and does not stop the rule tier's separation test: the jump
+/// model is the challenger and the rule tier is the standing model, and a challenger that
+/// cannot fit (a short series, a database error) must not silence the one that is running.
+async fn jump_labels(
+    pg: &PgPool,
+    scope: &RegimeScope,
+    returns: &[(chrono::DateTime<chrono::Utc>, f64)],
+) {
+    match api::knowledge_regime_jump::JumpLabeller::new(pg.clone())
+        .run(&scope.market_scope, returns)
+        .await
+    {
+        Ok(run) => info!(
+            scope = %scope.market_scope,
+            model_version = %run.model_version,
+            refit = run.refit,
+            labels = run.labels_written,
+            median_run = run.median_run,
+            "jump-model regime labels written"
+        ),
+        Err(e) => warn!(
+            scope = %scope.market_scope,
+            error = %e,
+            "the jump model did not label this scope"
+        ),
+    }
+}
+
 /// Run the separation test and record whatever it says.
 ///
 /// A negative result is written exactly as readily as a positive one. That is
@@ -142,23 +172,29 @@ async fn run_once(pg: &PgPool, clickhouse_url: &str, config_scopes: &[String]) {
 /// decorative, and a job that only records validations would make the platform
 /// unable to discover that about itself.
 async fn separation(pg: &PgPool, scope: &RegimeScope) {
-    match SeparationJob::new(pg.clone())
-        .run(TENANT, scope, RULE_MODEL_VERSION)
+    // Per tenant: the job used to run for the literal tenant "default", which no trial is
+    // registered under, so it measured an empty ledger daily.
+    for (tenant, r) in SeparationJob::new(pg.clone())
+        .run_for_all_tenants(scope, RULE_MODEL_VERSION)
         .await
     {
-        Ok(run) => info!(
-            scope = %scope.market_scope,
-            model_version = RULE_MODEL_VERSION,
-            written = run.written,
-            separates = ?run.result.separates,
-            "regime separation: {}",
-            run.result.verdict
-        ),
-        Err(e) => error!(
-            scope = %scope.market_scope,
-            error = %e,
-            "the regime separation test did not run"
-        ),
+        match r {
+            Ok(run) => info!(
+                %tenant,
+                scope = %scope.market_scope,
+                model_version = RULE_MODEL_VERSION,
+                written = run.written,
+                separates = ?run.result.separates,
+                "regime separation: {}",
+                run.result.verdict
+            ),
+            Err(e) => error!(
+                %tenant,
+                scope = %scope.market_scope,
+                error = %e,
+                "the regime separation test did not run"
+            ),
+        }
     }
 }
 

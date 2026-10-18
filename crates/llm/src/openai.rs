@@ -28,10 +28,16 @@ fn build_messages(req: &ChatRequest) -> Vec<Value> {
             } => {
                 let mut m = Map::new();
                 m.insert("role".into(), json!("assistant"));
-                m.insert(
-                    "content".into(),
-                    content.as_deref().map(Value::from).unwrap_or(Value::Null),
-                );
+                // `null` content is accepted only beside tool calls. An assistant
+                // turn that said nothing and called nothing is a 400 on
+                // api.openai.com ("expected a string, got null"), so it goes on
+                // the wire as the empty string it means.
+                let content_value = match content.as_deref() {
+                    Some(text) => Value::from(text),
+                    None if tool_calls.is_empty() => Value::from(""),
+                    None => Value::Null,
+                };
+                m.insert("content".into(), content_value);
                 if !tool_calls.is_empty() {
                     let calls: Vec<Value> = tool_calls
                         .iter()
@@ -87,6 +93,38 @@ pub enum Flavor {
     Vllm,
 }
 
+/// Whether `schema` is inside OpenAI's strict structured-output subset: every
+/// object sets `additionalProperties: false` and lists every property as required.
+pub(crate) fn strict_compatible(schema: &Value) -> bool {
+    match schema {
+        Value::Object(map) => {
+            let is_object = map.get("type").and_then(Value::as_str) == Some("object")
+                || map.contains_key("properties");
+            if is_object {
+                if map.get("additionalProperties") != Some(&Value::Bool(false)) {
+                    return false;
+                }
+                let props: Vec<&String> = map
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .map(|p| p.keys().collect())
+                    .unwrap_or_default();
+                let required: Vec<&str> = map
+                    .get("required")
+                    .and_then(Value::as_array)
+                    .map(|r| r.iter().filter_map(Value::as_str).collect())
+                    .unwrap_or_default();
+                if !props.iter().all(|p| required.contains(&p.as_str())) {
+                    return false;
+                }
+            }
+            map.values().all(strict_compatible)
+        }
+        Value::Array(items) => items.iter().all(strict_compatible),
+        _ => true,
+    }
+}
+
 fn build_body(req: &ChatRequest, use_completion_tokens: bool, flavor: Flavor) -> Value {
     let mut body = Map::new();
     body.insert("model".into(), json!(req.model));
@@ -115,7 +153,16 @@ fn build_body(req: &ChatRequest, use_completion_tokens: bool, flavor: Flavor) ->
             "response_format".into(),
             json!({
                 "type": "json_schema",
-                "json_schema": { "name": "tool_call", "schema": schema, "strict": true }
+                "json_schema": {
+                    "name": "tool_call",
+                    "schema": schema,
+                    // api.openai.com refuses `strict: true` with a 400 unless every
+                    // object closes `additionalProperties` and requires every
+                    // property. A schema outside that subset still constrains the
+                    // output non-strictly rather than failing the call; vLLM gets
+                    // the same flag and enforces through `guided_json` regardless.
+                    "strict": strict_compatible(schema),
+                }
             }),
         );
         if flavor == Flavor::Vllm {
@@ -161,7 +208,51 @@ fn build_body(req: &ChatRequest, use_completion_tokens: bool, flavor: Flavor) ->
     Value::Object(body)
 }
 
-fn classify_openai_400(body: &str) -> Option<LlmError> {
+/// Models that refused a `temperature` this process sent them.
+///
+/// OpenAI's reasoning models (the o-series and the GPT-5 family) accept only the
+/// default temperature and answer anything else, including the `0.0` every
+/// frontier profile asks for on tool calls, with a 400 naming the parameter. The
+/// first call learns it and retries without; this set is what stops every later
+/// call paying the same refused round trip. Keyed by `base_url` and model, because
+/// a vLLM server and api.openai.com may serve models with the same name.
+fn temperature_refusers() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+/// Models that refused function tools while reasoning was on.
+///
+/// Newer OpenAI reasoning models (seen with `gpt-6.1-sol`, 2026-10-05) answer a
+/// chat-completions request that carries tools with a 400 telling the caller to
+/// use `/v1/responses` or set `reasoning_effort` to `"none"`. The first call
+/// learns it and retries with `"none"`; this set stops every later call paying
+/// for the same refusal.
+fn reasoning_tool_refusers() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+/// Whether a 400 body is the server refusing tools alongside reasoning.
+fn refuses_tools_with_reasoning(body: &str) -> bool {
+    let lower = body.to_lowercase();
+    lower.contains("reasoning_effort") && lower.contains("tools")
+}
+
+fn refusal_key(base_url: &str, model: &str) -> String {
+    format!("{base_url} {model}")
+}
+
+/// Whether a 400 body is the server refusing the `temperature` parameter.
+fn refuses_temperature(body: &str) -> bool {
+    let lower = body.to_lowercase();
+    lower.contains("temperature")
+        && (lower.contains("unsupported") || lower.contains("not support"))
+}
+
+pub(crate) fn classify_openai_400(body: &str) -> Option<LlmError> {
     let lower = body.to_lowercase();
     if lower.contains("context_length") || lower.contains("maximum context length") {
         return Some(LlmError::ContextTooLarge(truncate(body)));
@@ -263,14 +354,14 @@ fn parse_response(body: Value) -> Result<ChatResponse, LlmError> {
     })
 }
 
-async fn post_chat(
+pub(crate) async fn post_json(
     http: &reqwest::Client,
-    base_url: &str,
+    url: &str,
     api_key: &str,
     body: &Value,
 ) -> Result<(u16, Option<u64>, String), LlmError> {
     let resp = http
-        .post(format!("{base_url}/v1/chat/completions"))
+        .post(url)
         .header("authorization", format!("Bearer {api_key}"))
         .json(body)
         .send()
@@ -289,6 +380,72 @@ async fn post_chat(
     Ok((status, retry_after, text))
 }
 
+async fn post_chat(
+    http: &reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+    body: &Value,
+) -> Result<(u16, Option<u64>, String), LlmError> {
+    post_json(http, &format!("{base_url}/v1/chat/completions"), api_key, body).await
+}
+
+/// Models whose chat-completions endpoint refused function tools, so every call
+/// goes to `/v1/responses` instead (see [`crate::openai_responses`]). Keyed like
+/// the other refusal sets, by `base_url` and model.
+fn responses_models() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+/// Model-id prefixes routed to `/v1/responses` from the first call.
+///
+/// ADR (OPENAI-RESPONSES, 2026-10-05): route `gpt-6*` and `o5*` proactively
+/// rather than waiting for chat-completions to refuse. `gpt-6.1-sol` refuses
+/// function tools on chat-completions whatever `reasoning_effort` says (it
+/// rejects `"none"` too), and the agent loop always sends tools, so for this
+/// family the refusal is certain and learning it costs one wasted round trip per
+/// model per process. Rejected alternative: learn-only routing, which remains
+/// the fallback for every model not on this list. Only the OpenAI flavour is
+/// routed; vLLM serves chat-completions alone.
+const RESPONSES_PREFIXES: &[&str] = &["gpt-6", "o5"];
+
+fn routes_to_responses(key: &str, model: &str) -> bool {
+    let lower = model.to_lowercase();
+    RESPONSES_PREFIXES.iter().any(|p| lower.starts_with(p))
+        || responses_models()
+            .lock()
+            .map(|set| set.contains(key))
+            .unwrap_or(false)
+}
+
+/// Remove the API key from every string an error carries.
+///
+/// Providers echo keys back in error bodies (OpenAI's 401 names the key it was
+/// given). Same rule as the API crate's `routes::llm::scrub`: a string shorter
+/// than eight characters is not a hosted-provider key, and scrubbing it would
+/// mangle ordinary words.
+pub(crate) fn scrub_error(err: LlmError, api_key: &str) -> LlmError {
+    let key = api_key.trim();
+    if key.len() < 8 {
+        return err;
+    }
+    let s = |t: String| t.replace(key, "[redacted]");
+    match err {
+        LlmError::Auth(t) => LlmError::Auth(s(t)),
+        LlmError::ContextTooLarge(t) => LlmError::ContextTooLarge(s(t)),
+        LlmError::ToolsUnsupported(t) => LlmError::ToolsUnsupported(s(t)),
+        LlmError::InvalidRequest(t) => LlmError::InvalidRequest(s(t)),
+        LlmError::Network(t) => LlmError::Network(s(t)),
+        LlmError::Deserialize(t) => LlmError::Deserialize(s(t)),
+        LlmError::Provider { status, body } => LlmError::Provider {
+            status,
+            body: s(body),
+        },
+        other @ (LlmError::RateLimited { .. } | LlmError::Overloaded) => other,
+    }
+}
+
 pub async fn chat(
     http: &reqwest::Client,
     base_url: &str,
@@ -296,30 +453,122 @@ pub async fn chat(
     req: &ChatRequest,
     flavor: Flavor,
 ) -> Result<ChatResponse, LlmError> {
+    let key = refusal_key(base_url, &req.model);
+    let result = if flavor == Flavor::OpenAi && routes_to_responses(&key, &req.model) {
+        crate::openai_responses::chat(http, base_url, api_key, req).await
+    } else {
+        match chat_completions(http, base_url, api_key, req, flavor).await {
+            Ok(resp) => Ok(resp),
+            Err(Completions::RefusedTools) => {
+                // Learned: this model calls tools only on the Responses API.
+                if let Ok(mut set) = responses_models().lock() {
+                    set.insert(key);
+                }
+                crate::openai_responses::chat(http, base_url, api_key, req).await
+            }
+            Err(Completions::Failed(e)) => Err(e),
+        }
+    };
+    result.map_err(|e| scrub_error(e, api_key))
+}
+
+/// Why a chat-completions call did not produce an answer.
+enum Completions {
+    /// The OpenAI flavour refused function tools alongside reasoning; the caller
+    /// moves the model to `/v1/responses`.
+    RefusedTools,
+    Failed(LlmError),
+}
+
+impl From<LlmError> for Completions {
+    fn from(e: LlmError) -> Self {
+        Completions::Failed(e)
+    }
+}
+
+async fn chat_completions(
+    http: &reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+    req: &ChatRequest,
+    flavor: Flavor,
+) -> Result<ChatResponse, Completions> {
+    let key = refusal_key(base_url, &req.model);
+    let mut drop_temperature = temperature_refusers()
+        .lock()
+        .map(|set| set.contains(&key))
+        .unwrap_or(false);
+    let mut no_reasoning = reasoning_tool_refusers()
+        .lock()
+        .map(|set| set.contains(&key))
+        .unwrap_or(false);
+    let shaped = |completion_tokens: bool, drop_temperature: bool, no_reasoning: bool| {
+        let mut body = build_body(req, completion_tokens, flavor);
+        if let Some(obj) = body.as_object_mut() {
+            if drop_temperature {
+                obj.remove("temperature");
+            }
+            if no_reasoning {
+                obj.insert("reasoning_effort".into(), json!("none"));
+            }
+        }
+        body
+    };
     // vLLM takes `max_tokens`. Asking it for `max_completion_tokens` first would
     // spend a round trip to learn something already known.
-    let completion_tokens = flavor == Flavor::OpenAi;
-    let mut body = build_body(req, completion_tokens, flavor);
+    let mut completion_tokens = flavor == Flavor::OpenAi;
+    let mut body = shaped(completion_tokens, drop_temperature, no_reasoning);
     let (mut status, mut retry_after, mut text) = post_chat(http, base_url, api_key, &body).await?;
 
     // Older models reject max_completion_tokens; retry once with max_tokens.
     if status == 400 && text.contains("max_completion_tokens") {
-        body = build_body(req, false, flavor);
+        completion_tokens = false;
+        body = shaped(completion_tokens, drop_temperature, no_reasoning);
         (status, retry_after, text) = post_chat(http, base_url, api_key, &body).await?;
+    }
+
+    // Reasoning models take only the default temperature. Retry once without it,
+    // and remember, so the next call does not pay for the same refusal.
+    if status == 400 && !drop_temperature && req.temperature.is_some() && refuses_temperature(&text)
+    {
+        drop_temperature = true;
+        if let Ok(mut set) = temperature_refusers().lock() {
+            set.insert(key);
+        }
+        body = shaped(completion_tokens, drop_temperature, no_reasoning);
+        (status, retry_after, text) = post_chat(http, base_url, api_key, &body).await?;
+    }
+
+    // Reasoning models that refuse tools while reasoning. On api.openai.com the
+    // only working answer is the Responses API: `gpt-6.1-sol` refuses
+    // `reasoning_effort: "none"` as well (2026-10-05). The retry with reasoning
+    // off is kept only for the vLLM flavour, which has no Responses endpoint.
+    if status == 400 && refuses_tools_with_reasoning(&text) {
+        if flavor == Flavor::OpenAi {
+            return Err(Completions::RefusedTools);
+        }
+        if !no_reasoning {
+            no_reasoning = true;
+            if let Ok(mut set) = reasoning_tool_refusers().lock() {
+                set.insert(refusal_key(base_url, &req.model));
+            }
+            body = shaped(completion_tokens, drop_temperature, no_reasoning);
+            (status, retry_after, text) = post_chat(http, base_url, api_key, &body).await?;
+        }
     }
 
     if status == 400 {
         if let Some(err) = classify_openai_400(&text) {
-            return Err(err);
+            return Err(err.into());
         }
     }
     if !(200..300).contains(&status) {
-        return Err(classify_status(status, &text, retry_after));
+        return Err(classify_status(status, &text, retry_after).into());
     }
 
     let parsed: Value =
         serde_json::from_str(&text).map_err(|e| LlmError::Deserialize(e.to_string()))?;
-    parse_response(parsed)
+    Ok(parse_response(parsed)?)
 }
 
 /// Model ids that are not chat models and should be hidden from the picker.
@@ -474,6 +723,40 @@ mod tests {
     fn a_schema_does_not_suppress_the_tool_list_here() {
         let body = build_body(&req_with_schema(), false, Flavor::Vllm);
         assert!(body.get("tools").is_some());
+    }
+
+    /// The title generator's schema leaves `additionalProperties` open, and
+    /// api.openai.com answers `strict: true` on such a schema with a 400, so every
+    /// OpenAI-keyed conversation fell back to an untitled row.
+    #[test]
+    fn strict_is_claimed_only_for_a_schema_openai_accepts_strictly() {
+        let open = serde_json::json!({
+            "type": "object",
+            "properties": {"title": {"type": "string"}},
+            "required": ["title"]
+        });
+        assert!(!strict_compatible(&open));
+        let closed = serde_json::json!({
+            "type": "object",
+            "properties": {"title": {"type": "string"}},
+            "required": ["title"],
+            "additionalProperties": false
+        });
+        assert!(strict_compatible(&closed));
+        let partly_required = serde_json::json!({
+            "type": "object",
+            "properties": {"a": {"type": "string"}, "b": {"type": "string"}},
+            "required": ["a"],
+            "additionalProperties": false
+        });
+        assert!(!strict_compatible(&partly_required));
+
+        let mut r = req_with_tools();
+        r.schema = Some(open);
+        assert_eq!(
+            build_body(&r, true, Flavor::OpenAi)["response_format"]["json_schema"]["strict"],
+            false
+        );
     }
 
     #[test]

@@ -95,23 +95,32 @@ pub fn list_features(params: &Value) -> Value {
         Some("rolling") => Some(features::CostClass::Rolling),
         Some("model") => Some(features::CostClass::Model),
         Some(other) => {
-            return json!({
-                "error": "unknown_cost",
-                "cost": other,
-                "known": ["cheap", "rolling", "model"],
-            })
+            return crate::tool_error::refuse_extra(
+                "unknown_cost",
+                format!("cost class `{other}` is not one of the feature cost classes."),
+                "set cost to \"cheap\", \"rolling\" or \"model\", or omit it",
+                json!({ "cost": other, "known": ["cheap", "rolling", "model"] }),
+            )
         }
         None => None,
     };
 
     let all = features::feature_families().len();
     let matched = features::list_features(text("family"), cost, text("query"));
+    // Paged: the cap is what makes ignoring the filters survivable, and `offset`
+    // is what makes the families past it reachable at all (S-5.2).
+    let offset = params
+        .get("offset")
+        .and_then(Value::as_u64)
+        .map_or(0, |o| usize::try_from(o).unwrap_or(usize::MAX));
     let shown: Vec<Value> = matched
         .iter()
+        .skip(offset)
         .take(MAX_FAMILIES)
         .map(|f| render(f))
         .collect();
-    let truncated = matched.len().saturating_sub(shown.len());
+    let truncated = matched.len().saturating_sub(offset.saturating_add(shown.len()));
+    let next_offset = (truncated > 0).then(|| offset + shown.len());
 
     json!({
         "summary_fields": {
@@ -125,6 +134,8 @@ pub fn list_features(params: &Value) -> Value {
             "n_matched": matched.len(),
             "n_total": all,
             "n_truncated": truncated,
+            "offset": offset,
+            "next_offset": next_offset,
             "note": "every family listed here is one the backtest engine resolves — this reads \
                      the same registry `features::runtime::feature` does, so a name that \
                      appears here is a name a strategy may use. Write the `example` form: a \
@@ -143,7 +154,7 @@ pub fn list_features(params: &Value) -> Value {
 pub async fn preview_signals(api: &ApiClient, params: &Value) -> Value {
     for field in ["definition", "instrument_id", "start", "end"] {
         if params.get(field).is_none() {
-            return json!({ "error": "missing_field", "field": field });
+            return crate::tool_error::missing_field(field);
         }
     }
     match api
@@ -191,22 +202,21 @@ fn read_source(params: &Value) -> Result<Source, Value> {
         (Some(t), None) => Ok(Source::Text(t.to_string())),
         (None, Some(d)) => match serde_json::from_value::<StrategyDefinition>(d.clone()) {
             Ok(def) => Ok(Source::Definition(Box::new(def))),
-            Err(e) => Err(json!({
-                "error": "invalid_definition",
-                "message": e.to_string(),
-                "fix": "send the object `get_strategy` returned, or send SLv2 in `text` instead",
-            })),
+            Err(e) => Err(crate::tool_error::refuse(
+                "invalid_definition",
+                format!("`definition` is not a strategy definition: {e}"),
+                "send the object `get_strategy` returned, or send SLv2 in `text` instead",
+            )),
         },
-        (None, None) => Err(json!({
-            "error": "missing_field",
-            "field": "text",
-            "fix": "send SLv2 in `text`, or a stored definition object in `definition`",
-        })),
-        (Some(_), Some(_)) => Err(json!({
-            "error": "ambiguous_source",
-            "fix": "send `text` or `definition`, not both — they are different languages and \
-                    this tool will not guess which one you meant",
-        })),
+        (None, None) => Err(crate::tool_error::missing_field_with(
+            "text",
+            "send SLv2 in `text`, or a stored definition object in `definition`",
+        )),
+        (Some(_), Some(_)) => Err(crate::tool_error::refuse(
+            "ambiguous_source",
+            "both `text` and `definition` were sent; they are different languages and this tool will not guess.",
+            "send `text` or `definition`, not both",
+        )),
     }
 }
 
@@ -243,11 +253,15 @@ fn render_diagnostic(d: &strategy_lang::Diagnostic) -> Value {
 }
 
 fn diagnostics(ds: &[strategy_lang::Diagnostic]) -> Value {
-    json!({
-        "error": "compile_failed",
-        "n_diagnostics": ds.len(),
-        "diagnostics": ds.iter().map(render_diagnostic).collect::<Vec<_>>(),
-    })
+    crate::tool_error::refuse_extra(
+        "compile_failed",
+        format!("the SLv2 text has {} diagnostic(s); see `diagnostics`.", ds.len()),
+        "apply the `fix` on each entry in `diagnostics`, then call again",
+        json!({
+            "n_diagnostics": ds.len(),
+            "diagnostics": ds.iter().map(render_diagnostic).collect::<Vec<_>>(),
+        }),
+    )
 }
 
 /// A refusal the language raised about a *stored* definition: it holds something
@@ -255,24 +269,30 @@ fn diagnostics(ds: &[strategy_lang::Diagnostic]) -> Value {
 /// the caller writes will help, and the answer names the mechanism that is
 /// missing rather than the clause.
 fn one_diagnostic(d: strategy_lang::Diagnostic) -> Value {
-    json!({
-        "error": "not_expressible_in_slv2",
-        "diagnostic": render_diagnostic(&d),
-    })
+    crate::tool_error::refuse_extra(
+        "not_expressible_in_slv2",
+        "the stored definition holds something SLv2 has no text for.",
+        "keep working on it as a definition object (get_strategy / create_strategy with `definition`); nothing in `text` will help",
+        json!({ "diagnostic": render_diagnostic(&d) }),
+    )
 }
 
 /// `compile_strategy` — SLv2 text to the canonical definition. Persists nothing.
 #[must_use]
 pub fn compile_strategy(params: &Value) -> Value {
     let Some(text) = params.get("text").and_then(Value::as_str) else {
-        return json!({ "error": "missing_field", "field": "text" });
+        return crate::tool_error::missing_field("text");
     };
     let def = match strategy_lang::text_to_definition(text) {
         Ok(d) => d,
         Err(ds) => return diagnostics(&ds),
     };
     let Ok(definition) = serde_json::to_value(&def) else {
-        return json!({ "error": "serialization_error" });
+        return crate::tool_error::refuse(
+            "serialization_error",
+            "the result could not be serialised.",
+            "call again; if it repeats, report the strategy that triggers it",
+        );
     };
     json!({
         "summary_fields": { "strategy_id": def.strategy_id, "n_diagnostics": 0 },
@@ -393,10 +413,17 @@ pub fn explain_strategy(params: &Value) -> Value {
 pub fn diff_strategies(params: &Value) -> Value {
     let read = |field: &str| -> Result<StrategyDefinition, Value> {
         let Some(v) = params.get(field).filter(|v| !v.is_null()) else {
-            return Err(json!({ "error": "missing_field", "field": field }));
+            return Err(crate::tool_error::missing_field(field));
         };
         serde_json::from_value(v.clone()).map_err(
-            |e| json!({ "error": "invalid_definition", "field": field, "message": e.to_string() }),
+            |e| {
+                crate::tool_error::refuse_ids(
+                    "invalid_definition",
+                    format!("`{field}` is not a strategy definition: {e}"),
+                    format!("send `{field}` as the object get_strategy returned"),
+                    &[("field", field)],
+                )
+            },
         )
     };
     let before = match read("before") {
@@ -453,19 +480,20 @@ pub fn diff_strategies(params: &Value) -> Value {
 #[must_use]
 pub fn apply_move(params: &Value) -> Value {
     let Some(v) = params.get("definition").filter(|v| !v.is_null()) else {
-        return json!({ "error": "missing_field", "field": "definition" });
+        return crate::tool_error::missing_field("definition");
     };
     let def: StrategyDefinition = match serde_json::from_value(v.clone()) {
         Ok(d) => d,
         Err(e) => {
-            return json!({
-                "error": "invalid_definition",
-                "message": e.to_string(),
-            })
+            return crate::tool_error::refuse(
+                "invalid_definition",
+                format!("`definition` is not a strategy definition: {e}"),
+                "send the object get_strategy returned",
+            )
         }
     };
     let Some(raw) = params.get("edit").filter(|v| !v.is_null()) else {
-        return json!({ "error": "missing_field", "field": "edit" });
+        return crate::tool_error::missing_field("edit");
     };
     // The edit is a closed enum with typed clause fills, so an unreadable one
     // is refused here with serde's own message rather than becoming a
@@ -474,25 +502,19 @@ pub fn apply_move(params: &Value) -> Value {
     let edit: strategy_lang::Edit = match serde_json::from_value(raw.clone()) {
         Ok(e) => e,
         Err(e) => {
-            return json!({
-                "error": "unreadable_edit",
-                "message": e.to_string(),
-                "fix": "an edit names its kind in `edit` and carries that kind's fields; clause \
-                        addresses are the ones `explain_strategy` prints, such as \
-                        `entry.long[0].clause[1]`",
-            })
+            return crate::tool_error::refuse(
+                "unreadable_edit",
+                format!("`edit` could not be read: {e}"),
+                "name the edit's kind in `edit` and give that kind's fields; clause addresses are the ones \
+                 `explain_strategy` prints, such as `entry.long[0].clause[1]`",
+            )
         }
     };
 
     let applied = match strategy_lang::apply_move(&def, &edit) {
         Ok(a) => a,
         Err(d) => {
-            return json!({
-                "error": d.code.as_str(),
-                "message": d.message,
-                "fix": d.fix,
-                "see": d.see,
-            })
+            return crate::tool_error::from_diagnostic_see(d.code.as_str(), &d.message, d.fix.as_deref().unwrap_or(crate::tool_error::DIAGNOSTIC_FIX), &d.see)
         }
     };
     let kind = applied.kind();
@@ -508,7 +530,11 @@ pub fn apply_move(params: &Value) -> Value {
         None => applied.into_definition(),
     };
     let Ok(definition) = serde_json::to_value(&out) else {
-        return json!({ "error": "serialization_error" });
+        return crate::tool_error::refuse(
+            "serialization_error",
+            "the result could not be serialised.",
+            "call again; if it repeats, report the strategy that triggers it",
+        );
     };
     json!({
         "summary_fields": { "kind": kind.as_str(), "says": says },
@@ -1023,12 +1049,12 @@ fn group<'a>(firings: impl IntoIterator<Item = &'a Firing>) -> Vec<BarFirings> {
 /// leak.
 fn read_run(v: &Value) -> Result<RunSignals, Value> {
     let unreadable = || {
-        json!({
-            "error": "unreadable_preview",
-            "fix": "this tool reads `preview_signals`' own answer; the platform returned \
-                    something else",
-            "detail": v.clone(),
-        })
+        crate::tool_error::refuse_extra(
+            "unreadable_preview",
+            "the platform's preview answer was not in the shape this tool reads.",
+            "call preview_signals directly and check it answers; if it does, report the mismatch",
+            json!({ "detail": v.clone() }),
+        )
     };
     if v.get("error").is_some() {
         return Err(v.clone());
@@ -1102,29 +1128,29 @@ fn read_fractions(params: &Value) -> Result<Vec<f64>, Value> {
         return Ok(DEFAULT_FRACTIONS.to_vec());
     };
     let Some(items) = raw.as_array() else {
-        return Err(json!({
-            "error": "invalid_fractions",
-            "fix": "send an array of numbers strictly between 0 and 1, e.g. [0.5, 0.75]",
-        }));
+        return Err(crate::tool_error::refuse(
+            "invalid_fractions",
+            "`fractions` is not an array.",
+            "send an array of numbers strictly between 0 and 1, e.g. [0.5, 0.75]",
+        ));
     };
     if items.is_empty() || items.len() > MAX_FRACTIONS {
-        return Err(json!({
-            "error": "invalid_fractions",
-            "message": format!("{} fractions", items.len()),
-            "fix": format!("send between 1 and {MAX_FRACTIONS} fractions"),
-        }));
+        return Err(crate::tool_error::refuse(
+            "invalid_fractions",
+            format!("{} fractions were sent.", items.len()),
+            format!("send between 1 and {MAX_FRACTIONS} fractions"),
+        ));
     }
     let mut out = Vec::with_capacity(items.len());
     for item in items {
         match item.as_f64() {
             Some(f) if f.is_finite() && f > 0.0 && f < 1.0 => out.push(f),
             _ => {
-                return Err(json!({
-                    "error": "invalid_fractions",
-                    "message": format!("`{item}` is not a fraction of the window"),
-                    "fix": "every fraction must be a number strictly between 0 and 1; 1 is the \
-                            full window and 0 is nothing",
-                }))
+                return Err(crate::tool_error::refuse(
+                    "invalid_fractions",
+                    format!("`{item}` is not a fraction of the window."),
+                    "make every fraction a number strictly between 0 and 1; 1 is the full window and 0 is nothing",
+                ))
             }
         }
     }
@@ -1132,11 +1158,11 @@ fn read_fractions(params: &Value) -> Result<Vec<f64>, Value> {
     let before = out.len();
     out.dedup();
     if out.len() != before {
-        return Err(json!({
-            "error": "invalid_fractions",
-            "fix": "drop the repeated fraction — running the same window twice costs a second \
-                    read and answers the same question",
-        }));
+        return Err(crate::tool_error::refuse(
+            "invalid_fractions",
+            "a fraction is repeated; the same window twice costs a second read and answers the same question.",
+            "drop the repeated fraction",
+        ));
     }
     Ok(out)
 }
@@ -1160,11 +1186,12 @@ fn rfc3339(params: &Value, field: &str) -> Result<chrono::DateTime<chrono::Utc>,
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|t| t.with_timezone(&chrono::Utc))
         .ok_or_else(|| {
-            json!({
-                "error": "invalid_timestamp",
-                "field": field,
-                "fix": "send RFC3339, e.g. 2025-01-01T00:00:00Z",
-            })
+            crate::tool_error::refuse_ids(
+                "invalid_timestamp",
+                format!("`{field}` is missing or not an RFC3339 instant."),
+                format!("send `{field}` as RFC3339, e.g. 2025-01-01T00:00:00Z"),
+                &[("field", field)],
+            )
         })
 }
 
@@ -1201,7 +1228,7 @@ async fn one_preview(
 pub async fn lookahead_truncation_test(api: &ApiClient, params: &Value) -> Value {
     for field in ["definition", "instrument_id", "start", "end"] {
         if params.get(field).is_none() {
-            return json!({ "error": "missing_field", "field": field });
+            return crate::tool_error::missing_field(field);
         }
     }
     let fractions = match read_fractions(params) {
@@ -1213,10 +1240,11 @@ pub async fn lookahead_truncation_test(api: &ApiClient, params: &Value) -> Value
         (Err(e), _) | (_, Err(e)) => return e,
     };
     if end <= start {
-        return json!({
-            "error": "empty_window",
-            "fix": "`end` must be after `start`; there is no shorter window inside an empty one",
-        });
+        return crate::tool_error::refuse(
+            "empty_window",
+            "`end` is not after `start`; there is no shorter window inside an empty one.",
+            "make `end` later than `start`",
+        );
     }
 
     let full_raw = match one_preview(api, params, end).await {
@@ -1226,11 +1254,12 @@ pub async fn lookahead_truncation_test(api: &ApiClient, params: &Value) -> Value
     let full = match read_run(&full_raw) {
         Ok(r) => r,
         Err(e) => {
-            return json!({
-                "error": "full_window_refused",
-                "fix": "the full window has to preview before a shorter one can be compared to it",
-                "detail": e,
-            })
+            return crate::tool_error::refuse_extra(
+                "full_window_refused",
+                "the full window did not preview, so no shorter window can be compared to it.",
+                "fix what `detail` reports so preview_signals runs on the full window, then call again",
+                json!({ "detail": e }),
+            )
         }
     };
     if full.bars_evaluated == 0 {
@@ -1334,7 +1363,7 @@ pub async fn lookahead_truncation_test(api: &ApiClient, params: &Value) -> Value
 }
 
 pub fn specs() -> Vec<ToolSpec> {
-    vec![
+    crate::result_shape::declared(vec![
     ToolSpec::new(
         "list_features",
         "strategy",
@@ -1351,7 +1380,8 @@ pub fn specs() -> Vec<ToolSpec> {
                     "type": "string",
                     "enum": ["cheap", "rolling", "model"],
                     "description": "cheap is O(1) per bar; rolling scans a window"
-                }
+                },
+                "offset": {"type": "integer", "minimum": 0, "description": "skip this many matches; use next_offset"}
             }
         }),
     )
@@ -1527,7 +1557,7 @@ pub fn specs() -> Vec<ToolSpec> {
             ("firings_matched", ""),
         ],
     ),
-    ]
+    ])
 }
 
 #[cfg(test)]
@@ -1566,7 +1596,7 @@ mod tests {
     #[test]
     fn an_unknown_cost_class_is_named_rather_than_ignored() {
         let out = list_features(&json!({ "cost": "free" }));
-        assert_eq!(out["error"], "unknown_cost");
+        assert_eq!(out["error"]["code"], "unknown_cost");
     }
 
     /// A filter narrows, and the answer says how much it left out.
@@ -1630,7 +1660,7 @@ exit time 48 bars
                      size fixed 1\n\
                      exit none\n"
         }));
-        assert_eq!(out["error"], "compile_failed");
+        assert_eq!(out["error"]["code"], "compile_failed");
         let ds = out["diagnostics"].as_array().expect("diagnostics");
         assert!(!ds.is_empty());
         assert!(
@@ -1725,10 +1755,10 @@ exit time 48 bars
     #[test]
     fn explain_strategy_refuses_two_sources_rather_than_picking_one() {
         let out = explain_strategy(&json!({ "text": TREND, "definition": compiled(TREND) }));
-        assert_eq!(out["error"], "ambiguous_source");
+        assert_eq!(out["error"]["code"], "ambiguous_source");
 
         let none = explain_strategy(&json!({}));
-        assert_eq!(none["error"], "missing_field");
+        assert_eq!(none["error"]["code"], "missing_field");
     }
 
     /// S-5.10's acceptance, the half a differ can prove on its own: a one-move
@@ -1807,8 +1837,8 @@ exit time 48 bars
             "definition": compiled(TREND),
             "edit": { "edit": "timeframe", "to": "1h" }
         }));
-        assert_eq!(out["error"], "nothing_to_move");
-        assert!(out["fix"].is_string());
+        assert_eq!(out["error"]["code"], "nothing_to_move");
+        assert!(out["error"]["fix"].is_string());
     }
 
     /// Adversarial: the address is a typed value, so a string that is not one
@@ -1820,9 +1850,9 @@ exit time 48 bars
             "definition": compiled(TREND),
             "edit": { "edit": "threshold", "clause": "entry.long.0", "to": "45" }
         }));
-        assert_eq!(out["error"], "unreadable_edit");
+        assert_eq!(out["error"]["code"], "unreadable_edit");
         assert!(
-            out["fix"]
+            out["error"]["fix"]
                 .as_str()
                 .is_some_and(|f| f.contains("entry.long[0].clause[1]")),
             "the refusal must show the shape that works: {out:#}"
@@ -2232,7 +2262,7 @@ exit time 48 bars
             ]
         });
         let err = read_run(&v).unwrap_err();
-        assert_eq!(err.get("error"), Some(&json!("unreadable_preview")));
+        assert_eq!(err["error"]["code"], "unreadable_preview");
     }
 
     /// The cap is read off the answer rather than copied from the preview's own
@@ -2310,10 +2340,13 @@ exit time 48 bars
     #[test]
     fn the_truncation_test_does_not_claim_a_perturbation_it_cannot_run() {
         let spec = crate::spec::find("lookahead_truncation_test").expect("declared");
+        // The runtime mode landed (S-3.10: `backtest::perturb`, the preview's
+        // `perturbations` field), so the perturbation tool is declared as its own
+        // tool. What must stay true is that the *truncation* tool does not borrow
+        // its signature, which the loop below checks.
         assert!(
-            crate::spec::find("future_perturbation_test").is_none(),
-            "column perturbation has no runtime mode here (ADR-D-19); declaring the tool would \
-             promise a computation nothing performs"
+            crate::spec::find("future_perturbation_test").is_some(),
+            "S-3.10 declared future_perturbation_test; ADR-D-19 keeps it a separate tool"
         );
         let schema = spec.input_schema.to_string();
         for absent in [

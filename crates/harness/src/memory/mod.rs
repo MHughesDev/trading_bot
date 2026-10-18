@@ -33,14 +33,16 @@ use serde::{Deserialize, Serialize};
 
 pub mod brief;
 pub mod conflict;
+pub mod curator;
 pub mod negative;
 pub mod questions;
+pub mod rules;
 pub mod retention;
 pub mod turn;
 pub mod verify;
 pub mod window;
 
-pub use brief::{assemble_brief, Brief, BriefItem, Detail as BriefDetail, Retrieval, Slot};
+pub use brief::{assemble_brief, cited_ids, Brief, BriefItem, Detail as BriefDetail, Retrieval, Slot};
 pub use conflict::{relate, Relation};
 pub use negative::{derive_negative_result, FailureClass, NegativeSource, RefusedWrite};
 pub use retention::{retention, Retention};
@@ -48,6 +50,23 @@ pub use turn::{SummaryFinding, SummaryNegative, TurnBudget, TurnSummary};
 pub use verify::{verify_finding, FindingVerdict};
 
 // ── Shared vocabulary (AGENT-007 §2.2) ──────────────────────────────────────
+
+/// The `extra` key that marks an entry as derived from untrusted text (KM-10).
+pub const TAINT_KEY: &str = "tainted";
+
+/// Tool namespaces whose results are untrusted text: a page somebody else wrote.
+///
+/// `bridge::source_for` prefixes every namespace with `platform.`, which
+/// `provenance::classify` reads as trusted, so the *content* of a `web` tool would
+/// otherwise count as platform output. A session that has consumed any of these is
+/// tainted from then on, and what it writes carries the mark.
+pub const UNTRUSTED_TOOL_NAMESPACES: &[&str] = &["web"];
+
+/// Whether a tool in `namespace` returns text the platform did not produce.
+#[must_use]
+pub fn consumes_untrusted(namespace: &str) -> bool {
+    UNTRUSTED_TOOL_NAMESPACES.contains(&namespace)
+}
 
 /// What kind of thing is remembered. The six §2.2 kinds plus `open_question`,
 /// which AGENT-013 §9 added.
@@ -410,6 +429,31 @@ impl Entry {
         self
     }
 
+    /// Whether the session that wrote this consumed untrusted text (reader extractions,
+    /// fetched pages, web search results): KM-10.
+    ///
+    /// Held in `extra` rather than a column, so a store whose database has not applied
+    /// a new migration still reads and writes every entry, and no `Entry` literal in the
+    /// workspace had to change. The retrieval queries read the same key.
+    #[must_use]
+    pub fn is_tainted(&self) -> bool {
+        self.extra
+            .get(TAINT_KEY)
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    }
+
+    /// Mark this entry tainted. Never un-marked by this API: a finding derived from
+    /// untrusted text does not become trustworthy by being re-saved.
+    #[must_use]
+    pub fn mark_tainted(mut self) -> Self {
+        if !self.extra.is_object() {
+            self.extra = serde_json::json!({});
+        }
+        self.extra[TAINT_KEY] = serde_json::Value::Bool(true);
+        self
+    }
+
     /// Set `valid_until` from the window's end and the kind's policy
     /// (AGENT-007 §3.1 step 3). Idempotent; a kind with no expiry leaves it
     /// `None`.
@@ -667,5 +711,27 @@ mod tests {
         e.conflicts_with.push("f_77".into());
         assert!(e.line().contains("STALE, CONFLICTED"));
         assert!(e.line().contains("f_31a"));
+    }
+
+    #[test]
+    fn a_tainted_entry_stays_tainted_and_an_ordinary_one_is_not() {
+        let e = Entry::finding(
+            "f1",
+            "BTC-USD",
+            "claim",
+            DataWindow::new("2026-01-01", "2026-02-01"),
+            Provenance::new("r", "t", "1", "h"),
+        );
+        assert!(!e.is_tainted());
+        let t = e.clone().mark_tainted();
+        assert!(t.is_tainted());
+        assert!(t.clone().mark_tainted().is_tainted());
+        assert_eq!(t.extra[TAINT_KEY], serde_json::json!(true));
+        // Other `extra` keys survive.
+        let mut with = e;
+        with.extra = serde_json::json!({ "scope": "x" });
+        let tw = with.mark_tainted();
+        assert_eq!(tw.extra["scope"], "x");
+        assert!(tw.is_tainted());
     }
 }

@@ -24,6 +24,11 @@ import {
   type Workflow,
 } from '@/api/desk'
 import { AwayDigestPanel } from './AwayDigest'
+import { SessionRunningRow, StalledSessionRow } from './DeskHomeSessions'
+import { ProposalCard } from './ProposalsQueue'
+import { useContinuousSessions, type ContinuousRow } from './useContinuousSessions'
+import { sessionRefusal, sessionState } from '@/lib/desk/sessions'
+import { invalidateApprovals } from '@/lib/desk/approvals'
 import { Composer, type ComposerSubmission } from './Composer'
 import { type MonitorRow } from './Operations'
 import { TierBadge } from './Shared'
@@ -32,6 +37,9 @@ import { readLastVisit, writeLastVisit } from '@/components/desk/AwayDigest.help
 import { environmentBadge, killSwitchBadge, monitorRow } from '@/components/desk/Operations.helpers'
 import { KILL_SWITCH_QUERY_KEY } from '@/components/desk/KillSwitchBanner.helpers'
 import { ago, tierTiles } from '@/components/desk/Shared.helpers'
+import { ConnectProviderCta } from '@/components/providers/ConnectProviderCta'
+import { parseEngineId } from '@/components/providers/engines'
+import { useEngineChoices } from '@/components/providers/useEngineChoices'
 
 export function LastDecision({
   text,
@@ -81,7 +89,14 @@ export function RunningNow({
   loading,
   conversations,
   onRetry,
+  continuous = [],
 }: {
+  /**
+   * Continuous sessions that are running, paused or not yet started — one row
+   * each, above the runs (S-11.13). A session's children are runs too and also
+   * appear below; the session row is the one that says what it will do next.
+   */
+  continuous?: ContinuousRow[]
   /** `null` when `/api/desk/running` did not answer — unknown, not none. */
   runs: DeskRunningRun[] | null
   notRecorded: NotRecordedNote[]
@@ -96,6 +111,13 @@ export function RunningNow({
     <Panel>
       <PanelHeader title="Running now" />
       <PanelBody>
+        {continuous.length > 0 && (
+          <div data-testid="running-sessions">
+            {continuous.map((r) => (
+              <SessionRunningRow key={r.session.session_id} r={r} />
+            ))}
+          </div>
+        )}
         {loading ? (
           <PanelLoading lines={2} />
         ) : runs === null ? (
@@ -109,7 +131,11 @@ export function RunningNow({
             onRetry={onRetry}
           />
         ) : runs.length === 0 ? (
-          <EmptyState message="Nothing is running" detail="Start something below, or open a recent conversation." />
+          continuous.length > 0 ? (
+            <p className="sub">No run is active right now; the sessions above start them when their schedule and budget allow.</p>
+          ) : (
+            <EmptyState message="Nothing is running" detail="Start something below, or open a recent conversation." />
+          )
         ) : (
           <div data-testid="running-runs">
             {runs.map((r) => {
@@ -392,6 +418,21 @@ export function DeskHome() {
     queryFn: () => deskApi.running(),
     refetchInterval: 10_000,
   })
+  // Proposals join *Needs you* (S-10.15): a run that asked to reach ring 1 or 2
+  // waits on a person, and nothing else on this page would say so.
+  const proposals = useQuery({
+    queryKey: ['desk', 'proposals'],
+    queryFn: () => deskApi.proposals(),
+    refetchInterval: 30_000,
+  })
+  // Continuous sessions (S-11.13): running ones are rows in *Running now*,
+  // stalled ones are in *Needs you* with their diagnosis.
+  const sessions = useContinuousSessions()
+  const stalled = sessions.rows.filter(
+    (r) => sessionState(r.detail ? r.detail.state : r.session.state).kind === 'stalled',
+  )
+  const going = sessions.rows.filter((r) => !stalled.includes(r))
+  const [startError, setStartError] = useState<string | null>(null)
   const monitor = useQuery({ queryKey: ['desk', 'monitor'], queryFn: () => deskApi.monitor() })
   const kill = useQuery({ queryKey: ['desk', 'kill-switch'], queryFn: () => deskApi.killSwitch() })
 
@@ -400,33 +441,68 @@ export function DeskHome() {
     [conversations.data],
   )
   const pending = approvals.data?.approvals ?? []
+  const pendingProposals = proposals.data?.pending ?? []
+  const waiting = pending.length + pendingProposals.length + stalled.length
 
   const profileList = tierTiles(profiles.data?.profiles)
+  // What the composer may start on: a provider *and* a model, from the keys
+  // this user has connected (PROVIDERS track). The tiles above stay profiles.
+  const engines = useEngineChoices()
+  const engineChoice = engines.choices.find((c) => c.id === model) ?? engines.choices[0]
 
+  /**
+   * The Start panel's one door (AGENT-014 §2.1).
+   *
+   * **Research goes through `POST /api/research/sessions`**, continuous or not:
+   * that route takes `mode`, `workflow` and `model` as fields and hands the
+   * workflow to the run as a typed `Workflow` — where the conversation door's
+   * body is `{text}` alone, so a mode written into the text as `mode=research`
+   * reached the server as prose nobody parsed. Chat stays on the conversation
+   * door, which is what a Chat turn is.
+   *
+   * A refusal is printed in the route's words. This used to be `void start(s)`
+   * over an `await` with no `catch`, so a local profile asking for continuous
+   * research — refused by name on the server — produced a click that did
+   * nothing.
+   */
   async function start(s: ComposerSubmission) {
-    if (s.continuous && s.charter) {
-      const created = await deskApi.createSession({
-        mode: s.mode as Mode,
-        continuous: true,
-        charter: s.charter as Charter,
-        workflow: s.workflow as Workflow,
-        model: model || profileList[0]?.id,
-      })
-      if (created) navigate(`/desk/c/${created.conversation_id}`)
+    setStartError(null)
+    // The conversation is opened on the chosen provider and model, by this
+    // client, for both modes. Left to the server it opened on the platform's
+    // default provider whatever key the user had connected (PROVIDERS track).
+    const engine = engineChoice ? parseEngineId(engineChoice.id) : null
+    if (!engine) {
+      setStartError('Nothing was started: connect an AI provider first.')
       return
     }
-    const { data } = await conversationsApi.create()
-    await conversationsApi.send(
-      data.conversation_id,
-      `mode=${s.mode}${s.mode === 'research' ? ` workflow=${s.workflow}` : ''}\n${s.question}`,
-    )
-    navigate(`/desk/c/${data.conversation_id}`)
+    try {
+      if (s.mode === 'research') {
+        const opened = await conversationsApi.create(engine)
+        const body = {
+          mode: s.mode as Mode,
+          continuous: s.continuous,
+          ...(s.continuous ? { charter: s.charter as Charter } : { question: s.question }),
+          workflow: s.workflow as Workflow,
+          model: engine.model,
+          conversation_id: opened.data.conversation_id,
+        }
+        const created = await deskApi.createSession(body)
+        if (created) navigate(`/desk/c/${created.conversation_id}`)
+        else setStartError('The session route did not answer; nothing was started.')
+        return
+      }
+      const { data } = await conversationsApi.create(engine)
+      await conversationsApi.send(data.conversation_id, s.question)
+      navigate(`/desk/c/${data.conversation_id}`)
+    } catch (e) {
+      setStartError(`Nothing was started: ${sessionRefusal(e)}`)
+    }
   }
 
   return (
     <div className="desk-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-4)' }}>
       <Panel>
-        <PanelHeader title="Needs you" badges={<Badge tone={pending.length ? 'warn' : 'neutral'}>{pending.length}</Badge>} />
+        <PanelHeader title="Needs you" badges={<Badge tone={waiting ? 'warn' : 'neutral'}>{waiting}</Badge>} />
         <PanelBody>
           {/* Four states, because "nothing is waiting on you" is a claim and the
               other three are not. A failed inbox that renders as an empty one
@@ -440,12 +516,12 @@ export function DeskHome() {
               detail="This is not the same as nothing waiting on you. A run blocked on an approval stays blocked."
               onRetry={() => void approvals.refetch()}
             />
-          ) : pending.length === 0 ? (
+          ) : waiting === 0 ? (
             <LastDecision
               text={lastDecision(decisions.data?.approvals ?? [])}
               known={!decisions.isPending && !decisions.isError}
             />
-          ) : (
+          ) : pending.length === 0 ? null : (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
               {pending.map((a) => {
                 const row = a as Record<string, unknown>
@@ -458,10 +534,10 @@ export function DeskHome() {
                     </div>
                     <p>{String((row.payload as Record<string, unknown>)?.summary ?? row.kind ?? '')}</p>
                     <div className="desk-actions">
-                      <Button size="xs" onClick={() => void deskApi.answerApproval(id, 'approve')}>
+                      <Button size="xs" onClick={() => void deskApi.answerApproval(id, 'approve').then(() => invalidateApprovals(qc))}>
                         Approve
                       </Button>
-                      <Button size="xs" variant="secondary" onClick={() => void deskApi.answerApproval(id, 'deny')}>
+                      <Button size="xs" variant="secondary" onClick={() => void deskApi.answerApproval(id, 'deny').then(() => invalidateApprovals(qc))}>
                         Deny
                       </Button>
                     </div>
@@ -469,6 +545,38 @@ export function DeskHome() {
                 )
               })}
             </ul>
+          )}
+          {pendingProposals.length > 0 && (
+            <div data-testid="needs-you-proposals">
+              <span className="lbl">proposals · {pendingProposals.length}</span>
+              {pendingProposals.map((p) => (
+                <ProposalCard
+                  key={p.proposal_id}
+                  p={p}
+                  onDecided={() => void qc.invalidateQueries({ queryKey: ['desk', 'proposals'] })}
+                />
+              ))}
+            </div>
+          )}
+          {stalled.length > 0 && (
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }} data-testid="needs-you-stalled">
+              {stalled.map((r) => (
+                <StalledSessionRow key={r.session.session_id} r={r} onChanged={sessions.refetch} />
+              ))}
+            </ul>
+          )}
+          {/* What could not be read is said, beside what could: an empty
+              *Needs you* is a claim, and it is not one this panel can make
+              while either of these is unknown. */}
+          {!proposals.isPending && (proposals.isError || proposals.data === null) && (
+            <p className="sub" role="status" data-testid="needs-you-proposals-unknown">
+              The proposals queue could not be read, so a run waiting on a ring-1 or ring-2 decision would not show here.
+            </p>
+          )}
+          {sessions.failed && (
+            <p className="sub" role="status" data-testid="needs-you-sessions-unknown">
+              The session list could not be read, so a stalled continuous session would not show here.
+            </p>
           )}
         </PanelBody>
       </Panel>
@@ -486,6 +594,7 @@ export function DeskHome() {
         loading={runningNow.isPending}
         conversations={conversations.data?.conversations ?? null}
         onRetry={() => void runningNow.refetch()}
+        continuous={going}
       />
 
       <Panel>
@@ -566,9 +675,10 @@ export function DeskHome() {
         <PanelBody>
           <Composer
             running={false}
-            profiles={profileList}
-            model={model || profileList[0]?.id || ''}
+            profiles={engines.choices}
+            model={engineChoice?.id ?? ''}
             onModelChange={setModel}
+            connect={engines.needsProvider ? <ConnectProviderCta /> : undefined}
             onSubmit={(s) => void start(s)}
             onOffer={(q) => void start({
               mode: 'research',
@@ -580,16 +690,24 @@ export function DeskHome() {
               steer: false,
             })}
           />
+          {startError && (
+            <p className="sub" role="alert" data-testid="start-error">
+              {startError}
+            </p>
+          )}
           <div className="desk-actions">
             <span className="sub">Starters:</span>
-            <Button size="xs" variant="ghost" onClick={() => void start({
+            {/* The two starters open a conversation, so they wait for an engine
+                like Send does: disabled while the provider list is read, and
+                absent behind the call to action when there is none. */}
+            <Button size="xs" variant="ghost" disabled={!engineChoice} hidden={engines.needsProvider} onClick={() => void start({
               mode: 'chat', continuous: false, workflow: 'investigate',
               question: 'What instruments do we have clean 1m bars for?',
               charter: null, constraints: { instrument: '', timeframe: '', window: '', balance: '' }, steer: false,
             })}>
               Ask a question
             </Button>
-            <Button size="xs" variant="ghost" onClick={() => void start({
+            <Button size="xs" variant="ghost" disabled={!engineChoice} hidden={engines.needsProvider} onClick={() => void start({
               mode: 'research', continuous: false, workflow: 'falsify',
               question: 'Does the overnight gap on BTC carry an edge after costs?',
               charter: null, constraints: { instrument: '', timeframe: '', window: '', balance: '' }, steer: false,

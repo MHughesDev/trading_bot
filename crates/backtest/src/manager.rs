@@ -189,7 +189,7 @@ impl PhaseFailure {
 /// load / simulate) phases at once.  Creating more simply queues them: the
 /// extra jobs sit in `Queued` until a permit frees up, so N concurrent
 /// creates can't spawn N simultaneous full simulations and exhaust the box.
-const MAX_CONCURRENT_RUNS: usize = 3;
+pub const MAX_CONCURRENT_RUNS: usize = 3;
 
 /// The eval resolution a stored bar timeframe corresponds to — the inverse of
 /// `sim_executor::timeframe_for`. Timeframes with no matching resolution fall
@@ -833,6 +833,12 @@ impl BacktestManager {
                     ),
                 )
             })?;
+        let external =
+            crate::runner::load_external(&self.pg, &self.ch_url, &plan, spec.start, spec.end)
+                .await
+                .map_err(|e| {
+                    PhaseFailure::new(BacktestStatus::LoadingData, TerminalReason::DataError, e)
+                })?;
         let cfg = Self::run_config_for(spec);
         let run = crate::runner::V3Run {
             plan: Arc::new(plan),
@@ -856,6 +862,7 @@ impl BacktestManager {
             fill_policy: execution::sim_venue::FillPolicy::NextBarOpen,
             strategy_id: graph.name.clone(),
             sims: execution::paper::SimulatorSet::realistic(),
+            external,
         };
         let started = std::time::Instant::now();
         let outcome = tokio::task::spawn_blocking(move || {

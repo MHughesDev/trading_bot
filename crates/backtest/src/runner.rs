@@ -78,6 +78,10 @@ pub struct V3Run {
     /// What the strategy's orders carry as `strategy_id`.
     pub strategy_id: String,
     pub sims: SimulatorSet,
+    /// The rows the plan's external indicators read (P-3.6), every one knowable
+    /// by the window's end; the engine picks per bar what was knowable then.
+    /// Empty when the plan reads none.
+    pub external: strategy_engine::ExternalData,
 }
 
 /// What a v3 run produced.
@@ -189,6 +193,7 @@ fn run_inner(
         drive(
             &r.plan,
             &r.bars,
+            &r.external,
             &primary,
             r.start_ns,
             &mut orders,
@@ -200,6 +205,7 @@ fn run_inner(
         drive(
             &r.plan,
             &r.bars,
+            &r.external,
             &primary,
             r.start_ns,
             &mut delayed,
@@ -248,9 +254,11 @@ pub(crate) fn primary_bars(r: &V3Run) -> Result<BTreeMap<i64, SimBar>, RunnerErr
 
 /// The one backtest loop, over any venue. Returns every decision inside the
 /// window.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn drive(
     plan: &Arc<Plan>,
     bars: &[Vec<LoadedBar>],
+    external: &strategy_engine::ExternalData,
     primary: &BTreeMap<i64, SimBar>,
     start_ns: i64,
     venue: &mut dyn BarVenue,
@@ -265,6 +273,17 @@ pub(crate) fn drive(
         start_ns,
     );
     let mut traces = Vec::new();
+    // The external rows before the first bar, through the same loop as every
+    // other event: the engine resolves each bar against them point-in-time.
+    if !external.is_empty() {
+        traces.extend(cycle(
+            &mut engine,
+            Event::External(external.clone()),
+            models,
+            &mut *venue,
+            journal,
+        )?);
+    }
     while let Some(ev) = data.next_bar() {
         let window = (ev.input == PRIMARY && !ev.warmup).then(|| &primary[&ev.bar.close_ns]);
         traces.extend(step_bar(
@@ -319,9 +338,8 @@ impl strategy_engine::VenuePort for Delayed<'_> {
         for a in actions {
             if let OrderAction::Cancel { tag } = a {
                 let before = self.held.len();
-                self.held.retain(
-                    |(_, h)| !matches!(h, OrderAction::Submit(o) if o.tag == *tag),
-                );
+                self.held
+                    .retain(|(_, h)| !matches!(h, OrderAction::Submit(o) if o.tag == *tag));
                 if self.held.len() < before {
                     events.push(Event::OrderClosed(strategy_engine::OrderClosed {
                         tag: tag.clone(),
@@ -387,7 +405,13 @@ pub(crate) fn step_bar(
             traces.extend(cycle(engine, e, models, &mut *venue, journal)?);
         }
     }
-    let decided = cycle(engine, Event::Bar { input, bar, warmup }, models, &mut *venue, journal)?;
+    let decided = cycle(
+        engine,
+        Event::Bar { input, bar, warmup },
+        models,
+        &mut *venue,
+        journal,
+    )?;
     if let Some(sim) = window {
         traces.extend(decided);
         venue.on_close_decided(sim);
@@ -698,6 +722,9 @@ impl V3RunExecutor {
             }
             bars.push(loaded);
         }
+        let external = load_external(&self.pg, &self.ch_url, &plan, start, end)
+            .await
+            .map_err(|e| (TerminalReason::DataError, e))?;
         let lot = meta.lot_size;
         Ok(V3Run {
             plan: Arc::new(plan),
@@ -721,8 +748,30 @@ impl V3RunExecutor {
             fill_policy: fill,
             strategy_id: strategy_id.to_owned(),
             sims: SimulatorSet::realistic(),
+            external,
         })
     }
+}
+
+/// The external rows `plan` reads over `[start, end]` (P-3.6), every one
+/// knowable by `end`; empty when it reads none.
+///
+/// # Errors
+/// Rows that could not be read, said so.
+pub async fn load_external(
+    pg: &sqlx::PgPool,
+    ch_url: &str,
+    plan: &Plan,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+) -> Result<strategy_engine::ExternalData, String> {
+    let indicators = plan.external_indicators();
+    if indicators.is_empty() {
+        return Ok(strategy_engine::ExternalData::default());
+    }
+    crate::external::load(pg, ch_url, &indicators, start, end, end)
+        .await
+        .map_err(|e| format!("external inputs: {e:#}"))
 }
 
 /// A stored strategy definition: the revision `revision` names exactly, else
@@ -1031,10 +1080,11 @@ impl V3RunExecutor {
     /// held in the trial ledger like every other run.
     fn execute_portfolio(&self, cfg: &RunConfig, started: Instant) -> RunResult {
         let loaded = tokio::task::block_in_place(|| self.handle.block_on(self.load_portfolio(cfg)));
-        let (r, registry) = match loaded {
+        let (mut r, registry) = match loaded {
             Ok(r) => r,
             Err((reason, detail)) => return RunResult::failed(cfg, reason, detail, RUNNER_TAG),
         };
+        scale_costs(&mut r.sims, cfg.cost_scale_bp);
         let optimistic = cfg.unsafe_flags.models_optimistic;
         let mut models: Box<dyn crate::models::RunModels> = match &self.models {
             Some(factory) => factory(registry, optimistic),
@@ -1096,6 +1146,42 @@ impl V3RunExecutor {
     }
 }
 
+/// Scale every trading cost the simulated venue charges by `cost_scale_bp`
+/// hundredths of a percent of itself (`+2000` is +20 %): what a
+/// cost-perturbation replicate varies (`RunConfig::cost_scale_bp`, SPEC
+/// §11.5). The same legs `market_simulator`'s schedule scales for a v1 run —
+/// fees (taker and maker) and the half-spread — on every simulator a venue
+/// could route to, moving together because a dearer venue is dearer on every
+/// leg. Market impact is the market's, not the venue's price list, and is left
+/// alone. Zero leaves the set unchanged, bit for bit.
+pub fn scale_costs(sims: &mut SimulatorSet, cost_scale_bp: i32) {
+    if cost_scale_bp == 0 {
+        return;
+    }
+    let k = Decimal::ONE + Decimal::new(i64::from(cost_scale_bp), 4);
+    let clob = |c: &mut execution::paper::ClobFillSimulator| {
+        c.fee_rate *= k;
+        c.maker_fee_rate = c.maker_fee_rate.map(|m| m * k);
+        c.half_spread_bps *= k;
+    };
+    clob(&mut sims.clob);
+    sims.clob_overrides.values_mut().for_each(clob);
+    let quote = |b: &mut execution::paper::BrokerQuoteFillSimulator| {
+        b.half_spread_bps *= k;
+        b.commission_flat *= k;
+    };
+    quote(&mut sims.broker_quote);
+    sims.broker_quote_overrides.values_mut().for_each(quote);
+    let amm = |a: &mut execution::paper::AmmQuoteSwapSimulator| {
+        a.protocol_fee_bps *= k;
+        a.flat_fee *= k;
+    };
+    amm(&mut sims.amm);
+    sims.amm_overrides.values_mut().for_each(amm);
+    sims.prediction.fee_coefficient *= k;
+    sims.prediction.half_spread_cents *= k;
+}
+
 impl RunExecutor for V3RunExecutor {
     fn execute(&self, cfg: &RunConfig, ticket: &ledger::TrialTicket) -> RunResult {
         let started = Instant::now();
@@ -1107,10 +1193,11 @@ impl RunExecutor for V3RunExecutor {
             return self.execute_portfolio(cfg, started);
         }
         let loaded = tokio::task::block_in_place(|| self.handle.block_on(self.load(cfg)));
-        let (r, registry) = match loaded {
+        let (mut r, registry) = match loaded {
             Ok(r) => r,
             Err((reason, detail)) => return RunResult::failed(cfg, reason, detail, RUNNER_TAG),
         };
+        scale_costs(&mut r.sims, cfg.cost_scale_bp);
         let optimistic = cfg.unsafe_flags.models_optimistic;
         let mut models: Box<dyn crate::models::RunModels> = match &self.models {
             Some(factory) => factory(registry, optimistic),
@@ -1193,6 +1280,33 @@ impl RunExecutor for FormatRoutedExecutor {
 }
 
 /// Fill a model version's prediction series over `bars` (U-5.5): the backtest
+/// The plan a `predict_series` job runs for `reference`: what it must load,
+/// external rows included (`Plan::external_indicators`), before it runs.
+///
+/// # Errors
+/// A reference that is not in the registry, has no contract, or whose inputs a
+/// graph cannot wire.
+pub fn series_plan(
+    reference: &str,
+    registry: &crate::models::RegistrySnapshot,
+    timeframe: &str,
+    asset_class: AssetClass,
+) -> Result<Plan, String> {
+    let entry = registry
+        .entry(reference)
+        .ok_or_else(|| format!("{reference} is not in the registry"))?;
+    let contract = entry
+        .contract
+        .as_ref()
+        .ok_or_else(|| format!("{reference} has no contract"))?;
+    let ac = serde_json::to_value(asset_class)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default();
+    let graph = crate::models::series_graph(reference, contract, &ac, timeframe)?;
+    compile_for_run(&graph, &crate::run::ParamMap::new(), registry)
+}
+
 /// loop over a graph that only calls the model, through `models` — whose cache
 /// is the series. Returns what was written.
 ///
@@ -1206,21 +1320,10 @@ pub fn predict_series(
     asset_class: AssetClass,
     bars: Vec<LoadedBar>,
     start_ns: i64,
+    external: strategy_engine::ExternalData,
     models: &mut dyn ModelProvider,
 ) -> Result<crate::models::SeriesReport, String> {
-    let entry = registry
-        .entry(reference)
-        .ok_or_else(|| format!("{reference} is not in the registry"))?;
-    let contract = entry
-        .contract
-        .as_ref()
-        .ok_or_else(|| format!("{reference} has no contract"))?;
-    let ac = serde_json::to_value(asset_class)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default();
-    let graph = crate::models::series_graph(reference, contract, &ac, timeframe)?;
-    let plan = compile_for_run(&graph, &crate::run::ParamMap::new(), registry)?;
+    let plan = series_plan(reference, registry, timeframe, asset_class)?;
     let r = V3Run {
         plan: Arc::new(plan),
         instrument: instrument.to_string(),
@@ -1243,6 +1346,7 @@ pub fn predict_series(
         fill_policy: FillPolicy::NextBarOpen,
         strategy_id: format!("series:{reference}"),
         sims: SimulatorSet::realistic(),
+        external,
     };
     let out = run(r, models).map_err(|e| e.to_string())?;
     let mut report = crate::models::SeriesReport::default();

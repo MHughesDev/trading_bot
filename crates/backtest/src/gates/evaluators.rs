@@ -243,47 +243,55 @@ impl VolRegime {
     }
 }
 
-/// Label each day by the tercile of its trailing realized volatility.
+/// Label each day by the tercile of its trailing realized volatility, **as known on that day**.
 ///
-/// The terciles are taken over the evaluation window itself. That is **not**
-/// lookahead: nothing here is fed to a strategy. It is a description of the
-/// period a result was earned in, computed after the fact, and the question it
-/// answers — "did this cover more than one kind of market?" — is only meaningful
-/// relative to the period in question. The rule tier of M7 (ADR-P3-02); the
-/// filtered HMM replaces it later without changing this gate.
+/// The cut points at day `t` are the terciles of the trailing volatilities of days
+/// `0..=t` only (an expanding window), so a label never changes when later bars arrive.
+/// The earlier version took the terciles over the whole window, which made the label at
+/// `t` a function of the future: the same day was labelled `Low` or `Mid` depending on
+/// when the job ran. That is a look-ahead on a table the strategies read (the rule tier
+/// writes `regime_causal.regime_state`; INV-01, ADR-RB-05), so the labels are filtered:
+/// `labels[t]` is a function of `returns[..=t]` and nothing else, and a test appends bars
+/// and checks every earlier label is unchanged.
+///
+/// With only a few days of history the cut points are coarse; the first labels are the
+/// least informative ones, which is what a filter knows on its first days. The rule tier of
+/// M7 (ADR-P3-02); the filtered jump model (`research::regime_engine`) runs beside it.
 #[must_use]
+#[allow(clippy::many_single_char_names)] // n, w, m, v, q are the standard statistics symbols
 pub fn vol_tercile_regimes(returns: &[(DateTime<Utc>, f64)], window: usize) -> Vec<VolRegime> {
     let n = returns.len();
     if n == 0 {
         return Vec::new();
     }
-    let w = window.max(2).min(n.max(2));
-    let mut vol = Vec::with_capacity(n);
+    // Not clipped to `n`: a window that depended on how many bars exist would itself be a
+    // function of the future.
+    let w = window.max(2);
+    // Sorted trailing volatilities of every day seen so far; the cut points come from here.
+    let mut seen: Vec<f64> = Vec::with_capacity(n);
+    let mut out = Vec::with_capacity(n);
     for i in 0..n {
         let lo = i.saturating_sub(w - 1);
         let slice = &returns[lo..=i];
         let m = slice.iter().map(|(_, r)| r).sum::<f64>() / slice.len() as f64;
         let v = slice.iter().map(|(_, r)| (r - m).powi(2)).sum::<f64>() / slice.len().max(1) as f64;
-        vol.push(v.sqrt());
+        let v = v.sqrt();
+        let at = seen.partition_point(|x| x.total_cmp(&v).is_lt());
+        seen.insert(at, v);
+        let q = |p: f64| -> f64 {
+            let idx = ((seen.len() - 1) as f64 * p).round() as usize;
+            seen[idx.min(seen.len() - 1)]
+        };
+        let (t1, t2) = (q(1.0 / 3.0), q(2.0 / 3.0));
+        out.push(if v <= t1 {
+            VolRegime::Low
+        } else if v <= t2 {
+            VolRegime::Mid
+        } else {
+            VolRegime::High
+        });
     }
-    let mut sorted = vol.clone();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let q = |p: f64| -> f64 {
-        let idx = ((sorted.len() - 1) as f64 * p).round() as usize;
-        sorted[idx.min(sorted.len() - 1)]
-    };
-    let (t1, t2) = (q(1.0 / 3.0), q(2.0 / 3.0));
-    vol.into_iter()
-        .map(|v| {
-            if v <= t1 {
-                VolRegime::Low
-            } else if v <= t2 {
-                VolRegime::Mid
-            } else {
-                VolRegime::High
-            }
-        })
-        .collect()
+    out
 }
 
 /// What Gate 11 measures, kept so the UI can show the shape rather than the bit.
@@ -1706,15 +1714,87 @@ pub fn gate_15_paper_shadow(profile: &GateProfile, i: PaperInputs) -> GateOutcom
 ///
 /// `verdicts` is every gate's `(number, passed)` including this one's
 /// prerequisites; `current` is the rung the registry holds today.
+///
+/// `step` is the judgement of a **completed forward review period**
+/// ([`ledger::ramp_gate::judge`], Set T T-3.2), and it is what turns this from
+/// an eligibility statement into a step verdict:
+///
+/// * `None` - no review period has been judged (the research-time stack). The gate
+///   reports eligibility to *request* the next rung on the sixteen verdicts, and
+///   says in its detail that no period has judged a step.
+/// * `Some(NotComputable)` - an incomplete or unobserved period. **Inconclusive,
+///   never a pass**, carrying the judgement's own reason.
+/// * `Some(Fail)` - the period failed: the rung does not move.
+/// * `Some(Pass)` - passes, and the rung rises only if the judgement permits a
+///   step up (`step_up_allowed`); a pass that holds reports the hold.
+///
+/// Eligibility is checked first and is never overridden by a good period: a
+/// `paper_v1` deployment with a flawless period still cannot authorise capital.
 #[must_use]
 pub fn gate_16_capital_ramp(
     profile: &GateProfile,
     current: ledger::AllowedFraction,
     verdicts: &[(i32, bool)],
+    step: Option<&ledger::ramp_gate::StepJudgement>,
 ) -> GateOutcome {
+    use ledger::ramp_gate::StepVerdict;
     const NAME: &str = "capital_ramp";
-    match ledger::capital::authorise(profile.profile_id(), profile.authorises_capital(), verdicts) {
-        Ok(authority) => {
+    let authority = match ledger::capital::authorise(
+        profile.profile_id(),
+        profile.authorises_capital(),
+        verdicts,
+    ) {
+        Ok(a) => a,
+        Err(why) => {
+            return GateOutcome::decided(
+                16,
+                NAME,
+                false,
+                current.value(),
+                current.value(),
+                format!("stays at {} — {why}", current.as_str()),
+            );
+        }
+    };
+    let Some(step) = step else {
+        let next = current.raise(&authority);
+        return GateOutcome::decided(
+            16,
+            NAME,
+            true,
+            next.value(),
+            current.value(),
+            format!(
+                "sixteen of sixteen passed under {}: {} → {} of intended size is eligible; \
+                 no forward review period has judged a step yet",
+                profile.profile_id(),
+                current.as_str(),
+                next.as_str()
+            ),
+        );
+    };
+    match &step.verdict {
+        StepVerdict::NotComputable { reason } => GateOutcome::inconclusive_pub(
+            16,
+            NAME,
+            format!(
+                "stays at {} — the review period cannot be judged: {reason}",
+                current.as_str()
+            ),
+        ),
+        StepVerdict::Fail { reasons } => GateOutcome::decided(
+            16,
+            NAME,
+            false,
+            current.value(),
+            current.value(),
+            format!(
+                "stays at {} — the review period failed: {}",
+                current.as_str(),
+                reasons.join("; ")
+            ),
+        ),
+        StepVerdict::Pass if step.step_up_allowed => {
             let next = current.raise(&authority);
             GateOutcome::decided(
                 16,
@@ -1723,20 +1803,26 @@ pub fn gate_16_capital_ramp(
                 next.value(),
                 current.value(),
                 format!(
-                    "sixteen of sixteen passed under {}: {} → {} of intended size",
+                    "review period passed under {}: {} → {} of intended size",
                     profile.profile_id(),
                     current.as_str(),
                     next.as_str()
                 ),
             )
         }
-        Err(why) => GateOutcome::decided(
+        StepVerdict::Pass => GateOutcome::decided(
             16,
             NAME,
-            false,
+            true,
             current.value(),
             current.value(),
-            format!("stays at {} — {why}", current.as_str()),
+            format!(
+                "review period passed; holds at {} — {}",
+                current.as_str(),
+                step.step_up_refusal
+                    .as_deref()
+                    .unwrap_or("no step up is permitted")
+            ),
         ),
     }
 }
@@ -1893,6 +1979,25 @@ mod tests {
         assert_ne!(labels[20], VolRegime::High);
     }
 
+    /// The label at `t` is a function of the returns up to `t` and nothing later (ADR-RB-05).
+    /// The previous whole-window terciles failed this: appending a volatile tail moved the
+    /// cut points and re-labelled days that had already been labelled.
+    #[test]
+    fn a_label_at_t_does_not_change_when_later_bars_arrive() {
+        let all = daily(NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(), 300, |i| {
+            let amp = if (150..250).contains(&i) { 0.08 } else { 0.004 };
+            if i % 2 == 0 { amp } else { -amp }
+        });
+        let full = vol_tercile_regimes(&all, 21);
+        for cut in [5usize, 30, 100, 149, 200, 299] {
+            let prefix = vol_tercile_regimes(&all[..cut], 21);
+            assert_eq!(prefix.as_slice(), &full[..cut], "labels up to {cut} moved when later bars were appended");
+        }
+        // The tail really is different, so the assertion above is not vacuous: whole-window
+        // terciles would have labelled the quiet start differently once the tail existed.
+        assert!(full[160..240].contains(&VolRegime::High));
+    }
+
     /// The platform's own filtered labels are used as given, not re-derived.
     ///
     /// Once a scope is configured, `regime_causal.regime_state` already holds
@@ -1959,8 +2064,11 @@ mod tests {
             }
         });
         let r = daily(NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(), 400, |i| {
-            // Flat everywhere except a violent, profitable 40-day window.
-            if (180..220).contains(&i) {
+            // Flat everywhere except a violent, profitable window. It sits inside one
+            // volatility block, past the trailing window's warm-up: the labels are
+            // filtered (known on the day), so a window straddling a block boundary is
+            // honestly split across two regimes, and this fixture wants exactly one.
+            if (230..239).contains(&i) {
                 0.05
             } else {
                 0.00001
@@ -3060,6 +3168,7 @@ mod tests {
             &GateProfile::paper_v1(),
             ledger::AllowedFraction::default(),
             &sixteen_passes(),
+            None,
         );
         assert!(!out.passed, "{}", out.detail);
         assert!(
@@ -3074,6 +3183,7 @@ mod tests {
             &GateProfile::strict_v1(),
             ledger::AllowedFraction::default(),
             &sixteen_passes(),
+            None,
         );
         assert!(strict.passed, "{}", strict.detail);
         assert!(
@@ -3091,6 +3201,7 @@ mod tests {
             &GateProfile::strict_v1(),
             ledger::AllowedFraction::Ten,
             &partial,
+            None,
         );
         assert!(!out.passed, "{}", out.detail);
         assert!(
@@ -3107,9 +3218,77 @@ mod tests {
             &GateProfile::strict_v1(),
             ledger::AllowedFraction::TwentyFive,
             &one_bad,
+            None,
         );
         assert!(!out.passed, "{}", out.detail);
         assert!((out.statistic.unwrap() - 0.25).abs() < 1e-12);
+    }
+
+    fn judgement(
+        verdict: ledger::ramp_gate::StepVerdict,
+        up: bool,
+    ) -> ledger::ramp_gate::StepJudgement {
+        ledger::ramp_gate::StepJudgement {
+            verdict,
+            step_up_allowed: up,
+            step_up_refusal: if up { None } else { Some("at the top rung".into()) },
+        }
+    }
+
+    /// T-3.2: the gate renders the judged period, not just the sixteen.
+    #[test]
+    fn gate_16_renders_the_judged_review_period() {
+        use ledger::ramp_gate::StepVerdict;
+        let at = ledger::AllowedFraction::Ten;
+        let run = |j: &ledger::ramp_gate::StepJudgement| {
+            gate_16_capital_ramp(&GateProfile::strict_v1(), at, &sixteen_passes(), Some(j))
+        };
+
+        let pass = run(&judgement(StepVerdict::Pass, true));
+        assert!(pass.passed && !pass.inconclusive, "{}", pass.detail);
+        assert!((pass.statistic.unwrap() - 0.25).abs() < 1e-12, "{}", pass.detail);
+
+        let hold = run(&judgement(StepVerdict::Pass, false));
+        assert!(hold.passed, "{}", hold.detail);
+        assert!(
+            (hold.statistic.unwrap() - 0.10).abs() < 1e-12,
+            "a hold does not move: {}",
+            hold.detail
+        );
+
+        let fail = run(&judgement(
+            StepVerdict::Fail {
+                reasons: vec!["signal match 0.80 < 0.95".into()],
+            },
+            false,
+        ));
+        assert!(!fail.passed && !fail.inconclusive, "{}", fail.detail);
+        assert!(fail.detail.contains("signal match"), "{}", fail.detail);
+        assert!((fail.statistic.unwrap() - 0.10).abs() < 1e-12);
+
+        // An incomplete period is not a pass, and is not a fail either.
+        let nc = run(&judgement(
+            StepVerdict::NotComputable {
+                reason: "3 observed forward bars; at least 20".into(),
+            },
+            false,
+        ));
+        assert!(nc.inconclusive && !nc.passed, "{}", nc.detail);
+        assert!(nc.detail.contains("3 observed forward bars"), "{}", nc.detail);
+    }
+
+    /// A flawless period does not make a paper profile eligible for capital.
+    #[test]
+    fn a_passed_period_cannot_override_eligibility() {
+        use ledger::ramp_gate::StepVerdict;
+        let out = gate_16_capital_ramp(
+            &GateProfile::paper_v1(),
+            ledger::AllowedFraction::default(),
+            &sixteen_passes(),
+            Some(&judgement(StepVerdict::Pass, true)),
+        );
+        assert!(!out.passed, "{}", out.detail);
+        assert!((out.statistic.unwrap() - 0.0).abs() < f64::EPSILON);
     }
 
     // ── Gate 2 — the leakage suite, wired ───────────────────────────────────

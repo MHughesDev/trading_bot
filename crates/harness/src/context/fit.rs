@@ -277,6 +277,62 @@ pub fn promote(
     }
 }
 
+/// What is kept of a promotion attempt (S-9.12: "a losing `v2` is recorded with
+/// its corpus rather than quietly re-tuned until it passes").
+///
+/// The weights and the corpus that produced them travel with the outcome, so a
+/// refused policy can be examined later and a re-fit that changes the weights
+/// without changing the corpus is visible as exactly that. Serialisable, and
+/// persisted append-only by `api::eval_store::record_promotion`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PromotionRecord {
+    pub policy_version: String,
+    pub weights: Weights,
+    /// How many observations the fit saw.
+    pub corpus_size: usize,
+    /// A stable fingerprint of the corpus (FNV-1a over each observation), so
+    /// "same corpus, different weights" is checkable without storing the corpus.
+    pub corpus_fingerprint: String,
+    pub promoted: bool,
+    pub refused: Vec<String>,
+    pub report: Vec<String>,
+}
+
+/// A stable FNV-1a fingerprint of an observation corpus.
+#[must_use]
+pub fn corpus_fingerprint(corpus: &[Observation]) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for o in corpus {
+        let row = format!("{:?}|{:?}", o.signals, o.utility);
+        for b in row.bytes() {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    format!("{h:016x}")
+}
+
+impl Promotion {
+    /// The record to keep, win or lose.
+    #[must_use]
+    pub fn record(
+        &self,
+        policy_version: &str,
+        fitted: &Fitted,
+        corpus: &[Observation],
+    ) -> PromotionRecord {
+        PromotionRecord {
+            policy_version: policy_version.to_string(),
+            weights: fitted.weights,
+            corpus_size: corpus.len(),
+            corpus_fingerprint: corpus_fingerprint(corpus),
+            promoted: self.promoted,
+            refused: self.refused.clone(),
+            report: self.report.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -411,6 +467,8 @@ mod tests {
             cache_hit_rate: None,
             memory_recall: None,
             hitl_precision: None,
+            utility_rate: None,
+            over_estimate_rate: None,
             evaluations: 1,
             barren: vec![],
         }
@@ -476,6 +534,33 @@ mod tests {
             "{:?}",
             p.refused
         );
+    }
+
+    /// S-9.12: a losing candidate is recorded WITH the weights and the corpus
+    /// that produced it, and the corpus fingerprint distinguishes a re-fit on
+    /// different data from a re-tune on the same data.
+    #[test]
+    fn a_losing_candidate_is_recorded_with_its_weights_and_corpus() {
+        let corpus_a = corpus();
+        let fitted = fit(&corpus_a);
+        let baselines = vec![card("claude-opus-5", "frontier", 90, 100, 5_000)];
+        let candidates = vec![card("claude-opus-5", "frontier", 90, 100, 5_000)];
+        let u = BTreeMap::from([("claude-opus-5".to_string(), utility(0.6, 0.4))]);
+        let p = promote(&baselines, &candidates, &u);
+        let rec = p.record("v2", &fitted, &corpus_a);
+        assert!(!rec.promoted);
+        assert_eq!(rec.weights, fitted.weights);
+        assert_eq!(rec.corpus_size, corpus_a.len());
+        assert!(!rec.refused.is_empty());
+        let back: PromotionRecord =
+            serde_json::from_str(&serde_json::to_string(&rec).unwrap()).unwrap();
+        assert_eq!(back, rec, "it survives being stored");
+
+        // Same corpus: same fingerprint. A different corpus: a different one.
+        assert_eq!(rec.corpus_fingerprint, corpus_fingerprint(&corpus()));
+        let mut other = corpus();
+        other.pop();
+        assert_ne!(rec.corpus_fingerprint, corpus_fingerprint(&other));
     }
 
     /// A refusal carries its reasons, so a loss is recorded rather than re-tuned.

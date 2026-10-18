@@ -9,6 +9,7 @@ mod anthropic;
 mod error;
 mod ollama;
 mod openai;
+mod openai_responses;
 mod types;
 
 use std::time::Duration;
@@ -101,6 +102,10 @@ pub struct LlmClient {
     http: reqwest::Client,
     base_url: String,
     api_key: Option<String>,
+    /// The only models this client will call, when the caller restricts it.
+    /// Checked before any request leaves the process, so a model the platform
+    /// has not enabled costs nothing and cannot be reached by any path.
+    allowed_models: Option<std::sync::Arc<[String]>>,
 }
 
 impl LlmClient {
@@ -121,7 +126,22 @@ impl LlmClient {
                 .expect("reqwest client"),
             base_url,
             api_key,
+            allowed_models: None,
         }
+    }
+
+    /// Restrict this client to `models`: [`chat`](Self::chat) refuses any other
+    /// model and [`list_models`](Self::list_models) shows only these.
+    #[must_use]
+    pub fn with_allowed_models<S: AsRef<str>>(mut self, models: &[S]) -> Self {
+        self.allowed_models = Some(models.iter().map(|m| m.as_ref().to_string()).collect());
+        self
+    }
+
+    fn model_allowed(&self, model: &str) -> bool {
+        self.allowed_models
+            .as_ref()
+            .is_none_or(|a| a.iter().any(|m| m == model))
     }
 
     pub fn provider(&self) -> Provider {
@@ -141,6 +161,14 @@ impl LlmClient {
 
     /// One chat completion (non-streaming).
     pub async fn chat(&self, req: &ChatRequest) -> Result<ChatResponse, LlmError> {
+        if !self.model_allowed(&req.model) {
+            let allowed = self.allowed_models.as_deref().unwrap_or_default().join(", ");
+            return Err(LlmError::InvalidRequest(format!(
+                "model `{}` is not enabled on this platform; enabled for {}: {allowed}",
+                req.model,
+                self.provider.as_str()
+            )));
+        }
         match self.provider {
             // vLLM speaks the OpenAI wire format, so it shares the mapping rather
             // than a near-copy of it that would drift.
@@ -173,6 +201,12 @@ impl LlmClient {
 
     /// List models available from this provider (live query).
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>, LlmError> {
+        let mut models = self.list_all_models().await?;
+        models.retain(|m| self.model_allowed(&m.id));
+        Ok(models)
+    }
+
+    async fn list_all_models(&self) -> Result<Vec<ModelInfo>, LlmError> {
         match self.provider {
             Provider::OpenAi | Provider::Vllm => {
                 openai::list_models(&self.http, &self.base_url, self.key()?).await
@@ -199,6 +233,6 @@ impl LlmClient {
 
     /// Verify the key/endpoint works; returns the number of models visible.
     pub async fn verify(&self) -> Result<usize, LlmError> {
-        Ok(self.list_models().await?.len())
+        Ok(self.list_all_models().await?.len())
     }
 }

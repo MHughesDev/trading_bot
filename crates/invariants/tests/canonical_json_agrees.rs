@@ -35,7 +35,7 @@ fn corpus() -> Vec<Value> {
         // change to either side fails here.
         json!({ "n": 1 }),
         json!({ "n": 1.0 }),
-        json!({ "n": -0.5, "m": 1e10, "k": 12345678901234.0 }),
+        json!({ "n": -0.5, "m": 1e10, "k": 12_345_678_901_234.0 }),
         // Strings: every escape the spec names, plus raw control characters.
         json!({ "s": "quote\" tab\t nl\n cr\r ff\u{c} bs\u{8}" }),
         json!({ "s": "backslash\\ slash/" }),

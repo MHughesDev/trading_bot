@@ -113,7 +113,7 @@ impl SessionOrchestrator {
     /// Revokes a session token. Called when a session ends, so that a container that
     /// outlives its session cannot keep working.
     pub async fn revoke_token(&self, token: &str) -> Result<(), OrchestratorError> {
-        sqlx::query("DELETE FROM sessions WHERE token = $1")
+        sqlx::query("DELETE FROM sessions WHERE token = session_token_hash($1)")
             .bind(token)
             .execute(&self.pool)
             .await?;

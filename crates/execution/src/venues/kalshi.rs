@@ -79,6 +79,19 @@ fn cents_to_price(cents: u64) -> Price {
     Price::from_decimal(Decimal::from(cents) / Decimal::from(100u64))
 }
 
+/// Kalshi's `side` → `Side`, the inverse of `submit`'s mapping (`Buy` = `yes`,
+/// `Sell` = `no`). It used to be `== "yes"` else `Sell`, so any unexpected text
+/// was a sell (Set E audit #9).
+pub(crate) fn parse_side(s: &str) -> Result<Side, BrokerError> {
+    match s {
+        "yes" => Ok(Side::Buy),
+        "no" => Ok(Side::Sell),
+        other => Err(BrokerError::Serialization(format!(
+            "kalshi reported order side {other:?}; refusing to guess a direction"
+        ))),
+    }
+}
+
 #[async_trait]
 impl Broker for KalshiBroker {
     async fn submit(&self, order: &ApprovedOrder) -> Result<String, BrokerError> {
@@ -173,11 +186,7 @@ impl Broker for KalshiBroker {
 
         let o = &parsed.order;
         let avg_fill_price = o.yes_price.map(cents_to_price);
-        let side = if o.side == "yes" {
-            Side::Buy
-        } else {
-            Side::Sell
-        };
+        let side = parse_side(&o.side)?;
 
         Ok(BrokerOrderStatus {
             broker_order_id: o.order_id.clone(),
@@ -220,10 +229,14 @@ impl Broker for KalshiBroker {
             .filter_map(|v| {
                 let id = v["order_id"].as_str()?.to_owned();
                 let ticker = v["ticker"].as_str()?.to_owned();
-                let side = if v["side"].as_str()? == "yes" {
-                    Side::Buy
-                } else {
-                    Side::Sell
+                // An order whose side cannot be read is dropped from the list
+                // with a log line rather than reported as a sell.
+                let side = match parse_side(v["side"].as_str()?) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::error!(error = %e, order_id = %id, "kalshi open order skipped");
+                        return None;
+                    }
                 };
                 let count = v["count"].as_u64().unwrap_or(0);
                 let filled = v["filled_count"].as_u64().unwrap_or(0);
@@ -294,4 +307,18 @@ impl Broker for KalshiBroker {
 #[allow(dead_code)]
 fn _use_fields(o: &KalshiOrder) -> (&str, Option<u64>) {
     (&o.action, o.no_price)
+}
+
+#[cfg(test)]
+mod inbound_tests {
+    use super::*;
+
+    #[test]
+    fn kalshi_sides_are_exactly_yes_and_no() {
+        assert_eq!(parse_side("yes").unwrap(), Side::Buy);
+        assert_eq!(parse_side("no").unwrap(), Side::Sell);
+        for bad in ["", "YES", "Yes", "buy", "nope"] {
+            assert!(parse_side(bad).is_err(), "{bad:?} must be refused");
+        }
+    }
 }

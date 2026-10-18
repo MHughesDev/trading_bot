@@ -1,5 +1,8 @@
 pub mod agent_audit;
 pub mod agent_cost;
+pub mod agent_data_lag;
+pub mod agent_divergence;
+pub mod agent_falsification;
 pub mod agent_preview;
 pub mod agent_sessions;
 pub mod agent_templates;
@@ -13,19 +16,26 @@ pub mod data;
 pub mod deployments;
 pub mod desk_catalogue;
 pub mod desk_charter;
+pub mod alerts_inbox;
 pub mod desk_digest;
+pub mod exec_quality;
 pub mod desk_running;
 pub mod dossiers;
 pub mod evidence;
+pub mod strategy_notes;
 pub mod experiments;
 pub mod falsification;
+pub mod alpha_chain;
+pub mod explain_trade;
 pub mod jobs;
 pub mod ledger;
 pub mod lifecycle;
 pub mod llm;
 pub mod memory;
+pub mod model_training_progress;
 pub mod models;
 pub mod models_phase6;
+pub mod models_studio;
 pub mod monitor;
 pub mod orders;
 pub mod paper;
@@ -37,6 +47,7 @@ pub mod research_sessions;
 pub mod selections;
 pub mod strategies;
 pub mod strategies_v3;
+pub mod skills;
 pub mod streams;
 pub mod synthetic;
 pub mod trading;
@@ -63,6 +74,19 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/login", post(handlers::login))
         .route("/auth/me", get(handlers::me))
         .route("/auth/logout", post(handlers::logout))
+        .route("/auth/touch", post(handlers::touch))
+        .route(
+            "/auth/venue-credentials",
+            get(crate::auth::venue_credentials::list).put(crate::auth::venue_credentials::put),
+        )
+        .route(
+            "/auth/venue-credentials/{venue}/verify",
+            post(crate::auth::venue_credentials::verify),
+        )
+        .route(
+            "/auth/venue-credentials/{venue}",
+            delete(crate::auth::venue_credentials::delete),
+        )
         .route("/auth/forgot-password", post(handlers::forgot_password))
         .route("/auth/verify-reset-code", post(handlers::verify_reset_code))
         .route("/auth/reset-password", post(handlers::reset_password))
@@ -146,6 +170,10 @@ pub fn router(state: AppState) -> Router {
             "/api/research/sessions/current",
             get(research_sessions::current),
         )
+        .route(
+            "/api/research/sessions/current/stage",
+            get(research_sessions::current_stage),
+        )
         .route("/api/research/sessions/{id}", get(research_sessions::get))
         .route(
             "/api/research/sessions/{id}/pause",
@@ -180,6 +208,14 @@ pub fn router(state: AppState) -> Router {
             post(research_sessions::prioritise_item),
         )
         .route(
+            "/api/research/sessions/{id}/agenda/{item}/redirect",
+            post(research_sessions::redirect_item),
+        )
+        .route(
+            "/api/research/sessions/{id}/agenda/{item}/refs",
+            get(research_sessions::item_refs),
+        )
+        .route(
             "/api/research/sessions/{id}/charter",
             axum::routing::put(research_sessions::amend_charter),
         )
@@ -191,6 +227,22 @@ pub fn router(state: AppState) -> Router {
             "/api/research/sessions/{id}/events",
             get(research_sessions::events),
         )
+        .route(
+            "/api/research/sessions/{id}/day-budget",
+            get(research_sessions::day_budget).put(research_sessions::set_day_budget),
+        )
+        .route(
+            "/api/research/profiles/{profile}/scorecard",
+            post(research_sessions::record_scorecard),
+        )
+        .route(
+            "/api/research/profiles/{profile}/standing",
+            get(research_sessions::profile_standing),
+        )
+        .route(
+            "/api/research/contradictions",
+            get(research_sessions::contradictions),
+        )
         .route("/api/dossiers/{ticket}", get(dossiers::get))
         .route(
             "/api/dossiers/{ticket}/verify/{claim}",
@@ -201,6 +253,16 @@ pub fn router(state: AppState) -> Router {
             get(dossiers::comments).post(dossiers::add_comment),
         )
         .route("/api/ledger/reservations", post(ledger::reserve))
+        // Set Q Q-1.7: the five-stage alpha-chain audit, a read over recorded gate verdicts.
+        .route(
+            "/api/ledger/experiments/{id}/alpha_chain",
+            get(alpha_chain::alpha_chain),
+        )
+        // Set M M-2.7: why one trade of a stored run happened.
+        .route(
+            "/api/backtest/runs/{run_id}/trades/{idx}/explain",
+            get(explain_trade::explain_trade),
+        )
         // S-8.4: written by the workflow engine, read by the gates.
         .route(
             "/api/ledger/workflow-verdicts",
@@ -212,6 +274,32 @@ pub fn router(state: AppState) -> Router {
         // never as one number.
         .route("/api/lifecycle/barren", get(lifecycle::barren_rates))
         .route("/api/lifecycle/campaigns", post(lifecycle::define_campaign))
+        // SPEC §11.5 as one door (S-10.10): N candidates on the paired replicate
+        // grid (windows x -20%/modelled/+20% cost), Holm across pairs. No seed,
+        // delta or ROPE bound in the body.
+        .route(
+            "/api/lifecycle/compare",
+            post(lifecycle::compare_candidates),
+        )
+        // A reproduction is not a look (S-10.8): re-run a stored result under its
+        // own config, spend no trial, append the finding to mlops.reproduction.
+        // A run's hypotheses with the verdicts and the numbers that decided them
+        // (S-10.15; the card the desk draws from it is the DESK sub-track's).
+        .route("/api/lifecycle/hypotheses", get(lifecycle::list_hypotheses))
+        .route("/api/lifecycle/reproduce", post(lifecycle::reproduce))
+        .route("/api/lifecycle/repro-drift", get(lifecycle::repro_drift))
+        .route(
+            "/api/knowledge/insights",
+            get(crate::knowledge_jobs::search_insights).post(crate::knowledge_jobs::create_insight),
+        )
+        .route(
+            "/api/knowledge/insights/{id}/contradict",
+            post(crate::knowledge_jobs::contradict_insight),
+        )
+        .route(
+            "/api/knowledge/insights/{id}/confirm",
+            post(crate::knowledge_jobs::confirm_insight),
+        )
         .route(
             "/api/lifecycle/campaigns/{campaign_id}",
             get(lifecycle::get_campaign),
@@ -291,12 +379,37 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/agent/cost/estimate", post(agent_cost::estimate))
         .route("/api/agent/strategy/preview", post(agent_preview::preview))
+        .route("/api/agent/divergence", get(agent_divergence::divergence))
+        .route("/api/agent/data/bar-lag", get(agent_data_lag::bar_lag))
+        .route(
+            "/api/agent/falsification/regime-failure/{run_id}",
+            get(agent_falsification::regime_failure),
+        )
+        .route(
+            "/api/agent/falsification/fragility/{sweep_id}",
+            get(agent_falsification::fragility),
+        )
+        .route(
+            "/api/agent/falsification/ablation/{experiment_id}/variants",
+            get(agent_falsification::ablation_variants),
+        )
+        .route(
+            "/api/agent/falsification/ablation/{experiment_id}/classify",
+            post(agent_falsification::ablation_classify),
+        )
         .route("/api/catalogue", get(desk_catalogue::catalogue))
         .route("/api/catalogue/exposure", get(desk_catalogue::exposure))
         .route("/api/desk/digest", get(desk_digest::digest))
         // §2.2 Running now: per-run tier, stage, tokens and cache. The
         // conversation list answers a different question and cannot carry them.
         .route("/api/desk/running", get(desk_running::running))
+        .route("/api/desk/runs/{run_id}/brief", get(desk_running::brief))
+        // A run's hypotheses with the numbers that decided each verdict (S-10.15).
+        .route(
+            "/api/desk/runs/{run_id}/hypotheses",
+            get(desk_running::hypotheses),
+        )
+        .route("/api/desk/kill-switch/events", get(desk_digest::kill_switch_events))
         // S-8.2: has this hypothesis already been registered?
         .route(
             "/api/lifecycle/hypotheses/similar",
@@ -315,8 +428,51 @@ pub fn router(state: AppState) -> Router {
             get(memory::list).post(memory::record),
         )
         .route("/api/memory/{bucket}/{id}", delete(memory::forget))
+        // Set R-a / R-b: the skill registry (ADR-0028). Static segments first and the
+        // parameterised ones after; every state-changing handler begins with
+        // `require_admit`, which no agent session can satisfy.
+        .route("/api/skills/glossary", get(skills::glossary))
+        .route("/api/skills/search", get(skills::search))
+        .route("/api/skills/notices", get(skills::notices))
+        .route("/api/skills/proposals", get(skills::list_proposals).post(skills::propose))
+        .route("/api/skills/proposals/{proposal_id}/pairs", post(skills::add_pair))
+        .route("/api/skills/proposals/{proposal_id}/steps", post(skills::add_step))
+        .route("/api/skills/proposals/{proposal_id}/verify", post(skills::verify))
+        .route("/api/skills/proposals/{proposal_id}/admit", post(skills::admit))
+        .route("/api/skills/runs/{session_id}/bill", get(skills::bill_of_materials))
+        // `item/` because a bare `{skill_id}` beside the Python library's static
+        // `/api/skills/run` would shadow GET on it (the shadowing test).
+        .route("/api/skills/item/{skill_id}", get(skills::get_skill))
+        .route("/api/skills/{skill_id}/vote", post(skills::vote))
+        .route("/api/skills/{skill_id}/quarantine", post(skills::quarantine))
+        .route("/api/skills/{skill_id}/deprecate", post(skills::deprecate))
+        .route("/api/skills/{skill_id}/conditions", post(skills::record_condition))
+        .route("/api/skills/{skill_id}/promote", post(skills::promote))
+        .route("/api/skills/curator/run", post(skills::curator_run))
+        .route("/api/skills/curator/items", get(skills::curator_items))
+        .route("/api/skills/curator/items/{item_id}/decide", post(skills::curator_decide))
+        // Set R-b: the knowledge model (move memory, analogs, regimes, the tier ladder,
+        // the random arm). Platform-write routes need `knowledge.write`.
+        .route("/api/knowledge/analogs", get(crate::knowledge_routes::analogs))
+        .route("/api/knowledge/moves/veto", post(crate::knowledge_routes::veto))
+        .route("/api/knowledge/moves/records", post(crate::knowledge_routes::record_move))
+        .route("/api/knowledge/moves/overrides", post(crate::knowledge_routes::override_veto))
+        .route("/api/knowledge/hypothesis-sources", post(crate::knowledge_routes::hypothesis_source))
+        .route("/api/knowledge/tiers", get(crate::knowledge_routes::tiers))
+        .route("/api/knowledge/regimes/profile", get(crate::knowledge_routes::regime_profile))
+        .route(
+            "/api/knowledge/regimes/prior",
+            get(crate::knowledge_routes::regime_prior).post(crate::knowledge_routes::update_regime_prior),
+        )
+        .route("/api/knowledge/regimes/gate", post(crate::knowledge_routes::regime_gate))
+        .route("/api/knowledge/campaigns/{campaign_id}/random-arm", post(crate::knowledge_routes::create_arm))
+        .route("/api/knowledge/campaigns/{campaign_id}/scores", post(crate::knowledge_routes::record_arm_score))
+        .route("/api/knowledge/campaigns/{campaign_id}/compare-to-random", get(crate::knowledge_routes::compare_random))
         // Evidence for the falsification tools (ADR-P7-05). None of these
         // returns a verdict; each answers one defect class with a number.
+        // The comments an author wrote, kept beside the revision (S-5.15).
+        .route("/api/strategy-notes", post(strategy_notes::put))
+        .route("/api/strategy-notes/{revision_hash}", get(strategy_notes::get))
         .route("/api/evidence/trades", post(evidence::trades))
         .route("/api/evidence/data-quality", post(evidence::data_quality))
         .route(
@@ -324,6 +480,18 @@ pub fn router(state: AppState) -> Router {
             post(evidence::similar_trials),
         )
         .route("/api/data/catalog", get(data::get_catalog))
+        .route("/api/data/coverage", get(data::get_coverage))
+        .route("/api/data/universe/{name}", get(data::get_universe))
+        .route("/api/data/macro", get(data::get_macro))
+        .route("/api/data/prediction_markets", get(data::get_prediction_markets))
+        .route("/api/data/text", get(data::get_text))
+        .route("/api/data/bars/derived", get(data::get_derived_bars))
+        .route("/api/data/search", get(data::get_search))
+        .route("/api/data/trades", get(data::get_trades))
+        .route("/api/data/open_interest", get(data::get_open_interest))
+        .route("/api/data/option_chain", get(data::get_option_chain))
+        .route("/api/data/fundamentals", get(data::get_fundamentals))
+        .route("/api/data/features", get(data::get_features))
         // S-3.14 / S-3.15: the one door two tasks need. `read_funding` had no
         // caller anywhere before this line.
         .route("/api/data/funding", get(data::get_funding))
@@ -421,6 +589,35 @@ pub fn router(state: AppState) -> Router {
             delete(monitor::close_window),
         )
         .route("/api/monitor/precision", get(monitor::get_precision))
+        .route("/api/monitor/feeds", get(monitor::list_feeds))
+        .route("/api/monitor/venues", get(monitor::list_venue_checks))
+        .route("/api/monitor/coverage", get(monitor::coverage))
+        .route("/api/monitor/defects", get(monitor::list_defects))
+        .route(
+            "/api/monitor/defects/{defect_id}/resolve",
+            post(monitor::resolve_defect),
+        )
+        .route(
+            "/api/monitor/drill-runs",
+            get(monitor::list_drill_runs).post(monitor::run_drills),
+        )
+        .route("/api/monitor/stream", get(monitor::stream))
+        .route("/api/reconciliation/halts", get(monitor::list_halts))
+        .route(
+            "/api/reconciliation/halts/{strategy_id}/clear",
+            post(monitor::clear_halt),
+        )
+        .route("/api/reconciliation/fleet", get(monitor::fleet))
+        .route("/api/execution/quality", get(exec_quality::get_quality))
+        .route("/api/alert-inbox", get(alerts_inbox::inbox))
+        .route(
+            "/api/alert-inbox/{source}/{id}/acknowledge",
+            post(alerts_inbox::acknowledge),
+        )
+        .route(
+            "/api/alert-inbox/{source}/{id}/dismiss",
+            post(alerts_inbox::dismiss),
+        )
         // Phase 3 UI streaming
         .route("/ws/live", get(ws_live))
         .route(
@@ -450,6 +647,13 @@ pub fn router(state: AppState) -> Router {
             axum::routing::put(llm::save_credential).delete(llm::delete_credential),
         )
         .route("/api/llm/{provider}/models", post(llm::list_models))
+        // Connect-your-own-key (PROVIDERS track): re-check a stored key, and the
+        // provider + model the desk starts on.
+        .route(
+            "/api/llm/credentials/{provider}/verify",
+            post(llm::verify_credential),
+        )
+        .route("/api/llm/default", axum::routing::put(llm::set_default))
         // Internal agent runs (LLM-driven strategy design + backtest loop)
         // Conversations: the agent is a chat now. `/runs` stays readable so a
         // historical run is still inspectable, but nothing starts one from a form.
@@ -513,6 +717,11 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/agent/runs/{id}/resume",
             post(crate::agent::routes::resume_run),
+        )
+        // A human's tool pin for one run (S-6.11): the router reads it first.
+        .route(
+            "/api/agent/runs/{id}/pins",
+            post(crate::agent::routes::pin_run),
         )
         // Research (FEAT-003): sweeps over the Backtest Suite, diagnostics,
         // and the selection-rule carry-forward read.
@@ -609,6 +818,33 @@ pub fn router(state: AppState) -> Router {
             "/api/deployments/{id}",
             delete(deployments::stop_deployment),
         )
+        // Set T phase 1: deployment is gated by a proposal, visible, revocable in one action.
+        .route(
+            "/api/deployment-proposals",
+            post(crate::deployment_gate_routes::create_proposal)
+                .get(crate::deployment_gate_routes::list_proposals),
+        )
+        .route(
+            "/api/deployment-proposals/{id}/decision",
+            post(crate::deployment_gate_routes::decide),
+        )
+        .route(
+            "/api/deployment-overview",
+            get(crate::deployment_gate_routes::overview),
+        )
+        .route(
+            "/api/deployments/{id}/revoke",
+            post(crate::deployment_gate_routes::revoke),
+        )
+        .route(
+            "/api/deployment-stop-all",
+            post(crate::deployment_gate_routes::stop_all),
+        )
+        .route(
+            "/api/deployment-ceilings",
+            get(crate::deployment_gate_routes::get_ceilings)
+                .put(crate::deployment_gate_routes::declare_ceiling),
+        )
         .route("/api/backtests/{id}/rerun", post(backtests::rerun_backtest))
         // Backtest Suite (Set J) — honest-evaluation core: experiments, studies,
         // nulls, the staged-gate funnel, the one-shot vault, reconciliation.
@@ -686,6 +922,53 @@ pub fn router(state: AppState) -> Router {
         )
         // A `transform` (Set U U-5.7): custom code with a declared contract.
         .route("/api/models/transforms", post(models::register_transform))
+        // Model Studio (Set N): families, declarations, fleet, verdicts, promotion proposals.
+        .route("/api/models/studio/families", get(models_studio::list_families))
+        .route(
+            "/api/models/declarations/validate",
+            post(models_studio::validate_declaration),
+        )
+        .route("/api/models/studio/fleet", get(models_studio::fleet))
+        .route(
+            "/api/models/promotion-proposals/{proposal_id}/decision",
+            post(models_studio::decide_promotion),
+        )
+        .route(
+            "/api/models/{id}/versions/{v}/verdict",
+            get(models_studio::get_verdict),
+        )
+        .route(
+            "/api/models/{id}/versions/{v}/promotion-evidence",
+            get(models_studio::promotion_evidence),
+        )
+        .route(
+            "/api/models/{id}/versions/{v}/promotion-proposals",
+            post(models_studio::propose_promotion),
+        )
+        .route(
+            "/api/models/{id}/promotion-proposals",
+            get(models_studio::list_promotions),
+        )
+        .route(
+            "/api/models/{id}/versions/{v}/importance",
+            get(models_studio::get_importance),
+        )
+        .route(
+            "/api/models/{id}/versions/{v}/calibrate",
+            post(models_studio::calibrate),
+        )
+        .route(
+            "/api/models/{id}/traces/rollup",
+            get(models_studio::trace_rollup),
+        )
+        // One authoring API for the editor and the agent (Set U U-7.4).
+        .route("/api/v3/authoring/validate", post(strategies_v3::validate))
+        .route("/api/v3/authoring/compile", post(strategies_v3::compile))
+        .route("/api/v3/authoring/explain", post(strategies_v3::explain))
+        .route("/api/v3/authoring/build", post(strategies_v3::build))
+        .route("/api/v3/strategies", post(strategies_v3::save))
+        .route("/api/v3/strategies/{id}", get(strategies_v3::get))
+        .route("/api/v3/catalogue", get(strategies_v3::catalogue))
         // Selection strategies, run now or as of the past, and journaled (Set U
         // U-6.3). The screener and the agent's tool share this route.
         .route("/api/selections/run", post(selections::run))
@@ -715,14 +998,6 @@ pub fn router(state: AppState) -> Router {
             "/api/models/{id}/versions/{v}/evaluate",
             post(models::start_eval),
         )
-        // One authoring API for the editor and the agent (Set U U-7.4).
-        .route("/api/v3/authoring/validate", post(strategies_v3::validate))
-        .route("/api/v3/authoring/compile", post(strategies_v3::compile))
-        .route("/api/v3/authoring/explain", post(strategies_v3::explain))
-        .route("/api/v3/authoring/build", post(strategies_v3::build))
-        .route("/api/v3/strategies", post(strategies_v3::save))
-        .route("/api/v3/strategies/{id}", get(strategies_v3::get))
-        .route("/api/v3/catalogue", get(strategies_v3::catalogue))
         .route(
             "/api/models/{id}/versions/{v}/promote",
             post(models::promote),
@@ -764,6 +1039,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/models/{id}/lineage", get(models::get_lineage))
         .route("/api/models/{id}/traces", get(models::get_traces))
         .route("/api/models/{id}/used-by", get(models::get_used_by))
+        // H-5.4 / H-5.5: the activity feed and the recorded loss curve.
+        .route("/api/models/{id}/events", get(model_training_progress::events))
+        .route(
+            "/api/models/{id}/runs/{run_id}/curve",
+            get(model_training_progress::curve),
+        )
         // I-2.12 evaluation reports
         .route(
             "/api/models/{id}/versions/{v}/report",

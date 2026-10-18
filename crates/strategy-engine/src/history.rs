@@ -11,6 +11,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use dataplane::feature::{Feature, FeatureRow};
+use features::external_features::ExternalFeature;
 use serde::{Deserialize, Serialize};
 
 /// One closed bar.
@@ -38,6 +39,23 @@ impl Bar {
     }
 }
 
+/// How one column is computed: from the bars alone, or from the bars and the
+/// environment's external rows (P-3.6).
+#[derive(Clone)]
+pub(crate) enum Column {
+    Windowed(Arc<dyn Feature>),
+    External(Arc<dyn ExternalFeature>),
+}
+
+impl Column {
+    pub(crate) fn lookback_bars(&self) -> u32 {
+        match self {
+            Self::Windowed(f) => f.def().lookback_bars,
+            Self::External(f) => f.def().lookback_bars,
+        }
+    }
+}
+
 /// One input's history.
 pub(crate) struct History {
     rows: VecDeque<FeatureRow>,
@@ -46,7 +64,7 @@ pub(crate) struct History {
     /// had no value (window incomplete, or a non-finite result).
     columns: Vec<VecDeque<Option<f64>>>,
     cols_cap: usize,
-    impls: Vec<Arc<dyn Feature>>,
+    impls: Vec<Column>,
     pub(crate) bars_seen: u64,
     pub(crate) last: Option<Bar>,
 }
@@ -54,7 +72,7 @@ pub(crate) struct History {
 impl History {
     /// `rows_cap`: the longest indicator lookback; `cols_cap`: the longest model
     /// window over this input.
-    pub(crate) fn new(impls: Vec<Arc<dyn Feature>>, rows_cap: usize, cols_cap: usize) -> Self {
+    pub(crate) fn new(impls: Vec<Column>, rows_cap: usize, cols_cap: usize) -> Self {
         let n = impls.len();
         Self {
             rows: VecDeque::with_capacity(rows_cap.max(1)),
@@ -69,8 +87,9 @@ impl History {
         }
     }
 
-    /// Append a closed bar and compute every column at it.
-    pub(crate) fn push(&mut self, bar: Bar) {
+    /// Append a closed bar and compute every column at it. External columns
+    /// read `external` as it stood at the bar's close.
+    pub(crate) fn push(&mut self, bar: Bar, external: &crate::external::ExternalData) {
         self.rows.push_back(bar.row());
         while self.rows.len() > self.rows_cap {
             self.rows.pop_front();
@@ -78,7 +97,15 @@ impl History {
         let rows = self.rows.make_contiguous();
         let decision = rows.len() - 1;
         for (i, f) in self.impls.iter().enumerate() {
-            let v = features::runtime::value_at(f.as_ref(), rows, decision);
+            let v = match f {
+                Column::Windowed(f) => features::runtime::value_at(f.as_ref(), rows, decision),
+                Column::External(f) => features::external_features::value_at_external(
+                    f.as_ref(),
+                    rows,
+                    decision,
+                    &external.inputs(),
+                ),
+            };
             let col = &mut self.columns[i];
             col.push_back(v);
             while col.len() > self.cols_cap {

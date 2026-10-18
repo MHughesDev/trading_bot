@@ -41,6 +41,9 @@ impl GapDetector {
             Some(last) => {
                 let expected = last.wrapping_add(1);
                 if sequence != expected {
+                    // Counted here, the one place every collector's gaps pass
+                    // through (Set E 5.1). Labelled by lane, never instrument.
+                    event_bus::observe::gap_detected(&self.lane);
                     Some(GapEvent {
                         instrument_id: self.instrument_id.clone(),
                         lane: self.lane.clone(),

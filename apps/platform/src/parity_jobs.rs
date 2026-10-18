@@ -274,6 +274,7 @@ mod tests {
         let genesis = Genesis {
             checkpoint: None,
             history: (0..5).map(|i| (0, bar(i))).collect(),
+            external: None,
         };
         let mut engine: Engine = genesis.build(Arc::clone(&plan), &spec()).unwrap();
         let mut genesis = Some(genesis);

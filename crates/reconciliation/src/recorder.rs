@@ -108,6 +108,56 @@ impl ForwardRecorder {
         })
     }
 
+    /// Rebuild a deployment's recorder after a restart.
+    ///
+    /// `observations` are this deployment's stored rows (observed and
+    /// backfilled alike, in bar order); the realised series, the divergence
+    /// monitor's running totals and the open bar all continue from them, and the
+    /// series is identical to one built without the restart
+    /// ([`RealisedSeriesBuilder::resume`]). `fills` are every fill of the
+    /// deployment with its decision price.
+    ///
+    /// **Pending intents are not restored from here** — a fill for an intent
+    /// submitted before the restart is attributed only if the runner calls
+    /// [`Self::on_submit`] again for each order still open, which it can do
+    /// because it re-derives their idempotency keys deterministically.
+    ///
+    /// # Errors
+    /// As [`RealisedSeriesBuilder::resume`] and [`DivergenceMonitor::resume`].
+    pub fn resume(
+        spec: DeploymentSpec,
+        opening_balance: Decimal,
+        open_bar: chrono::DateTime<chrono::Utc>,
+        observations: &[ForwardObservation],
+        fills: &[crate::forward::ResumeFill],
+        last_mark: Price,
+        halts: Arc<risk::StrategyHaltRegistry>,
+    ) -> Result<Self, ForwardError> {
+        let monitor = DivergenceMonitor::resume(
+            spec.clone(),
+            halts,
+            observations
+                .iter()
+                .map(|o| (o.realised_return, o.expected_return, o.signal_matched)),
+        )?;
+        let builder = RealisedSeriesBuilder::resume(
+            spec,
+            opening_balance,
+            open_bar,
+            observations.iter().map(|o| (o.bar, o.realised_return)),
+            fills,
+            last_mark,
+        )?;
+        Ok(Self {
+            state: Mutex::new(RecorderState {
+                builder,
+                monitor,
+                pending: HashMap::new(),
+                order: Vec::new(),
+            }),
+        })
+    }
+
     /// Register an intent this deployment submitted, with the mark it decided at.
     ///
     /// Intents belonging to another strategy are ignored, so one recorder per
@@ -130,6 +180,40 @@ impl ForwardRecorder {
                 decision_price,
             },
         );
+    }
+
+    /// Re-anchor the realised series at `bar` after recording paused (a restart
+    /// that held a position). Keeps the divergence monitor's cumulative state,
+    /// records no return for the skipped bars, and refuses an off-grid,
+    /// out-of-order or duplicate bar. See [`RealisedSeriesBuilder::reanchor`].
+    ///
+    /// Takes `&self` like every other method here: the state is behind the
+    /// recorder's own lock, because a deployed recorder is shared (`Arc`) with
+    /// the fill stream.
+    ///
+    /// # Errors
+    /// As [`RealisedSeriesBuilder::reanchor`].
+    pub fn reanchor(
+        &self,
+        bar: chrono::DateTime<chrono::Utc>,
+        mark: Price,
+    ) -> Result<(), ForwardError> {
+        self.state
+            .lock()
+            .expect("recorder lock")
+            .builder
+            .reanchor(bar, mark)
+    }
+
+    /// Every pause in this deployment's recording so far.
+    #[must_use]
+    pub fn gaps(&self) -> Vec<crate::forward::SeriesGap> {
+        self.state
+            .lock()
+            .expect("recorder lock")
+            .builder
+            .gaps()
+            .to_vec()
     }
 
     /// Take the deployment's opening mark. Must precede the first
@@ -367,6 +451,55 @@ impl ForwardRecorders {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push((deployment_id, Arc::clone(&recorder)));
         Ok(recorder)
+    }
+
+    /// Rebuild a deployment's recorder after a restart and attach it, in one
+    /// step, exactly as [`Self::deploy`] does for a new one.
+    ///
+    /// # Errors
+    /// As [`ForwardRecorder::resume`].
+    #[allow(clippy::too_many_arguments)] // mirrors `ForwardRecorder::resume`, which it forwards to
+    pub fn resume_deploy(
+        &self,
+        spec: DeploymentSpec,
+        opening_balance: Decimal,
+        open_bar: chrono::DateTime<chrono::Utc>,
+        observations: &[ForwardObservation],
+        fills: &[crate::forward::ResumeFill],
+        last_mark: Price,
+        halts: Arc<risk::StrategyHaltRegistry>,
+    ) -> Result<Arc<ForwardRecorder>, ForwardError> {
+        let deployment_id = spec.deployment_id;
+        let recorder = Arc::new(ForwardRecorder::resume(
+            spec,
+            opening_balance,
+            open_bar,
+            observations,
+            fills,
+            last_mark,
+            halts,
+        )?);
+        self.deployments
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((deployment_id, Arc::clone(&recorder)));
+        Ok(recorder)
+    }
+
+    /// Re-anchor one deployment's series after recording paused.
+    ///
+    /// # Errors
+    /// [`ForwardError::UnknownDeployment`] when nothing is deployed under that
+    /// id, otherwise as [`ForwardRecorder::reanchor`].
+    pub fn reanchor(
+        &self,
+        deployment_id: Uuid,
+        bar: chrono::DateTime<chrono::Utc>,
+        mark: Price,
+    ) -> Result<(), ForwardError> {
+        self.recorder(deployment_id)
+            .ok_or(ForwardError::UnknownDeployment(deployment_id))?
+            .reanchor(bar, mark)
     }
 
     /// The recorder for a deployment, if it is deployed here.

@@ -21,6 +21,28 @@ pub(crate) fn new_session_token() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 
+/// Insert a web session for `user_id` and return the credential to hand back.
+///
+/// The row stores `session_token_hash(token)` — the migration-0150 trigger
+/// hashes on insert — so the returned string exists only in this response.
+/// `web:full` is set explicitly: the column default is `{}`, and a web session
+/// minted with it (as every login was between 0038 and 0150) held no scope at
+/// all. The expiry starts at the idle window and slides on use
+/// ([`super::session::touch_key`]).
+pub(crate) async fn mint_web_session(pg: &sqlx::PgPool, user_id: Uuid) -> Result<String, sqlx::Error> {
+    let token = new_session_token();
+    sqlx::query(
+        "INSERT INTO sessions (token, user_id, kind, scopes, expires_at, last_seen_at) \
+         VALUES ($1, $2, 'web', ARRAY['web:full'], now() + make_interval(days => $3), now())",
+    )
+    .bind(&token)
+    .bind(user_id)
+    .bind(i32::try_from(super::session::WEB_IDLE_TTL_DAYS).unwrap_or(7))
+    .execute(pg)
+    .await?;
+    Ok(token)
+}
+
 fn six_digit_code() -> String {
     let bytes = Uuid::new_v4().into_bytes();
     let n = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) % 1_000_000;
@@ -98,16 +120,10 @@ pub async fn register(
     })?
     .ok_or_else(|| (StatusCode::CONFLICT, "email already registered").into_response())?;
 
-    let token = new_session_token();
-    sqlx::query("INSERT INTO sessions (token, user_id) VALUES ($1, $2)")
-        .bind(&token)
-        .bind(user_id)
-        .execute(&state.pg)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "register: session insert error");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        })?;
+    let token = mint_web_session(&state.pg, user_id).await.map_err(|e| {
+        tracing::error!(error = %e, "register: session insert error");
+        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+    })?;
 
     let created_at: chrono::DateTime<Utc> =
         sqlx::query_scalar("SELECT created_at FROM users WHERE user_id = $1")
@@ -153,16 +169,10 @@ pub async fn login(
         .filter(|(_, hash, _)| !hash.is_empty() && verify_password(&body.password, hash))
         .ok_or_else(|| (StatusCode::UNAUTHORIZED, "invalid email or password").into_response())?;
 
-    let token = new_session_token();
-    sqlx::query("INSERT INTO sessions (token, user_id) VALUES ($1, $2)")
-        .bind(&token)
-        .bind(user_id)
-        .execute(&state.pg)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "login: session insert error");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        })?;
+    let token = mint_web_session(&state.pg, user_id).await.map_err(|e| {
+        tracing::error!(error = %e, "login: session insert error");
+        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+    })?;
 
     Ok(Json(LoginResponse {
         token,
@@ -217,6 +227,55 @@ pub async fn logout(
     StatusCode::OK
 }
 
+// ── POST /auth/touch ──────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct TouchResponse {
+    /// When this session now expires.
+    pub expires_at: String,
+    /// `true` for a web session, whose expiry was recomputed (it may already
+    /// sit at its absolute cap and so not move). `false` for a service session,
+    /// which never slides.
+    pub extended: bool,
+}
+
+/// `POST /auth/touch` — slide this web session's expiry now (Set E 1.2).
+///
+/// The extractor already slides on use (throttled to once a minute); this is
+/// the explicit form the SPA calls on activity so an open tab nobody clicks in
+/// does not lose its session at the idle limit. A service session is answered
+/// with its unchanged expiry and `extended: false` — it was minted with the
+/// lifetime it is meant to have.
+pub async fn touch(
+    State(state): State<AppState>,
+    bearer: super::session::BearerToken,
+) -> Result<Json<TouchResponse>, Response> {
+    let moved = super::session::touch_key(&state.pg, &bearer.token)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "touch: db error");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        })?;
+    if let Some(expires_at) = moved {
+        return Ok(Json(TouchResponse {
+            expires_at: expires_at.to_rfc3339(),
+            extended: true,
+        }));
+    }
+    let expires_at: Option<chrono::DateTime<Utc>> =
+        sqlx::query_scalar("SELECT expires_at FROM sessions WHERE token = $1 AND expires_at > now()")
+            .bind(&bearer.token)
+            .fetch_optional(&state.pg)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
+    let expires_at = expires_at
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "session expired or invalid").into_response())?;
+    Ok(Json(TouchResponse {
+        expires_at: expires_at.to_rfc3339(),
+        extended: false,
+    }))
+}
+
 // ── Service tokens ────────────────────────────────────────────────────────────
 //
 // Long-lived bearer sessions (kind = 'service') for headless clients: the MCP
@@ -255,10 +314,14 @@ pub async fn create_service_token(
     }
 
     let token = new_session_token();
-    let expires_at: chrono::DateTime<Utc> = sqlx::query_scalar(
+    // `RETURNING token` is the stored key (the digest, hashed by the 0150
+    // trigger). Its prefix is what listings show and what delete matches, so the
+    // prefix echoed now is the same one the list will show later — and it says
+    // nothing about the credential.
+    let (key, expires_at): (String, chrono::DateTime<Utc>) = sqlx::query_as(
         "INSERT INTO sessions (token, user_id, label, kind, expires_at)
          VALUES ($1, $2, $3, 'service', now() + INTERVAL '365 days')
-         RETURNING expires_at",
+         RETURNING token, expires_at",
     )
     .bind(&token)
     .bind(bearer.user_id)
@@ -273,7 +336,7 @@ pub async fn create_service_token(
     Ok((
         StatusCode::CREATED,
         Json(ServiceTokenCreated {
-            token_prefix: token[..8].to_string(),
+            token_prefix: key[..8].to_string(),
             token,
             label: label.to_string(),
             expires_at: expires_at.to_rfc3339(),

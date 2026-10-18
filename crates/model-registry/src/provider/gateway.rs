@@ -977,7 +977,7 @@ mod tests {
             model: "emb".into(),
             version: 1,
             kind: "embedding".into(),
-            contract: Some(contract.expect("an embedding's derived contract")),
+            contract,
             trained_through: None,
             artifact_uri: None,
             artifact_sha256: None,

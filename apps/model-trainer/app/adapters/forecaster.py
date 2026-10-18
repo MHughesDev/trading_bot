@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .. import engine
+from .. import engine, windows
 
 
 class LSTMRegressor(nn.Module):
@@ -32,6 +32,7 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
     definition = {**definition, "hyperparameters": {**(definition.get("hyperparameters") or {})}}
     definition["hyperparameters"]["objective"] = "regression"
     p = engine.prepare(definition, df)
+    p, seq = windows.apply_sequence(definition, p)  # N-2.5: real windows when declared
     hp = p.hp
 
     target = definition.get("target", {}) or {}
@@ -43,7 +44,7 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
     batch_size = int(hp.get("batch_size", 64))
     hidden = int(hp.get("hidden_dim", 32))
     weight_decay = float(hp.get("weight_decay", 0.0))
-    input_dim = p.X_tr.shape[1] if p.X_tr.shape[1] else 1
+    input_dim = p.X_tr.shape[-1] if p.X_tr.shape[-1] else 1
 
     model = LSTMRegressor(input_dim, hidden)
     model, loss_info = engine.train_torch_model(
@@ -58,6 +59,7 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
         batch_size=batch_size,
         emit_progress=emit_progress,
         weight_decay=weight_decay,
+        checkpoint=definition.get("_checkpoint"),
     )
 
     def predict(X):
@@ -79,7 +81,7 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
         n_train=len(p.X_tr),
         n_val=len(p.X_val),
         n_test=len(p.X_te),
-        extra={"arch": "lstm", "horizon": horizon, "input_dim": int(input_dim), **loss_info},
+        extra={"arch": "lstm", "horizon": horizon, "input_dim": int(input_dim), **loss_info, **({"sequence": seq} if seq else {})},
     )
 
     buf = io.BytesIO()
@@ -103,5 +105,6 @@ def train(definition: dict, df, emit_progress) -> tuple[bytes, dict]:
         scaler=p.scaler,
         arch="lstm",
         extra={"horizon": horizon, "target_field": target_field, "forecaster": True},
+        sequence=seq,
     )
     return bundle, metrics

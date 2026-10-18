@@ -19,7 +19,9 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use domain::{
-    instrument::HaltPolicy, money::Price, order::OrderIntent,
+    instrument::HaltPolicy,
+    money::{Price, Size},
+    order::{OrderIntent, Side},
     strategy_def::risk_overrides::RiskOverrides, RiskRejection, TrustTier,
 };
 use rust_decimal::Decimal;
@@ -360,6 +362,13 @@ impl RiskGate {
             });
         }
 
+        // 3b. A strategy scaled below full size (the ramp's step-down, ADR-P2-27;
+        //     the monitor's `scale` control) trades at that fraction. Before the
+        //     idempotency cache, like the checks above it: a redelivery after the
+        //     scale changed is a new order at the new size. Between full and zero
+        //     only: zero is a halt, and a halt is the kill switch's job.
+        let intent = self.scaled(intent, ctx)?;
+
         // 4. Idempotency cache — redelivered intents return the prior decision.
         //    For cached approvals the monitor lease and the kill switch are both
         //    re-checked: a JetStream redelivery arriving after the switch was
@@ -415,6 +424,51 @@ impl RiskGate {
         }
 
         decision
+    }
+
+    /// The order at the size its strategy is currently allowed (ADR-T3-03).
+    ///
+    /// `KillSwitch::scale_strategy` stored a percentage and nothing read it, so a
+    /// deployment stepped down to 50% kept trading at 100% (the ramp pass applied
+    /// the size to a map the gate never consulted). Now an order that would
+    /// **add exposure** is cut to `scale_pct`% of its size, rounded down to a
+    /// whole lot. An order that rounds to nothing is refused rather than sent
+    /// as a zero-size order or rounded up past the allowance. An order that
+    /// **reduces** the position (`reduce_only`, or the opposite side and no larger
+    /// than the position) is never cut: a strategy being sized down must still be
+    /// able to get out.
+    fn scaled(&self, mut intent: OrderIntent, ctx: &GateContext) -> Result<OrderIntent, RiskRejection> {
+        let key = intent.strategy_id.as_deref().or(ctx.strategy_id.as_deref());
+        let Some(key) = key else { return Ok(intent) };
+        let pct = self.kill_switch.scale_pct(key);
+        if pct >= 100 || intent.reduce_only {
+            return Ok(intent);
+        }
+        let held = ctx.current_position;
+        let reduces = match intent.side {
+            Side::Sell => held > Decimal::ZERO && intent.size.inner() <= held,
+            Side::Buy => held < Decimal::ZERO && intent.size.inner() <= -held,
+        };
+        if reduces {
+            return Ok(intent);
+        }
+        let mut scaled = intent.size.inner() * Decimal::from(pct) / Decimal::from(100u8);
+        if let Measured::Yes(l) = ctx.instrument_limits {
+            if !l.lot_size.is_zero() {
+                scaled = (scaled / l.lot_size).floor() * l.lot_size;
+            }
+        }
+        if scaled <= Decimal::ZERO {
+            return Err(RiskRejection::StrategyHalted {
+                strategy_id: key.to_owned(),
+                reason: format!(
+                    "sized down to {pct}% of full; this order's {} is less than one lot at that size                      (ramp step-down, ADR-P2-27)",
+                    intent.size.inner()
+                ),
+            });
+        }
+        intent.size = Size(scaled);
+        Ok(intent)
     }
 
     /// Current rate counts for a scope, for diagnostics and tests.
@@ -867,5 +921,87 @@ mod tests {
         let gate = gate();
         let ctx = simple_ctx(); // defaults: is_in_session=true, NonHaltable
         assert!(gate.check(simple_intent("BTC-USDT"), &ctx).is_ok());
+    }
+
+    // ── a size between full and zero takes effect (ADR-T3-03) ───────────────
+
+    fn sized(strategy: &str, side: Side, size: &str) -> OrderIntent {
+        OrderIntent::new(
+            "BTC-USD",
+            side,
+            OrderType::Market,
+            Size::from_str(size).unwrap(),
+            None,
+            Some(strategy.to_owned()),
+        )
+    }
+
+    fn gate_with(ks: &Arc<KillSwitch>) -> RiskGate {
+        RiskGate::new(GlobalRiskLimits::default(), Arc::clone(ks))
+    }
+
+    #[test]
+    fn a_strategy_scaled_to_half_trades_half_size() {
+        let ks = Arc::new(KillSwitch::new(false));
+        let gate = gate_with(&ks);
+        ks.scale_strategy("dep-1", 50);
+        let ok = gate.check(sized("dep-1", Side::Buy, "1"), &simple_ctx()).unwrap();
+        assert_eq!(ok.intent.size.inner(), Decimal::from_str("0.5").unwrap());
+        // Another strategy, and a manual order, keep their size.
+        let other = gate.check(sized("dep-2", Side::Buy, "1"), &simple_ctx()).unwrap();
+        assert_eq!(other.intent.size.inner(), Decimal::ONE);
+        let manual = gate.check(simple_intent("BTC-USD"), &simple_ctx()).unwrap();
+        assert_eq!(manual.intent.size.inner(), Decimal::ONE);
+    }
+
+    #[test]
+    fn a_scaled_size_rounds_down_to_a_whole_lot_and_never_up() {
+        let ks = Arc::new(KillSwitch::new(false));
+        let gate = gate_with(&ks);
+        ks.scale_strategy("dep-1", 25);
+        // 0.0107 * 25% = 0.002675 -> lot 0.001 -> 0.002
+        let ok = gate.check(sized("dep-1", Side::Buy, "0.0107"), &simple_ctx()).unwrap();
+        assert_eq!(ok.intent.size.inner(), Decimal::from_str("0.002").unwrap());
+    }
+
+    #[test]
+    fn an_order_that_scales_to_less_than_a_lot_is_refused_not_rounded_up() {
+        let ks = Arc::new(KillSwitch::new(false));
+        let gate = gate_with(&ks);
+        ks.scale_strategy("dep-1", 10);
+        let err = gate.check(sized("dep-1", Side::Buy, "0.005"), &simple_ctx());
+        assert!(matches!(err, Err(RiskRejection::StrategyHalted { .. })), "{err:?}");
+    }
+
+    #[test]
+    fn an_order_that_reduces_the_position_is_never_cut() {
+        let ks = Arc::new(KillSwitch::new(false));
+        let gate = gate_with(&ks);
+        ks.scale_strategy("dep-1", 10);
+        let mut ctx = simple_ctx();
+        ctx.current_position = Decimal::from_str("2").unwrap();
+        let out = gate.check(sized("dep-1", Side::Sell, "1.5"), &ctx).unwrap();
+        assert_eq!(out.intent.size.inner(), Decimal::from_str("1.5").unwrap());
+        // reduce_only too.
+        let mut ro = sized("dep-1", Side::Buy, "1");
+        ro.reduce_only = true;
+        let out = gate.check(ro, &simple_ctx()).unwrap();
+        assert_eq!(out.intent.size.inner(), Decimal::ONE);
+    }
+
+    #[test]
+    fn a_redelivered_intent_is_scaled_at_the_size_current_when_it_arrives() {
+        let ks = Arc::new(KillSwitch::new(false));
+        let gate = gate_with(&ks);
+        let intent = sized("dep-1", Side::Buy, "1");
+        let first = gate.check(intent.clone(), &simple_ctx()).unwrap();
+        assert_eq!(first.intent.size.inner(), Decimal::ONE);
+        ks.scale_strategy("dep-1", 50);
+        let again = gate.check(intent, &simple_ctx()).unwrap();
+        assert_eq!(
+            again.intent.size.inner(),
+            Decimal::from_str("0.5").unwrap(),
+            "the cached approval must not carry the old full size past a step-down"
+        );
     }
 }

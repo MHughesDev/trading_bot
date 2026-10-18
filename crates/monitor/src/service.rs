@@ -108,11 +108,17 @@ impl CadenceDecision {
 #[derive(Debug, Default)]
 pub struct Cadence {
     evaluator: Evaluator,
+    /// Feeds currently past their warning multiple, so a warning is written on
+    /// the cadence it starts and not on every cadence it persists.
+    warned_feeds: std::collections::BTreeSet<crate::feed::FeedKey>,
 }
 
 impl Cadence {
     pub fn new(evaluator: Evaluator) -> Self {
-        Self { evaluator }
+        Self {
+            evaluator,
+            warned_feeds: std::collections::BTreeSet::new(),
+        }
     }
 
     pub fn evaluator(&self) -> &Evaluator {
@@ -330,6 +336,21 @@ fn scale_after(t: &Transition) -> u8 {
     scale_for(t.to)
 }
 
+/// What one pass over the feeds found. Every feed lands in exactly one bucket,
+/// and "unmeasured" is a bucket, not an absence.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FeedPass {
+    pub fresh: usize,
+    pub session_closed: usize,
+    pub warning: Vec<crate::feed::FeedKey>,
+    pub hard: Vec<crate::feed::FeedKey>,
+    pub unmeasured: Vec<crate::feed::FeedKey>,
+    /// Strategies this pass halted.
+    pub halted: Vec<String>,
+    /// Running deployments with no gauge row for their instrument at all.
+    pub unwatched: Vec<String>,
+}
+
 /// The independent monitor process's loop.
 pub struct MonitorService {
     store: MonitorStore,
@@ -541,7 +562,44 @@ impl MonitorService {
                 ids.push(id.clone());
             }
         }
+        // Every running deployment too (T-2.3): a deployment that has neither
+        // traded nor been judged yet is the one most likely to have silently
+        // stopped, and it is watched from the moment its row exists rather than
+        // from its first order.
+        for d in self.store.running_deployments().await? {
+            if !ids.contains(&d.strategy_id) {
+                ids.push(d.strategy_id);
+            }
+        }
         ids.sort();
+
+        // The behaviour inputs that are not orders (S-7.7). Both reads are
+        // whole-book and once per cadence; a failure of either leaves those
+        // metrics unobserved for this cadence rather than unjudging the book.
+        let signals = match self.store.signal_counts(&window).await {
+            Ok(s) => Some(s),
+            Err(e) => {
+                tracing::error!(error = %e, "signal counts unreadable — signals_per_hour unobserved this cadence");
+                None
+            }
+        };
+        // The P&L family (S-7.8): only strategies with a declared baseline are
+        // judged on it, because a return is standardised against the
+        // distribution the strategy was promoted on and nothing else.
+        let baselines = match self.store.return_baselines().await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::error!(error = %e, "return baselines unreadable — the P&L family is unobserved this cadence");
+                std::collections::BTreeMap::new()
+            }
+        };
+        let fills = match self.store.attributed_fills(window.to).await {
+            Ok(f) => Some(f),
+            Err(e) => {
+                tracing::error!(error = %e, "fills unreadable — holding period and positions unobserved this cadence");
+                None
+            }
+        };
 
         let mut out = Vec::new();
         for id in ids {
@@ -554,31 +612,52 @@ impl MonitorService {
 
             let mut readings =
                 crate::collect::ExecutionSample::measure(window, orders).readings(&id);
+            // See `crate::activity` for why each of these is attributable to this
+            // strategy and no other, and when each is reported as unobserved.
+            // A strategy absent from `signals` is one that was not running for
+            // the whole window — `None`, never `Some(0)`.
+            let signal_count = signals.as_ref().and_then(|m| m.get(&id).copied());
+            let replayed = fills.as_ref().map(|by| {
+                by.get(&id)
+                    .map_or_else(crate::activity::FillReplay::default, |f| {
+                        crate::activity::replay(f, &window)
+                    })
+            });
+            let (round_trips, positions) = match &replayed {
+                Some(r) => (r.round_trips.as_slice(), Some(r.open_positions)),
+                None => (&[][..], None),
+            };
             readings.extend(
                 crate::collect::BehaviourSample::measure(
                     window,
                     orders,
-                    // Nothing writes a per-strategy signal count to Postgres yet,
-                    // so the monitor has not observed one. `Some(0)` here would
-                    // manufacture a measured rate of zero and raise an alarm about
-                    // a strategy nobody had looked at.
-                    None,
-                    // Likewise round trips: `crates/monitor` has no source for
-                    // them, and an empty slice is the truthful input — it produces
-                    // an unobserved median rather than a fabricated one.
-                    &[],
-                    // And likewise the position count. `positions` is keyed on
-                    // `(account_id, instrument_id)` with no strategy column, so
-                    // any per-strategy count derived from it attributes a shared
-                    // instrument's position to every strategy that has traded it.
-                    // An over-counted position against an upper limit is a
-                    // false scale-down, which on this surface costs the operator's
-                    // trust in every other alarm. Unobserved is the honest reading
-                    // until the schema can answer the question.
-                    None,
+                    signal_count,
+                    round_trips,
+                    positions,
                 )
                 .readings(&id),
             );
+
+            if let Some(baseline) = baselines.get(&id) {
+                match self.store.pnl_inputs(&id).await {
+                    Ok(Some(inputs)) => {
+                        let last_complete = (now - chrono::Duration::days(1)).date_naive();
+                        let returns = crate::daily::daily_returns(&inputs, last_complete);
+                        // A fresh CUSUM over the whole series each cadence: the
+                        // statistic is a function of the series, and a chart
+                        // carried between cadences would count every day again.
+                        readings.extend(
+                            crate::pnl::PnlSample::measure(&returns, baseline.clone())
+                                .readings(&id, &mut crate::baseline::Cusum::default()),
+                        );
+                    }
+                    Ok(None) => {
+                        tracing::warn!(strategy_id = %id,
+                            "a return baseline is declared for a strategy with no deployment record — P&L unobserved");
+                    }
+                    Err(e) => tracing::error!(strategy_id = %id, error = %e, "P&L inputs unreadable"),
+                }
+            }
 
             match self
                 .evaluate_strategy(cadence, &id, readings, state, policy)
@@ -591,6 +670,132 @@ impl MonitorService {
             }
         }
         Ok(out)
+    }
+
+    /// The data family over every live feed: read the gauge, judge each feed,
+    /// and act on what it says (COMP-007 §3, §4.1; S-7.5).
+    ///
+    /// The production raiser of `Fact::HardDataStaleness`. Past ten timeframes
+    /// a feed is a fact and skips dwell: `facts::decide` halts every running
+    /// deployment that decides on that feed — that symbol at that venue — and
+    /// no other, through `MonitorStore::carry_out_fact`, which writes the event
+    /// and the `monitor.kill_switch` row in one transaction, record first. The
+    /// strategy's state row follows the switch, so the next cadence sees it
+    /// halted and `decide` writes no second trip for one incident.
+    ///
+    /// Past three timeframes is a warning, written once when it starts and
+    /// cleared when the feed recovers. A shut session and a silent producer are
+    /// neither; see [`crate::freshness`].
+    ///
+    /// # Errors
+    /// Reading the gauge, the deployments or the strategy states. A failure to
+    /// carry out one feed's action is logged and does not stop the others.
+    pub async fn assess_feeds(
+        &self,
+        cadence: &mut Cadence,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<FeedPass, crate::store::StoreError> {
+        use crate::evaluate::Staleness;
+        use crate::freshness::{dependencies, judge, unwatched, FeedReading};
+
+        let feeds = self.store.feed_rows().await?;
+        let deployments = self.store.running_deployments().await?;
+        let deps = dependencies(&deployments, &feeds);
+        let states: Vec<(String, StrategyState, HaltPolicy)> = self
+            .store
+            .strategy_runtime_states()
+            .await?
+            .into_iter()
+            .map(|(id, s, _, p)| (id, s, p))
+            .collect();
+
+        let mut pass = FeedPass {
+            unwatched: unwatched(&deployments, &feeds)
+                .into_iter()
+                .map(|d| d.strategy_id.clone())
+                .collect(),
+            ..FeedPass::default()
+        };
+
+        for row in &feeds {
+            match judge(row, now) {
+                FeedReading::Judged(Staleness::Hard(fact @ Fact::HardDataStaleness { .. })) => {
+                    pass.hard.push(row.feed.clone());
+                    cadence.warned_feeds.insert(row.feed.clone());
+                    let actions = crate::facts::decide(&fact, &deps, &states);
+                    if deps.strategies_for(&row.feed).is_empty() {
+                        tracing::warn!(feed = %row.feed.symbol(), venue = %row.feed.venue(),
+                            reason = %fact.reason(), "hard-stale feed reaches no running deployment");
+                    }
+                    for action in &actions {
+                        match self.store.carry_out_fact(&fact, action).await {
+                            Ok(()) => {
+                                if let crate::facts::FactAction::Halt(risk::Scope::Strategy(id)) =
+                                    action
+                                {
+                                    pass.halted.push(id.clone());
+                                    if let Err(e) = self
+                                        .store
+                                        .set_strategy_state(id, StrategyState::Halted.as_str(), 100)
+                                        .await
+                                    {
+                                        tracing::error!(strategy_id = %id, error = %e,
+                                            "staleness halt tripped but the strategy state was not written");
+                                    }
+                                }
+                            }
+                            Err(e) => tracing::error!(error = %e, reason = %fact.reason(),
+                                "a hard-stale feed's halt could not be carried out"),
+                        }
+                    }
+                }
+                FeedReading::Judged(Staleness::Hard(other)) => {
+                    // `staleness` builds nothing else; a different fact here is a
+                    // change in `evaluate` that this pass has not been taught.
+                    tracing::error!(fact = ?other, "staleness returned a fact this pass does not handle");
+                }
+                FeedReading::Judged(Staleness::Warning { feed, age_secs }) => {
+                    if cadence.warned_feeds.insert(feed.clone()) {
+                        for strategy_id in deps.strategies_for(&feed) {
+                            let event = MonitorEvent::new(
+                                risk::Scope::strategy(strategy_id.as_str()),
+                                Family::Data,
+                                EventKind::Warning,
+                                MONITOR_ACTOR,
+                            )
+                            .map_err(|e| crate::store::StoreError::Invalid(e.to_string()))?
+                            .with_reason(format!(
+                                "{} at {} last bar is {age_secs}s old, past {}x its {}s timeframe",
+                                feed.symbol(),
+                                feed.venue(),
+                                crate::evaluate::WARN_STALENESS_MULTIPLE,
+                                row.timeframe_secs
+                            ));
+                            if let Err(e) = self.store.record_event(&event).await {
+                                tracing::error!(error = %e, "a stale-feed warning could not be recorded");
+                            }
+                        }
+                    }
+                    pass.warning.push(feed);
+                }
+                FeedReading::Judged(Staleness::Fresh) => {
+                    cadence.warned_feeds.remove(&row.feed);
+                    pass.fresh += 1;
+                }
+                FeedReading::Judged(Staleness::Unmeasurable { feed, because }) => {
+                    tracing::warn!(feed = %feed.symbol(), venue = %feed.venue(), %because,
+                        "feed staleness unmeasurable");
+                    pass.unmeasured.push(feed);
+                }
+                FeedReading::SessionClosed(_) => pass.session_closed += 1,
+                FeedReading::ProducerSilent { feed, silent_secs } => {
+                    tracing::warn!(feed = %feed.symbol(), venue = %feed.venue(), silent_secs,
+                        "feed gauge not affirmed — its age is not a measurement");
+                    pass.unmeasured.push(feed);
+                }
+            }
+        }
+        Ok(pass)
     }
 
     /// One strategy, end to end: measure, judge, record, move.
@@ -741,6 +946,18 @@ impl MonitorService {
                 Err(e) => {
                     tracing::error!(error = %e, "the book went unjudged this cadence");
                 }
+            }
+            match self.assess_feeds(&mut cadence, Utc::now()).await {
+                Ok(pass) => {
+                    if !pass.halted.is_empty() {
+                        tracing::warn!(halted = ?pass.halted, "hard-stale feeds halted strategies");
+                    }
+                    if !pass.unwatched.is_empty() {
+                        tracing::info!(deployments = ?pass.unwatched,
+                            "running deployments with no feed gauge — the data family is blind to them");
+                    }
+                }
+                Err(e) => tracing::error!(error = %e, "feed staleness went unjudged this cadence"),
             }
             match self.assess_platform(&mut platform, Utc::now()).await {
                 Ok(verdict) if verdict.is_unhealthy() => {

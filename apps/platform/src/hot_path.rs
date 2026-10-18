@@ -223,6 +223,109 @@ impl Minute1Aggregator {
     }
 }
 
+/// Render one tape frame as JSON text. The aggressor side is reported as
+/// `unknown` rather than guessed — the tape colours by side and a wrong colour
+/// is a wrong statement about who lifted the offer.
+fn tape_frame_json(
+    ts_ms: i64,
+    price: domain::money::Price,
+    size: domain::money::Size,
+    side: domain::payloads::trade::TradeSide,
+) -> String {
+    use std::fmt::Write;
+    let side = match side {
+        domain::payloads::trade::TradeSide::Buy => "buy",
+        domain::payloads::trade::TradeSide::Sell => "sell",
+        _ => "unknown",
+    };
+    let mut out = String::with_capacity(96);
+    // Decimals render as digits, '-' and '.', so no escaping is needed.
+    let _ = write!(
+        out,
+        r#"{{"ts":{ts_ms},"price":"{}","size":"{}","side":"{side}"}}"#,
+        price.inner(),
+        size.inner()
+    );
+    out
+}
+
+/// What an idle consumer does next.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IdleStep {
+    /// Yield to the scheduler and poll again at once.
+    Spin,
+    /// Park for this long.
+    Sleep(std::time::Duration),
+}
+
+/// Idle policy for a ring consumer: a **wall-clock-bounded** spin, then park
+/// with backoff.
+///
+/// The three consumers used to `yield_now` in a tight loop, which pins a core
+/// at 100% while the market is quiet. A tick arriving within `SPIN_BUDGET` of
+/// the last one still sees a spin-fast pop; after that the consumer sleeps,
+/// escalating from 200 us to a 1 ms cap, so an idle pipeline costs close to
+/// nothing.
+///
+/// The spin is bounded by time, not by a count of polls: a count of 64 `yield_now`
+/// calls is tens of microseconds, which a normal trade stream (a tick every few
+/// milliseconds) always outlasts, so every tick would have met a sleeping
+/// consumer.
+///
+/// **A parked wake-up is not 1 ms on every OS.** The sleep is a timer, and the
+/// timer's resolution is the OS's: measured on the Windows dev box, a requested
+/// 1 ms sleep takes 15.6 ms (`SET-C IDLE` in the metrics test), because the
+/// default timer tick is 15.6 ms. On Linux, where the platform runs, it is
+/// about the request plus ~60 us. So after a lull a tick can wait up to one
+/// timer tick before it is consumed. That is acceptable for the 1-minute bars
+/// and the tape, and it is the trade this makes against a pinned core; raising
+/// the Windows timer resolution (`timeBeginPeriod(1)`) is a one-line boot call
+/// that belongs in `main.rs`.
+pub(crate) struct IdleBackoff {
+    idle_since: Option<std::time::Instant>,
+    sleeps: u32,
+}
+
+impl IdleBackoff {
+    /// How long an empty ring is polled hot before the consumer parks.
+    const SPIN_BUDGET: std::time::Duration = std::time::Duration::from_micros(200);
+    const BASE_SLEEP_US: u64 = 100;
+    const MAX_SLEEP_US: u64 = 1_000;
+
+    pub(crate) const fn new() -> Self {
+        Self {
+            idle_since: None,
+            sleeps: 0,
+        }
+    }
+
+    /// A pop succeeded: the next idle period starts spinning again.
+    #[inline]
+    pub(crate) fn reset(&mut self) {
+        self.idle_since = None;
+        self.sleeps = 0;
+    }
+
+    /// The policy, as a pure function of the clock.
+    pub(crate) fn next_step(&mut self, now: std::time::Instant) -> IdleStep {
+        let since = *self.idle_since.get_or_insert(now);
+        if now.saturating_duration_since(since) < Self::SPIN_BUDGET {
+            return IdleStep::Spin;
+        }
+        self.sleeps = (self.sleeps + 1).min(4);
+        let us = (Self::BASE_SLEEP_US << self.sleeps).min(Self::MAX_SLEEP_US);
+        IdleStep::Sleep(std::time::Duration::from_micros(us))
+    }
+
+    /// The ring was empty: spin, then park with backoff.
+    pub(crate) async fn wait(&mut self) {
+        match self.next_step(std::time::Instant::now()) {
+            IdleStep::Spin => tokio::task::yield_now().await,
+            IdleStep::Sleep(d) => tokio::time::sleep(d).await,
+        }
+    }
+}
+
 /// Stage 2: consume `RawTick`, feed the mark board, emit a per-tick `WorldEvent`
 /// for live strategy evaluation, AND aggregate trades into 1-minute OHLCV bars
 /// that are persisted to ClickHouse continuously (independent of any strategy).
@@ -255,9 +358,11 @@ async fn stage_bar_builder(
         });
     };
 
+    let mut idle = IdleBackoff::new();
     loop {
         match raw_cons.pop() {
             Ok(tick) => {
+                idle.reset();
                 let trade = match tick.decode_payload::<TradePayload>() {
                     Ok(p) => p,
                     Err(_) => continue,
@@ -266,25 +371,22 @@ async fn stage_bar_builder(
                 paper_engine.on_mark(&instrument_id, price);
 
                 // The tape. Published per tick so time & sales is genuinely live
-                // rather than a minute behind the market.
-                api::live_bus::publish(
-                    &live,
-                    domain::lanes::MARKET_TRADES,
-                    &instrument_id,
-                    serde_json::json!({
-                        "ts": tick.timestamp_ns / 1_000_000,
-                        "price": price.inner().to_string(),
-                        "size": trade.size.inner().to_string(),
-                        // An unknown aggressor is reported as such rather than
-                        // guessed — the tape colours by side and a wrong colour
-                        // is a wrong statement about who lifted the offer.
-                        "side": match trade.side {
-                            domain::payloads::trade::TradeSide::Buy => "buy",
-                            domain::payloads::trade::TradeSide::Sell => "sell",
-                            _ => "unknown",
-                        },
-                    }),
-                );
+                // rather than a minute behind the market. No `serde_json::Value`
+                // is built on this path: the frame is written straight into one
+                // `String`, and only when a socket is actually listening.
+                if api::live_bus::has_listeners(&live) {
+                    api::live_bus::publish_text(
+                        &live,
+                        domain::lanes::MARKET_TRADES,
+                        &instrument_id,
+                        tape_frame_json(
+                            tick.timestamp_ns / 1_000_000,
+                            price,
+                            trade.size,
+                            trade.side,
+                        ),
+                    );
+                }
 
                 // Aggregate into the 1-minute bar; persist a completed minute.
                 let ts_secs = tick.timestamp_ns / 1_000_000_000;
@@ -321,7 +423,7 @@ async fn stage_bar_builder(
                 if let Some(completed) = agg.flush_if_elapsed(chrono::Utc::now().timestamp()) {
                     emit_bar(completed);
                 }
-                tokio::task::yield_now().await;
+                idle.wait().await;
             }
         }
     }
@@ -359,6 +461,7 @@ async fn stage_strategy_eval(
     // a strategy armed before this pipeline started is picked up immediately.
     let mut synced_generation: u64 = u64::MAX;
 
+    let mut idle = IdleBackoff::new();
     loop {
         // One `Acquire` load per iteration.  No lock, no allocation.
         let generation = registry.generation();
@@ -370,6 +473,7 @@ async fn stage_strategy_eval(
 
         match world_cons.pop() {
             Ok(event) => {
+                idle.reset();
                 if instances.is_empty() {
                     continue;
                 }
@@ -418,7 +522,7 @@ async fn stage_strategy_eval(
                     }
                 }
             }
-            Err(_) => tokio::task::yield_now().await,
+            Err(_) => idle.wait().await,
         }
     }
 }
@@ -488,9 +592,11 @@ async fn stage_risk_exec(
     risk_gate: Arc<risk::RiskGate>,
 ) {
     info!(instrument_id, "hot-path stage 4 (risk/exec) starting");
+    let mut idle = IdleBackoff::new();
     loop {
         match intent_cons.pop() {
             Ok(intent) => {
+                idle.reset();
                 let ctx = match risk::context::context_for(&intent) {
                     Ok(ctx) => ctx,
                     Err(e) => {
@@ -516,7 +622,7 @@ async fn stage_risk_exec(
                     }
                 }
             }
-            Err(_) => tokio::task::yield_now().await,
+            Err(_) => idle.wait().await,
         }
     }
 }
@@ -1372,5 +1478,245 @@ mod tests {
             .orders_for_instrument(instrument)
             .iter()
             .any(|o| o.order_id == result.broker_order_id));
+    }
+}
+
+// ── Set C metrics: allocations and latency per tick ──────────────────────────
+
+/// Test-only allocator that counts allocations **on the calling thread**, so a
+/// measurement is not polluted by the other tests running in parallel.
+#[cfg(test)]
+mod alloc_count {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    thread_local! {
+        static ALLOCS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    pub struct Counting;
+
+    // SAFETY: delegates every call to `System`; the counter is a const-init
+    // thread-local `Cell`, which never allocates.
+    #[allow(unsafe_code)]
+    unsafe impl GlobalAlloc for Counting {
+        unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+            let _ = ALLOCS.try_with(|c| c.set(c.get() + 1));
+            System.alloc(l)
+        }
+        unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+            System.dealloc(p, l)
+        }
+        unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
+            let _ = ALLOCS.try_with(|c| c.set(c.get() + 1));
+            System.realloc(p, l, n)
+        }
+    }
+
+    pub fn count() -> u64 {
+        ALLOCS.with(Cell::get)
+    }
+}
+
+#[cfg(test)]
+#[global_allocator]
+static COUNTING: alloc_count::Counting = alloc_count::Counting;
+
+#[cfg(test)]
+mod metrics {
+    use super::*;
+    use std::str::FromStr;
+
+    use domain::money::{Price, Size};
+    use domain::payloads::trade::TradeSide;
+
+    #[test]
+    fn tape_frame_is_valid_json_with_the_published_shape() {
+        let p = Price::from_str("50000.25").unwrap();
+        let z = Size::from_str("0.5").unwrap();
+        for (side, want) in [
+            (TradeSide::Buy, "buy"),
+            (TradeSide::Sell, "sell"),
+            (TradeSide::Unknown, "unknown"),
+        ] {
+            let v: serde_json::Value =
+                serde_json::from_str(&tape_frame_json(1_700_000_000_123, p, z, side)).unwrap();
+            assert_eq!(v["ts"], 1_700_000_000_123_i64);
+            assert_eq!(v["price"], "50000.25");
+            assert_eq!(v["size"], "0.5");
+            assert_eq!(v["side"], want);
+        }
+    }
+
+    #[test]
+    fn idle_backoff_spins_then_sleeps_then_caps_and_resets() {
+        use std::time::Duration;
+        let base = std::time::Instant::now();
+        let at = |us: u64| base + Duration::from_micros(us);
+        let mut b = IdleBackoff::new();
+        // Within the spin budget it never sleeps, however many times it is asked.
+        for us in [0, 1, 50, 199] {
+            assert_eq!(b.next_step(at(us)), IdleStep::Spin);
+        }
+        // Past the budget it parks, escalating 200, 400, 800 us and then capping.
+        let sleeps: Vec<IdleStep> = (0..6).map(|i| b.next_step(at(300 + i))).collect();
+        let us = |n: u64| IdleStep::Sleep(Duration::from_micros(n));
+        assert_eq!(
+            sleeps,
+            [us(200), us(400), us(800), us(1_000), us(1_000), us(1_000)]
+        );
+        // A successful pop starts the next lull from a fresh spin.
+        b.reset();
+        assert_eq!(b.next_step(at(10_000)), IdleStep::Spin);
+        assert_eq!(b.next_step(at(10_100)), IdleStep::Spin);
+    }
+
+    /// An idle consumer must not pin a core: it spins only for its budget, then
+    /// parks. A pure spin would poll millions of times in this window.
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_idle_consumer_parks_instead_of_spinning() {
+        let mut b = IdleBackoff::new();
+        let t0 = std::time::Instant::now();
+        let mut polls = 0u64;
+        while t0.elapsed() < std::time::Duration::from_millis(60) {
+            b.wait().await;
+            polls += 1;
+        }
+        println!("SET-C IDLE polls_in_60ms={polls} (a pure yield_now spin does tens of thousands)");
+        assert!(
+            polls < 5_000,
+            "an idle consumer polled {polls} times in 60 ms"
+        );
+    }
+
+    /// What a parked wake-up really costs on this machine (see `IdleBackoff`).
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_parked_wakeup_is_measured_not_assumed() {
+        let t = std::time::Instant::now();
+        for _ in 0..10 {
+            tokio::time::sleep(std::time::Duration::from_micros(1_000)).await;
+        }
+        println!(
+            "SET-C IDLE requested_sleep_us=1000 actual_avg_us={:.0}",
+            t.elapsed().as_micros() as f64 / 10.0
+        );
+    }
+
+    /// The Set C metric run: allocations per tick and tick-to-intent latency for
+    /// the synchronous work of stages 2 and 3 (aggregate, build the world event,
+    /// evaluate one strategy, and the tape frame). Printed with `--nocapture`.
+    ///
+    /// The `rkyv` decode of the trade payload is **not** in this loop: this crate
+    /// does not depend on `rkyv`, so a test here cannot build an encoded tick. Its
+    /// cost is measured where `rkyv` is available, in
+    /// `crates/domain/tests/trade_decode_allocs.rs`.
+    ///
+    /// The allocation bound is asserted in every profile; the latency bound only
+    /// in release, where the figure means something.
+    #[test]
+    fn per_tick_allocations_and_latency() {
+        use strategy_runtime::runtime::StrategyInstance;
+        use strategy_runtime::world::WorldEvent;
+
+        let def: domain::strategy_def::StrategyDefinition =
+            serde_json::from_value(serde_json::json!({
+                "strategy_id": "metrics_ema", "definition_version": "1.0",
+                "asset_class": "crypto_spot_cex", "min_trust_tier": "centralized_exchange",
+                "inputs": [{ "lane": "features.technical", "instrument": "$bound_at_init",
+                             "features": ["ema_7", "ema_21"] }],
+                "nodes": [
+                    { "id": "c1", "type": "condition",
+                      "expr": "feature('ema_7') > feature('ema_21')" },
+                    { "id": "s1", "type": "signal", "when": "c1", "emit": "long" }],
+                "actions": [{ "on_signal": "long", "type": "place_order",
+                    "order": { "side": "buy", "size_mode": "fixed", "size": "0.01" } }]
+            }))
+            .unwrap();
+        let mut inst = StrategyInstance::new(
+            String::from("u"),
+            String::from("BTC-USD"),
+            def,
+            chrono::Utc::now(),
+        );
+        let mut agg = Minute1Aggregator::new();
+        let instrument_id = String::from("BTC-USD");
+        let price = Price::from_str("50000.25").unwrap();
+        let size = Size::from_str("0.01").unwrap();
+        let bus = api::live_bus::channel();
+
+        const N: usize = 20_000;
+        let mut lat = Vec::with_capacity(N);
+        let mut s2_allocs = 0u64;
+        let mut s3_allocs = 0u64;
+        let mut tape_allocs = 0u64;
+
+        for i in 0..N as i64 {
+            let ts_secs = 1_700_000_000 + i / 50;
+            let t0 = std::time::Instant::now();
+            let a0 = alloc_count::count();
+            // Stage 2's synchronous work. With no socket listening the tape frame
+            // is never formatted, so it is not on this path.
+            let listening = api::live_bus::has_listeners(&bus);
+            let _ = agg.on_trade(price.inner(), size.inner(), ts_secs);
+            let bar = domain::payloads::bar::BarPayload::new(
+                domain::payloads::bar::Timeframe::Minutes1,
+                price,
+                price,
+                price,
+                price,
+                Size::from_decimal(Decimal::ONE),
+                i as u64,
+            );
+            let event = WorldEvent::Bar {
+                instrument_id: instrument_id.clone(),
+                timeframe: domain::payloads::bar::Timeframe::Minutes1,
+                bar,
+                available_time: chrono::Utc::now(),
+            };
+            let a1 = alloc_count::count();
+            // Stage 3.
+            let out = inst.process_event(&event);
+            let a2 = alloc_count::count();
+            std::hint::black_box((&out, listening));
+            lat.push(t0.elapsed().as_nanos() as u64);
+            s2_allocs += a1 - a0;
+            s3_allocs += a2 - a1;
+
+            // The tape frame, as it is formatted only when a socket listens.
+            let b0 = alloc_count::count();
+            let frame = tape_frame_json(ts_secs * 1000, price, size, TradeSide::Buy);
+            tape_allocs += alloc_count::count() - b0;
+            std::hint::black_box(frame);
+        }
+        lat.sort_unstable();
+        let p = |q: f64| lat[((N as f64 * q) as usize).min(N - 1)] as f64 / 1000.0;
+        println!(
+            "SET-C METRICS profile={} ticks={N} stage2_allocs_per_tick={:.2} stage3_allocs_per_tick={:.2} \
+             tape_frame_allocs_per_tick_when_listening={:.2} tick_to_intent_us p50={:.1} p99={:.1} p999={:.1}",
+            if cfg!(debug_assertions) { "debug" } else { "release" },
+            s2_allocs as f64 / N as f64,
+            s3_allocs as f64 / N as f64,
+            tape_allocs as f64 / N as f64,
+            p(0.50),
+            p(0.99),
+            p(0.999),
+        );
+        // Baseline in MASTER was ~150+ allocations per tick for the whole path.
+        assert!(
+            (s2_allocs + s3_allocs) as f64 / (N as f64) < 50.0,
+            "per-tick allocations regressed past 50"
+        );
+        // With nobody listening, the tape costs nothing: one allocation is the
+        // `Vec` of the formatted frame, and only when a socket is subscribed.
+        assert!(
+            tape_allocs as f64 / (N as f64) <= 2.0,
+            "the tape frame allocates more than its one buffer"
+        );
+        #[cfg(not(debug_assertions))]
+        assert!(
+            p(0.99) < 500.0,
+            "tick-to-intent p99 {} us exceeds 500 us",
+            p(0.99)
+        );
     }
 }

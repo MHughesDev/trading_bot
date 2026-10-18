@@ -17,23 +17,45 @@ worse than no map, because people steer by it.
 
 ---
 
-## 1. Where we are — **19% left**
+## 1. Where we are — **22% left**
 
-Derived 2026-10-04 from the `### <TASK-ID>` headings and their status markers
-across sets P, S, T and U. Size-weighted **S = 1, M = 2, L = 4**: 189 tasks of
-wildly different sizes averaged flat would flatter us.
+Derived 2026-10-05 from the `### <TASK-ID>` headings and their status markers
+across sets P, S, T, U, M, N, Q, R-a and R-b (442 tasks). Size-weighted **S = 1, M = 2, L = 4**:
+tasks of wildly different sizes averaged flat would flatter us.
 
 | counting rule | % of the work left |
 |---|---|
-| strict — only `DONE` counts | 34% |
-| **`PARTIAL` counts half** | **19%** |
-| generous — `PARTIAL` counts done | 4% |
+| strict — only `DONE` counts | 37% |
+| **`PARTIAL` counts half** | **22%** |
+| generous — `PARTIAL` counts done | 7% |
 
 Take the middle number and treat it as **±10**, not as a measurement. `PARTIAL`
-is 205 of 680 units and in this repository it spans "complete, one database test
+is 312 of 1028 units and in this repository it spans "complete, one database test
 unwritten" to "the types exist and nothing calls them". The spread between the
 strict and generous rows *is* the uncertainty, and it is honest to show it rather
 than pick one and present it as precision.
+
+**2026-10-05 (track VERIFY2): the headline moved from 40% to 22% left, and this time the work moved it.**
+The plan did not grow (still 442 tasks, 1028 units); the push of 2026-10-04/05 closed or advanced
+work in Sets M, N, Q, R-a and R-b, which had been "almost entirely ahead of us". Their `DONE` units went
+13 → 132 of 348 (tasks 9 → 64 of 148), and their `PARTIAL` units 43 → 160. The older sets moved too:
+Set S 137 → 140 of 189 tasks `DONE` (14% left, unchanged), Set T 6 → 7 of 17 (35% → 32%), Set P and
+Set U unchanged (17% and 6%). Read the movement with the spread, not the headline alone: **the strict row went
+50% → 37% and the generous row 30% → 7%**, so most of the gain is `PARTIAL` work (312 units, 30% of
+the programme), and `PARTIAL` here includes "built, tested, and with no production caller yet". The
+by-set rows are below. What is left in M, N, Q, R-a and R-b is now mostly integration (the Studio
+frontend is 0 of 9 tasks `DONE` and 22 `PARTIAL` units) and the parts only a person or time can
+close.
+
+**2026-10-04 (track VERIFY): the headline moved from 19% to 40% and the work did not regress.**
+The plan grew. Sets M, N, Q, R-a and R-b were planned on 2026-10-04 (they were reserved letters
+in ROADMAP §5 with spec content and no plan files) and joined the derivation the same day:
+**5 sets, 148 tasks, 348 units, 13 of them `DONE`** (9 of 148 tasks) — almost entirely ahead of us, so the
+headline carries them at their true weight. Over the same push the four older sets
+**improved**: Set S 29% → 14% left, Set P 57% → 17%, Set T 85% → 35%, Set U 13% → 6% (the
+tracks of 2026-10-03/04 took Set S from 90 to 137 of its 189 tasks `DONE`). Read the
+two together: **the four old sets are 14% left and the whole programme is 40%**, and the difference
+is the capability work in M, N, Q, R-a and R-b that nobody had scheduled.
 
 **The headline moved from 35% to 49% on 2026-10-01 because the plan grew, not because work
 regressed.** Set U (137 units) was added after an audit found that strategies are evaluated by three
@@ -44,14 +66,20 @@ model in any mode — work no previous set had planned. See [Set U](plan-sets/se
 
 | set | subject | tasks | units | done | partial | % left |
 |---|---|---:|---:|---:|---:|---:|
-| **S** | The Agent Platform | 189 | 446 | 208 | 217 | **29%** |
-| **P** | Data Reach | 30 | 51 | 14 | 16 | **57%** |
-| **T** | Forward Evidence | 17 | 34 | 2 | 6 | **85%** |
-| **U** | Unified Strategy Engine | 58 | 149 | 121 | 16 | **13%** |
+| **S** | The Agent Platform | 189 | 446 | 325 | 119 | **14%** |
+| **P** | Data Reach | 30 | 51 | 38 | 9 | **17%** |
+| **T** | Forward Evidence | 17 | 34 | 14 | 18 | **32%** |
+| **U** | Unified Strategy Engine | 58 | 149 | 137 | 6 | **6%** |
+| **M** | Engine truthfulness (backtest) | 29 | 67 | 15 | 36 | **51%** |
+| **N** | Model platform v2 (AI Model Studio) | 41 | 99 | 41 | 53 | **32%** |
+| **Q** | Evaluation tools and evidence extensions | 20 | 39 | 22 | 8 | **33%** |
+| **R-a** | Skill registry and materialiser | 24 | 50 | 25 | 23 | **27%** |
+| **R-b** | Knowledge, learned tiers, random arm | 34 | 93 | 29 | 40 | **47%** |
 
-P and T are 16% of the weight and almost entirely ahead of us — and they are the
-two that carry a **calendar**, which is why §3 puts them first despite Set S
-being where the code is.
+P and T are 8% of the weight, and they are the two that carry a **calendar**, which is why §3
+puts them first despite Set S being where the code is. They are no longer "almost entirely ahead of
+us" (P is 17% left, T 32%): what is left in them is mostly the part only time or a human can
+close (a first paper deployment, the archive files, the credentials).
 
 **Both were audited for the first time on 2026-09-21 and both figures moved, in
 opposite directions.** Set P is better than published (84% → 79%): four tasks
@@ -87,18 +115,20 @@ startup so an operator can tell which. **H-1 would now produce a
 
 | phase | tasks | units | done | partial | not started | blocked | % left |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| 1 — Contracts | 20 | 34 | 29 | 5 | 0 | 0 | 7% |
-| 9 — Context as retrieval | 20 | 56 | 46 | 10 | 0 | 0 | 9% |
+| 0 — Ground rules | 6 | 7 | 4 | 3 | 0 | 0 | 21% |
+| 1 — Contracts | 20 | 34 | 30 | 4 | 0 | 0 | 6% |
+| 2 — One runtime | 16 | 32 | 12 | 20 | 0 | 0 | 31% |
+| 3 — The catalogue | 19 | 50 | 36 | 14 | 0 | 0 | 14% |
+| 4 — Memory and evaluation | 17 | 39 | 28 | 9 | 0 | 2 | 17% |
+| 5 — The language | 15 | 36 | 31 | 5 | 0 | 0 | 7% |
+| 6 — The Research Desk | 24 | 66 | 56 | 10 | 0 | 0 | 8% |
+| 7 — The monitor | 13 | 29 | 29 | 0 | 0 | 0 | 0% |
 | 8 — Integration and honesty | 9 | 24 | 18 | 6 | 0 | 0 | 12% |
-| **4 — Memory and evaluation** | 17 | 39 | 18 | 19 | 0 | 2 | **29%** |
-| **3 — The catalogue** | 19 | 50 | 20 | 28 | 2 | **0** | **32%** |
-| **6 — The Research Desk** | 24 | **66** | 22 | 44 | 0 | 0 | **33%** |
-| 7 — The monitor | 13 | 29 | 10 | 18 | 0 | 1 | 34% |
-| 0 — Ground rules | 6 | 7 | 2 | 5 | 0 | 0 | 36% |
-| 10 — Modes and the lifecycle | 16 | 41 | 9 | 32 | 0 | 0 | 39% |
-| 2 — One runtime | 16 | 32 | 9 | 19 | 4 | 0 | 42% |
-| 5 — The language | 15 | 36 | 12 | 15 | 9 | 0 | 46% |
-| **11 — Continuous research** | 14 | 32 | 0 | 28 | 4 | 0 | **56%** |
+| 9 — Context as retrieval | 20 | 56 | 48 | 8 | 0 | 0 | 7% |
+| 10 — Modes and the research lifecycle | 16 | 41 | 11 | 30 | 0 | 0 | 37% |
+| 11 — Continuous research: Research with the toggle on | 14 | 32 | 22 | 10 | 0 | 0 | 16% |
+
+Derived 2026-10-05 by track VERIFY2 (the 2026-10-04 table read the same except phase 4: 24 done, 13 partial, 22% left, and phase 6: 54 done, 12 partial, 9% left). The narrative below is **history** (2026-09-21 to 2026-09-27) and its percentages are those days', not today's.
 
 **Phase 3 moved 42% → 32% and its blocked column reached zero**, which is the
 larger fact: all four `BLOCKED:UPSTREAM` markers in Set S are gone. Three were
@@ -136,24 +166,55 @@ up.
 
 Phase 11 still has the highest percentage and the smallest body.
 
-### Set P and Set T by phase
+### Every other set by phase
 
-| set | phase | tasks | units | % left |
-|---|---|---:|---:|---:|
-| P | 0 — Measure, start the irreversible clock | 6 | 10 | **100%** |
-| P | 1 — Deep backfill | 7 | 13 | **100%** |
-| P | 2 — Quality and eligibility | 6 | 10 | 20% |
-| P | 3 — Alternative data | 6 | 9 | 100% |
-| P | 4 — Derived access and the source fence | 5 | 9 | 100% |
-| T | 0 — Reconciliation and the first observation | 4 | 8 | 25% |
-| T | 1 — The deployment path | 5 | 10 | **100%** |
-| T | 2 — The paper fleet | 4 | 8 | 100% |
-| T | 3 — Ramp mechanics | 4 | 8 | 100% |
+| set | phase | tasks | units | done | partial | not started | blocked | % left |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| P | 0 — Measure, and start the irreversible clock | 6 | 10 | 9 | 0 | 0 | 1 | 10% |
+| P | 1 — Deep backfill | 7 | 13 | 9 | 4 | 0 | 0 | 15% |
+| P | 2 — Quality and eligibility | 6 | 10 | 10 | 0 | 0 | 0 | 0% |
+| P | 3 — Alternative data | 6 | 9 | 1 | 5 | 0 | 3 | 61% |
+| P | 4 — Derived access and the source fence | 5 | 9 | 9 | 0 | 0 | 0 | 0% |
+| T | 0 — Reconciliation and the first observation | 4 | 8 | 4 | 2 | 0 | 2 | 38% |
+| T | 1 — The deployment path | 5 | 10 | 2 | 8 | 0 | 0 | 40% |
+| T | 2 — The paper fleet | 4 | 8 | 6 | 2 | 0 | 0 | 12% |
+| T | 3 — Ramp mechanics | 4 | 8 | 2 | 6 | 0 | 0 | 38% |
+| U | 0 — The contracts | 5 | 10 | 10 | 0 | 0 | 0 | 0% |
+| U | 1 — The engine core | 9 | 25 | 25 | 0 | 0 | 0 | 0% |
+| U | 2 — Venues and the risk gate | 6 | 15 | 15 | 0 | 0 | 0 | 0% |
+| U | 3 — The backtest environment | 5 | 12 | 12 | 0 | 0 | 0 | 0% |
+| U | 4 — Paper and live | 7 | 16 | 16 | 0 | 0 | 0 | 0% |
+| U | 5 — Models | 8 | 22 | 18 | 4 | 0 | 0 | 9% |
+| U | 6 — Selection strategies | 6 | 18 | 18 | 0 | 0 | 0 | 0% |
+| U | 7 — Authoring — identical for people and models | 7 | 22 | 20 | 0 | 2 | 0 | 9% |
+| U | 8 — Parity, proven; old paths retired | 5 | 9 | 3 | 2 | 0 | 4 | 56% |
+| M | 0 — Reconciliation: what Set U left, what is still owed | 4 | 5 | 2 | 3 | 0 | 0 | 30% |
+| M | 1 — Layer 1: research strategies as position series | 8 | 16 | 2 | 14 | 0 | 0 | 44% |
+| M | 2 — Costs, RunConfig and outputs | 8 | 19 | 6 | 9 | 4 | 0 | 45% |
+| M | 3 — Throughput tiers and tick replay | 5 | 17 | 5 | 4 | 0 | 8 | 59% |
+| M | 4 — Research-to-deploy reconciliation and the reference venue | 4 | 10 | 0 | 6 | 0 | 4 | 70% |
+| N | 0 — Reconciliation: two DatasetSpecs, a stale Set H, a GPU question | 3 | 4 | 4 | 0 | 0 | 0 | 0% |
+| N | 1 — The dataset declaration and `dataset_build` | 7 | 17 | 11 | 6 | 0 | 0 | 18% |
+| N | 2 — Model families and bring-your-own | 10 | 30 | 16 | 14 | 0 | 0 | 23% |
+| N | 3 — Scoring additions and the hard usage rules | 6 | 13 | 0 | 11 | 2 | 0 | 58% |
+| N | 4 — Calibration, serving and operations | 6 | 13 | 10 | 0 | 3 | 0 | 23% |
+| N | 5 — The model studio frontend (Set H 5, re-cut) | 9 | 22 | 0 | 22 | 0 | 0 | 50% |
+| Q | 1 — The §8 evaluation tools | 12 | 25 | 17 | 6 | 0 | 2 | 20% |
+| Q | 2 — Evidence-standard extensions | 8 | 14 | 5 | 2 | 1 | 6 | 57% |
+| R-a | 1 — The registry and admission | 5 | 10 | 10 | 0 | 0 | 0 | 0% |
+| R-a | 2 — The materialiser | 6 | 10 | 4 | 4 | 0 | 2 | 40% |
+| R-a | 3 — Propose, verify and admit | 8 | 19 | 6 | 13 | 0 | 0 | 34% |
+| R-a | 4 — Search, the Skills page and SKILL.md procedures | 5 | 11 | 5 | 6 | 0 | 0 | 27% |
+| R-b | 1 — Knowledge and memory (KM-02 to KM-10) | 9 | 18 | 10 | 8 | 0 | 0 | 22% |
+| R-b | 2 — Skill promotion, curation and evaluation | 6 | 15 | 9 | 6 | 0 | 0 | 20% |
+| R-b | 3 — The shadow random-search arm (EV-09) | 3 | 7 | 3 | 4 | 0 | 0 | 29% |
+| R-b | 4 — The regime engine and its learned tier | 6 | 15 | 1 | 14 | 0 | 0 | 47% |
+| R-b | 5 — Learned model tiers, FEAT-003 phases 2 to 4 and the visual pipeline builder | 10 | 38 | 6 | 8 | 0 | 24 | 74% |
 
 ### The older sets, and what is genuinely left in them
 
 Sets A–L use a different format (one `Completion:` line per MASTER, no per-task
-markers) so they are not in the 46%. Most are closed; **two are not**, and saying
+markers) so they are not in the headline percentage. Most are closed; **two are not**, and saying
 "A–L are done" would be wrong:
 
 | set | state | what remains |
@@ -163,7 +224,7 @@ markers) so they are not in the 46%. Most are closed; **two are not**, and sayin
 | D | 31/33 (94%) | 2 deferred, recorded |
 | **E** | **7/30 (23%)**, 6 partial, 16 open | production readiness. **10 items block unattended paper trading and 4 block a paper fill at all** — those four are Stage 0 work, not Stage 3 |
 | F, G, I, J, K | closed / complete / superseded | F has 2 deliberately reversed; G has 4 hygiene items |
-| **H** | **47/64 (73%)** | AI Model Studio phases 4–5, folded into the reserved Set N |
+| **H** | **47/64 (73%)** | AI Model Studio phases 4–5, folded into Set N (now planned and counted above) |
 | L | phases 0,1,2,5,6 complete | 3–4 built but **never run live** — the same blocker as S-4.14 |
 
 ---
@@ -370,6 +431,8 @@ Newest first. One line per closing, with the evidence.
 
 | date | what | evidence |
 |---|---|---|
+| 2026-10-05 | **Final verification pass over the whole push (track VERIFY2): the workspace builds, lints and tests green except what belongs to the Set U session or to a service this machine lacks, and the plan was re-counted: 40% → 22% left.** `cargo check --workspace --all-targets` was green; clippy `-D warnings` was not (about 30 sites in `backtest`, `harness`, `model-registry`, `research`, `ledger`, `jobs`, `mcp-server-lib` and `api`, all fixed; one was real, a dead `si/pi/fi -= 1` in `harness::memory::curator::shrink_to_cap` whose values were never read). Defects found by running the suites against a migrated scratch database, not by reading: **(1) `session_driver_veto_pg.rs` was a test module living in `crates/api/src/`**, so the boot-sequence invariant (`every_production_binary_that_can_place_an_order_is_accounted_for`) scanned it as a production binary that builds an `ExecutionEngine` without installing forward recording; it moved to `crates/api/tests/inline/`; **(2) its scratch-database helper applied every migration without `_sqlx_migrations`, so 0044 failed and was silently rolled back**, no table made after it carried a grant to `app_role`, and the veto route answered 500 `permission denied for table research_sessions` (fixed with the stand-in table `pg_self_monitor.rs` already uses); **(3) `deployment_gate_switch` and nineteen append-only tables were writable by `app_role` beyond what their migrations granted**, because 0044's default privileges hand `SELECT, INSERT, UPDATE, DELETE` to every new `public` table and a narrower `GRANT` cannot take one away (the lesson of 0167, repeated for 0157, 0170, 0177, 0180, 0181, 0182, 0220, 0222 and 0238): **migration 0246** revokes the surplus, and `deployment_path`'s own probe (an `INSERT` into `deployment_gate_switch` as `app_role` must fail) is what it satisfies; **(4) `pg_model_ops` inserted a `strategy_definitions` row with no `head_revision`**, which 0140 refuses (it now inserts the revision first); **(5) the promoted-set invariant carried a stale `ALLOWED` entry**: `promote_model_version` has filed a proposal since N-4.3 and no longer writes the promoted set, so the entry came off. Line endings: 24 files whose working copy had flipped to CRLF against an LF HEAD were normalised back. Ten stale phase and MASTER headlines were re-counted (four MASTERs, six phase files): Set S MASTER read 137 / 189, holds 140; Set M 2 / 29, holds 7; Set Q 5 / 20, holds 11; Set T 6 / 17, holds 7. **The headline moved because the work moved: Sets M, N, Q, R-a and R-b went from 13 to 132 `DONE` units of 348 and from 43 to 160 `PARTIAL`; the strict row went 50% → 37% and the generous 30% → 7%, so the spread is wider, not narrower.** | 163 migration files (0246 new) apply in order to an empty database (pgvector columns stood in as `float8[]` on 5433), numbers unique, all LF, every new table has `app_role` access and no unintended `DELETE`. Tests per crate, default run: domain 226, execution 218, risk 117, reconciliation 102, monitor 267 (`--test-threads=1`, fresh DB), ledger 231, jobs 129, storage 107, dataplane 323, collectors 246, features 145, backtest 671, research 151, research-session 308, harness 833, model-registry 165, skills 115, strategy-validator 89, strategy-lang 223, strategy-engine 91 (Set U), mcp-server-lib 425, api 755, platform 64, xtask 25, invariants 139; `--ignored` against the scratch database: execution 4, ledger 45, harness 6, skills 22, collectors 1, backtest 6 (+ 5 on a database without `strategy_revision`), model-registry 21 of 25 (the other 4 need the inference sidecar), api 159 of 161 (the other two need pgvector and an illustrative doctest). Frontend: `tsc` 0 errors, vitest 1059 in 114 files, lint 0, build ok; model-trainer 273, model-inference 26 (1 skipped), skill-runner 51, tbot 6, evals 49. Not green and not fixable here: `skeletons_on_btc_usd` (Set U's, `mean_reversion` never fires on 2024 BTC hourly bars), four `storage` legacy suites (a `ledger_events` table no migration creates; `registry_seed` expects 8 asset classes), the live sidecar tests (no inference service on 8002) |
+| 2026-10-04 | **The whole push was built and tested together for the first time, and re-counted.** Twenty tracks and the Set U session had been landing in one uncommitted tree; nobody had run the workspace as a unit. `cargo check --workspace --all-targets` was green; clippy `-D warnings` was not (about 100 sites in `ledger`, `harness`, `backtest`, `model-registry`, `reconciliation`, `execution`, `skills`, `features`, `research`, `invariants`, `api` and `xtask`, all fixed except four in Set U files). Real defects found by running the suites, not by reading: a **deliberate-panic experiment left in `pg_strategy_revision.rs`** (it turned the chain test into a guaranteed failure); `precapital_battery` runnable but not demanded by the Significance gate (`enforced: false` against a runnable battery, now `true`, and its pinned unit test updated); two storage and api tests that broke on this push's own migrations (`pg_instruments` deleted a row 0155 now refuses; `projects.rs` inserted a counted job without the trial 0045 requires); `pg_agent_effect_log` counting every suite's `test-fixture-` users instead of its own; and the AT-01 invariant naming `canonical_read.rs`, `qc_reports.rs` and its live test, now allow-listed with a recorded reason each. Sets M, N, Q, R-a and R-b joined `LIVE_SETS` and §1, and seven stale phase and MASTER headlines were re-counted (Set S MASTER read 90 / 189, the tree holds 137; Set T MASTER read 1 / 17, holds 6). **The headline went 19% → 40% left because 148 planned tasks were added, not because anything regressed**: the four older sets went 29/57/85/13% → 14/17/35/6%. | 143 migrations apply in order to an empty database (pgvector columns stood in as `float8[]` on 5433), numbers unique, gaps only the reserved bands, every new table GRANTs `app_role`, all LF. Tests per crate: domain 226, execution 218, risk 117, reconciliation 102, monitor 267 (`--test-threads=1`, fresh DB), ledger 224, jobs 121, storage 106, dataplane 311, collectors 246, features 145, backtest 576, research 90, research-session 308, harness 806, model-registry 112, skills 77, strategy-validator 89, strategy-lang 223, mcp-server-lib 378, api 700 (+107 `--ignored` against a scratch Postgres), platform 63, xtask 25, invariants 129 with 2 failing on Set U's `propose_deployment` schema; frontend vitest 931, lint 0, build ok, `tsc` 1 error in `StrategyGraphPage.test.tsx` (Set U); model-trainer 117, skill-runner 34 |
 | 2026-10-04 | **Set U U-5.2 done: an embedding model answers a strategy with its vector.** An `embedding` version is an adapter served by the inference service's `/v2/embed` through the local Ollama embedding model (no key, no cost, nothing downloaded); paper deployments reach it through the gateway, the vector typed against the contract, and a strategy can compare two embedded texts with `cosine`. | `test_embed.py` 5/5 incl. the local `nomic-embed-text` (similar texts closer); gateway `an_embeddings_vector_is_consumed_by_a_strategy` (cosine > 0.8 enters, dissimilar holds, a client that cannot embed is unavailable by name); `live_sidecar_v2` embedding test through the running service: 768-d vectors, rates~rates 0.686 vs rates~bread 0.290; model-registry provider 15/15; Set U 9% left |
 | 2026-10-04 | **Set U U-3.4 and U-5.5 done: a v3 backtest runs over HTTP, and the prediction series runs against ClickHouse — without starting the platform.** The platform's own `AppState` and router, built in process as `main.rs` builds them with nothing spawned, take `POST /api/backtests` with an inline graph; the job loads stored bars from a scratch ClickHouse copy and runs on the strategy engine, and the tile reads back `completed` over HTTP. The series job fills a scratch ClickHouse series from a registry version with fold models, each row tagged by the model that answered it, and a refill asks the inference service nothing. | `api/tests/v3_backtest_over_http.rs` (scratch PostgreSQL with every migration, BTC-USD hourly bars 2026-09-01..11: 239 decisions, 6 orders, 3 trades; a bad graph and a wrong timeframe 422, no session 401, another user 404); `platform` `series_runner` against ClickHouse (166 answers, three models each in its window, 3 refused, refill 0 calls); Set U 11% left |
 | 2026-10-04 | **Set U U-5.8 (backtest side): every walk-forward fold's own model answers its window.** A version can keep each fold's model as a `model_fold` artifact with its own training end (0189); the point-in-time chooser answers each backtest decision with the latest model — a fold's or the version's own — trained before the decision minus the embargo, and the manifest names the fold. The trainer that fits every fold and the platform's recording of it are built in another session's files and land with its commit (U-5.8 PARTIAL until then). **Found on the way:** no trained model could ever answer a backtest or a paper deployment — the registry read joined on `model_versions.artifact_id`, which training has never set; it now picks the version's `model` artifact by (model, version), and the series rows record which training end answered. Also: a v1 decision model's class map translates to v3 per-class conditions (U-7.3), and v3 strategies arm from automations and sweep in research. | `v3_models` 9/9 (a fold version over 120 bars answers every decision after fold 0 opens, each by the latest model trained before it — dropping the embargo from the chooser fails it; its prediction series covers the folds' union once, each row tagged by its fold); chooser unit test; `pg_fold_artifacts` on scratch PostgreSQL 17 with 0017/0018/0146/0189; `model-registry` provider 14/14; trainer pytest 117 passed incl. `test_fold_models` 5/5; registry read checked 16/16 versions on the platform database (read-only); staged tree checked in isolation; Set U 13% left |

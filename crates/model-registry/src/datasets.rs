@@ -63,6 +63,27 @@ pub fn runtime_image_digest() -> Result<&'static str> {
         })
 }
 
+/// A dataset the leakage harness refused. Typed so a caller (the `dataset_build` job) can tell a
+/// leak, which is terminal, from an outage, which is retried.
+#[derive(Debug)]
+pub struct LeakageRefused {
+    pub dataset_id: String,
+    pub failures: Vec<String>,
+}
+
+impl std::fmt::Display for LeakageRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "dataset {} failed the leakage harness and was not registered: {}",
+            self.dataset_id,
+            self.failures.join(" | ")
+        )
+    }
+}
+
+impl std::error::Error for LeakageRefused {}
+
 /// What a caller asks for. The label spec is typed, not JSON: `LabelSpec` has no
 /// serde default for `sample_weight_method` (§3.4), so a request that omits the
 /// declaration cannot be constructed at all.
@@ -313,7 +334,35 @@ impl DatasetManager {
             row_flags,
             parquet_bytes,
             frame_digest,
+            leakage_checks,
         } = self.build_frame(plan).await?;
+
+        // N-1.5: a dataset that fails the leakage harness is not registered. This runs
+        // before the Parquet is stored or any row exists, so there is nothing to mistake
+        // for a clean dataset. With no bar store configured there is nothing to check
+        // and the report says so rather than passing vacuously.
+        let leakage = crate::leakage::LeakageReport::from_checks(
+            if leakage_checks.is_empty() {
+                vec![crate::leakage::Check {
+                    name: "no_frames",
+                    passed: true,
+                    detail: "no bar store is configured; no frame was built to check".into(),
+                }]
+            } else {
+                leakage_checks
+            },
+            serde_json::json!({
+                "dataset_id": plan.dataset_id,
+                "frame_digest": frame_digest,
+            }),
+        );
+        if !leakage.passed {
+            return Err(LeakageRefused {
+                dataset_id: plan.dataset_id.clone(),
+                failures: leakage.failures(),
+            }
+            .into());
+        }
 
         let row_count = i64::try_from(acc.row_count()).unwrap_or(i64::MAX);
         let (realized_start, realized_end) = acc.realized_span(req.start, req.end);
@@ -377,6 +426,14 @@ impl DatasetManager {
         .bind(&parquet_uri)
         .execute(&self.pg)
         .await?;
+        sqlx::query(
+            "UPDATE dataset_versions SET leakage_report = $2, dataset_handle = $3              WHERE dataset_version_id = $1",
+        )
+        .bind(dataset_version_id)
+        .bind(leakage.to_json())
+        .bind(&parquet_uri)
+        .execute(&self.pg)
+        .await?;
 
         Ok(DatasetVersionRecord {
             dataset_version_id,
@@ -414,6 +471,7 @@ impl DatasetManager {
         .unwrap_or(60_000_000_000);
         let mut acc = FrameAccumulator::new(plan.features.clone());
         let mut row_flags = QualityFlags::NONE;
+        let mut leakage_checks: Vec<crate::leakage::Check> = Vec::new();
 
         if let Some(store) = &self.store {
             let view = DataView::new(store);
@@ -437,15 +495,34 @@ impl DatasetManager {
                         kept.push(b);
                     }
                 }
+                let obs = kept
+                    .iter()
+                    .map(backtest::warmup::bar_obs)
+                    .collect::<Vec<_>>();
                 let frame = features::build_aligned_training_frame(
-                    &kept
-                        .iter()
-                        .map(backtest::warmup::bar_obs)
-                        .collect::<Vec<_>>(),
+                    &obs,
                     &plan.features,
                     plan.horizon_bars,
                     step_ns,
                 );
+                // The high/low barrier and CUSUM sampling the label spec names (N-1.4, N-1.7).
+                let frame =
+                    crate::dataset_labels::apply(frame, &obs, step_ns, &req.label_spec)?;
+                // The leakage harness (N-1.5) runs on the frame it is about to store.
+                let build = crate::leakage::production_builder(
+                    &plan.features,
+                    plan.horizon_bars,
+                    step_ns,
+                );
+                leakage_checks.extend(crate::leakage::dataset_checks(
+                    instrument,
+                    &obs,
+                    &build,
+                    &frame,
+                    &req.split_spec,
+                    req.label_spec.horizon_bars,
+                    step_ns,
+                ));
                 acc.push(instrument, &frame);
             }
         }
@@ -457,6 +534,7 @@ impl DatasetManager {
             row_flags,
             parquet_bytes,
             frame_digest,
+            leakage_checks,
         })
     }
 
@@ -794,6 +872,8 @@ struct Built {
     row_flags: QualityFlags,
     parquet_bytes: Vec<u8>,
     frame_digest: String,
+    /// What the leakage harness found on the frames just built (N-1.5).
+    leakage_checks: Vec<crate::leakage::Check>,
 }
 
 /// The pinned calendars a dataset's instruments trade under. Calendars are
@@ -1028,6 +1108,8 @@ mod tests {
             min_return_threshold: None,
             sample_weight_method: weighting,
             code_hash: "code".into(),
+            barrier_path: None,
+            sampling: None,
         }
         .content_keyed()
     }

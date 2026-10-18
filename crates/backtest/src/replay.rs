@@ -73,6 +73,10 @@ pub struct Genesis {
     pub checkpoint: Option<Checkpoint>,
     /// The stored bars it was given, per input, as given.
     pub history: Vec<(InputIdx, Bar)>,
+    /// The external rows it was handed at start (P-3.6), in place before the
+    /// history is replayed. Later refreshes are ordinary events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external: Option<strategy_engine::ExternalData>,
 }
 
 impl Genesis {
@@ -84,9 +88,22 @@ impl Genesis {
     /// A checkpoint from another plan, or an engine error.
     pub fn build(&self, plan: Arc<Plan>, spec: &InstrumentSpec) -> Result<Engine, RestoreError> {
         if let Some(cp) = &self.checkpoint {
-            return Engine::restore(plan, cp, self.history.iter().copied(), spec);
+            return Engine::restore_with_external(
+                plan,
+                cp,
+                self.history.iter().copied(),
+                spec,
+                self.external.clone(),
+            );
         }
         let mut engine = Engine::new(plan)?;
+        if let Some(data) = &self.external {
+            engine.on_event(
+                Event::External(data.clone()),
+                &PortfolioView::default(),
+                spec,
+            )?;
+        }
         let mut bars = self.history.clone();
         bars.sort_by_key(|(i, b)| (b.close_ns, *i == PRIMARY, *i));
         let view = PortfolioView::default();
@@ -134,10 +151,14 @@ pub struct Divergence {
 #[serde(tag = "verdict", rename_all = "snake_case")]
 pub enum Verdict {
     /// Every decision byte-identical.
-    Identical { decisions: usize },
+    Identical {
+        decisions: usize,
+    },
     Diverged(Divergence),
     /// Could not be replayed, and why — never counted as a match.
-    Unreplayable { reason: String },
+    Unreplayable {
+        reason: String,
+    },
 }
 
 /// One segment: a genesis and the records up to the next.
@@ -319,7 +340,11 @@ pub fn first_difference(a: &Value, b: &Value, path: String) -> Option<(String, V
             let keys: BTreeSet<&String> = x.keys().chain(y.keys()).collect();
             keys.into_iter().find_map(|k| {
                 let null = Value::Null;
-                first_difference(x.get(k).unwrap_or(&null), y.get(k).unwrap_or(&null), join(k))
+                first_difference(
+                    x.get(k).unwrap_or(&null),
+                    y.get(k).unwrap_or(&null),
+                    join(k),
+                )
             })
         }
         (Value::Array(x), Value::Array(y)) => (0..x.len().max(y.len())).find_map(|i| {
@@ -333,7 +358,11 @@ pub fn first_difference(a: &Value, b: &Value, path: String) -> Option<(String, V
         (Value::Number(x), Value::Number(y)) if x.as_f64() == y.as_f64() => None,
         _ if a == b => None,
         _ => Some((
-            if path.is_empty() { "trace".into() } else { path },
+            if path.is_empty() {
+                "trace".into()
+            } else {
+                path
+            },
             a.clone(),
             b.clone(),
         )),
@@ -355,7 +384,10 @@ mod tests {
         let b = json!({"values": {"f": {"num": 1.0}, "s": 2}, "actions": [{"qty": "1"}]});
         assert_eq!(first_difference(&a, &b, String::new()), None);
         // An integer and the same float are the same number.
-        assert_eq!(first_difference(&json!(5), &json!(5.0), String::new()), None);
+        assert_eq!(
+            first_difference(&json!(5), &json!(5.0), String::new()),
+            None
+        );
     }
 
     /// A recorded input must read back as exactly the number the engine saw,
@@ -395,6 +427,9 @@ mod tests {
         };
         let r = replay(&plan, &[step]);
         assert_eq!(r.len(), 1);
-        assert!(matches!(r[0].verdict, Verdict::Unreplayable { .. }), "{r:?}");
+        assert!(
+            matches!(r[0].verdict, Verdict::Unreplayable { .. }),
+            "{r:?}"
+        );
     }
 }

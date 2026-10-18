@@ -64,7 +64,7 @@ For every relative markdown link under `docs/`, confirm the target file exists.
 - **Fail:** a broken relative link → fix the path.
 
 ### 8. Index completeness
-For each folder with a `README.md` index (`adr/`, `specs/`, `plans/`, `research/`), confirm every
+For each folder with a `README.md` index (`docs/adr/`, `docs/specs/`, `docs/plans/`, `docs/research/`), confirm every
 file in the folder has an index row and every index row points to a file that exists.
 - **Fail:** an unlisted file or a dangling index row.
 

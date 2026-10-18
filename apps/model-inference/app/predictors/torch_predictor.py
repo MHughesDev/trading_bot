@@ -52,6 +52,14 @@ def _fit_width(X: np.ndarray, input_dim: int) -> np.ndarray:
     return fixed
 
 
+def sequence_window(header: dict | None) -> int | None:
+    """The window a bundle was trained on (``header["sequence"]["window"]``), or None."""
+    seq = (header or {}).get("sequence")
+    if not seq:
+        return None
+    return int(seq["window"])
+
+
 def predict(
     artifact_bytes: bytes,
     instances: list,
@@ -60,6 +68,11 @@ def predict(
     header: dict | None = None,
 ) -> list[Forecast]:
     X, objective = base.build_matrix(instances, header)
+
+    window = sequence_window(header)
+    seq = window is not None
+    if seq and len(instances) < window:
+        raise base.Abstain(f"insufficient_history: have {len(instances)}, need {window}")
 
     try:
         payload = torch.load(io.BytesIO(artifact_bytes), map_location="cpu", weights_only=False)
@@ -83,19 +96,26 @@ def predict(
         )
         out_horizon = payload.get("horizon", horizon) or horizon
 
+        if seq and arch != "lstm":
+            raise base.Abstain(f"sequence_arch_not_served: {arch}")
         model = _build(arch, input_dim, hidden)
         model.load_state_dict(payload["state_dict"])
         model.eval()
 
         X = _fit_width(X, input_dim)
+        if seq:
+            # (1, window, features): the instances are the recent bars, oldest first.
+            X = X[-window:][None, :, :]
         with torch.no_grad():
-            raw = model(torch.tensor(X, dtype=torch.float32)).squeeze(-1)
+            raw = model(torch.tensor(X, dtype=torch.float32)).reshape(-1)
         raw = np.atleast_1d(raw.numpy().astype(float))
 
         if objective == "regression":
             return [base.to_forecast_return(float(r), out_horizon) for r in raw]
         probs = 1.0 / (1.0 + np.exp(-raw))
         return [base.to_forecast(float(p), out_horizon) for p in probs]
+    except base.Abstain:
+        raise
     except Exception:
         # Robust fallback: one flat forecast per instance.
         return [base.to_forecast(0.5, horizon) for _ in instances]

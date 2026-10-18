@@ -768,6 +768,7 @@ dependencies = [
  "chrono",
  "domain",
  "rkyv 0.8.16",
+ "rust_decimal",
  "uuid",
 ]
 
@@ -1127,10 +1128,12 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sqlx",
  "storage",
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite 0.24.0",
+ "toml 0.8.23",
  "tracing",
  "xxhash-rust",
 ]
@@ -1771,6 +1774,7 @@ dependencies = [
  "async-nats",
  "base64 0.22.1",
  "domain",
+ "observability",
  "rkyv 0.8.16",
  "serde",
  "serde_json",
@@ -1796,11 +1800,14 @@ name = "execution"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "dashmap",
  "domain",
  "execution",
+ "observability",
  "reqwest",
+ "ring",
  "risk",
  "rust_decimal",
  "rust_decimal_macros",
@@ -1834,6 +1841,8 @@ dependencies = [
  "dataplane",
  "domain",
  "once_cell",
+ "rust_decimal",
+ "rust_decimal_macros",
  "serde",
 ]
 
@@ -2898,10 +2907,12 @@ name = "mcp-server-lib"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "backtest",
  "chrono",
  "dataplane",
  "domain",
  "features",
+ "nautilus-backtest",
  "reqwest",
  "rust_decimal",
  "serde",
@@ -2998,6 +3009,7 @@ dependencies = [
  "domain",
  "features",
  "futures-util",
+ "jobs",
  "ledger",
  "parquet",
  "reqwest",
@@ -3510,6 +3522,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -3839,6 +3852,7 @@ dependencies = [
  "chrono",
  "collectors",
  "dashmap",
+ "dataplane",
  "demand-manager",
  "domain",
  "ed25519-dalek",
@@ -4215,8 +4229,10 @@ dependencies = [
  "execution",
  "ledger",
  "monitor",
+ "observability",
  "risk",
  "rust_decimal",
+ "serde_json",
  "sqlx",
  "thiserror 2.0.18",
  "tokio",
@@ -5044,12 +5060,15 @@ name = "skills"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "ed25519-dalek",
  "hex",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sqlx",
  "thiserror 2.0.18",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -5373,6 +5392,8 @@ dependencies = [
 name = "strategy-lang"
 version = "0.1.0"
 dependencies = [
+ "backtest",
+ "chrono",
  "domain",
  "features",
  "rust_decimal",
@@ -5381,6 +5402,7 @@ dependencies = [
  "strategy-engine",
  "strategy-validator",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

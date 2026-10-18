@@ -320,7 +320,16 @@ impl AppState {
             }
             Err(_) => Arc::new(SuiteManager::new()),
         };
-        let research = crate::research::ResearchManager::new(pg.clone(), Arc::clone(&suite), 2);
+        // Sweeps may hold at most `sweep_max_parallel()` of the backtest slots and never the last
+        // one, so a campaign cannot starve an interactive backtest (FEAT-003 §7.6, RB-5.8).
+        let research = crate::research::ResearchManager::new(
+            pg.clone(),
+            Arc::clone(&suite),
+            research::refit::sweep_slots(
+                backtest::manager::MAX_CONCURRENT_RUNS,
+                research::refit::sweep_max_parallel(),
+            ),
+        );
 
         // The job service counts trials against Set J's experiment counter inside
         // the submission transaction (INV-1, JB-03).

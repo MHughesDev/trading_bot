@@ -53,14 +53,32 @@ fn decimal_to_raw_u64(d: rust_decimal::Decimal) -> u64 {
 
 // ── Kraken message shapes ─────────────────────────────────────────────────────
 
-/// Kraken trade message wrapper — borrows directly from the WS frame bytes.
+/// Kraken message wrapper — borrows directly from the WS frame bytes.
+///
+/// `data` stays raw because its shape depends on `channel`: the `status`
+/// frame Kraken sends on every connect carries system info there, not trades.
+/// Decoding it as trades up front rejected that valid frame on each connect.
 #[derive(Debug, Deserialize)]
 struct KrakenMessage<'a> {
     #[serde(borrow)]
     channel: Option<&'a str>,
     #[serde(rename = "type", borrow)]
     msg_type: Option<&'a str>,
-    data: Option<Vec<KrakenTrade<'a>>>,
+    #[serde(borrow)]
+    data: Option<&'a RawValue>,
+}
+
+impl<'a> KrakenMessage<'a> {
+    /// The trades in a `trade` `update` frame; `Ok(None)` for every other frame.
+    fn trade_updates(&self) -> Result<Option<Vec<KrakenTrade<'a>>>, serde_json::Error> {
+        if self.channel != Some("trade") || self.msg_type != Some("update") {
+            return Ok(None);
+        }
+        match self.data {
+            Some(data) => serde_json::from_str(data.get()).map(Some),
+            None => Ok(Some(Vec::new())),
+        }
+    }
 }
 
 /// A single trade entry inside a Kraken `trade.update` message.
@@ -236,21 +254,16 @@ impl KrakenCollector {
                     Some(Ok(Message::Text(text))) => {
                         let raw = text.as_bytes().to_vec();
                         // Borrow directly from `text` — no per-field String allocations.
-                        let parsed: Result<KrakenMessage<'_>, _> = serde_json::from_str(&text);
+                        let parsed = serde_json::from_str::<KrakenMessage<'_>>(&text)
+                            .and_then(|km| km.trade_updates());
                         match parsed {
                             Err(e) => {
                                 warn!(error = %e, "failed to parse Kraken message (in-process)");
                                 let _ = raw;
                             }
-                            Ok(km) => {
-                                let is_trade_update =
-                                    km.channel == Some("trade") && km.msg_type == Some("update");
-
-                                if !is_trade_update {
-                                    continue;
-                                }
-
-                                for trade in km.data.unwrap_or_default() {
+                            Ok(None) => continue,
+                            Ok(Some(trades)) => {
+                                for trade in trades {
                                     if let Some(gap) = gap_detector.check(trade.trade_id) {
                                         warn!(
                                             instrument_id = %gap.instrument_id,
@@ -355,7 +368,8 @@ impl Collector for KrakenCollector {
                     Some(Ok(Message::Text(text))) => {
                         let raw = text.as_bytes().to_vec();
                         // Borrow directly from `text` — no per-field String allocations.
-                        let parsed: Result<KrakenMessage<'_>, _> = serde_json::from_str(&text);
+                        let parsed = serde_json::from_str::<KrakenMessage<'_>>(&text)
+                            .and_then(|km| km.trade_updates());
                         match parsed {
                             Err(e) => {
                                 warn!(error = %e, "failed to parse Kraken message");
@@ -366,15 +380,8 @@ impl Collector for KrakenCollector {
                                     warn!(error = %qe, "quarantine publish failed");
                                 }
                             }
-                            Ok(km) => {
-                                let is_trade_update =
-                                    km.channel == Some("trade") && km.msg_type == Some("update");
-
-                                if !is_trade_update {
-                                    continue;
-                                }
-
-                                let trades = km.data.unwrap_or_default();
+                            Ok(None) => continue,
+                            Ok(Some(trades)) => {
                                 for trade in &trades {
                                     if let Some(gap) = gap_detector.check(trade.trade_id) {
                                         warn!(
@@ -421,5 +428,43 @@ impl Collector for KrakenCollector {
             );
             policy.wait().await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn trades_in(frame: &str) -> Option<usize> {
+        let km: KrakenMessage<'_> = serde_json::from_str(frame).expect("frame parses");
+        km.trade_updates().expect("data parses").map(|t| t.len())
+    }
+
+    #[test]
+    fn status_frame_on_connect_is_not_a_parse_error() {
+        // Abridged from a real frame Kraken sent on connect, 2026-10-02.
+        let status = r#"{"channel":"status","type":"update","data":[{"version":"2.0.10","system":"online","api_version":"v2","connection_id":17891276928146118034,"upcoming_maintenance":[{"affected_services":["spot_ws"],"event_id":33}]}]}"#;
+        assert_eq!(trades_in(status), None);
+    }
+
+    #[test]
+    fn heartbeat_and_subscribe_ack_carry_no_trades() {
+        assert_eq!(trades_in(r#"{"channel":"heartbeat"}"#), None);
+        let ack = r#"{"method":"subscribe","req_id":1,"result":{"channel":"trade","snapshot":false,"symbol":"BTC/USD"},"success":true}"#;
+        assert_eq!(trades_in(ack), None);
+    }
+
+    #[test]
+    fn trade_update_yields_its_trades() {
+        let update = r#"{"channel":"trade","type":"update","data":[{"symbol":"BTC/USD","side":"sell","price":84513.4,"qty":0.00044372,"ord_type":"limit","trade_id":110042677,"timestamp":"2026-10-02T22:26:27.655339Z"}]}"#;
+        assert_eq!(trades_in(update), Some(1));
+    }
+
+    #[test]
+    fn malformed_trade_update_is_still_an_error() {
+        let km: KrakenMessage<'_> =
+            serde_json::from_str(r#"{"channel":"trade","type":"update","data":[{"side":"buy"}]}"#)
+                .expect("frame parses");
+        assert!(km.trade_updates().is_err());
     }
 }

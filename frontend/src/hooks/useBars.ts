@@ -1,8 +1,9 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { assetApi } from '@/lib/api'
 import { usePrefs } from '@/store/prefs'
 import { getWsClient, wsBus } from '@/api/ws'
+import { foldTrade, mergeLiveBars, upsertLive } from '@/lib/liveBars'
 import type { Bar } from '@/components/charts/MultiPaneChart'
 
 /* =============================================================================
@@ -97,6 +98,13 @@ export function useBars(instrument: string | undefined, tfSecs: number, lookback
     staleTime: 5_000,
   })
 
+  // The history the trade lane seeds a forming candle from. A ref, so the
+  // socket subscription does not tear down every time REST refetches.
+  const historyRef = useRef<Bar[]>([])
+  useEffect(() => {
+    historyRef.current = rest.data ?? []
+  }, [rest.data])
+
   // Dropping the live tail when the chart changes instrument or timeframe, in
   // the same render rather than in an effect. As an effect this was a real
   // wrong-data bug, not a style point: `bars` splices `liveBars` onto the REST
@@ -129,11 +137,7 @@ export function useBars(instrument: string | undefined, tfSecs: number, lookback
       if (f.lane === 'market.bars.1m') {
         const [b] = normalise([f.payload])
         if (!b) return
-        setLiveBars((prev) => {
-          const next = prev.filter((x) => String(x.ts) !== String(b.ts))
-          next.push(b)
-          return next.slice(-600)
-        })
+        setLiveBars((prev) => upsertLive(prev, b))
         setLastUpdate(Date.now())
         return
       }
@@ -144,22 +148,8 @@ export function useBars(instrument: string | undefined, tfSecs: number, lookback
         const price = Number((f.payload as unknown as { price?: string })?.price)
         if (!Number.isFinite(price)) return
         const minute = Math.floor(Date.now() / 60000) * 60
-        setLiveBars((prev) => {
-          const next = [...prev]
-          const i = next.findIndex((x) => Number(x.ts) === minute)
-          if (i >= 0) {
-            const cur = next[i]
-            next[i] = {
-              ...cur,
-              high: Math.max(cur.high, price),
-              low: Math.min(cur.low, price),
-              close: price,
-            }
-          } else {
-            next.push({ ts: minute, open: price, high: price, low: price, close: price, volume: 0 })
-          }
-          return next.slice(-600)
-        })
+        const history = historyRef.current
+        setLiveBars((prev) => foldTrade(prev, history, price, minute))
         setLastUpdate(Date.now())
       }
     })
@@ -169,13 +159,7 @@ export function useBars(instrument: string | undefined, tfSecs: number, lookback
     }
   }, [instrument, tfSecs, panelId])
 
-  const bars = useMemo(() => {
-    const base = rest.data ?? []
-    if (!liveBars.length) return base
-    const lastRest = base.length ? Number(base[base.length - 1].ts) : 0
-    const tail = liveBars.filter((b) => Number(b.ts) > lastRest)
-    return tail.length ? [...base, ...tail] : base
-  }, [rest.data, liveBars])
+  const bars = useMemo(() => mergeLiveBars(rest.data ?? [], liveBars), [rest.data, liveBars])
 
   return {
     bars,

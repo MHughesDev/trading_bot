@@ -22,6 +22,9 @@ ADR that replaces it.
 | [ADR-0009](0009-append-only-raw-event-archive-as-ground-truth.md) | Append-Only Raw Event Archive as Ground Truth | Accepted | 2026-06-08 |
 | [ADR-0010](0010-three-front-doors-one-canonical-strategy-json.md) | Three Front Doors, One Canonical Strategy JSON | Accepted | 2026-06-08 |
 | [ADR-0011](0011-demand-driven-data-engines-no-auto-start.md) | Demand-Driven Data Engines — No Auto-Start | Accepted | 2026-06-08 |
+| [ADR-0012](0012-canonical-bar-storage.md) | Canonical Bar Storage Strategy (FB-AP-013) — Python-era, pre-dates the Rust rewrite; bar storage is now governed by ADR-0004 | Accepted (historical) | 2026-04-12 |
+| [ADR-0013](0013-managed-data-services.md) | Managed vs Self-Hosted Data Services (FB-CONT-008) — Python-era (Redis/QuestDB/Qdrant) | Accepted (historical) | 2026-04-12 |
+| [ADR-0014](0014-backtesting-via-market-simulator-sdk.md) | Backtesting via the market_simulator SDK (Set D) | Accepted; partially superseded by ADR-0044 | 2026-06-13 |
 | [ADR-0015](0015-freeze-model-definition-format-v1.md) | Freeze Model Definition Format v1.0 | Accepted | 2026-06-15 |
 | [ADR-0016](0016-distributional-forecast-contract.md) | Distributional Forecast Contract v1.1 | Accepted | 2026-06-16 |
 | [ADR-0017](0017-walk-forward-cv-and-leakage-discipline.md) | Walk-Forward Cross-Validation and Leakage Discipline | Accepted | 2026-06-16 |
@@ -56,6 +59,7 @@ ADR that replaces it.
 | [ADR-0046](0046-risk-gate-in-every-environment.md) | The Risk Gate Runs in Every Environment, Including Backtests | Accepted | 2026-10-01 |
 | [ADR-0047](0047-decision-journal-and-replay-parity.md) | Every Decision Is Journaled, and Paper Is Replayed Through the Backtest Nightly | Accepted | 2026-10-01 |
 | [ADR-0048](0048-paper-trading-runs-in-the-app.md) | Paper Trading Runs in the App, Never on a Broker's Paper Account | Accepted | 2026-10-02 |
+| [ADR-0049](0049-retrieval-store-pgvector-and-postgres-full-text.md) | The Retrieval Store Is pgvector Plus Postgres Full-Text; Milvus Stays Deferred | Accepted | 2026-10-04 |
 
 ## Decision Relationships
 

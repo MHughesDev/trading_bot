@@ -12,6 +12,7 @@
 //! endpoint at all.
 
 pub mod funding;
+pub mod runner;
 pub mod service;
 pub mod sink;
 

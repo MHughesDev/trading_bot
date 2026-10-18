@@ -34,11 +34,11 @@ Phase 0 and 1: done. Phase 2: every item done except 2.1, 2.14 and 2.16, which a
 
 ## 4. Known violations still in code (reported, not fixed)
 
-- **The GOVERNOR loop's approval pause writes no audit record.** `local_driver`'s `Effect::AskHuman` holds a §15 action across a human answer with no `pre`/`post` pair of its own, so the *asking* is in `agent_messages` and not in `audit_event`. The dispatch that follows an approval is recorded like any other. Found while closing AT-64; narrower than the exemption it replaces, and not the same claim.
+- **(Closed in the working tree, 2026-10-03, by the runtime track: `await_approval` opens an audit envelope before the pause and closes it with the answer.)** **The GOVERNOR loop's approval pause writes no audit record.** `local_driver`'s `Effect::AskHuman` holds a §15 action across a human answer with no `pre`/`post` pair of its own, so the *asking* is in `agent_messages` and not in `audit_event`. The dispatch that follows an approval is recorded like any other. Found while closing AT-64; narrower than the exemption it replaces, and not the same claim.
 - **The older SDK driver refuses gated actions rather than pausing on them.** Its loop cannot hold a call across a human answer. The GOVERNOR loop (`local_driver`) pauses and resumes.
-- **The trainer's failure classification is not total.** An exception type nobody has classified maps to `dependency_failure`.
+- ~~**The trainer's failure classification is not total.**~~ **Total as of 2026-10-03.** Every `builtins` exception resolves to a declared reason through `_TYPE_TABLE`, and `classify_detailed` reports whether the reason was *declared*, *type_table* or *unclassified* (a third-party type no entry reaches, still `dependency_failure` because the reason set is closed); `tests/test_failures.py` enumerates the builtins and fails if one has no entry.
 - **Overlapping-label leakage has no static detector** (OQ-12, deliberate). Visible only as the 1.10 CV/WF gap, and the test asserts that.
-- **Nothing consumes a `Comparison`.** Built, sealed, tested; the COMPARE worker that would call it is 2.1's gap.
+- ~~**Nothing consumes a `Comparison`.**~~ `compare_worker::CompareWorker` calls `ComparisonPlan::judge` (2026-10-03). It runs once registered in `main.rs`.
 - **Five of the sixteen gates have no evidence source** — 3, 4, 10, 12, 15. Eleven judge on real numbers read from the ledger.
 - **Resume still restarts, for two reasons that are no longer "nobody measured it".** AT-61 has run (2026-09-15): torch is bit-identical and is in `BIT_IDENTICAL_FRAMEWORKS`; xgboost and lightgbm are bit-identical only with row/column sampling off and are in `SAMPLING_SENSITIVE_FRAMEWORKS` (ADR-P6-11); sklearn and garch have no checkpoint boundary. What is still missing is that **no adapter writes a checkpoint during training** and **nothing calls `jobs::checkpoint::plan_resume`** — so a manifest can now honestly say `bit_identical`, and there is still no stored checkpoint for a re-queued job to find.
 
@@ -174,7 +174,7 @@ Never pipe cargo through anything that swallows its exit code.
 
 ## 7. Memory notes worth reading
 
-In `C:\Users\Mason\.claude\projects\C--Users-Mason-Desktop-coding-projects-trading-bot\memory\`:
+In `C:\Users\Mason\.claude\projects\D--coding-projects-trading-bot\memory\`:
 - `ml-platform-context-pack.md`
 - `trial-ledger-architecture.md` — why the sealed types and the append-only design must not be "simplified"
 - `feedback-work-to-finish-line.md`

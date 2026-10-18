@@ -115,6 +115,9 @@ fn row(e: &Entry) -> Value {
             "window": format!("{}→{}", e.data_window.start, e.data_window.end),
         },
         "stale": e.stale,
+        // Derived from untrusted text (KM-10). The browser shows every entry and marks
+        // these; the agent's default retrieval leaves them out.
+        "tainted": e.is_tainted(),
         "corroborations": e.corroborations,
         "cited_by_chain": e.cited_by_chain,
         // §2.2's right-hand column: the fields that belong to one kind rather
@@ -179,6 +182,22 @@ pub async fn list(
     Path(bucket): Path<String>,
     Query(q): Query<ListQuery>,
 ) -> impl IntoResponse {
+    // `report` is the monthly store report (AGENT-007 §2.4, S-4.16): size,
+    // archive rate and cited share. It lives under the one `{bucket}` path for
+    // the shadowing reason in the module docs, not on a literal of its own.
+    if bucket == "report" {
+        return match MemoryStore::new(state.pg.clone())
+            .store_report(token.user_id())
+            .await
+        {
+            Ok(r) => (StatusCode::OK, Json(json!(r))).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "report_failed", "message": e.to_string() })),
+            )
+                .into_response(),
+        };
+    }
     let Some(kind) = kind_for(&bucket) else {
         return unknown_bucket(&bucket);
     };
@@ -193,10 +212,14 @@ pub async fn list(
         // one that already carries the archived/superseded filter; filtering the
         // kind afterwards costs a few rows and keeps one query.
         Some(subject) => store
-            .for_subject(token.user_id(), subject, 200)
+            .for_subject_including_tainted(token.user_id(), subject, 200)
             .await
             .map(|entries| entries.into_iter().filter(|e| e.kind == kind).collect()),
-        None => store.by_kind(token.user_id(), kind, 200).await,
+        None => {
+            store
+                .by_kind_including_tainted(token.user_id(), kind, 200)
+                .await
+        }
     };
     match fetched {
         Ok(entries) => {

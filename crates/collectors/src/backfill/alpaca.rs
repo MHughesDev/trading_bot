@@ -223,6 +223,10 @@ impl BackfillSource for AlpacaBackfill {
         SOURCE
     }
 
+    fn max_page_span(&self, period_secs: u32) -> Option<chrono::Duration> {
+        Some(chrono::Duration::seconds(Self::page_span_secs(period_secs)))
+    }
+
     fn declared_limit(&self) -> RateLimit {
         declared_rate_limit()
     }

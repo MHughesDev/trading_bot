@@ -5,7 +5,7 @@
   "name": "estimate_liquidity_cost",
   "version": 1,
   "namespace": "analysis",
-  "description": "Effective spread by three bar-based estimators plus Amihud illiquidity and a square-root impact curve. Use it to find the turnover at which a strategy's edge is eaten by its own costs.",
+  "description": "Effective spread by four bar-based estimators (EDGE, Roll, Corwin-Schultz, Abdi-Ranaldo) plus Amihud illiquidity and a square-root impact curve. Use it to find the turnover at which a strategy's edge is eaten by its own costs.",
   "input_schema": {
     "type": "object",
     "required": ["instrument_id", "timeframe", "start", "end"],
@@ -34,7 +34,7 @@
 }
 ```
 
-Three estimators because each one breaks somewhere
+Four estimators because each one breaks somewhere
 --------------------------------------------------
 None of these observe a quote. They infer the spread from what bars do, and each
 inference fails on a different kind of data:
@@ -51,15 +51,22 @@ inference fails on a different kind of data:
   is more robust than Corwin-Schultz on gappy data and is biased on very short
   bars.
 
-AGENT-006 §5.2 also names **EDGE** (Ardia, Guidotti & Kroencke, 2024), and it is
-deliberately **not here**. It is a generalised method-of-moments estimator whose
-moment conditions this implementation could not reproduce from memory with
-confidence: the version written first returned a negative variance against a
-reference series whose spread is known exactly, which means it was wrong, not
-that the data was hard. A cost estimator that is wrong low makes every strategy
-look profitable, so it is absent rather than approximate. Recorded as **OQ-15**;
-the fix is to implement it from the paper and check it against the same fixture,
-which now measures exactly this.
+* **EDGE (Ardia, Guidotti & Kroencke, 2024)** is a GMM estimator over open, high,
+  low and close of consecutive bars. It uses the moment conditions the paper
+  derives from the open-to-mid, close-to-mid and overnight log-price steps, each
+  demeaned by the share of bars that traded, and combines the two resulting
+  squared-spread estimates by inverse-variance weight. It is the one estimator
+  here that uses the open, and it is the least biased when the high and low are
+  observed at discrete times. Its squared-spread estimate is **negative** when
+  the bounce is smaller than sampling noise; that is the estimator declining,
+  reported as `None`, and it is never floored to zero.
+
+  History, because the number is only worth trusting with it: the first version
+  of this estimator (OQ-15) was written without the paper to hand and returned a
+  negative variance against a series whose spread is known exactly, so it was
+  withheld. This version follows the published moment conditions and is held to
+  the same fixture by `the_cost_estimators_recover_the_fixtures_known_spread`,
+  which checks it against two series with different known spreads.
 
 The consensus is the **median**, not the mean: these disagree by large factors on
 bad data, and a mean is dragged by whichever one broke. `estimator_disagreement_bps`
@@ -142,6 +149,49 @@ def _abdi_ranaldo(h, l, c):
     return math.sqrt(value) if value > 0 else None
 
 
+def _edge(o, h, l, c):
+    """EDGE (Ardia, Guidotti & Kroencke 2024), the efficient GMM combination.
+
+    Works on consecutive bars, so it takes the log of each series and pairs bar
+    `t` with bar `t-1`. Returns the spread as a fraction of price, or `None`
+    when the estimate does not exist: too few bars, no bar that traded, or a
+    negative squared spread (the bounce is below the noise, so there is no
+    real-valued spread to report).
+    """
+    if o.size < 30:
+        return None
+    lo, lh, ll, lc = np.log(o), np.log(h), np.log(l), np.log(c)
+    h1, l1, c1 = lh[:-1], ll[:-1], lc[:-1]
+    m = (lh + ll) / 2.0
+    m1 = m[:-1]
+    o_, h_, l_, c_, m_ = lo[1:], lh[1:], ll[1:], lc[1:], m[1:]
+    r1 = m_ - o_
+    r2 = o_ - m1
+    r3 = m_ - c1
+    r4 = c1 - m1
+    r5 = o_ - c1
+    # tau: the bar did not just repeat itself (a flat bar carries no information)
+    tau = ((h_ != l_) | (l_ != c1)).astype(float)
+    pt = float(tau.mean())
+    po = float((tau * (o_ != h_)).mean() + (tau * (o_ != l_)).mean())
+    pc = float((tau * (c1 != h1)).mean() + (tau * (c1 != l1)).mean())
+    if pt == 0.0 or po == 0.0 or pc == 0.0:
+        return None
+    d1 = r1 - float(r1.mean()) / pt * tau
+    d3 = r3 - float(r3.mean()) / pt * tau
+    d5 = r5 - float(r5.mean()) / pt * tau
+    x1 = -4.0 / po * d1 * r2 - 4.0 / pc * d3 * r4
+    x2 = -4.0 / po * d1 * r5 - 4.0 / pc * d5 * r4
+    e1, e2 = float(x1.mean()), float(x2.mean())
+    v1 = float((x1**2).mean()) - e1**2
+    v2 = float((x2**2).mean()) - e2**2
+    if not (v1 + v2) > 0.0:
+        return None
+    w1 = v2 / (v1 + v2)
+    s2 = w1 * e1 + (1.0 - w1) * e2
+    return math.sqrt(s2) if s2 > 0.0 else None
+
+
 def run(payload: dict) -> dict:
     frame = load(payload, "primary")
     o = pd.to_numeric(frame["open"], errors="coerce").to_numpy(dtype=float)
@@ -174,7 +224,11 @@ def run(payload: dict) -> dict:
     ar = _abdi_ranaldo(h, l, c)
     if ar is not None:
         estimates["abdi_ranaldo"] = ar
+    edge = _edge(o, h, l, c)
+    if edge is not None:
+        estimates["edge"] = edge
     refused = {
+        "edge": edge is None,
         "roll": roll is None,
         "corwin_schultz": cs is None,
         "abdi_ranaldo": ar is None,
@@ -221,6 +275,11 @@ def run(payload: dict) -> dict:
     )
 
     warnings = []
+    if edge is None:
+        warnings.append(
+            "EDGE declined: its squared-spread estimate was not positive (the bounce is below "
+            "the sampling noise) or too few bars traded. It is not floored to zero."
+        )
     if roll is None:
         warnings.append(
             "Roll's estimator has no solution here: the first-order return autocovariance is "

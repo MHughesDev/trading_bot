@@ -53,6 +53,38 @@ pub struct RollupResponse {
     /// Paper mode only: bot-wide account totals across all asset classes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_totals: Option<paper::PaperAccountTotals>,
+    /// Live mode: which open positions could **not** be marked, and why
+    /// (Set E 2.2, locked decision 4). Their unrealized P&L is absent from the
+    /// totals above, and this says so — a missing mark is never a zero.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mark_coverage: Option<MarkCoverage>,
+}
+
+/// Open positions the rollup could not value, by reason.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct MarkCoverage {
+    /// Instruments with open lots that were valued.
+    pub marked: Vec<String>,
+    /// Instruments with open lots and no mark at all.
+    pub missing: Vec<String>,
+    /// Instruments whose latest mark is older than the staleness bound.
+    pub stale: Vec<String>,
+    /// Instruments quoted in a currency the rollup cannot convert to USD.
+    pub unconverted: Vec<String>,
+    /// Lots whose stored side is absent or unreadable — not valued in either
+    /// direction rather than guessed long.
+    pub unreadable_lots: usize,
+}
+
+impl MarkCoverage {
+    /// Whether every open position was valued.
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        self.missing.is_empty()
+            && self.stale.is_empty()
+            && self.unconverted.is_empty()
+            && self.unreadable_lots == 0
+    }
 }
 
 /// A mark price for an instrument at query time.
@@ -113,7 +145,13 @@ pub fn compute_rollup(
             continue;
         }
         if let Some(mark) = mark_by_id.get(lot.instrument_id.as_str()) {
-            let upnl = (mark.mark - lot.open_price) * lot.remaining_qty * mark.usd_rate;
+            // A short lot gains when the mark falls. Valuing every lot as a long
+            // reported a winning short as a loss of the same size.
+            let per_unit = match lot.side {
+                domain::order::Side::Buy => mark.mark - lot.open_price,
+                domain::order::Side::Sell => lot.open_price - mark.mark,
+            };
+            let upnl = per_unit * lot.remaining_qty * mark.usd_rate;
             *unrealized_by_instrument
                 .entry(lot.instrument_id.clone())
                 .or_default() += upnl;
@@ -235,6 +273,7 @@ pub fn compute_rollup(
         win_rate: platform_win_rate,
         by_asset_class: asset_class_tiles,
         account_totals: None,
+        mark_coverage: None,
     }
 }
 

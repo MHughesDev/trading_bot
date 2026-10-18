@@ -152,6 +152,7 @@ fn a_shadow_fed_bar_by_bar_is_the_backtest_over_the_same_bars() {
             fill_policy: FillPolicy::NextBarOpen,
             strategy_id: "ema_cross".into(),
             sims: SimulatorSet::realistic(),
+            external: strategy_engine::ExternalData::default(),
         },
         &mut NoModels,
     )
@@ -165,6 +166,7 @@ fn a_shadow_fed_bar_by_bar_is_the_backtest_over_the_same_bars() {
     let genesis = Genesis {
         checkpoint: None,
         history: all[..WARM].iter().map(|b| (0, engine_bar(b))).collect(),
+        external: None,
     };
     let mut shadow = Shadow::new(
         ShadowSpec {
@@ -226,6 +228,7 @@ fn a_shadow_fill_reports_its_turnover_and_slippage_against_the_decision_price() 
         &Genesis {
             checkpoint: None,
             history: Vec::new(),
+            external: None,
         },
     )
     .unwrap();

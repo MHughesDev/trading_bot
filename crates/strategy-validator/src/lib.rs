@@ -6,6 +6,7 @@
 pub mod exits;
 pub mod expressions;
 pub mod feature_names;
+pub mod leakage_scan;
 pub mod risk;
 pub mod schema;
 pub mod teach;

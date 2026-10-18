@@ -362,7 +362,12 @@ impl BackfillEngine {
                 });
             }
 
-            let page_end = std::cmp::min(cursor + self.policy.page_span, key.window_end);
+            let span = self
+                .source
+                .max_page_span(period)
+                .filter(|s| *s > Duration::zero())
+                .unwrap_or(self.policy.page_span);
+            let page_end = std::cmp::min(cursor + span, key.window_end);
             let req = PageRequest {
                 venue: key.venue.clone(),
                 symbol: key.instrument.clone(),
@@ -408,6 +413,7 @@ impl BackfillEngine {
                 .cloned()
                 .collect();
 
+            let mut page_rows = 0_u64;
             if !bars.is_empty() {
                 match self
                     .sink
@@ -420,7 +426,10 @@ impl BackfillEngine {
                     )
                     .await
                 {
-                    Ok(report) => rows += report.written(),
+                    Ok(report) => {
+                        page_rows = report.written();
+                        rows += page_rows;
+                    }
                     Err(e) => {
                         // A sink failure is *not* a source failure: pause rather
                         // than fail so a ClickHouse restart does not lose a
@@ -462,7 +471,13 @@ impl BackfillEngine {
                 .advance(
                     &key,
                     next,
-                    i64::try_from(rows)
+                    // This page's rows, not the run's running total: the store
+                    // *adds* it (`rows_written = rows_written + $n`), so passing
+                    // the cumulative count summed a triangle — 145 pages that
+                    // wrote 896 rows recorded 79,597 on the live database
+                    // (2026-10-03). A delta is also the only figure that stays
+                    // right across a restart, where the run's total restarts at 0.
+                    i64::try_from(page_rows)
                         .unwrap_or(i64::MAX)
                         .min(i64::from(u32::MAX)),
                 )

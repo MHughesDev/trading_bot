@@ -1,0 +1,777 @@
+[
+  {
+    "family": "gbm",
+    "variant": "lightgbm",
+    "framework": "lightgbm",
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "direction",
+      "triple_barrier",
+      "meta_label",
+      "rank"
+    ],
+    "outputs": [
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.adapters.lightgbm_adapter:train",
+    "description": "lightgbm point model (legacy framework lightgbm)",
+    "contamination": null
+  },
+  {
+    "family": "gbm",
+    "variant": "lightgbm_q",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "realized_vol"
+    ],
+    "outputs": [
+      "quantiles",
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.adapters.lightgbm_q_adapter:train",
+    "description": "lightgbm quantile model; legacy framework lightgbm with output.quantile_levels",
+    "contamination": null
+  },
+  {
+    "family": "gbm",
+    "variant": "xgboost",
+    "framework": "xgboost",
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "direction",
+      "triple_barrier",
+      "meta_label",
+      "rank"
+    ],
+    "outputs": [
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.adapters.xgboost_adapter:train",
+    "description": "xgboost point model (legacy framework xgboost)",
+    "contamination": null
+  },
+  {
+    "family": "gbm",
+    "variant": "xgboost_q",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "realized_vol"
+    ],
+    "outputs": [
+      "quantiles",
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.adapters.xgboost_q_adapter:train",
+    "description": "xgboost quantile model; legacy framework xgboost with output.quantile_levels",
+    "contamination": null
+  },
+  {
+    "family": "linear",
+    "variant": "sklearn",
+    "framework": "sklearn",
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "direction",
+      "triple_barrier",
+      "meta_label",
+      "rank"
+    ],
+    "outputs": [
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.adapters.sklearn_adapter:train",
+    "description": "scikit-learn point model (legacy framework sklearn)",
+    "contamination": null
+  },
+  {
+    "family": "linear",
+    "variant": "sklearn_q",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "forward_return"
+    ],
+    "outputs": [
+      "quantiles",
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.adapters.sklearn_q_adapter:train",
+    "description": "scikit-learn quantile model; legacy framework sklearn with output.quantile_levels",
+    "contamination": null
+  },
+  {
+    "family": "nn",
+    "variant": "torch",
+    "framework": "torch",
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "direction",
+      "triple_barrier",
+      "meta_label",
+      "rank"
+    ],
+    "outputs": [
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": true,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.adapters.torch_adapter:train",
+    "description": "torch MLP/LSTM point model (legacy framework torch)",
+    "contamination": null
+  },
+  {
+    "family": "forecaster",
+    "variant": "lstm",
+    "framework": "forecaster",
+    "role": "candidate",
+    "targets": [
+      "forward_return"
+    ],
+    "outputs": [
+      "point",
+      "quantiles"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": true,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.adapters.forecaster:train",
+    "description": "legacy forecaster (model_kind=forecaster); torch LSTM",
+    "contamination": null
+  },
+  {
+    "family": "baseline",
+    "variant": "mean",
+    "framework": null,
+    "role": "baseline",
+    "targets": [
+      "forward_return",
+      "realized_vol",
+      "direction"
+    ],
+    "outputs": [
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.baseline:train_mean",
+    "description": "Historical mean of the training label",
+    "contamination": null
+  },
+  {
+    "family": "baseline",
+    "variant": "ewma",
+    "framework": null,
+    "role": "baseline",
+    "targets": [
+      "forward_return",
+      "realized_vol"
+    ],
+    "outputs": [
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.baseline:train_ewma",
+    "description": "Exponentially weighted moving average of the label",
+    "contamination": null
+  },
+  {
+    "family": "baseline",
+    "variant": "ridge",
+    "framework": null,
+    "role": "baseline",
+    "targets": [
+      "forward_return",
+      "realized_vol",
+      "direction"
+    ],
+    "outputs": [
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.baseline:train_ridge",
+    "description": "Ridge regression on the declared features",
+    "contamination": null
+  },
+  {
+    "family": "baseline",
+    "variant": "har",
+    "framework": null,
+    "role": "baseline",
+    "targets": [
+      "realized_vol"
+    ],
+    "outputs": [
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [
+      "realized_variance"
+    ],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.baseline:train_har",
+    "description": "HAR-RV: daily/weekly/monthly realised variance",
+    "contamination": null
+  },
+  {
+    "family": "baseline",
+    "variant": "log_har",
+    "framework": null,
+    "role": "baseline",
+    "targets": [
+      "realized_vol"
+    ],
+    "outputs": [
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [
+      "realized_variance"
+    ],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.baseline:train_log_har",
+    "description": "Log-HAR-RV",
+    "contamination": null
+  },
+  {
+    "family": "baseline",
+    "variant": "harq",
+    "framework": null,
+    "role": "baseline",
+    "targets": [
+      "realized_vol"
+    ],
+    "outputs": [
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [
+      "realized_variance",
+      "realized_quarticity"
+    ],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.baseline:train_harq",
+    "description": "HARQ: HAR with realised-quarticity-scaled daily term",
+    "contamination": null
+  },
+  {
+    "family": "vol",
+    "variant": "garch",
+    "framework": "garch",
+    "role": "candidate",
+    "targets": [
+      "realized_vol",
+      "forward_return"
+    ],
+    "outputs": [
+      "distribution",
+      "quantiles"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.vol:train_garch",
+    "description": "GARCH(1,1) Student-t, own MLE; serving = conditional sigma or abstain",
+    "contamination": null
+  },
+  {
+    "family": "vol",
+    "variant": "gjr",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "realized_vol",
+      "forward_return"
+    ],
+    "outputs": [
+      "distribution",
+      "quantiles"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.vol:train_gjr",
+    "description": "GJR-GARCH(1,1) leverage term",
+    "contamination": null
+  },
+  {
+    "family": "vol",
+    "variant": "egarch",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "realized_vol",
+      "forward_return"
+    ],
+    "outputs": [
+      "distribution",
+      "quantiles"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.vol:train_egarch",
+    "description": "EGARCH(1,1)",
+    "contamination": null
+  },
+  {
+    "family": "vol",
+    "variant": "realized_garch",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "realized_vol"
+    ],
+    "outputs": [
+      "distribution",
+      "quantiles"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [
+      "realized_variance"
+    ],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.vol:train_realized_garch",
+    "description": "Realised GARCH (Hansen-Huang-Shek) with a realised-measure equation",
+    "contamination": null
+  },
+  {
+    "family": "regime",
+    "variant": "hmm",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "regime"
+    ],
+    "outputs": [
+      "regime_labels"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.regime:train_hmm",
+    "description": "Gaussian HMM, filtered probabilities only (forward algorithm); artifact type regime_labels; filtered only",
+    "contamination": null
+  },
+  {
+    "family": "regime",
+    "variant": "jm",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "regime"
+    ],
+    "outputs": [
+      "regime_labels"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.regime:train_jm",
+    "description": "Statistical jump model (discrete); artifact type regime_labels; filtered only",
+    "contamination": null
+  },
+  {
+    "family": "regime",
+    "variant": "cjm",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "regime"
+    ],
+    "outputs": [
+      "regime_labels"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.regime:train_cjm",
+    "description": "Continuous jump model (soft assignments); artifact type regime_labels; filtered only",
+    "contamination": null
+  },
+  {
+    "family": "regime",
+    "variant": "sjm",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "regime"
+    ],
+    "outputs": [
+      "regime_labels"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.regime:train_sjm",
+    "description": "Sparse jump model (feature-weight selection); artifact type regime_labels; filtered only",
+    "contamination": null
+  },
+  {
+    "family": "probabilistic",
+    "variant": "ngboost",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "realized_vol"
+    ],
+    "outputs": [
+      "distribution",
+      "quantiles",
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.probabilistic:train_ngboost",
+    "description": "Gaussian natural-gradient boosting (own implementation, sklearn trees)",
+    "contamination": null
+  },
+  {
+    "family": "probabilistic",
+    "variant": "qrf",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "realized_vol"
+    ],
+    "outputs": [
+      "quantiles",
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.probabilistic:train_qrf",
+    "description": "Quantile regression forest (leaf-weight quantiles)",
+    "contamination": null
+  },
+  {
+    "family": "probabilistic",
+    "variant": "conformal",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "realized_vol"
+    ],
+    "outputs": [
+      "quantiles",
+      "point"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.probabilistic:train_conformal",
+    "description": "Split-conformal wrapper around a point model",
+    "contamination": null
+  },
+  {
+    "family": "foundation",
+    "variant": "chronos",
+    "framework": null,
+    "role": "foundation_baseline",
+    "targets": [
+      "forward_return",
+      "realized_vol"
+    ],
+    "outputs": [
+      "point",
+      "quantiles"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": false,
+    "entrypoint": "app.families.foundation:train_chronos",
+    "description": "Chronos zero-shot; baseline only, contaminated when cutoff is after the window start",
+    "contamination": {
+      "model_cutoff": "2024-01-01"
+    }
+  },
+  {
+    "family": "foundation",
+    "variant": "timesfm",
+    "framework": null,
+    "role": "foundation_baseline",
+    "targets": [
+      "forward_return",
+      "realized_vol"
+    ],
+    "outputs": [
+      "point",
+      "quantiles"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": false,
+    "entrypoint": "app.families.foundation:train_timesfm",
+    "description": "TimesFM zero-shot; baseline only, contaminated when cutoff is after the window start",
+    "contamination": {
+      "model_cutoff": "2024-06-01"
+    }
+  },
+  {
+    "family": "foundation",
+    "variant": "ttm",
+    "framework": null,
+    "role": "foundation_baseline",
+    "targets": [
+      "forward_return",
+      "realized_vol"
+    ],
+    "outputs": [
+      "point",
+      "quantiles"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": false,
+    "entrypoint": "app.families.foundation:train_ttm",
+    "description": "TinyTimeMixer zero-shot; baseline only, contaminated when cutoff is after the window start",
+    "contamination": {
+      "model_cutoff": "2024-01-01"
+    }
+  },
+  {
+    "family": "sequence",
+    "variant": "lstm",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "realized_vol",
+      "direction"
+    ],
+    "outputs": [
+      "point",
+      "quantiles"
+    ],
+    "needs_sequence": true,
+    "uses_gpu": true,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.sequence:train_lstm",
+    "description": "lstm on real windows (needs DatasetSpec.sequence)",
+    "contamination": null
+  },
+  {
+    "family": "sequence",
+    "variant": "tcn",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "realized_vol",
+      "direction"
+    ],
+    "outputs": [
+      "point",
+      "quantiles"
+    ],
+    "needs_sequence": true,
+    "uses_gpu": true,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.sequence:train_tcn",
+    "description": "tcn on real windows (needs DatasetSpec.sequence)",
+    "contamination": null
+  },
+  {
+    "family": "sequence",
+    "variant": "dlinear",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "realized_vol",
+      "direction"
+    ],
+    "outputs": [
+      "point",
+      "quantiles"
+    ],
+    "needs_sequence": true,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.sequence:train_dlinear",
+    "description": "dlinear on real windows (needs DatasetSpec.sequence)",
+    "contamination": null
+  },
+  {
+    "family": "sequence",
+    "variant": "nhits",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "realized_vol",
+      "direction"
+    ],
+    "outputs": [
+      "point",
+      "quantiles"
+    ],
+    "needs_sequence": true,
+    "uses_gpu": true,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.sequence:train_nhits",
+    "description": "nhits on real windows (needs DatasetSpec.sequence)",
+    "contamination": null
+  },
+  {
+    "family": "sequence",
+    "variant": "patchtst",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "realized_vol",
+      "direction"
+    ],
+    "outputs": [
+      "point",
+      "quantiles"
+    ],
+    "needs_sequence": true,
+    "uses_gpu": true,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.sequence:train_patchtst",
+    "description": "patchtst on real windows (needs DatasetSpec.sequence)",
+    "contamination": null
+  },
+  {
+    "family": "sequence",
+    "variant": "tft",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "realized_vol",
+      "direction"
+    ],
+    "outputs": [
+      "point",
+      "quantiles"
+    ],
+    "needs_sequence": true,
+    "uses_gpu": true,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.sequence:train_tft",
+    "description": "tft on real windows (needs DatasetSpec.sequence)",
+    "contamination": null
+  },
+  {
+    "family": "sequence",
+    "variant": "tsmixer",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "realized_vol",
+      "direction"
+    ],
+    "outputs": [
+      "point",
+      "quantiles"
+    ],
+    "needs_sequence": true,
+    "uses_gpu": true,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.families.sequence:train_tsmixer",
+    "description": "tsmixer on real windows (needs DatasetSpec.sequence)",
+    "contamination": null
+  },
+  {
+    "family": "byo",
+    "variant": "model_interface",
+    "framework": null,
+    "role": "candidate",
+    "targets": [
+      "forward_return",
+      "direction",
+      "triple_barrier",
+      "meta_label",
+      "rank",
+      "realized_vol"
+    ],
+    "outputs": [
+      "point",
+      "quantiles",
+      "distribution",
+      "class_probs"
+    ],
+    "needs_sequence": false,
+    "uses_gpu": false,
+    "requires": [],
+    "selectable_as_candidate": true,
+    "entrypoint": "app.byo:train",
+    "description": "Bring-your-own tbot.models.ModelInterface class, sandboxed",
+    "contamination": null
+  }
+]

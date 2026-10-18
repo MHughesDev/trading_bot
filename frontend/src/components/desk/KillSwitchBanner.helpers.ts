@@ -35,3 +35,42 @@ export function killSwitchView(q: {
   if (q.isPending) return { kind: 'silent' }
   return { kind: 'unknown' }
 }
+
+/** The push channel's path. One place, so the banner and its test agree. */
+export const KILL_SWITCH_STREAM = '/api/desk/kill-switch/events'
+
+/**
+ * What one frame of `GET /api/desk/kill-switch/events` does to the banner's
+ * state (§19.6, "within one event").
+ *
+ * The frame carries the halted scopes **read from `monitor.kill_switch`**, not
+ * the trading-status mirror. So:
+ *
+ *  - a global halt is applied to the cached state **at once** — that is the
+ *    event, and waiting for a refetch of the mirror would put the poll back
+ *    between the trip and the banner. The mirror is not re-read in the same
+ *    breath, because it refreshes on the same notification and a read that
+ *    raced it would put the stale "armed" back over the frame;
+ *  - anything else (a reset, a strategy-scoped halt, an unreadable frame) asks
+ *    for a refetch rather than clearing the banner itself: the frame knows the
+ *    monitor's table, and only the status route knows whether the gate agrees.
+ *
+ * `null` for `next` means "leave the cache alone".
+ */
+export function applyKillSwitchFrame(
+  prev: KillSwitchState | null | undefined,
+  content: Record<string, unknown>,
+): { next: KillSwitchState | null; refetch: boolean } {
+  if (content.readable === true && content.global_halted === true) {
+    return {
+      next: {
+        ...(prev ?? {}),
+        trading_enabled: false,
+        kill_switch_active: true,
+        scope: 'global',
+      },
+      refetch: false,
+    }
+  }
+  return { next: null, refetch: true }
+}

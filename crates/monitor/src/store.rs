@@ -51,11 +51,12 @@ fn numeric(v: Option<f64>) -> Option<Decimal> {
 /// `monitor` was in until this constant existed, because `0074` and `0075` both
 /// publish and nothing anywhere issued a `LISTEN`.
 ///
-/// `monitor.strategy_state` is deliberately **not** here, and the reason is not
-/// an omission: it has no trigger to listen to. An automatic scale-down
-/// therefore still waits a cadence. Adding the trigger is a migration, which
-/// this crate may not write.
-pub const NOTIFY_CHANNELS: [&str; 2] = ["monitor_lease", "monitor_kill_switch"];
+/// `monitor.strategy_state` has no trigger of its own. Since 0165 every
+/// `monitor.events` insert publishes on `monitor_events`, and every automatic
+/// scale-down writes its event before its state row — so the mirror is woken by
+/// the event, and the cadence is what catches the state row if the refresh
+/// raced it.
+pub const NOTIFY_CHANNELS: [&str; 3] = ["monitor_lease", "monitor_kill_switch", "monitor_events"];
 
 /// The monitor's database.
 #[derive(Clone, Debug)]
@@ -76,7 +77,8 @@ pub struct MonitorStore {
 /// which carries `event_id`, `occurred_at` and `is_drill` that the write type does
 /// not, and lacks the fields the writer had no reason to keep. Two names because
 /// they are two things.
-#[derive(Clone, Debug, PartialEq, Eq)]
+// Not `Eq`: the two value fields are floats.
+#[derive(Clone, Debug, PartialEq)]
 pub struct RecordedEvent {
     pub event_id: Uuid,
     /// When the monitor recorded it. Selected, not merely ordered by.
@@ -86,6 +88,12 @@ pub struct RecordedEvent {
     pub kind: String,
     /// The metric the event is about, when it is about one.
     pub metric: Option<String>,
+    /// The reading that breached, when the event is about one. Nullable: a trip
+    /// from a fact (lease lost, mismatch) has no metric value, and a missing
+    /// number must stay missing rather than become 0.
+    pub observed_value: Option<f64>,
+    /// The declared limit it was judged against, when there is one.
+    pub limit_value: Option<f64>,
     pub actor: String,
     /// A rehearsal (§4.2). Carried so a caller can keep a drill out of a
     /// precision numerator rather than discovering later that it could not.
@@ -481,6 +489,18 @@ impl MonitorStore {
         // Through `facts::decide` rather than naming the halt here, so the venue
         // scoping and the "that venue and no other" rule stay in one place for
         // every raise site.
+        // The verdict first (0165): the venue now has a recorded last word, and
+        // it is "disagreed", so `monitor.venue_reconciled` refuses its resume
+        // until a later check agrees (§8.3). Written before the halt so a
+        // failure between the two leaves the stricter record, never the looser.
+        self.record_venue_check(
+            venue.as_str(),
+            crate::reconciled::VenueVerdict::Disagreed,
+            0,
+            Some(&fact.reason()),
+            crate::reconciled::RECONCILIATION_ACTOR,
+        )
+        .await?;
         let actions = crate::facts::decide(&fact, &crate::evaluate::DependencyMap::new(), &[]);
         let mut halted = None;
         for action in &actions {
@@ -514,7 +534,18 @@ impl MonitorStore {
     /// the caller is not a check.
     pub async fn reset(&self, request: &ResetRequest) -> Result<(), StoreError> {
         let last = self.last_reset_at(&request.scope).await?;
+        // The reconciliation preconditions are read here, from the verdict table,
+        // and the caller's claim is discarded (S-7.6, §8.3). An error reading
+        // them refuses the reset: an unreadable verdict has not agreed.
+        let mut request = request.clone();
+        request.all_venues_reconciled = self.all_venues_reconciled().await?;
+        let request = &request;
+        // Who, why and what first, so an agent asking about an unreconciled
+        // venue is told it is not a person rather than about the venue.
         request.validate(last, Utc::now())?;
+        if let Scope::Venue(v) = &request.scope {
+            request.validate_venue(self.venue_reconciled(v).await?)?;
+        }
 
         let event = MonitorEvent::new(
             request.scope.clone(),
@@ -614,7 +645,9 @@ impl MonitorStore {
         // 30 days" -- an answer that shrinks as the rest of the platform gets
         // busier, with nothing in it to say so.
         let rows = sqlx::query(
-            "SELECT event_id, occurred_at, scope, family, kind, metric, actor, is_drill
+            "SELECT event_id, occurred_at, scope, family, kind, metric,
+                    observed_value::float8 AS observed_value,
+                    limit_value::float8 AS limit_value, actor, is_drill
                FROM monitor.events
               WHERE ($2::TEXT IS NULL OR scope = $2)
                 AND ($3::TIMESTAMPTZ IS NULL OR occurred_at >= $3)
@@ -634,6 +667,8 @@ impl MonitorStore {
                 family: r.get("family"),
                 kind: r.get("kind"),
                 metric: r.get("metric"),
+                observed_value: r.get("observed_value"),
+                limit_value: r.get("limit_value"),
                 actor: r.get("actor"),
                 is_drill: r.get("is_drill"),
             })

@@ -90,7 +90,34 @@ impl QualityMonitor {
 
     // ── I-5.9: Rolling quality re-scoring ────────────────────────────────────
 
+    /// Fill realised outcomes into the forecasts whose horizon has passed (N-4.1), so the
+    /// scoring below, the coverage CUSUM and calibration have rows with a `realized` value.
+    /// A missing bar store is reported as waiting rows, not an error.
+    ///
+    /// # Errors
+    /// A Postgres failure.
+    pub async fn realise_now(&self) -> anyhow::Result<crate::forecast_realisation::Realised> {
+        let url = std::env::var("CLICKHOUSE_URL").ok().filter(|u| !u.is_empty());
+        let bars: Box<dyn crate::forecast_realisation::ClosedBars> = match url {
+            Some(u) => Box::new(crate::forecast_realisation::StoreBars(
+                backtest::store::BarStore::connect(&u),
+            )),
+            None => Box::new(crate::forecast_realisation::NoBars),
+        };
+        crate::forecast_realisation::realise_pending(&self.pg, bars.as_ref(), Utc::now(), 5000)
+            .await
+    }
+
     async fn run_cycle(&self) -> anyhow::Result<()> {
+        match self.realise_now().await {
+            Ok(r) => tracing::info!(
+                filled = r.filled,
+                waiting_for_bars = r.waiting_for_bars,
+                unresolvable = r.unresolvable,
+                "forecast realisation pass"
+            ),
+            Err(e) => tracing::warn!("forecast realisation failed: {e}"),
+        }
         // Fetch all deployed / production models.
         let rows: Vec<(String, uuid::Uuid)> = sqlx::query_as(
             "SELECT DISTINCT m.model_id, m.created_by \
@@ -100,8 +127,7 @@ impl QualityMonitor {
                AND m.status NOT IN ('archived', 'failed')",
         )
         .fetch_all(&self.pg)
-        .await
-        .unwrap_or_default();
+        .await?;
 
         for (model_id, user_uuid) in &rows {
             if let Err(e) = self.score_model(model_id, user_uuid).await {
@@ -113,52 +139,81 @@ impl QualityMonitor {
     }
 
     async fn score_model(&self, model_id: &str, _user_id: &uuid::Uuid) -> anyhow::Result<()> {
-        // Fetch recent realized vs predicted forecasts from the forecasts table.
-        // Falls back gracefully when no rows exist yet.
-        let rows: Vec<(f64, f64, f64, f64)> = sqlx::query_as(
-            "SELECT predicted_q10, predicted_q50, predicted_q90, realized \
-             FROM model_forecasts \
-             WHERE model_id = $1 \
-               AND created_at > NOW() - INTERVAL '7 days' \
-               AND realized IS NOT NULL \
-             ORDER BY created_at DESC LIMIT 500",
+        // Recent realised forecasts, oldest first (the change-point scan reads them in
+        // time order). A forecast carries the quantile levels its model reported; a level
+        // that was not reported is NULL, and a coverage figure is computed only from the
+        // levels that exist, never from a neighbouring level standing in for it.
+        type Row = (
+            Option<f64>,
+            Option<f64>,
+            Option<f64>,
+            Option<f64>,
+            Option<f64>,
+            Option<f64>,
+            f64,
+        );
+        let mut rows: Vec<Row> = sqlx::query_as(
+            "SELECT predicted_q05, predicted_q25, predicted_q50, predicted_q75,                     predicted_q95, predicted_q10, realized                FROM (SELECT * FROM model_forecasts                       WHERE model_id = $1                         AND created_at > NOW() - INTERVAL '7 days'                         AND realized IS NOT NULL                       ORDER BY created_at DESC LIMIT 500) recent               ORDER BY created_at ASC",
         )
         .bind(model_id)
         .fetch_all(&self.pg)
-        .await
-        .unwrap_or_default();
+        .await?;
 
         if rows.is_empty() {
             return Ok(());
         }
+        rows.retain(|r| r.6.is_finite());
 
-        let n = rows.len() as f64;
-        // Pinball loss at τ=0.5 → MAD-style CRPS proxy.
-        let crps: f64 = rows
-            .iter()
-            .map(|(_, q50, _, r)| {
-                let e = r - q50;
-                if e >= 0.0 {
-                    0.5 * e
-                } else {
-                    -0.5 * e
-                }
-            })
-            .sum::<f64>()
-            / n;
+        // Pinball loss at tau = 0.5 (MAD-style CRPS proxy), over rows that have a median.
+        let medians: Vec<(f64, f64)> = rows.iter().filter_map(|r| r.2.map(|q| (q, r.6))).collect();
+        let crps: Option<f64> = (!medians.is_empty()).then(|| {
+            medians.iter().map(|(q50, r)| 0.5 * (r - q50).abs()).sum::<f64>() / medians.len() as f64
+        });
 
-        // Empirical coverage at 50% and 90% intervals.
-        let cov50 = rows
-            .iter()
-            .filter(|(q10, _, q90, r)| r >= q10 && r <= q90)
-            .count() as f64
-            / n;
-        // Use q10/q90 for the 90% proxy (outer interval).
-        let cov90 = rows
-            .iter()
-            .filter(|(q10, _, q90, r)| r >= q10 && r <= q90)
-            .count() as f64
-            / n;
+        // Coverage of the central 50% interval (q25..q75) and the central 90% (q05..q95).
+        let cov = |lo: fn(&Row) -> Option<f64>, hi: fn(&Row) -> Option<f64>| -> Option<(f64, Vec<bool>)> {
+            let hits: Vec<bool> = rows
+                .iter()
+                .filter_map(|r| lo(r).zip(hi(r)).map(|(l, h)| r.6 >= l && r.6 <= h))
+                .collect();
+            (!hits.is_empty())
+                .then(|| (hits.iter().filter(|h| **h).count() as f64 / hits.len() as f64, hits))
+        };
+        let cov50 = cov(|r| r.1, |r| r.3).map(|(c, _)| c);
+        let cov90_series = cov(|r| r.0, |r| r.4);
+        let cov90 = cov90_series.as_ref().map(|(c, _)| *c);
+
+        // N-4.1: a change point in the 90% interval's coverage. The adaptive wrapper in the
+        // trainer resets on the same statistic with the same parameters.
+        if let Some((_, hits)) = &cov90_series {
+            let changes = crate::calibration::CoverageCusum::scan(
+                0.10,
+                crate::calibration::DEFAULT_K,
+                crate::calibration::DEFAULT_H,
+                hits,
+            );
+            if let Some(last) = changes.last() {
+                let word = match last.shift {
+                    crate::calibration::Shift::Undercover => "under-covers",
+                    crate::calibration::Shift::Overcover => "over-covers",
+                };
+                self.raise_alert(
+                    model_id,
+                    "coverage_shift",
+                    &format!(
+                        "the 90% interval {word} since forecast {} of {} (CUSUM k={}, h={}, {} change point(s))",
+                        last.at,
+                        hits.len(),
+                        crate::calibration::DEFAULT_K,
+                        crate::calibration::DEFAULT_H,
+                        changes.len()
+                    ),
+                    cov90,
+                    Some(crate::calibration::DEFAULT_H),
+                )
+                .await?;
+            }
+        }
 
         let now = Utc::now();
 
@@ -175,11 +230,12 @@ impl QualityMonitor {
         .bind(cov90)
         .bind(rows.len() as i32)
         .execute(&self.pg)
-        .await
-        .ok(); // Non-fatal: table may not exist yet.
+        .await?;
 
-        // I-5.10: check calibration drift.
-        self.check_calibration_drift(model_id, cov90, cov50).await?;
+        // I-5.10: check calibration drift (only when a 90% interval was reported).
+        if let Some(c90) = cov90 {
+            self.check_calibration_drift(model_id, c90, cov50.unwrap_or(f64::NAN)).await?;
+        }
 
         // I-5.10: check staleness.
         self.check_staleness(model_id).await?;
@@ -378,6 +434,9 @@ impl QualityMonitor {
                 "quality-triggered retrain (alert={alert_id}, kind={alert_kind})"
             )),
             data: None,
+            declaration: None,
+            family: None,
+            experiment_id: None,
         };
 
         match self.models.start_train(model_id, user_id, req).await {

@@ -28,6 +28,13 @@ d_min_missing = 0.05
 sigma_multiple = 8.0
 reversal_fraction = 0.8
 sigma_window = 50
+# ADR-P1-7a (2026-10-04): a reversing spike on a bar whose volume is at least this
+# multiple of the rolling median volume is a traded market move that reverted, not
+# a bad print. All 16 spikes the 8-sigma rule flagged in the 3-year Coinbase 1m
+# backfill (10 BTC-USD, 6 ETH-USD) sat on 4.5x-130x median volume, and Kraken's own
+# trades reproduced each bar's high/low. A print nobody traded through has no volume
+# behind it. 0 disables the exemption.
+volume_confirm_multiple = 3.0
 
 [stale.runs]
 # Consecutive identical closes on ZERO volume before a run is flagged, per
@@ -47,6 +54,12 @@ default = 10
 max_zero_share = 0.10
 # "spikes > 20x rolling median" (DATA-005 §7).
 spike_multiple = 20.0
+# ADR-P1-7b (2026-10-04): the check fires on the SHARE of bars that are spikes, not
+# on any single one. 1m volume is heavy-tailed: 0.28% (BTC-USD) and 0.39% (ETH-USD)
+# of three years of Coinbase 1m bars exceed 20x the rolling median, and "any spike
+# fails" is certain to fire on a million-bar series. A feed that is wrong about
+# volume shows far above one bar in a hundred.
+max_spike_share = 0.01
 median_window = 50
 
 [cross_source]

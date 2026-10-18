@@ -12,7 +12,7 @@
 import { useMemo, useState } from 'react'
 import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
-import { SearchInput } from '@/components/primitives/Field'
+import { Input, SearchInput } from '@/components/primitives/Field'
 import { Tabs } from '@/components/primitives/Segmented'
 import { EmptyState } from '@/components/primitives/States'
 import { Tooltip } from '@/components/primitives/Overlay'
@@ -20,14 +20,21 @@ import type {
   AgendaItem,
   AmendmentView,
   CharterView,
+  HypothesisVerdict,
   Mode,
+  RunBrief,
+  ServedRead,
+  Stage,
   ToolCard,
+  WireCharter,
   WorkingState,
 } from '@/api/desk'
 import type { CallCost, ExposureNote, ToolSearch } from '@/lib/desk/events'
 import { applyOrder, dropOnto, moveInColumn, reconcileOrder } from '@/lib/desk/agenda'
 import { toolsVisibleInMode, whyHidden } from '@/lib/desk/rings'
-import { BudgetMeter, EvidenceChip, RiskBadge, StageStrip, type IdResolver } from './Shared'
+import { BudgetMeter, EvidenceChip, InertText, RiskBadge, StageStrip, type IdResolver } from './Shared'
+import type { EvidenceEntry, StreamEvidence } from '@/lib/desk/evidence'
+import { sessionRefusal } from '@/lib/desk/sessions'
 import { acceptanceMark, waitingOn, absenceCopy } from './RightPanel.helpers'
 import { ago } from '@/components/desk/Shared.helpers'
 
@@ -55,6 +62,103 @@ const STEP_GLYPH: Record<string, string> = {
  */
 export type StateAbsence = 'not_served' | 'no_run'
 
+/** A run's lifecycle columns, as recorded on its row. */
+export interface RecordedLifecycle {
+  mode: string
+  workflow: string | null
+  ring: string | null
+  stage: Stage
+}
+
+/** Mode, workflow, ring and stage from the run record, said to be that. */
+export function RecordedLifecycleView({ r }: { r: RecordedLifecycle }) {
+  return (
+    <div data-testid="recorded-lifecycle">
+      <div style={{ display: 'flex', gap: 'var(--s-2)', flexWrap: 'wrap', marginBottom: 'var(--s-2)' }}>
+        <Badge tone="outline">mode: {r.mode}</Badge>
+        <Badge tone="outline">{r.workflow ?? 'no workflow — a chat turn'}</Badge>
+        <Badge tone={r.ring === null ? 'warn' : r.ring === 'research' ? 'neutral' : 'warn'}>
+          ring: {r.ring ?? 'not reported'}
+        </Badge>
+      </div>
+      <StageStrip stage={r.stage} />
+      <p className="sub">from the run record — the agent's own working state is not served here</p>
+    </div>
+  )
+}
+
+/**
+ * The run's hypotheses, each with the platform's verdict and the numbers that
+ * decided it (S-10.15): the falsifier read as metric / comparator / threshold,
+ * and every observed value recorded up to the verdict, marked when it satisfied
+ * the falsifier (which refutes the hypothesis).
+ *
+ * The verdict is the platform's (`evaluate` reads the ledger); a model never
+ * writes it. An `open` hypothesis has no verdict and says so; an `inconclusive`
+ * one carries its reason; a falsifier that does not read has no numbers and
+ * shows the parser's complaint rather than a threshold nobody stated.
+ */
+export function HypothesisVerdicts({
+  verdicts,
+}: {
+  verdicts: HypothesisVerdict[] | 'unreadable' | null
+}) {
+  if (verdicts === null) return null
+  if (verdicts === 'unreadable') {
+    return (
+      <p className="sub" role="alert" data-testid="hypotheses-unreadable">
+        The hypotheses could not be read. That is the request failing, not a run that stated none.
+      </p>
+    )
+  }
+  if (verdicts.length === 0) return null
+  return (
+    <section data-testid="hypothesis-verdicts" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-2)' }}>
+      <span className="lbl">hypotheses · verdicts from the ledger</span>
+      {verdicts.map((h) => (
+        <div key={h.hypothesis_id} className="well" data-testid={`hypothesis-${h.hypothesis_id}`}>
+          <div className="desk-actions">
+            <Badge tone={h.status === 'refuted' ? 'neg' : h.status === 'supported' ? 'pos' : 'neutral'}>
+              {h.status}
+              {h.status === 'inconclusive' && h.inconclusive_why ? `: ${h.inconclusive_why.replace(/_/g, ' ')}` : ''}
+            </Badge>
+            <Badge tone="outline">{h.role}</Badge>
+          </div>
+          <p style={{ margin: 0, fontSize: 'var(--t-12)' }}>{h.statement}</p>
+          {h.parsed ? (
+            <p className="sub" data-testid="falsifier-terms">
+              refuted if <span className="mono">{h.parsed.metric} {h.parsed.comparator} {h.parsed.threshold}</span>
+            </p>
+          ) : (
+            <p className="sub" data-testid="falsifier-unreadable">
+              falsifier “{h.falsifier}” does not read: {h.parse_error ?? 'no reason given'}. There is no
+              threshold to show.
+            </p>
+          )}
+          {h.parsed &&
+            (h.observed.length === 0 ? (
+              <p className="sub" data-testid="no-observations">
+                {h.status === 'open'
+                  ? 'No value has been recorded for this metric yet; it has no verdict.'
+                  : 'No ledger value for this metric was recorded before the verdict.'}
+              </p>
+            ) : (
+              <ul style={{ margin: 0, paddingLeft: 'var(--s-4)', fontSize: 'var(--t-12)' }} data-testid="observed-values">
+                {h.observed.map((o) => (
+                  <li key={`${o.ticket_id}-${o.recorded_at}`}>
+                    <span className="mono">{o.value}</span> from ticket{' '}
+                    <span className="mono">{o.ticket_id.slice(0, 8)}</span>
+                    {o.fired && <> — satisfies the falsifier</>}
+                  </li>
+                ))}
+              </ul>
+            ))}
+        </div>
+      ))}
+    </section>
+  )
+}
+
 export function StateTab({
   state,
   absence,
@@ -63,7 +167,23 @@ export function StateTab({
   jobPct,
   pendingApproval,
   paused,
+  recorded = null,
+  verdicts = null,
 }: {
+  /**
+   * The run's hypotheses with the platform's verdict and the numbers behind it
+   * (S-10.15). `null` while unread or not served; `'unreadable'` when the read
+   * failed, which is not the same as no hypotheses.
+   */
+  verdicts?: HypothesisVerdict[] | 'unreadable' | null
+  /**
+   * The run's lifecycle as its **row** records it (`agent_runs.mode`,
+   * `workflow`, `ring`, `stage` — migration 0126), from `/api/desk/running`.
+   * Shown when the working state is not served, so a running Research turn
+   * still says what it is and where it is (S-10.15) — labelled as the run
+   * record, because it is not the agent's own snapshot.
+   */
+  recorded?: RecordedLifecycle | null
   state: WorkingState | null
   /** Why there is no state, when the caller knows. */
   absence?: StateAbsence
@@ -75,7 +195,13 @@ export function StateTab({
 }) {
   if (!state) {
     const { message, detail } = absenceCopy(absence)
-    return <EmptyState message={message} detail={detail} />
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
+        {recorded && <RecordedLifecycleView r={recorded} />}
+        <EmptyState message={message} detail={detail} />
+        <HypothesisVerdicts verdicts={verdicts} />
+      </div>
+    )
   }
   const activeIndex = state.plan.findIndex((s) => s.status.status === 'active')
   return (
@@ -139,6 +265,8 @@ export function StateTab({
           <p className="sub">falsifier: {state.hypothesis.falsifier}</p>
         </section>
       )}
+
+      <HypothesisVerdicts verdicts={verdicts} />
 
       {state.prereg && (
         <section>
@@ -232,24 +360,68 @@ export function StateTab({
 
 // ── S-6.9 Evidence ───────────────────────────────────────────────────────────
 
-/**
- * One id on the run's working state.
- *
- * **There is deliberately no `view`.** The field was declared here as "rendered
- * in place when the id is opened", the tab kept an `openId` and toggled it on
- * every chip click, and the only caller — `Conversation` — never set it on any
- * entry, so the click opened an empty node: no panel, no error, no console
- * line. Nothing in the tree ever produced a `view`, and nothing could: a
- * viewer needs the tool result behind the id, and this platform serves no route
- * that returns one. `/api/agent/runs/{id}/state` — the source of these entries
- * — is itself 404, so the list is empty on every run here.
- *
- * Asserted by `an_id_that_opens_nothing_does_not_pretend_to_open`.
- */
-export interface EvidenceEntry {
-  id: string
-  type: string
-  summary: string
+export type { EvidenceEntry } from '@/lib/desk/evidence'
+
+/** The stored result behind an id, in place (§3.5's experiment-summary viewer). */
+export function EvidenceViewer({
+  result,
+  resolve,
+  onOpen,
+}: {
+  result: StreamEvidence
+  resolve?: IdResolver
+  onOpen?: (id: string) => void
+}) {
+  const detail = result.detail === null || result.detail === undefined ? null : JSON.stringify(result.detail, null, 2)
+  const clipped = detail !== null && detail.length > 4000 ? `${detail.slice(0, 4000)}\n…` : detail
+  return (
+    <div className="well" data-testid={`ev-view-${result.id}`} style={{ marginTop: 'var(--s-2)' }}>
+      <p className="sub" style={{ margin: 0 }}>
+        <span className="mono">{result.tool}</span> · step {result.step} · returned as{' '}
+        <span className="mono">{result.key}</span>
+        {result.isError && (
+          <>
+            {' '}
+            <Badge tone="neg">the call errored</Badge>
+          </>
+        )}
+      </p>
+      {result.summary ? (
+        <p style={{ margin: 'var(--s-1) 0' }}>
+          <InertText>{result.summary}</InertText>
+        </p>
+      ) : (
+        <p className="sub" style={{ margin: 'var(--s-1) 0' }}>
+          the stored result carries no summary
+        </p>
+      )}
+      <p className="sub" style={{ margin: 0 }}>
+        {/* Absent is its own word: a result with no `n` did not report one, and
+            "(n unknown)" is what §19.1 asks a sample-less number to say. */}
+        {result.n === null ? '(n unknown)' : `n ${result.n}`}
+        {result.se !== null && ` · se ${result.se}`}
+      </p>
+      {result.siblings.length > 1 && (
+        <div className="desk-card-hd" style={{ flexWrap: 'wrap' }}>
+          <span className="lbl">returned with</span>
+          {result.siblings
+            .filter((s) => s.id !== result.id)
+            .map((s) => (
+              <EvidenceChip key={s.id} id={s.id} resolve={resolve} onOpen={onOpen} />
+            ))}
+        </div>
+      )}
+      {clipped !== null ? (
+        <pre className="mono" style={{ whiteSpace: 'pre-wrap', fontSize: 'var(--t-11)', maxHeight: 240, overflow: 'auto' }}>
+          {clipped}
+        </pre>
+      ) : result.handle ? (
+        <p className="sub">
+          the full result overflowed and is held under the handle <span className="mono">{result.handle}</span>
+        </p>
+      ) : null}
+    </div>
+  )
 }
 
 export function EvidenceTab({
@@ -257,21 +429,31 @@ export function EvidenceTab({
   absence,
   resolve,
   onOpenId,
+  focusedId = null,
 }: {
   entries: EvidenceEntry[]
   /**
    * Why the list is empty, when the caller knows.
    *
-   * This tab reads the working state's `evidence`, so it inherits the State
-   * tab's missing route exactly (`StateAbsence`). An empty list then said **"This
-   * run has produced no ids yet"** — a claim about the run, made by a panel that
-   * had no way to find out. On this platform it is the only sentence the tab can
-   * ever print, over runs that called eighty-nine tools.
+   * An empty list once said **"This run has produced no ids yet"** — a claim
+   * about the run, made by a panel that had no way to find out.
    */
   absence?: StateAbsence
   resolve?: IdResolver
   onOpenId?: (id: string) => void
+  /** An id another surface asked to open — a card's chip, the State tab. */
+  focusedId?: string | null
 }) {
+  const [openId, setOpenId] = useState<string | null>(focusedId)
+  // A chip elsewhere asking for an id is a new request even when the tab is
+  // already mounted; following the prop during render is React's documented
+  // pattern for state derived from a changing prop.
+  const [lastFocus, setLastFocus] = useState<string | null>(focusedId)
+  if (focusedId !== lastFocus) {
+    setLastFocus(focusedId)
+    setOpenId(focusedId)
+  }
+
   const grouped = useMemo(() => {
     const m = new Map<string, EvidenceEntry[]>()
     for (const e of entries) {
@@ -281,13 +463,14 @@ export function EvidenceTab({
     }
     return [...m.entries()]
   }, [entries])
+  const byId = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
 
   if (entries.length === 0) {
     if (absence === 'not_served') {
       return (
         <EmptyState
           message="Nothing reports what this run produced"
-          detail="This tab lists the ids on the run's working state, and the route that would serve it — /api/agent/runs/{id}/state — is not mounted. An empty list here is this panel having no source, not the run having produced nothing; the tool results on the stream beside it do not carry their ids either."
+          detail="No tool result on this run's stream returned an id, and the working state that would list the rest — /api/agent/runs/{id}/state — is not mounted. An empty list here is this panel having found nothing to list, not a claim that the run produced nothing."
         />
       )
     }
@@ -307,6 +490,15 @@ export function EvidenceTab({
     )
   }
 
+  function open(id: string) {
+    onOpenId?.(id)
+    // Only an id with a stored result toggles anything. One without opens
+    // nothing here, and drawing an empty node for it is the defect the
+    // deleted `view` was.
+    if (byId.get(id)?.result) setOpenId((cur) => (cur === id ? null : id))
+  }
+  const canOpen = (e: EvidenceEntry) => !!e.result || !!onOpenId
+
   return (
     <div>
       {grouped.map(([type, list]) => (
@@ -317,13 +509,24 @@ export function EvidenceTab({
           {list.map((e) => (
             <div key={e.id} className="desk-card">
               <div className="desk-card-hd">
-                <EvidenceChip id={e.id} resolve={resolve} onOpen={onOpenId} />
+                <EvidenceChip id={e.id} resolve={resolve} onOpen={canOpen(e) ? open : undefined} />
               </div>
               <p className="sub">{e.summary}</p>
+              {openId === e.id && e.result && (
+                <EvidenceViewer result={e.result} resolve={resolve} onOpen={open} />
+              )}
             </div>
           ))}
         </section>
       ))}
+      {/* An id another surface asked for that is not on this run's list. Said,
+          not ignored: a chip that sent the reader here and then showed nothing
+          about it would be a link that opened the wrong page. */}
+      {openId && !byId.has(openId) && (
+        <p className="sub" role="status" data-testid="ev-not-listed">
+          <s className="mono">{openId}</s> — not found: no tool result on this run returned it.
+        </p>
+      )}
     </div>
   )
 }
@@ -331,61 +534,141 @@ export function EvidenceTab({
 // ── S-6.10 Memory ────────────────────────────────────────────────────────────
 
 /**
- * What this run's memory brief contained — which is nothing this platform can
- * answer, so the tab says that and takes no data.
+ * What this run's memory brief contained (AGENT-012 §3.5; AGENT-007 §4).
  *
- * It used to take `items: BriefItem[] | null`, plus `onForget` and `onAdd`, and
- * its one caller rendered it as the literal `<MemoryTab items={null} />`. Two
- * thirds of the component were therefore unreachable, and the reachable third
- * is the paragraph below.
+ * The **brief**, not the store: which entries retrieval put into this run's
+ * prompt, why each was chosen, and whether the run cited it. Those are per-run
+ * facts, read from `memory_retrievals` by `GET /api/desk/runs/{id}/brief` —
+ * never the store's rows, which would look like the answer and are not.
  *
- * The props were deleted rather than fed, because the only thing there is to
- * feed them with is the wrong data. `/api/memory/{bucket}` is mounted and
- * serves — the Memory browser reads it, and distinguishes an empty bucket from
- * an unreadable one — but that is the *store*, and this tab is the *brief*:
- * which entries retrieval put into this run's prompt, why each was chosen, and
- * whether the run cited it. Those are per-run facts, and no route carries
- * them: `GET /api/agent/runs/{id}/brief`, `…/memory` and `…/selection` all
- * answer 404, as does `GET /api/memory` with no bucket. Handing the tab the store would
- * have filled the panel with rows that look like the answer and are not.
- *
- * `onForget` could not have worked either had anything passed it: it was typed
- * `(id: string) => void`, and `deskApi.forget` needs the bucket as well —
- * `DELETE /api/memory/{bucket}/{id}`. The bucket was on `BriefItem` and the
- * callback dropped it.
+ * **forget** archives the entry (`DELETE /api/memory/{bucket}/{id}`), and the
+ * brief's loader reads `NOT archived`, so a forgotten entry is not in the next
+ * run's brief. This run's row stays — it is the record of what the run was
+ * shown — and is marked forgotten rather than removed.
  *
  * Asserted by `the_memory_tab_does_not_offer_the_store_as_the_brief`.
  */
-export function MemoryTab() {
-  return (
-  <EmptyState
-      message="No endpoint reports what this run's brief contained"
-      detail={
-        <>
-          The memory <em>store</em> is served and browsable — `/api/memory/&#123;bucket&#125;`
-          answers, and the Memory page reads it. What has no source is the <em>brief</em>: which
-          entries retrieval put into this run's prompt, why each was chosen, and whether the run
-          cited it. That is a per-run record nothing writes, so the desk cannot say, and it will
-          not show the store here and let it read as the brief.
-          {/* The nearest thing that exists, and why it is not near enough —
-              written down so the next reader does not have to rediscover it.
-              `Note::Selected` carries a per-record clause and the elided set,
-              which is exactly "why retrieved". Two things stop it: it is
-              emitted only under a retrieval context policy and
-              `expose_pinned` documents `retrieval: false` as the shipped
-              default, so this platform's `agent_messages` holds **zero** rows
-              of kind `selection` against 2,111 of every other kind; and its
-              lines are bare record ids (`r007`) with no kind on them, so even
-              under retrieval nothing would separate the `Memory` records from
-              the tool results beside them. */}{' '}
-          The harness's `selection` note comes closest — it records a reason per record — but it
-          is written only under a retrieval policy, which is not the shipped default, and its
-          lines carry record ids without saying which are memory. Neither half of this tab can
-          be answered from it.
-        </>
-      }
-    />
+export function MemoryTab({
+  brief,
+  absence,
+  onForget,
+}: {
+  /** `undefined` while loading; `null` when the read failed outright. */
+  brief: ServedRead<RunBrief> | null | undefined
+  absence?: StateAbsence
+  onForget?: (bucket: string, entryId: string) => Promise<unknown>
+}) {
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  if (absence === 'no_run') {
+    return (
+      <EmptyState
+        message="This conversation has no run"
+        detail="A brief belongs to a run: it is what retrieval put into that run's prompt."
+      />
+    )
+  }
+  if (brief === undefined) return <EmptyState message="Reading the brief…" />
+  if (brief === null) {
+    return (
+      <EmptyState
+        message="The brief could not be read"
+        detail="The request failed, which is not the same as retrieval choosing nothing."
+      />
+    )
+  }
+  if (!brief.served) {
+    return (
+      <EmptyState
+        message="No endpoint reports what this run's brief contained"
+        detail="The memory store is served and browsable on the Memory page; the per-run brief route answered 404 here, so the desk cannot say what this run was shown — and will not show the store in its place."
+      />
+    )
+  }
+  const { items, not_recorded } = brief.data
+  const notes = not_recorded.length > 0 && (
+    <div data-testid="brief-not-recorded">
+      <span className="lbl">not recorded</span>
+      {not_recorded.map((n) => (
+        <p className="sub" key={n.field}>
+          <b>{n.field}</b>: {n.why}
+        </p>
+      ))}
+    </div>
   )
+  if (items.length === 0) {
+    return (
+      <div>
+        <EmptyState
+          message="Retrieval put nothing into this run's brief"
+          detail="The retrieval log for this run answered and holds no rows."
+        />
+        {notes}
+      </div>
+    )
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-2)' }}>
+      {items.map((i) => (
+        <div key={i.entry_id} className="desk-card" data-testid={`brief-${i.entry_id}`}>
+          <div className="desk-card-hd">
+            <Badge tone="outline">{i.slot.replace(/_/g, ' ')}</Badge>
+            <span className="lbl-t">#{i.rank}</span>
+            {/* Three readings. `null` is "nobody records citations", which a
+                `not cited` badge would turn into a claim about the run. */}
+            <Badge tone={i.cited === null ? 'warn' : i.cited ? 'pos' : 'neutral'} data-testid={`brief-cited-${i.entry_id}`}>
+              {i.cited === null ? 'citation not recorded' : i.cited ? 'cited' : 'not cited'}
+            </Badge>
+            {i.entry?.archived && <Badge tone="neutral">forgotten — not in the next brief</Badge>}
+            {i.entry?.superseded && <Badge tone="neutral">superseded</Badge>}
+          </div>
+          {i.entry ? (
+            <p style={{ margin: 0 }}>
+              <span className="mono">{i.entry.subject}</span> — <InertText>{i.entry.claim}</InertText>
+            </p>
+          ) : (
+            <p className="sub" style={{ margin: 0 }}>
+              <span className="mono">{i.entry_id}</span> —{' '}
+              {brief.data.entries_readable ? 'no longer in the store' : 'the store could not be read'}
+            </p>
+          )}
+          {/* Visible, not only on hover: the reason is the half of this tab a
+              person argues with. */}
+          <p className="sub" title={i.why} style={{ margin: 0 }} data-testid={`brief-why-${i.entry_id}`}>
+            why retrieved: {i.why}
+          </p>
+          {onForget && i.entry?.bucket && !i.entry.archived && (
+            <div className="desk-actions">
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() =>
+                  void onForget(i.entry!.bucket as string, i.entry_id).catch((e: unknown) =>
+                    setErrors((m) => ({ ...m, [i.entry_id]: strategyRefusalWords(e) })),
+                  )
+                }
+              >
+                Forget
+              </Button>
+            </div>
+          )}
+          {errors[i.entry_id] && (
+            <p className="sub" role="alert">
+              Not forgotten: {errors[i.entry_id]}
+            </p>
+          )}
+        </div>
+      ))}
+      {notes}
+    </div>
+  )
+}
+
+/** What a memory route said when it refused — `cited_by_evidence_chain` above all. */
+function strategyRefusalWords(e: unknown): string {
+  const data = ((e as { response?: { data?: unknown } }).response?.data ?? {}) as Record<string, unknown>
+  if (typeof data.message === 'string') return data.message
+  if (typeof data.error === 'string') return data.error
+  return 'the request did not reach the platform'
 }
 
 // ── S-6.11 Tools ─────────────────────────────────────────────────────────────
@@ -422,8 +705,15 @@ export function ToolsTab({
   catalogueLoading = false,
   searchedFor,
   exposure,
+  onPin,
 }: {
   mode: Mode
+  /**
+   * Pin a tool for this run. Absent when there is no live run to pin into (no
+   * run, or one that has ended): the button is then not drawn, because a
+   * control with nothing behind it is the defect this prop exists to fix.
+   */
+  onPin?: (tool: string) => Promise<unknown>
   /** What the harness's `Note::Exposure` says this step actually saw. */
   exposed: string[] | null
   /** `null` means the endpoint did not answer; `[]` means it answered with none. */
@@ -446,6 +736,28 @@ export function ToolsTab({
   exposure?: ExposureNote | null
 }) {
   const [q, setQ] = useState('')
+  // What the person asked for and what the platform said: `queued` is a request
+  // delivered, and the next exposure note is what shows it took.
+  const [pinned, setPinned] = useState<Record<string, 'sending' | 'queued' | string>>({})
+  const pin = (tool: string) => {
+    if (!onPin) return
+    setPinned((p) => ({ ...p, [tool]: 'sending' }))
+    onPin(tool).then(
+      () => setPinned((p) => ({ ...p, [tool]: 'queued' })),
+      (e: unknown) => {
+        const status = (e as { response?: { status?: number } })?.response?.status
+        setPinned((p) => ({
+          ...p,
+          [tool]:
+            status === 409
+              ? 'this process is not driving the run, or it has ended'
+              : status === 422
+                ? 'the registry has no such tool'
+                : 'the pin was not delivered',
+        }))
+      },
+    )
+  }
   const all = catalogue ?? []
   const visible = toolsVisibleInMode(all, mode)
   const hidden = all.filter((t) => !visible.includes(t))
@@ -556,6 +868,29 @@ export function ToolsTab({
                   {t.spends_trial && <Badge tone="warn">spends a trial</Badge>}
                 </div>
                 {t.notes && <p className="sub">{t.notes}</p>}
+                {onPin && (
+                  <div className="desk-actions">
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      disabled={pinned[t.name] === 'sending' || pinned[t.name] === 'queued'}
+                      onClick={() => pin(t.name)}
+                    >
+                      Pin for this run
+                    </Button>
+                    {pinned[t.name] === 'queued' && (
+                      <span className="sub" data-testid={`pin-queued-${t.name}`}>
+                        queued — the router puts it first from the next step; the exposure note
+                        above says whether it was admitted
+                      </span>
+                    )}
+                    {pinned[t.name] && pinned[t.name] !== 'sending' && pinned[t.name] !== 'queued' && (
+                      <span className="sub" data-testid={`pin-failed-${t.name}`}>
+                        {pinned[t.name]}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
             {filtered.length === 0 && q.length > 0 && (
@@ -580,16 +915,12 @@ export function ToolsTab({
           Only under a catalogue that was read. "You cannot pin from here" is a
           sentence about a list of tools; printed under "the tools are unknown"
           it answers a question nobody had got as far as asking. */}
-      {catalogue !== null && catalogue.length > 0 && (
+      {catalogue !== null && catalogue.length > 0 && !onPin && (
       <section>
         <span className="lbl">putting a tool in front of the model</span>
         <p className="sub" data-testid="no-pin-control">
-          Not from here. Three things decide the next step's exposure and none of them is a
-          control on this panel: the plan step's named tool, a three-hit search over that step's
-          goal text, and the tools the model itself found with <span className="mono">search_tools</span>.
-          A human reaches all three the same way — steer the run, and name the tool in the steer
-          so the re-plan puts it in a step. Nothing on the platform records a per-run pin, so a
-          button here would have been a click that changed nothing.
+          There is no live run to pin into. A pin goes to a run this platform is driving; for a
+          finished or absent run, start one, or steer a live run and name the tool in the steer.
         </p>
       </section>
       )}
@@ -652,6 +983,20 @@ export function CostTab({
   const promptTotal = sum((c) => c.provider_prompt_tokens)
   const outputTotal = sum((c) => c.output_tokens)
   const withLayers = calls.filter((c) => c.layers !== null)
+  // Only calls with both sides, so a call missing either is not counted as a
+  // drift of the whole prompt.
+  const both = calls.filter((c) => c.layers !== null && c.provider_prompt_tokens !== null)
+  const reassembly =
+    both.length === 0
+      ? null
+      : (() => {
+          const layers = both.reduce(
+            (a, c) => a + (c.layers ? c.layers.charter + c.layers.schemas + c.layers.body : 0),
+            0,
+          )
+          const provider = both.reduce((a, c) => a + (c.provider_prompt_tokens ?? 0), 0)
+          return { layers, provider, calls: both.length, pct: Math.round((layers / provider) * 100) }
+        })()
   const withCache = calls.filter((c) => c.cache_hit_pct !== null)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
@@ -666,8 +1011,9 @@ export function CostTab({
             could print. */}
         {priced.length === 0 ? (
           <p className="sub" data-testid="cost-unpriced">
-            not priced — the platform has no price table, so these calls have a token count and no
-            dollar figure (OQ-16). This is not $0.
+            not priced — none of these calls' usage notes carries a dollar figure (the per-call rate
+            from config/prices.yaml is recorded in the effect log, not on this stream; OQ-16). This
+            is not $0.
           </p>
         ) : (
           <p className="mono">${(cumulativeUsd / 1000).toFixed(3)}</p>
@@ -738,9 +1084,9 @@ export function CostTab({
         <span className="lbl">tokens by call</span>
         {withLayers.length === 0 && (
           <p className="sub" data-testid="layers-unsplit">
-            the four-layer split (charter · schemas · body · output) is not on the wire — the usage
-            note records one prompt total, so the columns below are what was measured. The split is
-            unbuilt, not zero.
+            the four-layer split (charter · schemas · body · output) is not on this run's wire — its
+            usage notes record one prompt total (the driver writes the split on runs from 2026-10-04
+            on), so the columns below are what was measured. The split is unbuilt, not zero.
           </p>
         )}
         <table className="tbl">
@@ -751,6 +1097,7 @@ export function CostTab({
               <th>harness estimate</th>
               <th>cache read</th>
               <th>output</th>
+              {withLayers.length > 0 && <th>charter · schemas · body · output</th>}
             </tr>
           </thead>
           <tbody>
@@ -772,11 +1119,30 @@ export function CostTab({
                   </td>
                   <td>{c.cache_read_tokens ?? 'not reported'}</td>
                   <td>{c.output_tokens ?? 'not reported'}</td>
+                  {withLayers.length > 0 && (
+                    <td data-testid="layer-split">
+                      {c.layers
+                        ? `${c.layers.charter} · ${c.layers.schemas} · ${c.layers.body} · ${c.layers.output}`
+                        : 'not split'}
+                    </td>
+                  )}
                 </tr>
               )
             })}
           </tbody>
         </table>
+        {/* §3.5's acceptance: the layers should reassemble to the provider's
+            prompt count within the calibrated error. They are the harness's own
+            estimate, so this is that estimate's drift against the provider, said
+            as a share rather than as agreement. */}
+        {reassembly !== null && (
+          <p className="sub" data-testid="layer-reassembly">
+            charter + schemas + body estimate {reassembly.layers.toLocaleString()} tokens against
+            the provider's {reassembly.provider.toLocaleString()} over {reassembly.calls}{' '}
+            {reassembly.calls === 1 ? 'call' : 'calls'} ({reassembly.pct}%). These are the
+            harness's estimates, not provider counts; the output column is the reply cap.
+          </p>
+        )}
       </section>
     </div>
   )
@@ -794,13 +1160,25 @@ export function AgendaTab({
   onAdd,
   onOpenChild,
   onReorder,
+  childStages = {},
   loading = false,
 }: {
   items: AgendaItem[] | null
   onVeto?: (id: string) => void
   onApprove?: (id: string) => void
-  onAdd?: () => void
+  /**
+   * Source 4.2 — a question the human adds (`POST …/{id}/agenda`). Resolves when
+   * the route accepted it and rejects with the route's own words when it did
+   * not, which the form prints rather than swallowing.
+   */
+  onAdd?: (question: string) => Promise<unknown>
   onOpenChild?: (conversationId: string) => void
+  /**
+   * The stage each running child is at, keyed by child conversation id — read
+   * from `/api/desk/running`, which is the one served route that carries a
+   * run's stage. An item with no entry draws no strip rather than a guessed one.
+   */
+  childStages?: Record<string, Stage>
   /**
    * The board's whole order, as it reads after the move (AGENT-014 §9).
    *
@@ -824,6 +1202,21 @@ export function AgendaTab({
   // bug.
   const [moved, setMoved] = useState<string[] | null>(null)
   const [dragging, setDragging] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [addError, setAddError] = useState<string | null>(null)
+
+  function submitAdd() {
+    const q = draft.trim()
+    if (!q || !onAdd) return
+    setAddError(null)
+    onAdd(q)
+      .then(() => {
+        setDraft('')
+        setAdding(false)
+      })
+      .catch((e: unknown) => setAddError(sessionRefusal(e)))
+  }
 
   const order = reconcileOrder(moved, (items ?? []).map((i) => i.item_id))
 
@@ -855,9 +1248,38 @@ export function AgendaTab({
   const columns: AgendaItem['state'][] = ['proposed', 'queued', 'running', 'done', 'vetoed']
   return (
     <div>
-      <Button size="xs" variant="secondary" onClick={onAdd}>
-        Add a question
-      </Button>
+      {/* Drawn only with a handler: a button that reached nothing is what this
+          one was until 2026-10-03 — `Conversation` never passed `onAdd`. */}
+      {onAdd &&
+        (adding ? (
+          <div className="desk-actions" data-testid="agenda-add-form">
+            <Input
+              small
+              aria-label="Question to add"
+              placeholder="the question, as you would ask it"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitAdd()
+              }}
+            />
+            <Button size="xs" variant="primary" onClick={submitAdd} disabled={!draft.trim()}>
+              Add
+            </Button>
+            <Button size="xs" variant="ghost" onClick={() => setAdding(false)}>
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <Button size="xs" variant="secondary" onClick={() => setAdding(true)}>
+            Add a question
+          </Button>
+        ))}
+      {addError && (
+        <p className="sub" role="alert" data-testid="agenda-add-error">
+          Not added: {addError}
+        </p>
+      )}
       {/* Said before the first drag rather than discovered after one: the board
           keeps no rank of its own, so what a move does is mark the card yours. */}
       <p className="sub" data-testid="reorder-note">
@@ -923,6 +1345,16 @@ export function AgendaTab({
                   </p>
                 )}
                 {i.rationale && <p className="sub">{i.rationale}</p>}
+                {col === 'running' &&
+                  (i.child_conversation_id && childStages[i.child_conversation_id] ? (
+                    <StageStrip stage={childStages[i.child_conversation_id]} />
+                  ) : (
+                    // No active run row for this child: the stage is unknown,
+                    // not "intake".
+                    <p className="sub" data-testid={`stage-unknown-${i.item_id}`}>
+                      stage not reported — no active run for this item answers on /api/desk/running
+                    </p>
+                  ))}
                 {i.child_conversation_id && (
                   <Button size="xs" variant="ghost" onClick={() => onOpenChild?.(i.child_conversation_id as string)}>
                     Open the run
@@ -991,11 +1423,119 @@ function ScopeLine({ label, values }: { label: string; values: string[] }) {
   )
 }
 
+/** A comma-separated list, as one input. */
+function ListInput({ label, value, onChange }: { label: string; value: string[]; onChange: (v: string[]) => void }) {
+  return (
+    <label className="sub" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-1)' }}>
+      {label}
+      <Input
+        small
+        aria-label={label}
+        value={value.join(', ')}
+        placeholder="comma separated"
+        onChange={(e) =>
+          onChange(
+            e.target.value
+              .split(',')
+              .map((x) => x.trim())
+              .filter(Boolean),
+          )
+        }
+      />
+    </label>
+  )
+}
+
+/**
+ * The amendment form (AGENT-014 §2.3; S-11.13's *amend*).
+ *
+ * It edits the **stored** charter — `WireCharter`, the shape
+ * `PUT …/{id}/charter` deserialises — and only the fields a person amends
+ * mid-session: scope, seeds, permitted workflows, exclusions and standing
+ * constraints. Everything else is sent back exactly as it was read, so an
+ * amendment cannot silently reset the objective or the exploration share. The
+ * server bumps the version and records the field-level diff; the form does
+ * neither.
+ */
+export function CharterAmendForm({
+  charter,
+  onAmend,
+  onDone,
+}: {
+  charter: WireCharter
+  onAmend: (next: WireCharter) => Promise<unknown>
+  onDone: () => void
+}) {
+  const [draft, setDraft] = useState<WireCharter>(charter)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const scope = (k: keyof WireCharter['scope'], v: string[]) => setDraft((d) => ({ ...d, scope: { ...d.scope, [k]: v } }))
+  function save() {
+    setBusy(true)
+    setError(null)
+    onAmend(draft)
+      .then(onDone)
+      .catch((e: unknown) => setError(sessionRefusal(e)))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <section data-testid="charter-amend-form" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-2)' }}>
+      <span className="lbl">amend the charter</span>
+      <ListInput label="Instruments" value={draft.scope.instruments} onChange={(v) => scope('instruments', v)} />
+      <ListInput label="Asset classes" value={draft.scope.asset_classes} onChange={(v) => scope('asset_classes', v)} />
+      <ListInput label="Families" value={draft.scope.families} onChange={(v) => scope('families', v)} />
+      <ListInput label="Timeframes" value={draft.scope.timeframes} onChange={(v) => scope('timeframes', v)} />
+      <ListInput
+        label="Permitted workflows"
+        value={draft.permitted_workflows}
+        onChange={(v) => setDraft((d) => ({ ...d, permitted_workflows: v }))}
+      />
+      <ListInput label="Exclusions" value={draft.exclusions} onChange={(v) => setDraft((d) => ({ ...d, exclusions: v }))} />
+      <ListInput
+        label="Standing constraints"
+        value={draft.standing_constraints}
+        onChange={(v) => setDraft((d) => ({ ...d, standing_constraints: v }))}
+      />
+      <ListInput
+        label="Seeds"
+        value={draft.seeds.map((x) => x.question)}
+        onChange={(v) =>
+          setDraft((d) => ({
+            ...d,
+            // A seed already on the charter keeps its subject and workflow; a
+            // new one has neither, which is what the form can say about it.
+            seeds: v.map((q) => d.seeds.find((x) => x.question === q) ?? { question: q, subject: '', workflow: null }),
+          }))
+        }
+      />
+      <div className="desk-actions">
+        <Button size="xs" variant="primary" disabled={busy} onClick={save}>
+          Save amendment
+        </Button>
+        <Button size="xs" variant="ghost" disabled={busy} onClick={onDone}>
+          Cancel
+        </Button>
+      </div>
+      {error && (
+        <p className="sub" role="alert" data-testid="charter-amend-error">
+          Not amended: {error}
+        </p>
+      )}
+    </section>
+  )
+}
+
 export function CharterTab({
   charter,
   amendments,
+  raw = null,
+  onAmend,
   loading = false,
 }: {
+  /** The stored charter, as read — what an amendment starts from. */
+  raw?: WireCharter | null
+  /** `PUT …/{id}/charter`. The Amend control is drawn only when this is passed. */
+  onAmend?: (next: WireCharter) => Promise<unknown>
   /** Decoded by `charterView`; `null` when the session has none or was not read. */
   charter: CharterView | null
   /**
@@ -1010,6 +1550,7 @@ export function CharterTab({
   amendments: AmendmentView[]
   loading?: boolean
 }) {
+  const [amending, setAmending] = useState(false)
   if (loading) {
     return <EmptyState message="Reading the charter…" />
   }
@@ -1023,6 +1564,17 @@ export function CharterTab({
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
+      {onAmend &&
+        raw &&
+        (amending ? (
+          <CharterAmendForm charter={raw} onAmend={onAmend} onDone={() => setAmending(false)} />
+        ) : (
+          <div className="desk-actions">
+            <Button size="xs" variant="secondary" onClick={() => setAmending(true)}>
+              Amend
+            </Button>
+          </div>
+        ))}
       <section>
         <span className="lbl">
           objective{charter.version !== null ? ` · version ${charter.version}` : ''}

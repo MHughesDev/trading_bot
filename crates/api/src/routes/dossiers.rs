@@ -196,7 +196,7 @@ pub async fn verify(
             .into_response();
     };
 
-    let redone = extract(&sentence, &[live.clone()]);
+    let redone = extract(&sentence, std::slice::from_ref(&live));
     let now = redone
         .claims
         .first()
@@ -235,7 +235,7 @@ async fn live_evidence(state: &AppState, user_id: uuid::Uuid, id: &str) -> Optio
     if let Some(result) = state.suite.run_result(user_id, id) {
         return Some(Evidence {
             id: id.to_string(),
-            text: crate::dossier::render(&serde_json::to_value(&result.metrics).ok()?),
+            text: crate::dossier::render(&serde_json::to_value(result.metrics).ok()?),
         });
     }
     type Measured = (String, Option<f64>, Option<f64>, Option<i64>);

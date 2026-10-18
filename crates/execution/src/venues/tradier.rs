@@ -66,6 +66,32 @@ struct TradierOrder {
     status: String,
 }
 
+/// Tradier's `side` → `Side`. Unknown text is an error (Set E audit #9): this
+/// was `side.contains("buy")`, so an empty or unexpected value became a sell.
+pub(crate) fn parse_side(s: &str) -> Result<Side, BrokerError> {
+    match s {
+        "buy" | "buy_to_open" | "buy_to_cover" | "buy_to_close" => Ok(Side::Buy),
+        "sell" | "sell_short" | "sell_to_open" | "sell_to_close" => Ok(Side::Sell),
+        other => Err(BrokerError::Serialization(format!(
+            "tradier reported order side {other:?}; refusing to guess a direction"
+        ))),
+    }
+}
+
+/// Tradier's order `type` → `OrderType`. Anything unlisted used to read as a
+/// limit.
+pub(crate) fn parse_order_type(s: &str) -> Result<OrderType, BrokerError> {
+    match s {
+        "market" => Ok(OrderType::Market),
+        "limit" => Ok(OrderType::Limit),
+        "stop" => Ok(OrderType::Stop),
+        "stop_limit" => Ok(OrderType::StopLimit),
+        other => Err(BrokerError::Serialization(format!(
+            "tradier reported order type {other:?}; refusing to guess one"
+        ))),
+    }
+}
+
 fn parse_state(s: &str) -> BrokerOrderState {
     match s {
         "open" | "partially_filled" | "pending" => BrokerOrderState::New,
@@ -188,16 +214,8 @@ impl Broker for TradierBroker {
             .map_err(|e| BrokerError::Serialization(e.to_string()))?;
 
         let o = &parsed.order;
-        let side = if o.side.contains("buy") {
-            Side::Buy
-        } else {
-            Side::Sell
-        };
-        let order_type = if o.order_type == "market" {
-            OrderType::Market
-        } else {
-            OrderType::Limit
-        };
+        let side = parse_side(&o.side)?;
+        let order_type = parse_order_type(&o.order_type)?;
         let broker_state = if o.exec_quantity > Decimal::ZERO && o.exec_quantity < o.quantity {
             BrokerOrderState::PartiallyFilled
         } else {
@@ -235,7 +253,12 @@ impl Broker for TradierBroker {
             let text = resp.text().await.unwrap_or_default();
             return Err(BrokerError::Http(text));
         }
-        Ok(vec![])
+        // Listing open orders was never implemented here and answered "none",
+        // which a reconciler reads as a clean book. Refuse instead; callers
+        // use `query_order` by id.
+        Err(BrokerError::Serialization(
+            "tradier open-order listing is not implemented; use query_order".to_owned(),
+        ))
     }
 
     async fn query_positions(&self) -> Result<Vec<BrokerPosition>, BrokerError> {
@@ -280,5 +303,30 @@ impl Broker for TradierBroker {
                 })
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod inbound_tests {
+    use super::*;
+
+    #[test]
+    fn every_tradier_side_spelling_maps_and_nothing_else_does() {
+        for b in ["buy", "buy_to_open", "buy_to_cover", "buy_to_close"] {
+            assert_eq!(parse_side(b).unwrap(), Side::Buy, "{b}");
+        }
+        for s in ["sell", "sell_short", "sell_to_open", "sell_to_close"] {
+            assert_eq!(parse_side(s).unwrap(), Side::Sell, "{s}");
+        }
+        for bad in ["", "BUY", "buying", "sideways", "xbuy"] {
+            assert!(parse_side(bad).is_err(), "{bad:?} must be refused");
+        }
+    }
+
+    #[test]
+    fn an_unknown_order_type_is_refused_not_read_as_a_limit() {
+        assert_eq!(parse_order_type("stop_limit").unwrap(), OrderType::StopLimit);
+        assert!(parse_order_type("").is_err());
+        assert!(parse_order_type("debit").is_err());
     }
 }

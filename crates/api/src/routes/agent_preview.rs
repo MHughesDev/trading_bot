@@ -72,6 +72,34 @@ pub struct PreviewBody {
     /// executing them (`intent_only`). Ignored for v1 definitions.
     #[serde(default)]
     pub venue: backtest::preview::PreviewVenue,
+    /// Deliberately corrupted inputs (S-3.10, `future_perturbation_test`): one
+    /// entry per feature column. Empty means an ordinary preview. v1 definitions
+    /// only; a v3 graph with perturbations is refused rather than run unperturbed,
+    /// because an unperturbed run wearing a perturbed label diffs to "no
+    /// divergence".
+    #[serde(default)]
+    pub perturbations: Vec<PerturbationIn>,
+}
+
+/// The wire form of one [`backtest::perturb::Perturbation`].
+#[derive(Debug, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PerturbationIn {
+    ShiftColumn { column: String, shift_bars: i32 },
+    MaskColumn { column: String },
+    JitterColumn { column: String, perturbation_pct: f64, #[serde(default)] seed: u64 },
+}
+
+impl From<PerturbationIn> for backtest::perturb::Perturbation {
+    fn from(p: PerturbationIn) -> Self {
+        match p {
+            PerturbationIn::ShiftColumn { column, shift_bars } => Self::ShiftColumn { column, shift_bars },
+            PerturbationIn::MaskColumn { column } => Self::MaskColumn { column },
+            PerturbationIn::JitterColumn { column, perturbation_pct, seed } => {
+                Self::JitterColumn { column, perturbation_pct, seed }
+            }
+        }
+    }
 }
 
 fn default_timeframe() -> String {
@@ -160,6 +188,12 @@ pub async fn preview(
     // A v3 graph previews as a short backtest through the one strategy engine
     // (Set U U-3.5); the window rule below applies to it unchanged.
     if backtest::runner::is_v3(&body.definition) {
+        if !body.perturbations.is_empty() {
+            return unprocessable(
+                "perturbations_unsupported",
+                "perturbations apply to v1 definitions only; a v3 preview would have run                  unperturbed and reported no divergence",
+            );
+        }
         return preview_v3(&state, &project, body).await;
     }
 
@@ -177,6 +211,16 @@ pub async fn preview(
             )
                 .into_response()
         }
+    };
+
+    // Parameters at their defaults, as a backtest runs them (`sim_executor`): the
+    // preview reads feature names as written, so a swept `ema_{{fast}}` reached the
+    // engine unresolved and the first draft the platform handed a model could not
+    // be previewed (S-5.15).
+    let definition = match domain::strategy_def::params::materialize(&definition, &Default::default())
+    {
+        Ok(d) => d,
+        Err(e) => return unprocessable("params_do_not_materialise", e.to_string()),
     };
 
     let timeframe = match <Timeframe as backtest::types::TimeframeExt>::from_key(&body.timeframe) {
@@ -268,7 +312,25 @@ pub async fn preview(
             .into_response();
     }
 
-    match backtest::preview::preview_signals(&definition, &bars, timeframe) {
+    let previewed = if body.perturbations.is_empty() {
+        backtest::preview::preview_signals(&definition, &bars, timeframe)
+    } else {
+        // Validated against the columns the strategy actually reads: a
+        // perturbation of a column nothing reads cannot diverge, and that
+        // negative would be about the request rather than the strategy.
+        let known: Vec<String> = match backtest::requirements::derive_requirements(&definition, timeframe) {
+            Ok(r) => r.features.iter().map(|f| f.name.clone()).collect(),
+            Err(e) => return unprocessable("preview_failed", e.to_string()),
+        };
+        let items: Vec<backtest::perturb::Perturbation> =
+            body.perturbations.into_iter().map(Into::into).collect();
+        let set = match backtest::perturb::PerturbationSet::validate(items, &known, bars.len()) {
+            Ok(s) => s,
+            Err(e) => return unprocessable("invalid_perturbation", e.to_string()),
+        };
+        backtest::preview::preview_signals_perturbed(&definition, &bars, timeframe, &set)
+    };
+    match previewed {
         Ok(p) => {
             let mut out = serde_json::to_value(&p).unwrap_or_else(|_| json!({}));
             out["window"] = json!({
@@ -448,6 +510,26 @@ async fn preview_v3(
         )
             .into_response();
     }
+    // External rows the plan's macro and fundamentals indicators read (P-3.6),
+    // as the store stood at the preview's horizon.
+    let external = match backtest::runner::load_external(
+        &state.pg,
+        &state.clickhouse_url,
+        &plan,
+        body.start,
+        effective_end,
+    )
+    .await
+    {
+        Ok(e) => e,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": "external_inputs_unavailable", "message": e })),
+            )
+                .into_response()
+        }
+    };
     let run = backtest::runner::V3Run {
         plan: std::sync::Arc::new(plan),
         instrument: body.instrument_id.clone(),
@@ -470,6 +552,7 @@ async fn preview_v3(
         fill_policy: execution::sim_venue::FillPolicy::NextBarOpen,
         strategy_id: graph.name.clone(),
         sims: execution::paper::SimulatorSet::realistic(),
+        external,
     };
     let venue = body.venue;
     let outcome = tokio::task::spawn_blocking(move || {

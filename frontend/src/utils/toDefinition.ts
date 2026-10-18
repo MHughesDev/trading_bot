@@ -170,10 +170,6 @@ export function scannerToDefinition(
   const indById = new Map(indicators.map((i) => [i.id, i]))
   const features = new Set<string>()
 
-  if (indicators.some((i) => i.kind === 'sma' || i.kind === 'atr')) {
-    warnings.push('SMA / ATR indicators are not yet supported by the backtest engine.')
-  }
-
   if (allOf.length > 1) {
     errors.push(
       'The saved v1.0 format supports a single entry condition (or OR alternatives); combine the AND-ed conditions into one.',
@@ -248,13 +244,6 @@ export function ruleSpecToDefinition(
   const warnings: string[] = []
   const indById = new Map(spec.indicators.map((i) => [i.id, i]))
   const features = new Set<string>()
-
-  // Unsupported-by-backtest indicators still produce a valid definition.
-  if (spec.indicators.some((i) => i.kind === 'sma' || i.kind === 'atr')) {
-    warnings.push(
-      'SMA / ATR indicators are not yet supported by the backtest engine (EMA and RSI are).',
-    )
-  }
 
   // The v1.0 grammar has no boolean operators, so AND-combined conditions can't
   // be expressed.  A single condition, or OR-alternatives, are supported.

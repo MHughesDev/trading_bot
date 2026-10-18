@@ -23,7 +23,7 @@ pub async fn list_initialized_assets(api: &ApiClient) -> Value {
 pub async fn init_asset(api: &ApiClient, params: &Value) -> Value {
     let symbol = params.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
     if symbol.is_empty() {
-        return json!({ "error": "missing_field", "field": "symbol" });
+        return crate::tool_error::missing_field("symbol");
     }
     let lookback_days = params
         .get("lookback_days")
@@ -56,7 +56,7 @@ pub async fn init_asset(api: &ApiClient, params: &Value) -> Value {
 pub async fn get_asset_init_job(api: &ApiClient, params: &Value) -> Value {
     let job_id = params.get("job_id").and_then(|v| v.as_str()).unwrap_or("");
     if job_id.is_empty() {
-        return json!({ "error": "missing_field", "field": "job_id" });
+        return crate::tool_error::missing_field("job_id");
     }
     match api
         .get(&format!("/assets/init/jobs/{}", urlencode(job_id)))

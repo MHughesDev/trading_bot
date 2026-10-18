@@ -38,6 +38,17 @@ fn the_shipped_config_matches_the_specs_boundaries() {
     assert!((cfg.bad_ticks.sigma_multiple - 8.0).abs() < f64::EPSILON);
     assert!((cfg.bad_ticks.reversal_fraction - 0.8).abs() < f64::EPSILON);
     assert!((cfg.volume.spike_multiple - 20.0).abs() < f64::EPSILON);
+    // ADR-P1-7a / 7b: the two decisions the 2026-10-04 re-grade rests on.
+    assert!((cfg.bad_ticks.volume_confirm_multiple - 3.0).abs() < f64::EPSILON);
+    assert!((cfg.volume.max_spike_share - 0.01).abs() < f64::EPSILON);
+}
+
+/// The shipped file and the compiled defaults must name the same rules, or a
+/// grade's `config_version` depends on whether the file was found.
+#[test]
+fn the_shipped_config_and_the_compiled_defaults_share_one_version() {
+    let shipped = QcConfig::from_toml(&shipped()).unwrap();
+    assert_eq!(shipped.version(), QcConfig::default().version());
 }
 
 /// Every timeframe the platform collects needs its own stale-run threshold, or

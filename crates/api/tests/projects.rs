@@ -161,16 +161,20 @@ async fn a_cutoff_cannot_move_once_the_project_has_an_experiment() {
         "no experiment yet, so the cutoff is still soft"
     );
 
-    // An experiment exists the moment a trial-counted job is recorded against it.
+    // An experiment exists the moment a trial-counted job is recorded against it. The job is
+    // recorded as already `cancelled` so it can never be claimed by a worker or by another
+    // suite that shares this database (its trial is not in the ledger).
     sqlx::query(
         "INSERT INTO jobs (job_id, kind, project_id, user_id, submitted_by, experiment_id, \
-                           queue, worker_class, manifest, manifest_hash, state) \
-         VALUES ($1,'backtest',$2,$3,'agent','exp_x','agent','backtest','{}'::jsonb,$4,'queued')",
+                           queue, worker_class, manifest, manifest_hash, state, trial_id) \
+         VALUES ($1,'backtest',$2,$3,'agent','exp_x','agent','backtest','{}'::jsonb,$4,'cancelled',$5)",
     )
     .bind(format!("job_test_{}", Uuid::new_v4().simple()))
     .bind(project.project_id)
     .bind(user)
     .bind(Uuid::new_v4().to_string())
+    // 0045: a trial-counted job must carry its trial (CHECK chk_counted_jobs_have_trial).
+    .bind(Uuid::new_v4())
     .execute(&pool)
     .await
     .expect("record an experiment job");

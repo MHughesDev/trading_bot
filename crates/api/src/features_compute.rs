@@ -156,3 +156,91 @@ pub async fn serve_vector(
     }
     Ok(out)
 }
+
+// ── external inputs (Set P P-3.6) ────────────────────────────────────────────────
+
+/// The point-in-time rows an external feature (`macro_<series>`,
+/// `fundamental_<cik>_<tag>`) resolves against, loaded once for a window and
+/// **handed to** the feature runtime; the runtime never fetches (INV-13/14).
+#[derive(Debug, Default)]
+pub struct ExternalRows {
+    pub macro_rows: Vec<dataplane::vintage::MacroObservation>,
+    pub facts: Vec<dataplane::fundamentals::FundamentalFact>,
+}
+
+impl ExternalRows {
+    /// The borrowed view the one evaluation routine takes.
+    #[must_use]
+    pub fn inputs(&self) -> features::external_inputs::ExternalInputs<'_> {
+        features::external_inputs::ExternalInputs {
+            macro_rows: &self.macro_rows,
+            facts: &self.facts,
+        }
+    }
+}
+
+/// How far before the first bar a macro series is read, so the latest observation
+/// that was knowable at the first decision is in hand even for a quarterly series
+/// published a month late.
+const MACRO_LOOKBACK_DAYS: i64 = 200;
+
+/// Load every vintage / every accepted fact the `feats` read, as they stood at
+/// `as_of`. The per-decision choice among them is made by the feature runtime, so a
+/// column computed from these rows equals what a live serve computed at each instant.
+///
+/// # Errors
+/// The macro store or the fundamentals table.
+pub async fn load_external_rows(
+    pg: &PgPool,
+    clickhouse_url: &str,
+    feats: &[Arc<dyn features::external_features::ExternalFeature>],
+    first_bar: chrono::DateTime<chrono::Utc>,
+    last_bar: chrono::DateTime<chrono::Utc>,
+    as_of: chrono::DateTime<chrono::Utc>,
+) -> anyhow::Result<ExternalRows> {
+    use features::external_inputs::ExternalSeries;
+    let mut out = ExternalRows::default();
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for f in feats {
+        for input in f.inputs() {
+            match &input.series {
+                ExternalSeries::Macro { series_id } => {
+                    if !seen.insert(format!("m:{series_id}")) {
+                        continue;
+                    }
+                    let from = (first_bar - chrono::Duration::days(MACRO_LOOKBACK_DAYS)).date_naive();
+                    let rows = storage::clickhouse::alt::macro_vintages(
+                        clickhouse_url,
+                        series_id,
+                        from,
+                        last_bar.date_naive(),
+                        as_of,
+                    )
+                    .await?;
+                    out.macro_rows.extend(rows);
+                }
+                ExternalSeries::Fundamental { cik, tag } => {
+                    if !seen.insert(format!("f:{cik}:{tag}")) {
+                        continue;
+                    }
+                    out.facts.extend(load_facts(pg, *cik, tag, as_of).await?);
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Every fact of `(cik, tag)` accepted on or before `as_of`, **all filings kept**:
+/// the acceptance-time choice per decision is the runtime's (`latest_as_of`), so a
+/// restatement filed after one decision and before the next is seen by the second
+/// only.
+async fn load_facts(
+    pg: &PgPool,
+    cik: u32,
+    tag: &str,
+    as_of: chrono::DateTime<chrono::Utc>,
+) -> anyhow::Result<Vec<dataplane::fundamentals::FundamentalFact>> {
+    // One copy of the SQL: the storage crate owns it (Set P P-3.6).
+    Ok(storage::postgres::fundamentals::facts(pg, cik, tag, as_of).await?)
+}

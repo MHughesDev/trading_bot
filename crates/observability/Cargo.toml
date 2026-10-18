@@ -25,6 +25,8 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+# The /metrics exporter's listener (Set E 5.1). Already in the workspace lock.
+tokio = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

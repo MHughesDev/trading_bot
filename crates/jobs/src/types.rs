@@ -28,6 +28,12 @@ pub enum JobKind {
     PredictSeries,
     SimulatePaths,
     ResearchRun,
+    /// A Layer 1 research strategy run (Set M M-1.5): runs a position-series function
+    /// and its Gate-0 truncation re-runs (compute, no trial), then dispatches the one
+    /// evaluation as a registered, counted ledger trial. It does not count at submission
+    /// because the trial is registered *inside* the run, after the code has produced a
+    /// series, exactly as COMP-005 §2 orders `research_run` before the counted `backtest`.
+    Layer1Run,
     /// The continuous-research session driver (AGENT-014 §3, ADR-0037). Like
     /// [`JobKind::Campaign`] it folds an append-only log and dispatches each
     /// iteration's work as a child; like it, it counts no trial of its own,
@@ -56,6 +62,7 @@ impl JobKind {
         JobKind::PredictSeries,
         JobKind::SimulatePaths,
         JobKind::ResearchRun,
+        JobKind::Layer1Run,
         JobKind::ContinuousResearch,
         JobKind::Backfill,
         JobKind::DataQc,
@@ -79,6 +86,7 @@ impl JobKind {
             JobKind::PredictSeries => "predict_series",
             JobKind::SimulatePaths => "simulate_paths",
             JobKind::ResearchRun => "research_run",
+            JobKind::Layer1Run => "layer1_run",
             JobKind::ContinuousResearch => "continuous_research",
             JobKind::Backfill => "backfill",
             JobKind::DataQc => "data_qc",
@@ -104,6 +112,7 @@ impl JobKind {
             | JobKind::FeatureMaterialise
             | JobKind::SimulatePaths
             | JobKind::ResearchRun
+            | JobKind::Layer1Run
             | JobKind::ContinuousResearch => WorkerClass::Research,
             JobKind::Train | JobKind::Hpo | JobKind::PredictSeries => WorkerClass::Trainer,
             JobKind::Backfill

@@ -54,6 +54,9 @@ def run_predict(artifact_bytes: bytes, instances: list, model_kind: str, horizon
                 result = predict(inner, instances, model_kind, horizon, header)
                 if result is not None:
                     return result
+            except base.Abstain:
+                # An abstain is the answer: never fall through to another predictor.
+                raise
             except Exception:
                 continue
 

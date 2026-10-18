@@ -419,7 +419,7 @@ mod tests {
         };
         match admit(None, "BTC-USD", 1_000.0, Some(&c)) {
             Admission::Refused { reason } => {
-                assert!(reason.contains("single-venue ADV"), "{reason}")
+                assert!(reason.contains("single-venue ADV"), "{reason}");
             }
             other => panic!("{other:?}"),
         }

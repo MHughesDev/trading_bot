@@ -50,7 +50,7 @@ impl PaperLedgerKind {
 }
 
 /// One journal line on a paper account.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PaperLedgerEntry {
     /// Monotonic per-account sequence number.
     pub seq: u64,
@@ -120,6 +120,32 @@ impl PaperLedger {
             note,
         });
         self.next_seq += 1;
+    }
+
+    /// Every retained entry plus the next sequence number — the ledger's whole
+    /// state, for [`super::account::PaperAccountState`] (Set E #5).
+    pub fn export(&self) -> (Vec<PaperLedgerEntry>, u64) {
+        (self.entries.iter().cloned().collect(), self.next_seq)
+    }
+
+    /// Rebuild a ledger from [`Self::export`]'s output.
+    pub fn restore(
+        asset_class: AssetClass,
+        clock: std::sync::Arc<dyn crate::clock::VenueClock>,
+        entries: Vec<PaperLedgerEntry>,
+        next_seq: u64,
+    ) -> Self {
+        let mut entries: VecDeque<PaperLedgerEntry> = entries.into();
+        while entries.len() > LEDGER_CAPACITY {
+            entries.pop_front();
+        }
+        Self {
+            asset_class,
+            clock,
+            entries,
+            next_seq,
+            capacity: LEDGER_CAPACITY,
+        }
     }
 
     /// All retained entries at or after `since` (all entries when `None`).

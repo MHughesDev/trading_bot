@@ -567,6 +567,268 @@ pub fn blocking_profile_with(
     Ok(BlockingProfile { entries })
 }
 
+// ── measuring it without a second evaluator ─────────────────────────────────
+
+/// What one probe run is the answer to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Measures {
+    /// Every clause together: the bars on which the entry is true.
+    AllClauses,
+    /// This clause alone: the bars on which it is true.
+    OnlyClause(usize),
+    /// Every clause **except** this one: with [`Self::AllClauses`], the bars
+    /// this clause alone cost the strategy.
+    AllButClause(usize),
+}
+
+/// One preview run the caller must make, and the signal to read the answer from.
+///
+/// A probe is the stored definition with exactly one thing changed: the entry's
+/// condition expression. Its declared inputs are untouched, and the preview
+/// takes its feature list from them, so every probe has the same warm-up and
+/// the same `bars_evaluated` as the strategy itself. That sameness is the
+/// whole reason this is correct: shares of different windows cannot be
+/// subtracted.
+#[derive(Clone, Debug)]
+pub struct Probe {
+    pub measures: Measures,
+    pub definition: StrategyDefinition,
+    /// The `emit` name whose `bars_true` the preview reports for this probe.
+    pub signal: String,
+}
+
+/// The probes for one entry condition.
+#[derive(Clone, Debug)]
+pub struct ProbeSet {
+    entry: EntryClauses,
+    probes: Vec<Probe>,
+}
+
+/// An expression no bar satisfies, in the frozen v1 grammar. It stands in for
+/// the other entries on the same side, so a probe measures one entry and not
+/// the union the preview's `signals` list would otherwise report under one name.
+pub const NEVER: &str = "(0 > 1)";
+
+impl ProbeSet {
+    #[must_use]
+    pub const fn entry(&self) -> &EntryClauses {
+        &self.entry
+    }
+
+    /// In the order [`Self::counts`] reads their answers.
+    #[must_use]
+    pub fn probes(&self) -> &[Probe] {
+        &self.probes
+    }
+
+    /// Fold the preview's answers into the tally [`blocking_profile()`] reads.
+    ///
+    /// `bars_true[i]` is the `bars_true` of [`Self::probes`]`[i]`'s signal, and
+    /// `bars_evaluated` is the preview's own `bars_evaluated` (identical for
+    /// every probe, by construction).
+    ///
+    /// # Errors
+    ///
+    /// [`Code::ImpossibleTally`] when the answers are the wrong number, or
+    /// cannot have come from one window — including a conjunction that was
+    /// true on more bars than a subset of its own clauses.
+    pub fn counts(
+        &self,
+        bars_evaluated: u64,
+        bars_true: &[u64],
+    ) -> Result<EntryCounts, Diagnostic> {
+        let path = self.entry.path.as_str();
+        if bars_true.len() != self.probes.len() {
+            return Err(impossible(
+                path,
+                format!(
+                    "{} answers for {} probes",
+                    bars_true.len(),
+                    self.probes.len()
+                ),
+            ));
+        }
+        let n = self.entry.clauses.len();
+        let all = bars_true[0];
+        let only = |i: usize| -> u64 {
+            if n == 1 {
+                all
+            } else {
+                bars_true[1 + i]
+            }
+        };
+        let mut clauses = Vec::with_capacity(n);
+        for (i, c) in self.entry.clauses.iter().enumerate() {
+            let sole = if n == 1 {
+                // No other clause to be true: every bar this one was false on.
+                bars_evaluated.checked_sub(all)
+            } else {
+                // Every other clause true, this one false: the others' joint
+                // count minus the bars on which this one was true as well.
+                let others = if n == 2 {
+                    only(1 - i)
+                } else {
+                    bars_true[1 + n + i]
+                };
+                others.checked_sub(all)
+            };
+            let Some(sole) = sole else {
+                return Err(impossible(
+                    path,
+                    format!(
+                        "the conjunction was true on {all} bars and the other clauses together \
+                         on fewer — a conjunction cannot outrun a subset of itself"
+                    ),
+                ));
+            };
+            clauses.push(ClauseCounts {
+                path: c.path.clone(),
+                bars_true: only(i),
+                bars_sole_blocker: sole,
+            });
+        }
+        EntryCounts::new(path, bars_evaluated, all, clauses)
+    }
+}
+
+/// The preview runs that measure every entry condition clause by clause.
+///
+/// This is how the blocking profile reaches a model without a second walk over
+/// the bars: the preview already reports how many bars a signal was true on, so
+/// each question "how often is this clause true, and how often are all the
+/// others?" is a preview of the same definition with that expression swapped
+/// in. Cost: `1` run for a one-clause entry, `n + 1` for two, `2n + 1` for
+/// three or more.
+///
+/// # Errors
+///
+/// Whatever [`entry_clauses()`] refuses.
+pub fn probes(def: &StrategyDefinition) -> Result<Vec<ProbeSet>, Diagnostic> {
+    probes_with(def, &Catalogue::engine())
+}
+
+/// As [`probes()`], against a caller-supplied catalogue.
+///
+/// # Errors
+///
+/// As [`probes()`].
+pub fn probes_with(
+    def: &StrategyDefinition,
+    cat: &Catalogue,
+) -> Result<Vec<ProbeSet>, Diagnostic> {
+    let entries = entry_clauses_with(def, cat)?;
+
+    // Every feature the strategy declares, once each, in declaration order.
+    let mut declared: Vec<&str> = Vec::new();
+    for input in &def.inputs {
+        for f in &input.features {
+            if !declared.contains(&f.as_str()) {
+                declared.push(f.as_str());
+            }
+        }
+    }
+    let guard: Option<String> = declared
+        .iter()
+        .map(|f| format!("(feature('{f}') == feature('{f}'))"))
+        .reduce(|a, b| format!("({a} * {b})"));
+
+    let mut out = Vec::with_capacity(entries.len());
+    for entry in &entries {
+        // The signal this entry's condition feeds.
+        let emits: Vec<&str> = def
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.kind {
+                NodeKind::Signal { when, emit } if *when == entry.node => Some(emit.as_str()),
+                _ => None,
+            })
+            .collect();
+        let [signal] = emits.as_slice() else {
+            return Err(defect(
+                "an entry condition does not feed exactly one signal",
+            ));
+        };
+        let signal = (*signal).to_string();
+        // Every other condition feeding the same signal name: the preview
+        // reports one count per name, so they have to be silenced for a probe
+        // to measure this entry alone.
+        let siblings: Vec<&str> = def
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.kind {
+                NodeKind::Signal { when, emit } if *emit == signal && *when != entry.node => {
+                    Some(when.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        let make = |measures: Measures, expr: String| -> Probe {
+            // Restricted to the bars the preview counts as evaluated: the
+            // expression is multiplied by `x == x` for every declared feature,
+            // which is true where the feature has a value and makes the whole
+            // condition false where it has none. Without it a clause that reads
+            // one early-warming feature is "true" on bars before the strategy
+            // as a whole has any answer, and the tallies stop being counts of
+            // one window.
+            let expr = match &guard {
+                Some(g) => format!("(({expr}) * {g})"),
+                None => expr,
+            };
+            let mut d = def.clone();
+            for node in &mut d.nodes {
+                if let NodeKind::Condition { expr: e } = &mut node.kind {
+                    if node.id == entry.node {
+                        e.clone_from(&expr);
+                    } else if siblings.contains(&node.id.as_str()) {
+                        *e = NEVER.to_string();
+                    }
+                }
+            }
+            Probe {
+                measures,
+                definition: d,
+                signal: signal.clone(),
+            }
+        };
+
+        let exprs: Vec<&str> = entry.clauses.iter().map(|c| c.expr.as_str()).collect();
+        // The compiled `and` encoding, so the probe is evaluated by the same
+        // rule the strategy itself is: `((A) * (B))`. Each clause is
+        // parenthesised here because `Clause::expr` is a slice of the stored
+        // text with the parser's parentheses already stripped — `a > b`, not
+        // `(a > b)` — and `(a > b * c < d)` is a different expression from the
+        // conjunction it was cut out of.
+        let conj = |skip: Option<usize>| -> String {
+            let mut it = exprs
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| Some(*i) != skip)
+                .map(|(_, e)| format!("({e})"));
+            let first = it.next().unwrap_or_default();
+            it.fold(first, |acc, e| format!("({acc} * {e})"))
+        };
+
+        let n = exprs.len();
+        let mut probes = vec![make(Measures::AllClauses, conj(None))];
+        if n > 1 {
+            for (i, e) in exprs.iter().enumerate() {
+                probes.push(make(Measures::OnlyClause(i), (*e).to_string()));
+            }
+        }
+        if n > 2 {
+            for i in 0..n {
+                probes.push(make(Measures::AllButClause(i), conj(Some(i))));
+            }
+        }
+        out.push(ProbeSet {
+            entry: entry.clone(),
+            probes,
+        });
+    }
+    Ok(out)
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 /// Split the compiled `and` encoding, on exactly the rule

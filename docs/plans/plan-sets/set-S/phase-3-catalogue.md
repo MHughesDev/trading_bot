@@ -1,6 +1,6 @@
 # Phase 3 — The catalogue
 
-**Completion: 42% (8 / 19 tasks), plus 10 `PARTIAL` and 1 `NOT STARTED`.**
+**Completion: 74% (14 / 19 tasks), plus 10 `PARTIAL` and 1 `NOT STARTED`.**
 
 > **2026-09-27.** S-3.18 closed. S-3.10, S-3.13 and S-3.17 moved
 > `BLOCKED:UPSTREAM` → `PARTIAL`: the perturbation runtime mode now exists, the
@@ -304,8 +304,15 @@ control is matched, not naive; results are stable across two seeded runs.
 **Traces:** AGENT-006 §5.2; AGENT-002 §6.3.
 
 ### S-3.4 Liquidity, correlation, seasonality, stationarity, cointegration — L
-`PARTIAL` 2026-09-16 — four of the five tools are complete; `estimate_liquidity_cost`
-ships three of the four spread estimators §5.2 names.
+`DONE` 2026-10-03 — EDGE added to `estimate_liquidity_cost` (four estimators now), closing OQ-15.
+Evidence: `templates_run` 6/6 pass; `the_cost_estimators_recover_the_fixtures_known_spread` now
+asserts EDGE is present and within 25% of the known 60 bps (measured about 67 bps on the 60 bps
+fixture, about 135 bps on the 120 bps one). Mutation-checked: flipping the sign of one moment term
+makes it fail (28.9 bps). EDGE declines (None) on a non-positive squared spread rather than flooring.
+The 2026-09-16 note below is the history of why it was absent.
+
+(Original note, 2026-09-16: four of the five tools were complete; `estimate_liquidity_cost`
+shipped three of the four spread estimators §5.2 names.)
 
 Done: `apps/skill-runner/templates/analysis/{estimate_liquidity_cost,rolling_correlation,
 seasonality,stationarity,cointegration}.py`.
@@ -504,8 +511,15 @@ the audit reads only platform-side logs, never agent-authored text.
 **Traces:** AGENT-006 §5.4; AGENT-009 honesty suite; research brief Theme 9.
 
 ### S-3.9 PBO and family-wise significance — M
-`PARTIAL` 2026-09-16 — both tools exist; `family_wise_test` offers **one** family-wise
-procedure rather than the three §5.4 names.
+`DONE` 2026-10-03 — both tools exist and both acceptance clauses hold; `family_wise_test` offers **one**
+family-wise procedure rather than the three §5.4 names, **by decision** (ADR-S3-06, below), which is why
+this closes rather than stays partial. The alternative rejected: shipping SPA and White's Reality Check
+beside Romano-Wolf. Romano-Wolf dominates both, and three procedures behind one question is a menu to
+shop between. Re-opening it needs a reason the decision did not weigh, not a wish for the spec's list.
+Evidence: `tools::audit` declarations unchanged; the Romano-Wolf and PBO routes are the 2026-09-16 ones
+(`agent_audit` tests).
+
+(Original 2026-09-16 note follows.)
 
 `crates/mcp-server/src/tools/audit.rs`, `crates/api/src/routes/agent_audit.rs`,
 `SuiteManager::{audit_probability_of_overfit,audit_family_wise}`.
@@ -543,6 +557,18 @@ length is derived, not hard-coded.
 ## Leakage
 
 ### S-3.10 `future_perturbation_test` — M
+`PARTIAL` 2026-10-04 (S-CATALOGUE track) - Re-checked, no status change. The one open clause (a seeded lookahead end to end through live ClickHouse) cannot be written: the causal feature engine forbids expressing one, so the seeded case stays unit-level (`audit::perturbation_tests`, `perturbed_preview`).
+`PARTIAL` 2026-10-04 (F-LIFECYCLE track) - No status change. `fill_delay_ms` stays refused by the preview; its job is now `timing_jitter_sensitivity` (S-3.13). A seeded lookahead end to end through live ClickHouse is still not expressible (the causal engine forbids writing one), so the seeded case stays unit-level.
+`PARTIAL` 2026-10-03 — **the tool is built and reaches the platform.** `tools::audit::future_perturbation_test`
+(dispatch arm in `lib.rs`) calls `POST /api/agent/strategy/preview` once unperturbed and twice per feature column
+(shift, mask); the route now takes `perturbations` (`agent_preview.rs`; v1 only, a v3 graph is refused). It refuses
+to read a result whose answer did not echo the perturbation applied. **Reading rule (ADR row, rejected alternative:
+"no divergence under a shift = lookahead" alone):** that rule cannot tell a column that reads the future from one that
+decides nothing, so a column is `biased` only when masking it changes the strategy (decisive) yet shifting it does not;
+indecisive columns are `not_decisive`, never clean. Evidence: `audit::perturbation_tests` (4), `backtest` `perturbed_preview`
+suite. **Not done:** no end-to-end run against a live ClickHouse and a seeded-lookahead strategy (the preview cannot express
+a lookahead the causal feature engine forbids, so the seeded case is unit-level only), and `fill_delay_ms` stays refused.
+
 `PARTIAL` 2026-09-27 (was `BLOCKED:UPSTREAM`) — **the runtime mode exists now.**
 `crates/backtest/src/perturb.rs` carries `ShiftColumn`, `MaskColumn` and
 `JitterColumn` with validation, and `backtest::preview::preview_signals_perturbed`
@@ -597,7 +623,9 @@ strategy produces no divergence.
 **Traces:** AGENT-006 §5.4; research brief Theme 2 (Freqtrade's shipped precedent).
 
 ### S-3.11 Bar-boundary and feature leakage — M
-`PARTIAL` 2026-09-16 — `bar_boundary_check` is built and tested against a planted defect;
+`DONE` 2026-10-04 (F-LIFECYCLE track) - `feature_leakage_scan` built, as a static pass over **code a run submits** (ADR-S3-14; rejected: scanning definitions, which can only say clean): `strategy_validator::leakage_scan` (negative shifts, centred windows, backward fill, whole-sample statistics and scalers, a label feeding a feature, shuffled splits; comments and strings blanked). Reached: catalogue tool in `audit` (`tools::audit::feature_leakage_scan`, dispatch arm in `lib.rs`), local and free. It never says clean: no findings is `no_findings_not_a_clean_bill`, with the limits stated. Evidence: `leakage_scan::tests` (8, incl. `a_full_dataset_normalisation_is_flagged_with_its_line`), `tools::audit::tests::the_leakage_scan_finds_a_seeded_leak_names_its_line_and_never_says_clean`; strategy-validator 58 pass. The `leakage_audit` battery's `static scan` stage stays owed (it is about SLv2 expressions, a different input).
+`PARTIAL` 2026-10-03 (re-checked, unchanged; `crates/strategy-validator` is outside this track's territory, so the
+static scan was not started, and the original reason for deferring it to AGENT-011's SLv2 phase stands) — `bar_boundary_check` is built and tested against a planted defect;
 `feature_leakage_scan` (the static pass in `crates/strategy-validator`) is **deferred to
 phase 5, with a reason**.
 
@@ -649,6 +677,20 @@ timestamp; the static scan flags a full-dataset normalisation.
 ## Falsification — the adversarial battery
 
 ### S-3.12 Reshuffle, bootstrap, cost shock — M
+`DONE` 2026-10-04 (was `PARTIAL`) — **verified end to end through the real simulator.** `crates/mcp-server/tests/path_risk_end_to_end.rs`
+runs the market_simulator engine over 1,500 synthetic bars (`run_simulation_detailed`, the call `BacktestManager` makes), takes
+`DetailedOutcome::result_document()` (what is stored on `backtest_jobs.result`), serves its `trades` array from a stand-in for
+`/api/evidence/trades`, and calls the shipped tools: `cost_shock_curve`'s break-even multiple equals `(net + costs) / costs` recomputed from the
+engine's own `Trade` values, the 1x point is the run's net, and `trade_reshuffle_bootstrap` is seed-repeatable and says it is not a worst case.
+**What was used instead of a stored run:** the box's 11 completed `backtest_jobs` predate `c553b246` (queried: 11 completed, 0 with `trades`), and none can be
+added without starting the platform, so a synthetic-venue run is the evidence. The route handler's own body was not exercised against Postgres.
+**Finding for the `backtest::sim` owner:** `apply_exit_fills`'s `debug_assert!(delta <= 0)` ("the conservative fill never improves a trade") panics on
+declared exits over a seeded random walk (first at 266 bars, a `max_holding_bars` exit on bar 265; also with take-profit/stop only), so the fixture uses
+signal exits. Not investigated further.
+
+2026-10-03 re-check: the producer exists (`c553b246` harvests per-trade rows into the result document; `manager.rs` stores it).
+Not re-verified end to end against a stored real run in this pass, so the marker stays `PARTIAL`.
+
 `PARTIAL` — **downgraded from `DONE` on 2026-09-21.** All three tools are built and
 35 tests pass over fixtures. **None of them can execute.** The marker said `DONE`
 because the tools were finished; nobody had asked whether the route under them
@@ -718,6 +760,24 @@ templated tier, which cannot carry per-trade rows (Q-S3-02); and the spec and th
 plan disagree about whether `regime_failure_search` spends a trial (Q-S3-01).
 
 ### S-3.13 Ablation, fragility, jitter, regime failure — L
+`DONE` 2026-10-04 (F-LIFECYCLE track) - All four tools exist. **`timing_jitter_sensitivity`**: `StudyKind::TimingJitter` + `VarySpec::FillDelays` over `RunConfig::fill_delay_bars` (ADR-S3-16); the v1 executor refuses a delayed config (it has no order-hold path), so v1 reads `unmeasured`, never insensitive. **`ablation_sweep`**: variants registered as draft strategies through `POST /api/strategies`, one `StudyKind::Ablation`, verdicts from timestamp-paired equity returns and a paired stationary bootstrap (ADR-S3-15); routes `/api/agent/falsification/ablation/{id}/{variants,classify}`; v1 definitions only. Both declare `TrialKind::Falsification` (gate registers before running; the study counts each member). Jitter is v3-only and ablation v1-only, so no strategy gets both. Evidence: backtest `study::` 27 pass (incl. `timing_jitter_runs_one_member_per_delay_and_the_executor_sees_each`, `ablation_runs_one_member_per_strategy_in_the_order_given`), research `ablation::tests` (incl. `equity_curves_are_paired_by_timestamp`), mcp `falsification::tests` (timing curve, tally, declarations), api `ablation_tests`. **Not done:** no run through the live simulator and ClickHouse.
+2026-10-04 wave 3: `research::ablation` added (7 tests): leave-one-rule-out variants (a condition becomes `1 > 0`, an exit rule is removed, the last one switching to
+`risk_layer_only`) and a paired stationary-bootstrap classifier (load_bearing / redundant / harmful / inconclusive, Politis-White block, 95% interval).
+**`ablation_sweep` is still not a tool, and the reason is structural:** the existing sweep machinery (`ParamBatchSpec`, `run_param_batch`) varies parameters of one stored
+strategy, while an ablation varies the strategy; `SimRunExecutor`/`V3RunExecutor` resolve a run's definition from `strategy_definitions` by id, so each variant must be a stored
+strategy with its own run and its own `Falsification` trial. That dispatcher writes the user's strategy table and registers N trials, which needs a decision from the owner of
+those paths rather than assembly inside a tool handler. **`timing_jitter_sensitivity`: the order path is not exposed.** `FillPolicy` has only `NextBarOpen`/`CurrentClose`, and the
+runner submits orders to `SimulatedVenue` the bar they are decided. Exact request to the Set U session: add `fill_delay_bars: u32` (default 0, part of the `RunConfig` hash) and have
+`backtest::runner::run` hold each decided order intent in a FIFO and release it to `SimulatedVenue` `fill_delay_bars` bars later; no change to `SimulatedVenue`. The tool is then a loop of
+runs at delay 0..k, each a `Falsification` trial.
+
+`PARTIAL` 2026-10-03 — **two of four built.** `regime_failure_search` (`research::regime_search`, route
+`/api/agent/falsification/regime-failure/{run_id}`): platform-labelled regimes, BH across tested regimes, thin regimes listed
+untested, no labels -> `regimes_unmeasured` 422, `TrialKind::None`. `parameter_fragility_map` (`research::fragility`, route
+`/api/agent/falsification/fragility/{sweep_id}`): the re-scoped scalar over the existing surface, no re-run; `chosen_point_percentile`
+is null with a reason (the carried point's score is not on the report). Evidence: `research` 81 pass (8 new). Still blocked:
+`ablation_sweep` (needs a variant dispatcher) and `timing_jitter_sensitivity` (needs the simulator order path).
+
 `PARTIAL` 2026-09-27 (was `BLOCKED:UPSTREAM`) — **three of the four blockers are
 closed; the tools are the remaining work.** Per tool:
 
@@ -765,6 +825,18 @@ across regimes is applied.
 ## Execution realism
 
 ### S-3.14 Venue constraints, funding, divergence attribution — L
+`PARTIAL` 2026-10-04 (S-CATALOGUE track) - Re-checked, no status change. Timing and data components need fields the forward record does not carry (not Set S's to add); venue numeric limits are OQ-17 (a human-verified fact).
+`PARTIAL` 2026-10-04 (F-LIFECYCLE track) - No status change. `ShadowBar` was checked again: it carries the same five quantities as the forward row, so a timing or data component cannot be attributed from it; the four-way split stays unmet.
+2026-10-04 wave 3: Set T's `ShadowBar` was checked and carries the same five quantities as the forward row, so it adds no timing or data field.
+`attribute_divergence` now also reports `recording_lag_median_s` / `recording_lag_max_s` (`observed_at` minus bar close): recording latency, **not** execution
+latency, labelled as such. Timing and data stay unmeasured components. Status unchanged: `PARTIAL`.
+
+`PARTIAL` 2026-10-03 — `apply_funding_costs` built (`tools::venues`, over `/api/data/funding`; long pays positive funding, gaps counted not
+interpolated, >10% of held settlements unreported -> `confidence: low`, absent series refused). `attribute_divergence` built over the new
+`GET /api/agent/divergence` + `backtest::diagnostics_divergence` (5 tests): it separates signal-mismatch bars from the matched-signal residual and reports
+slippage excess beside it; **timing and data are unmeasured** (no field in the forward record) and execution cannot be put in return units
+without an equity figure, so the spec's four-way split and "dominant of four" are not met. Venue numeric limits remain OQ-17.
+
 `PARTIAL` 2026-09-16 — `get_venue_constraints` is built with the staleness mechanism and the
 qualitative rules; its numeric limits are **OQ-17**. `apply_funding_costs` and
 `attribute_divergence` are not started.
@@ -811,6 +883,16 @@ attribution names a dominant component with its evidence.
 **Traces:** AGENT-006 §5.6; research brief Theme 5.
 
 ### S-3.15 Data provenance, survivorship, funding history — M
+`DONE` 2026-10-04 (code; not exercised against the running platform) — funding collection now runs: `funding_rates` holds rows for `kraken_futures` perpetuals on this box
+(queried 2026-10-03, ~10 rows per instrument). The lag figure is built: `GET /api/agent/data/bar-lag` (`routes/agent_data_lag.rs`) reports `knowledge - close` over received bars, backfilled bars
+counted separately, and `probe_pit_provenance` folds it into `worst_case_lag_days` (null with the reason when every bar is backfilled). `estimated_bias_bps` stays null by design. All three
+tools are tested on synthetic inputs (`market::data_tool_tests`, 11); the platform was not started, so no live call was made.
+
+`PARTIAL` 2026-10-03 — all three tools built as thin clients (`tools::market`): `get_funding_history` (gap % against the settlement grid, annualised mean,
+absent -> unmeasured never zero), `probe_pit_provenance` (executes an as-of read and a latest read and diffs them; reports `unknown`, not `yes`, when the as-of
+read hides nothing), `audit_survivorship` (samples membership at five instants; a static membership is `unauditable`, never clean). Evidence: `market::data_tool_tests` (10).
+**Missing:** funding rows (collection never run, table empty), the lag in days (bars route serves no knowledge_time), and a bias estimate in bps.
+
 `NOT STARTED` — **corrected 2026-09-21: this was marked `BLOCKED:UPSTREAM` on a
 claim that turned out to be false.** Both ClickHouse schema files **are** applied in database `trading`:
 `market_bar` holds **170,594 rows**, `instrument_symbol_dim` 10, `venue_dim` 11,
@@ -872,6 +954,18 @@ reports "unauditable", never a false clean.
 ## Attribution, models, portfolio
 
 ### S-3.16 What the signal actually is — L
+`PARTIAL` 2026-10-04 (S-CATALOGUE track) - Remaining gap is the carry factor. It needs a `SeriesKind::Funding` in `crates/skills/src/template.rs` (Set R-a/R-b territory, dirty) and a materialiser arm beside `materialise_predictions` in `crates/api/src/routes/agent_templates.rs` reading `/api/data/funding`; then `factor_spanning_test` takes a second factor. Not built here to avoid editing two files another track owns; the exact edit is in the track report.
+`PARTIAL` 2026-10-04 (F-LIFECYCLE track) - `model_prediction_series` DDL (`clickhouse/09`) is applied on this box (it was already in the boot list `storage::clickhouse::migrate`; applied by hand to the local `trading` database, idempotent). `signal_half_life` therefore answers on an empty series rather than `series_table_missing`. Still PARTIAL: the factor set is BTC beta only.
+2026-10-04 wave 3: **`signal_half_life` built** (`attribution/signal_half_life.py`) on a new `SeriesKind::Predictions` (`crates/skills`, additive; materialised in `agent_templates.rs` from
+`model_prediction_series` plus the point-in-time bars, labels `ln(close[i+h]/close[i])` from the last closed bar, NaN past the readable bars; reader `backtest::diagnostics_predictions`, 8 tests).
+Recovers a planted 12-bar half-life (`the_half_life_is_recovered_from_a_planted_decay`), flags a rebalance faster than a supplied `breakeven_rebalance_bars`. **On this box the table
+`model_prediction_series` does not exist** (clickhouse/09 is applied at platform boot, not yet here; DDL and the read query were validated on a scratch database and dropped), so the tool answers
+`series_table_missing` here. Still `PARTIAL`: the factor set is BTC beta only (carry has no materialisable series).
+
+`PARTIAL` 2026-10-03 — `factor_spanning_test` added (`attribution/factor_spanning_test.py`): HAC OLS of a recorded run on the fixed BTC factor,
+named `btc_beta_v0` with `funding_rate_carry` listed as missing, so `alpha_beyond_btc_beta_carry_untested` is never "genuine". Power test
+`the_spanning_test_separates_a_repackaged_market_from_an_edge`. `signal_half_life` still needs a signal series (no `SeriesKind::Signal` producer).
+
 `PARTIAL` 2026-09-16 — `alpha_health_check` is built;
 `factor_spanning_test` and `signal_half_life` are not, and both are blocked on data that
 does not exist yet rather than on effort.
@@ -913,6 +1007,15 @@ per report; a recommended rebalance faster than the break-even turnover is flagg
 **Traces:** AGENT-006 §5.3; research brief Theme 4.
 
 ### S-3.17 Model diagnostics — M
+`PARTIAL` 2026-10-04 (S-CATALOGUE track) - Re-checked, no status change. `time_aware_importance` needs an inference job over permuted inputs (a counted dispatch, Set U's `predict_series` family); "a drift-flagged model's live signals are downgraded" needs a consumer in `apps/platform/src/live_runner.rs` (Set U file), reported not built.
+`PARTIAL` 2026-10-04 (F-LIFECYCLE track) - `time_aware_importance` is **not built**, and cannot be from stored data (ADR-S3-17): block-permutation importance re-runs the model on permuted inputs; the prediction series holds outputs and an `inputs_digest`, and a permuted run is a counted inference dispatch belonging to a new job kind beside `predict_series` (Set U). A surrogate regression of the outputs on bar features would measure what predicts the output, not what the model reads, and under this name would be mislabelled. `conformal_calibrate` and `detect_drift` stand.
+2026-10-04 wave 3: **`conformal_calibrate` built** (`model/conformal_calibrate.py`, ACI with delayed labels, realised coverage by block, drift warning; EnbPI not offered); test
+`adaptive_intervals_hold_coverage_through_a_regime_change`. **`time_aware_importance` not built:** block-permutation importance has to re-run the model on permuted inputs, and the stored
+series holds only answers, not inputs; it needs an inference job over perturbed features (a dispatch, so a trial). The acceptance clause "a drift-flagged model's live signals are downgraded" is harness
+work not done here. `PARTIAL`.
+
+`PARTIAL` 2026-10-03, unchanged: `conformal_calibrate` and `time_aware_importance` need a prediction series with a realised outcome; none is materialisable.
+
 `PARTIAL` 2026-09-27 (was `BLOCKED:UPSTREAM`) — **one of the three is built, and the
 blocked marker was hiding it.** `apps/skill-runner/templates/model/detect_drift.py` is on
 disk and in the catalogue (`every_template_on_disk_reached_the_catalogue` would fail
@@ -1040,6 +1143,21 @@ has no write path and no agent-callable halt.
 **Traces:** AGENT-006 §5.7, COMP-007 §6.
 
 ### S-3.19 Spending guards: call budgets, cost preview, self-status — M
+`PARTIAL` 2026-10-04 (S-CATALOGUE track) - Re-checked, no status change. `get_self_status` now reports counted tokens and dollars (harness `on_self_status`, done by the runtime track). Open: `estimate_cost` dollars need a fresh verified hardware row in `config/prices.yaml` (OQ-16, a human-supplied price), and the startup canary is api-side state the sans-IO loop does not hold.
+`PARTIAL` 2026-10-04 (F-LIFECYCLE track) - `get_self_status` now reports counted tokens (`N spent, R of C left`; `cap C, no model reply counted yet` before the first reply), dollars (spent and left, or no cap / no verified price row) and the calibrated bytes-per-token, and its note carries `args: {}` rather than null (a null made any run that looked at itself unreplayable, S-4.8). Tests: `self_status_answers_from_the_loops_own_state_without_spending_a_step` (rewritten), `a_self_status_note_carries_empty_object_args_so_the_run_stays_replayable`; harness lib 682 pass. Still open: `estimate_cost` dollars need a fresh verified hardware price row (OQ-16); the startup canary is api-side state the sans-IO loop does not hold.
+2026-10-04: `get_self_status` change requested of the RUNTIME track (`crates/harness/src/drive.rs`, `fn on_self_status`). The budget line is stale: the loop now counts tokens and dollars
+(`spend`, `working.budget.tokens_remaining`, `usd_tenth_cents_remaining`) but the line still says tokens are not counted and dollars have no cap (OQ-16). Replace the `budget:` push with one that reads the
+fields, and add a calibration line:
+`let tokens = match (b.tokens_cap, b.tokens_remaining) { (Some(c), Some(r)) => format!("{r} of {c} left"), (Some(c), None) => format!("cap {c}, burn not counted by this run"), _ => "no cap set by this profile".into() };`
+`let usd = match (b.usd_tenth_cents_cap, b.usd_tenth_cents_remaining) { (Some(c), Some(r)) => format!("{r} of {c} tenth-cents left"), (Some(c), None) => format!("cap {c} tenth-cents, spend not yet measured (no fresh price row)"), _ => "no dollar cap enforced (no verified price row)".into() };`
+then `"budget: {}/{} steps left, {} trials spent{}. Tokens: {tokens}. Dollars: {usd}. Treat every uncounted axis as unknown, not as zero and not as remaining."`, and
+`lines.push(match self.bytes_per_token { Some(v) => format!("calibrated bytes-per-token {v:.2}"), None => "bytes-per-token: unmeasured (no calibration row for this model); the 4.0 prior is in use".into() });`.
+Update `self_status_answers_from_the_loops_own_state_without_spending_a_step`, which asserts the old wording ("tokens spent NOT counted by this run", "Dollars have neither a cap nor a count").
+
+`PARTIAL` 2026-10-03 — `estimate_cost` now returns `est_usd` (and a band) from the shipped price table (ADR-D-03) when `TBOT_HARDWARE_CLASS` is set and a fresh
+verified hardware row exists; otherwise null with the reason (`config/prices.yaml` has no hardware row today). Tests `a_fresh_row_prices_seconds_and_the_band`,
+`no_fresh_row_is_no_number`. Not done: `get_self_status` (harness-owned, outside this track) still reports dollars as uncounted and omits calibration/canary.
+
 `PARTIAL` 2026-09-16 — all three tools exist; `estimate_cost` cannot produce dollars, and
 that is **OQ-16** rather than a gap to fill in.
 

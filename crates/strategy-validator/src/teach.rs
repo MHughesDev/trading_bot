@@ -51,9 +51,10 @@ pub const TEACHINGS: &[Teaching] = &[
     },
     Teaching {
         code: "distance_without_unit",
-        fix: "give the distance a unit: `1.5 atr`, `1.5 %` or `1.5 sigma` from entry. A bare \
-              number is ambiguous across instruments at different price scales, which is the \
-              one thing a swept parameter must not be.",
+        fix: "give the distance a unit: `1.5 %`, `1.5 atr(14)` or `1.5 sigma(20)` from entry — \
+              `atr` and `sigma` take their lookback in parentheses. A bare number is ambiguous \
+              across instruments at different price scales, which is the one thing a swept \
+              parameter must not be.",
         see: Some("guide#exits.units"),
     },
     Teaching {

@@ -242,6 +242,9 @@ pub struct PaperOrderRecord {
     /// A trailing stop's best price since placement — the high for a sell stop,
     /// the low for a buy stop.
     pub best: Option<Decimal>,
+    /// The deployment account the order trades in, frozen when it was
+    /// submitted (Set U U-4.7); `None` for the asset class's account.
+    deployment_slot: Option<usize>,
 }
 
 impl PaperOrderRecord {
@@ -263,6 +266,7 @@ impl PaperOrderRecord {
             updated_at: now,
             triggered: false,
             best: None,
+            deployment_slot: None,
         }
     }
 
@@ -479,6 +483,34 @@ pub struct PaperTradingEngine {
     clock: Arc<dyn crate::clock::VenueClock>,
     /// Order ids: random for paper, sequential in a backtest.
     ids: Arc<dyn crate::clock::OrderIds>,
+    /// Per-account "touched since last save" flags for [`super::persist`]
+    /// (Set E #5). Set whenever an account is locked; the saver swaps it.
+    dirty: HashMap<AssetClass, std::sync::atomic::AtomicBool>,
+    /// One account per deployment that opened one (Set U U-4.7), so two
+    /// deployments on one asset class never share cash, positions or a day's
+    /// loss. Slots are filled once and never emptied, which is what lets a
+    /// lock on one borrow from the engine like the asset-class accounts do.
+    deployment_accounts: Vec<std::sync::OnceLock<DeploymentAccount>>,
+    deployment_index: DashMap<Uuid, usize>,
+    next_deployment_slot: std::sync::atomic::AtomicUsize,
+}
+
+/// How many deployment accounts one process can open.
+pub const DEPLOYMENT_ACCOUNT_SLOTS: usize = 4096;
+
+/// A deployment's own paper account.
+struct DeploymentAccount {
+    deployment: Uuid,
+    asset_class: AssetClass,
+    account: Mutex<PaperAccount>,
+    dirty: std::sync::atomic::AtomicBool,
+}
+
+/// Which account an order trades in: its asset class's, or a deployment's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Book {
+    Class(AssetClass),
+    Deployment(usize),
 }
 
 impl Default for PaperTradingEngine {
@@ -563,10 +595,19 @@ impl PaperTradingEngine {
             resting: DashMap::new(),
             idempotency: DashMap::new(),
             terminal_fifo: Mutex::new(VecDeque::new()),
+            dirty: ALL_ASSET_CLASSES
+                .into_iter()
+                .map(|ac| (ac, std::sync::atomic::AtomicBool::new(false)))
+                .collect(),
             sims,
             config,
             clock,
             ids,
+            deployment_accounts: (0..DEPLOYMENT_ACCOUNT_SLOTS)
+                .map(|_| std::sync::OnceLock::new())
+                .collect(),
+            deployment_index: DashMap::new(),
+            next_deployment_slot: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -661,16 +702,28 @@ impl PaperTradingEngine {
             return Ok(existing.value().clone());
         }
 
+        let book = self.book_for(asset_class, intent.strategy_id.as_deref());
+        if self.book_poisoned(book) {
+            observability::metrics::inc(
+                "paper_orders_refused_poisoned_total",
+                "Paper orders refused because the account's lock was poisoned by a panic.",
+                &[("asset_class", asset_class.as_str())],
+            );
+            return Err(PaperTradeError::AccountUnavailable { asset_class });
+        }
+
         let order_id = self.ids.next_id();
         let mut record = PaperOrderRecord::new(order_id.clone(), asset_class, intent.clone(), now);
+        record.deployment_slot = match book {
+            Book::Deployment(slot) => Some(slot),
+            Book::Class(_) => None,
+        };
 
         // Session gate: a live venue would reject this order outright.
         if self.config.enforce_sessions && !super::session::is_open(asset_class, now) {
             record.state = BrokerOrderState::Rejected;
             let reason = format!("market closed for {}", asset_class.as_str());
-            self.account(asset_class)
-                .lock()
-                .expect("paper account lock")
+            self.lock_book(book)
                 .record_rejection(&order_id, &intent.instrument_id, &reason);
             self.insert_record(record);
             return Err(PaperTradeError::MarketClosed { asset_class });
@@ -679,9 +732,7 @@ impl PaperTradingEngine {
         let Some((mark, mark_at)) = self.mark_with_time(&intent.instrument_id) else {
             record.state = BrokerOrderState::Rejected;
             let reason = format!("no mark price for {}", intent.instrument_id);
-            self.account(asset_class)
-                .lock()
-                .expect("paper account lock")
+            self.lock_book(book)
                 .record_rejection(&order_id, &intent.instrument_id, &reason);
             self.insert_record(record);
             return Err(PaperTradeError::NoMarkPrice {
@@ -698,9 +749,7 @@ impl PaperTradingEngine {
                     "stale mark for {} ({age}s old, max {max_age}s)",
                     intent.instrument_id
                 );
-                self.account(asset_class)
-                    .lock()
-                    .expect("paper account lock")
+                self.lock_book(book)
                     .record_rejection(&order_id, &intent.instrument_id, &reason);
                 self.insert_record(record);
                 return Err(PaperTradeError::StaleMark {
@@ -712,9 +761,7 @@ impl PaperTradingEngine {
 
         if let Err(e) = intent.check_shape() {
             record.state = BrokerOrderState::Rejected;
-            self.account(asset_class)
-                .lock()
-                .expect("paper account lock")
+            self.lock_book(book)
                 .record_rejection(&order_id, &intent.instrument_id, &e.to_string());
             self.insert_record(record);
             return Err(PaperTradeError::InvalidOrder(e.to_string()));
@@ -732,9 +779,7 @@ impl PaperTradingEngine {
                 let e = PaperTradeError::PostOnlyWouldTake {
                     instrument_id: intent.instrument_id.clone(),
                 };
-                self.account(asset_class)
-                    .lock()
-                    .expect("paper account lock")
+                self.lock_book(book)
                     .record_rejection(&order_id, &intent.instrument_id, &e.to_string());
                 self.insert_record(record);
                 return Err(e);
@@ -765,9 +810,7 @@ impl PaperTradingEngine {
                 }
                 Attempt::Cancelled(e) => {
                     record.state = BrokerOrderState::Cancelled;
-                    self.account(asset_class)
-                        .lock()
-                        .expect("paper account lock")
+                    self.lock_book(book)
                         .record_rejection(&order_id, &intent.instrument_id, &e.to_string());
                     self.insert_record(record);
                     return Err(e);
@@ -863,10 +906,28 @@ impl PaperTradingEngine {
 
     /// Broker-shaped positions for one asset class.
     pub fn positions(&self, asset_class: AssetClass) -> Vec<BrokerPosition> {
-        let account = self
-            .account(asset_class)
-            .lock()
-            .expect("paper account lock");
+        self.positions_in(Book::Class(asset_class))
+    }
+
+    /// The positions of the account `strategy_id` trades in: its deployment's
+    /// when it opened one (U-4.7), otherwise the asset class's.
+    pub fn positions_for(&self, asset_class: AssetClass, strategy_id: Option<&str>) -> Vec<BrokerPosition> {
+        self.positions_in(self.book_for(asset_class, strategy_id))
+    }
+
+    /// The snapshot of the account `strategy_id` trades in.
+    pub fn snapshot_for(&self, asset_class: AssetClass, strategy_id: Option<&str>) -> PaperAccountSnapshot {
+        self.snapshot_in(self.book_for(asset_class, strategy_id))
+    }
+
+    /// Today's loss on the account `strategy_id` trades in — what the risk
+    /// gate's daily-loss limit reads for that strategy's orders.
+    pub fn daily_loss_usd_for(&self, asset_class: AssetClass, strategy_id: Option<&str>) -> Decimal {
+        self.daily_loss_in(self.book_for(asset_class, strategy_id))
+    }
+
+    fn positions_in(&self, book: Book) -> Vec<BrokerPosition> {
+        let account = self.lock_book(book);
         let mut out: Vec<BrokerPosition> = account
             .positions()
             .iter()
@@ -882,9 +943,11 @@ impl PaperTradingEngine {
 
     /// Account summary (cash, equity, margin, positions) for one asset class.
     pub fn snapshot(&self, asset_class: AssetClass) -> PaperAccountSnapshot {
-        self.account(asset_class)
-            .lock()
-            .expect("paper account lock")
+        self.snapshot_in(Book::Class(asset_class))
+    }
+
+    fn snapshot_in(&self, book: Book) -> PaperAccountSnapshot {
+        self.lock_book(book)
             .snapshot(&|id| self.mark(id).map(Price::inner))
     }
 
@@ -899,13 +962,15 @@ impl PaperTradingEngine {
     /// In-memory, like the whole paper account: a platform restart starts the
     /// day's tally again.
     pub fn daily_loss_usd(&self, asset_class: AssetClass) -> Decimal {
+        self.daily_loss_in(Book::Class(asset_class))
+    }
+
+    fn daily_loss_in(&self, book: Book) -> Decimal {
         let realized_today = self
-            .account(asset_class)
-            .lock()
-            .expect("paper account lock")
+            .lock_book(book)
             .realized_pnl_on(self.clock.now().date_naive());
         let unrealized: Decimal = self
-            .snapshot(asset_class)
+            .snapshot_in(book)
             .positions
             .iter()
             .map(|p| p.unrealized_pnl)
@@ -927,9 +992,7 @@ impl PaperTradingEngine {
         asset_class: AssetClass,
         since: Option<DateTime<Utc>>,
     ) -> Vec<PaperLedgerEntry> {
-        self.account(asset_class)
-            .lock()
-            .expect("paper account lock")
+        self.lock_account(asset_class)
             .transactions_since(since)
     }
 
@@ -959,12 +1022,12 @@ impl PaperTradingEngine {
             .copied()
             .unwrap_or_else(|| AccountPolicy::for_asset_class(asset_class).default_starting_cash);
         {
-            let mut account = self
-                .account(asset_class)
-                .lock()
-                .expect("paper account lock");
+            let mut account = self.lock_account(asset_class);
             *account = PaperAccount::with_clock(asset_class, cash, Arc::clone(&self.clock));
         }
+        // The account was replaced wholesale, so whatever a panic left half-done
+        // is gone with it: the class takes orders again (Set E #8).
+        self.account(asset_class).clear_poison();
         self.purge_orders(|r| r.asset_class == asset_class);
         info!(asset_class = %asset_class.as_str(), "paper account reset to opening balance");
     }
@@ -979,15 +1042,15 @@ impl PaperTradingEngine {
                 .get(&ac)
                 .copied()
                 .unwrap_or_else(|| AccountPolicy::for_asset_class(ac).default_starting_cash);
-            let mut account = self.account(ac).lock().expect("paper account lock");
+            let mut account = self.lock_account(ac);
             *account = PaperAccount::with_clock(ac, cash, Arc::clone(&self.clock));
+            drop(account);
+            self.account(ac).clear_poison();
         }
         self.orders.clear();
         self.resting.clear();
         self.idempotency.clear();
-        self.terminal_fifo
-            .lock()
-            .expect("terminal fifo lock")
+        self.lock_fifo()
             .clear();
         info!("all paper accounts reset to opening balances");
     }
@@ -1014,9 +1077,7 @@ impl PaperTradingEngine {
         }
         let removed: std::collections::HashSet<&String> =
             to_remove.iter().map(|(id, _, _)| id).collect();
-        self.terminal_fifo
-            .lock()
-            .expect("terminal fifo lock")
+        self.lock_fifo()
             .retain(|id| !removed.contains(id));
     }
 
@@ -1028,10 +1089,9 @@ impl PaperTradingEngine {
         instrument_id: &str,
         won: bool,
     ) -> Result<Decimal, PaperTradeError> {
-        self.account(AssetClass::PredictionMarket)
-            .lock()
-            .expect("paper account lock")
-            .settle_binary(instrument_id, won)
+        self.settle_everywhere(AssetClass::PredictionMarket, instrument_id, |a| {
+            a.settle_binary(instrument_id, won)
+        })
     }
 
     /// Close a position at a settlement price (futures / option expiry).
@@ -1041,10 +1101,9 @@ impl PaperTradingEngine {
         instrument_id: &str,
         price: Decimal,
     ) -> Result<Decimal, PaperTradeError> {
-        self.account(asset_class)
-            .lock()
-            .expect("paper account lock")
-            .settle_position(instrument_id, price)
+        self.settle_everywhere(asset_class, instrument_id, |a| {
+            a.settle_position(instrument_id, price)
+        })
     }
 
     /// Charge a perpetual-swap funding payment at the current mark.
@@ -1058,21 +1117,17 @@ impl PaperTradingEngine {
             .ok_or_else(|| PaperTradeError::NoMarkPrice {
                 instrument_id: instrument_id.to_owned(),
             })?;
-        self.account(AssetClass::PerpetualSwap)
-            .lock()
-            .expect("paper account lock")
-            .apply_funding(instrument_id, mark.inner(), rate)
+        self.settle_everywhere(AssetClass::PerpetualSwap, instrument_id, |a| {
+            a.apply_funding(instrument_id, mark.inner(), rate)
+        })
     }
 
     // ── Internals ────────────────────────────────────────────────────────────
 
     /// How much of a reduce-only order may fill now: the size of an opposite
     /// position, or nothing.
-    fn reduce_capacity(&self, asset_class: AssetClass, instrument_id: &str, side: Side) -> Decimal {
-        let pos = self
-            .account(asset_class)
-            .lock()
-            .expect("paper account lock")
+    fn reduce_capacity(&self, book: Book, instrument_id: &str, side: Side) -> Decimal {
+        let pos = self.lock_book(book)
             .position(instrument_id)
             .map_or(Decimal::ZERO, |p| p.quantity);
         match side {
@@ -1094,10 +1149,16 @@ impl PaperTradingEngine {
         if remaining <= Decimal::ZERO {
             return Attempt::NotMarketable;
         }
+        let book = Self::book_of(record);
+        if self.book_poisoned(book) {
+            return Attempt::Rejected(PaperTradeError::AccountUnavailable {
+                asset_class: record.asset_class,
+            });
+        }
         let mut qty = remaining;
         if record.intent.reduce_only {
             let cap = self.reduce_capacity(
-                record.asset_class,
+                book,
                 &record.intent.instrument_id,
                 record.intent.side,
             );
@@ -1117,10 +1178,7 @@ impl PaperTradingEngine {
             return Attempt::NotMarketable;
         }
         let applied = {
-            let mut account = self
-                .account(record.asset_class)
-                .lock()
-                .expect("paper account lock");
+            let mut account = self.lock_book(book);
             let result = account.apply_fill(&record.order_id, &fill, &|id| {
                 self.mark(id).map(Price::inner)
             });
@@ -1142,7 +1200,7 @@ impl PaperTradingEngine {
                 if record.is_open()
                     && record.intent.reduce_only
                     && self.reduce_capacity(
-                        record.asset_class,
+                        book,
                         &record.intent.instrument_id,
                         record.intent.side,
                     ) <= Decimal::ZERO
@@ -1172,10 +1230,272 @@ impl PaperTradingEngine {
         }
     }
 
+    // ── Deployment accounts (Set U U-4.7) ─────────────────────────────────────
+
+    /// Open `deployment`'s own account, seeded with `starting_cash`. Returns
+    /// `false` when it is already open (a restored account is never reseeded).
+    ///
+    /// # Errors
+    /// Every slot is taken.
+    pub fn open_deployment_account(
+        &self,
+        deployment: Uuid,
+        asset_class: AssetClass,
+        starting_cash: Decimal,
+    ) -> Result<bool, String> {
+        self.open_with(deployment, asset_class, || {
+            PaperAccount::with_clock(asset_class, starting_cash, Arc::clone(&self.clock))
+        })
+    }
+
+    fn open_with(
+        &self,
+        deployment: Uuid,
+        asset_class: AssetClass,
+        account: impl FnOnce() -> PaperAccount,
+    ) -> Result<bool, String> {
+        match self.deployment_index.entry(deployment) {
+            dashmap::mapref::entry::Entry::Occupied(_) => Ok(false),
+            dashmap::mapref::entry::Entry::Vacant(v) => {
+                let slot = self
+                    .next_deployment_slot
+                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                let cell = self.deployment_accounts.get(slot).ok_or_else(|| {
+                    format!("every one of the {DEPLOYMENT_ACCOUNT_SLOTS} deployment account slots is taken")
+                })?;
+                cell.set(DeploymentAccount {
+                    deployment,
+                    asset_class,
+                    account: Mutex::new(account()),
+                    dirty: std::sync::atomic::AtomicBool::new(true),
+                })
+                .map_err(|_| "a deployment account slot was filled twice".to_string())?;
+                v.insert(slot);
+                Ok(true)
+            }
+        }
+    }
+
+    /// Every deployment account, with its asset class.
+    pub fn deployment_accounts(&self) -> Vec<(Uuid, AssetClass)> {
+        self.deployment_accounts
+            .iter()
+            .filter_map(std::sync::OnceLock::get)
+            .map(|d| (d.deployment, d.asset_class))
+            .collect()
+    }
+
+    /// One deployment account's whole state, for persistence.
+    pub fn export_deployment_account(
+        &self,
+        deployment: Uuid,
+    ) -> Option<(AssetClass, super::account::PaperAccountState)> {
+        let slot = *self.deployment_index.get(&deployment)?;
+        let d = self.deployment_accounts[slot].get()?;
+        Some((d.asset_class, self.lock_book(Book::Deployment(slot)).export_state()))
+    }
+
+    /// Restore a deployment account from a stored state — opening it if this
+    /// process has not, replacing it if it has. Called at boot, before orders.
+    ///
+    /// # Errors
+    /// The state names another asset class, or no slot is left.
+    pub fn restore_deployment_account(
+        &self,
+        deployment: Uuid,
+        asset_class: AssetClass,
+        state: super::account::PaperAccountState,
+    ) -> Result<(), String> {
+        let restored = PaperAccount::from_state(asset_class, state, Arc::clone(&self.clock))?;
+        let mut restored = Some(restored);
+        self.open_with(deployment, asset_class, || {
+            restored.take().expect("taken once")
+        })?;
+        if let Some(r) = restored {
+            // Already open: replace it.
+            let slot = *self
+                .deployment_index
+                .get(&deployment)
+                .ok_or("deployment account vanished")?;
+            *self.lock_book(Book::Deployment(slot)) = r;
+        }
+        if let Some(slot) = self.deployment_index.get(&deployment).map(|s| *s) {
+            if let Some(d) = self.deployment_accounts[slot].get() {
+                d.dirty.store(false, std::sync::atomic::Ordering::Release);
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether a deployment account changed since the last call; clears it.
+    pub fn take_deployment_dirty(&self, deployment: Uuid) -> bool {
+        self.deployment_index
+            .get(&deployment)
+            .and_then(|slot| self.deployment_accounts[*slot].get())
+            .is_some_and(|d| d.dirty.swap(false, std::sync::atomic::Ordering::AcqRel))
+    }
+
+    /// The book an order with `strategy_id` trades in: its deployment's
+    /// account when it opened one on this asset class, else the class's.
+    fn book_for(&self, asset_class: AssetClass, strategy_id: Option<&str>) -> Book {
+        strategy_id
+            .and_then(|s| Uuid::parse_str(s).ok())
+            .and_then(|id| self.deployment_index.get(&id).map(|slot| *slot))
+            .filter(|slot| {
+                self.deployment_accounts[*slot]
+                    .get()
+                    .is_some_and(|d| d.asset_class == asset_class)
+            })
+            .map_or(Book::Class(asset_class), Book::Deployment)
+    }
+
+    fn book_of(record: &PaperOrderRecord) -> Book {
+        record
+            .deployment_slot
+            .map_or(Book::Class(record.asset_class), Book::Deployment)
+    }
+
+    /// Lock a book, recovering poison as [`Self::lock_account`] does.
+    fn lock_book(&self, book: Book) -> std::sync::MutexGuard<'_, PaperAccount> {
+        match book {
+            Book::Class(ac) => self.lock_account(ac),
+            Book::Deployment(slot) => {
+                let d = self.deployment_accounts[slot]
+                    .get()
+                    .expect("a book names only an opened slot");
+                let guard = d.account.lock().unwrap_or_else(|poisoned| {
+                    tracing::error!(
+                        deployment = %d.deployment,
+                        "deployment paper account mutex is poisoned — serving reads, refusing new orders"
+                    );
+                    poisoned.into_inner()
+                });
+                d.dirty.store(true, std::sync::atomic::Ordering::Release);
+                guard
+            }
+        }
+    }
+
+    fn book_poisoned(&self, book: Book) -> bool {
+        match book {
+            Book::Class(ac) => self.account_poisoned(ac),
+            Book::Deployment(slot) => self.deployment_accounts[slot]
+                .get()
+                .is_some_and(|d| d.account.is_poisoned()),
+        }
+    }
+
+    /// Apply `op` to every account of `asset_class` that holds `instrument_id`
+    /// — the class's and each deployment's — summing what it returns. With no
+    /// holder at all, the class account answers (and so names the error).
+    fn settle_everywhere(
+        &self,
+        asset_class: AssetClass,
+        instrument_id: &str,
+        op: impl Fn(&mut PaperAccount) -> Result<Decimal, PaperTradeError>,
+    ) -> Result<Decimal, PaperTradeError> {
+        let mut books = vec![Book::Class(asset_class)];
+        books.extend(
+            self.deployment_accounts
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.get().is_some_and(|d| d.asset_class == asset_class))
+                .map(|(i, _)| Book::Deployment(i)),
+        );
+        let holders: Vec<Book> = books
+            .into_iter()
+            .filter(|b| self.lock_book(*b).position(instrument_id).is_some())
+            .collect();
+        if holders.is_empty() {
+            return op(&mut self.lock_account(asset_class));
+        }
+        let mut total = Decimal::ZERO;
+        for b in holders {
+            total += op(&mut self.lock_book(b))?;
+        }
+        Ok(total)
+    }
+
     fn account(&self, asset_class: AssetClass) -> &Mutex<PaperAccount> {
         self.accounts
             .get(&asset_class)
             .expect("every asset class has a paper account")
+    }
+
+    /// Lock one account **without panicking on poison** (Set E audit item #8).
+    ///
+    /// Every account access used to be `.lock().expect("paper account lock")`.
+    /// One panic while a guard was held poisoned that mutex for the life of the
+    /// process, after which *every* order on the class panicked its handler
+    /// task — while the process kept running and looking healthy.
+    ///
+    /// A poisoned guard is recovered here so reads (snapshots, positions, the
+    /// daily-loss figure) keep answering; **new orders are refused** on a
+    /// poisoned account by [`Self::account_poisoned`] in `submit_at` and
+    /// `attempt`, because its state may be mid-mutation. `reset_account` clears
+    /// the poison by replacing the account.
+    fn lock_account(&self, asset_class: AssetClass) -> std::sync::MutexGuard<'_, PaperAccount> {
+        let guard = self.account(asset_class).lock().unwrap_or_else(|poisoned| {
+            tracing::error!(
+                asset_class = %asset_class.as_str(),
+                "paper account mutex is poisoned — serving reads, refusing new orders"
+            );
+            poisoned.into_inner()
+        });
+        // Every mutation goes through here, so this is the persistence hook:
+        // the flag is set while the guard is held, and the saver re-locks
+        // before exporting, so it always sees the finished mutation.
+        if let Some(flag) = self.dirty.get(&asset_class) {
+            flag.store(true, std::sync::atomic::Ordering::Release);
+        }
+        guard
+    }
+
+    /// Whether `asset_class`'s account was touched since the last call, and
+    /// clear the flag. For [`super::persist`].
+    pub fn take_dirty(&self, asset_class: AssetClass) -> bool {
+        self.dirty
+            .get(&asset_class)
+            .is_some_and(|f| f.swap(false, std::sync::atomic::Ordering::AcqRel))
+    }
+
+    /// One account's whole state, for persistence (Set E #5).
+    pub fn export_account(&self, asset_class: AssetClass) -> super::account::PaperAccountState {
+        self.lock_account(asset_class).export_state()
+    }
+
+    /// Replace one account with a stored state. Called at boot, before the
+    /// engine takes an order; the account's poison (if any) goes with it.
+    ///
+    /// # Errors
+    /// The state names a different asset class.
+    pub fn restore_account(
+        &self,
+        asset_class: AssetClass,
+        state: super::account::PaperAccountState,
+    ) -> Result<(), String> {
+        let restored = PaperAccount::from_state(asset_class, state, Arc::clone(&self.clock))?;
+        *self.lock_account(asset_class) = restored;
+        self.account(asset_class).clear_poison();
+        // A just-restored account equals its stored row; no need to write it back.
+        self.take_dirty(asset_class);
+        Ok(())
+    }
+
+    /// Whether an account's mutex was poisoned by a panic. Orders are refused
+    /// on such an account rather than executed against state that may be
+    /// half-updated.
+    #[must_use]
+    pub fn account_poisoned(&self, asset_class: AssetClass) -> bool {
+        self.account(asset_class).is_poisoned()
+    }
+
+    /// The terminal-order FIFO, poison-tolerant: it is a bounded eviction list
+    /// with no invariant a half-finished push can break.
+    fn lock_fifo(&self) -> std::sync::MutexGuard<'_, VecDeque<String>> {
+        self.terminal_fifo
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Try to fill resting orders on `instrument_id` at the new mark — the
@@ -1351,7 +1671,7 @@ impl PaperTradingEngine {
     /// Track a terminal order and evict the oldest ones beyond capacity.
     fn push_terminal(&self, order_id: String) {
         let evicted: Vec<String> = {
-            let mut fifo = self.terminal_fifo.lock().expect("terminal fifo lock");
+            let mut fifo = self.lock_fifo();
             fifo.push_back(order_id);
             let mut evicted = Vec::new();
             while fifo.len() > ORDER_HISTORY_CAPACITY {
@@ -1931,5 +2251,209 @@ mod tests {
             eng.order_status(&id).unwrap().state,
             BrokerOrderState::Filled
         );
+    }
+
+    // ── Set E #8: a poisoned account refuses orders instead of panicking ──
+
+    fn poison(eng: &PaperTradingEngine, ac: AssetClass) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = eng.account(ac).lock();
+            panic!("deliberately poisoning a paper account");
+        }));
+        assert!(eng.account_poisoned(ac));
+    }
+
+    #[test]
+    fn a_poisoned_account_refuses_orders_and_still_answers_reads() {
+        let eng = engine();
+        eng.on_mark("BTC-USD", Price::from_decimal(dec!(50_000)));
+        poison(&eng, AssetClass::CryptoSpotCex);
+
+        let err = eng
+            .submit(AssetClass::CryptoSpotCex, &market("BTC-USD", Side::Buy, dec!(1)))
+            .unwrap_err();
+        assert!(
+            matches!(err, PaperTradeError::AccountUnavailable { .. }),
+            "a poisoned account must refuse with an error, got {err:?}"
+        );
+        // Reads do not panic.
+        let _ = eng.snapshot(AssetClass::CryptoSpotCex);
+        let _ = eng.positions(AssetClass::CryptoSpotCex);
+        let _ = eng.daily_loss_usd(AssetClass::CryptoSpotCex);
+        // Other classes are unaffected.
+        assert!(!eng.account_poisoned(AssetClass::Equity));
+
+        // A reset replaces the account and clears the poison.
+        eng.reset_account(AssetClass::CryptoSpotCex);
+        assert!(!eng.account_poisoned(AssetClass::CryptoSpotCex));
+        eng.submit(AssetClass::CryptoSpotCex, &market("BTC-USD", Side::Buy, dec!(1)))
+            .expect("a reset account trades again");
+    }
+
+    // ── Set E #5: an account's whole state round-trips ─────────────────────
+
+    #[test]
+    fn exported_state_restores_into_a_fresh_engine_exactly() {
+        let a = engine();
+        a.on_mark("BTC-USD", Price::from_decimal(dec!(50_000)));
+        a.submit(AssetClass::CryptoSpotCex, &market("BTC-USD", Side::Buy, dec!(1)))
+            .unwrap();
+        a.on_mark("BTC-USD", Price::from_decimal(dec!(51_000)));
+        a.submit(AssetClass::CryptoSpotCex, &market("BTC-USD", Side::Sell, dec!(0.5)))
+            .unwrap();
+        let before = a.export_account(AssetClass::CryptoSpotCex);
+        assert!(!before.positions.is_empty());
+
+        let json = serde_json::to_value(&before).unwrap();
+        assert_eq!(json["asset_class"], AssetClass::CryptoSpotCex.as_str());
+        let back: super::super::account::PaperAccountState = serde_json::from_value(json).unwrap();
+
+        let b = engine();
+        b.on_mark("BTC-USD", Price::from_decimal(dec!(51_000)));
+        b.restore_account(AssetClass::CryptoSpotCex, back).unwrap();
+        assert_eq!(b.export_account(AssetClass::CryptoSpotCex), before);
+        let (sa, sb) = (
+            a.snapshot(AssetClass::CryptoSpotCex),
+            b.snapshot(AssetClass::CryptoSpotCex),
+        );
+        assert_eq!(sa.cash, sb.cash);
+        assert_eq!(sa.realized_pnl, sb.realized_pnl);
+        assert_eq!(sa.positions.len(), sb.positions.len());
+        assert_eq!(
+            a.daily_loss_usd(AssetClass::CryptoSpotCex),
+            b.daily_loss_usd(AssetClass::CryptoSpotCex)
+        );
+    }
+
+    #[test]
+    fn a_state_for_another_class_is_refused() {
+        let eng = engine();
+        let state = eng.export_account(AssetClass::Equity);
+        assert!(eng.restore_account(AssetClass::CryptoSpotCex, state).is_err());
+    }
+
+    #[test]
+    fn touching_an_account_marks_it_dirty_once() {
+        let eng = engine();
+        assert!(!eng.take_dirty(AssetClass::Fx));
+        let _ = eng.snapshot(AssetClass::Fx);
+        assert!(eng.take_dirty(AssetClass::Fx));
+        assert!(!eng.take_dirty(AssetClass::Fx));
+    }
+
+    // ── Set U U-4.7: each deployment trades in its own account ───────────────
+
+    fn as_deployment(mut i: OrderIntent, d: Uuid) -> OrderIntent {
+        i.strategy_id = Some(d.to_string());
+        i
+    }
+
+    fn qty(positions: &[BrokerPosition], instrument: &str) -> Decimal {
+        positions
+            .iter()
+            .find(|p| p.instrument_id == instrument)
+            .map_or(Decimal::ZERO, |p| p.quantity)
+    }
+
+    #[test]
+    fn two_deployments_on_one_class_trade_in_their_own_accounts() {
+        let eng = engine();
+        let ac = AssetClass::CryptoSpotCex;
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        assert!(eng.open_deployment_account(a, ac, dec!(10_000)).unwrap());
+        assert!(eng.open_deployment_account(b, ac, dec!(5_000)).unwrap());
+        let class_cash = eng.snapshot(ac).cash;
+        eng.on_mark("BTC-USD", Price::from_decimal(dec!(100)));
+        eng.submit(ac, &as_deployment(market("BTC-USD", Side::Buy, dec!(1)), a)).unwrap();
+        eng.submit(ac, &as_deployment(market("BTC-USD", Side::Buy, dec!(2)), b)).unwrap();
+
+        let (sa, sb) = (a.to_string(), b.to_string());
+        assert_eq!(qty(&eng.positions_for(ac, Some(&sa)), "BTC-USD"), dec!(1));
+        assert_eq!(qty(&eng.positions_for(ac, Some(&sb)), "BTC-USD"), dec!(2));
+        assert_eq!(qty(&eng.positions(ac), "BTC-USD"), Decimal::ZERO, "the class account traded nothing");
+        assert_eq!(eng.snapshot(ac).cash, class_cash);
+        assert!(eng.snapshot_for(ac, Some(&sa)).cash < dec!(10_000));
+        assert!(eng.snapshot_for(ac, Some(&sb)).cash < dec!(5_000));
+        assert!(
+            dec!(5_000) - eng.snapshot_for(ac, Some(&sb)).cash
+                > dec!(10_000) - eng.snapshot_for(ac, Some(&sa)).cash,
+            "B bought twice as much from its own cash"
+        );
+    }
+
+    #[test]
+    fn an_order_naming_no_opened_account_trades_in_the_class_account() {
+        let eng = engine();
+        let ac = AssetClass::CryptoSpotCex;
+        eng.on_mark("ETH-USD", Price::from_decimal(dec!(50)));
+        // A deployment that never opened an account, and a manual order.
+        eng.submit(ac, &as_deployment(market("ETH-USD", Side::Buy, dec!(1)), Uuid::new_v4()))
+            .unwrap();
+        eng.submit(ac, &market("ETH-USD", Side::Buy, dec!(1))).unwrap();
+        assert_eq!(qty(&eng.positions(ac), "ETH-USD"), dec!(2));
+        // An account opened on another class does not capture this class's orders.
+        let fx = Uuid::new_v4();
+        eng.open_deployment_account(fx, AssetClass::Fx, dec!(1_000)).unwrap();
+        eng.submit(ac, &as_deployment(market("ETH-USD", Side::Buy, dec!(1)), fx)).unwrap();
+        assert_eq!(qty(&eng.positions(ac), "ETH-USD"), dec!(3));
+    }
+
+    #[test]
+    fn reduce_only_reads_the_deployments_own_position() {
+        let eng = engine();
+        let ac = AssetClass::CryptoSpotCex;
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        eng.open_deployment_account(a, ac, dec!(10_000)).unwrap();
+        eng.open_deployment_account(b, ac, dec!(10_000)).unwrap();
+        eng.on_mark("SOL-USD", Price::from_decimal(dec!(20)));
+        eng.submit(ac, &as_deployment(market("SOL-USD", Side::Buy, dec!(3)), a)).unwrap();
+        // B is flat: its reduce-only sell has nothing to reduce, whatever A holds.
+        let mut sell_b = as_deployment(market("SOL-USD", Side::Sell, dec!(1)), b);
+        sell_b.reduce_only = true;
+        assert!(eng.submit(ac, &sell_b).is_err());
+        let mut sell_a = as_deployment(market("SOL-USD", Side::Sell, dec!(3)), a);
+        sell_a.reduce_only = true;
+        eng.submit(ac, &sell_a).unwrap();
+        assert_eq!(qty(&eng.positions_for(ac, Some(&a.to_string())), "SOL-USD"), Decimal::ZERO);
+    }
+
+    #[test]
+    fn a_settlement_reaches_a_deployments_position() {
+        let eng = engine();
+        let ac = AssetClass::CryptoSpotCex;
+        let a = Uuid::new_v4();
+        eng.open_deployment_account(a, ac, dec!(10_000)).unwrap();
+        eng.on_mark("XRP-USD", Price::from_decimal(dec!(10)));
+        eng.submit(ac, &as_deployment(market("XRP-USD", Side::Buy, dec!(5)), a)).unwrap();
+        eng.settle_at_price(ac, "XRP-USD", dec!(12)).unwrap();
+        assert_eq!(qty(&eng.positions_for(ac, Some(&a.to_string())), "XRP-USD"), Decimal::ZERO);
+        // With no holder anywhere, the class account answers with the error.
+        assert!(eng.settle_at_price(ac, "XRP-USD", dec!(12)).is_err());
+    }
+
+    #[test]
+    fn a_deployment_account_round_trips_and_is_never_reseeded() {
+        let eng = engine();
+        let ac = AssetClass::CryptoSpotCex;
+        let a = Uuid::new_v4();
+        eng.open_deployment_account(a, ac, dec!(10_000)).unwrap();
+        eng.on_mark("BTC-USD", Price::from_decimal(dec!(100)));
+        eng.submit(ac, &as_deployment(market("BTC-USD", Side::Buy, dec!(1)), a)).unwrap();
+        assert!(eng.take_deployment_dirty(a));
+        assert!(!eng.take_deployment_dirty(a));
+        let (class, state) = eng.export_deployment_account(a).unwrap();
+        assert_eq!(class, ac);
+
+        // A restart: a fresh engine restores it, and opening it again keeps it.
+        let fresh = engine();
+        fresh.restore_deployment_account(a, ac, state).unwrap();
+        assert!(!fresh.open_deployment_account(a, ac, dec!(99)).unwrap());
+        let sa = a.to_string();
+        assert_eq!(qty(&fresh.positions_for(ac, Some(&sa)), "BTC-USD"), dec!(1));
+        assert_eq!(
+            fresh.snapshot_for(ac, Some(&sa)).cash,
+            eng.snapshot_for(ac, Some(&sa)).cash
+        );
+        assert_eq!(fresh.deployment_accounts(), vec![(a, ac)]);
     }
 }

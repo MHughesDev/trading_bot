@@ -29,6 +29,17 @@ use ledger::TrialTicket;
 /// need the ticket's contents; it needs to be *unreachable without one*.
 pub trait RunExecutor: Send + Sync {
     fn execute(&self, cfg: &RunConfig, ticket: &TrialTicket) -> RunResult;
+
+    /// The reproducibility receipt of the computation that last executed `cfg`:
+    /// every input that can change its number, by content (AGENT-013 §6.9).
+    ///
+    /// `None` is the default and means "this executor cannot say" — which a
+    /// reproduction reports as `receipt_missing` rather than as agreement. The
+    /// executor is the only place that knows what data it read and which
+    /// definition it resolved, so it is the only place that can answer.
+    fn receipt(&self, _cfg: &RunConfig) -> Option<crate::receipt::ReproSpec> {
+        None
+    }
 }
 
 /// Boxed executors are executors, so an orchestrator can be generic over the
@@ -36,6 +47,9 @@ pub trait RunExecutor: Send + Sync {
 impl RunExecutor for Box<dyn RunExecutor> {
     fn execute(&self, cfg: &RunConfig, ticket: &TrialTicket) -> RunResult {
         (**self).execute(cfg, ticket)
+    }
+    fn receipt(&self, cfg: &RunConfig) -> Option<crate::receipt::ReproSpec> {
+        (**self).receipt(cfg)
     }
 }
 

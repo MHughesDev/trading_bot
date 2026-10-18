@@ -1,0 +1,60 @@
+[
+  {
+    "harness_version": "0.1.0",
+    "profile_id": "qwen2.5-7b-instruct",
+    "tier": "degraded",
+    "hardware": "replay: no hardware",
+    "suites": [
+      {
+        "suite": "budget",
+        "kind": "replay",
+        "passed": 1,
+        "n": 1,
+        "flakiness": 0.0,
+        "attribution": {},
+        "failed_cases": [],
+        "sealed": false
+      },
+      {
+        "suite": "honesty",
+        "kind": "replay",
+        "passed": 5,
+        "n": 5,
+        "flakiness": 0.0,
+        "attribution": {},
+        "failed_cases": [],
+        "sealed": false
+      },
+      {
+        "suite": "routing",
+        "kind": "replay",
+        "passed": 2,
+        "n": 2,
+        "flakiness": 0.0,
+        "attribution": {},
+        "failed_cases": [],
+        "sealed": false
+      },
+      {
+        "suite": "stopping",
+        "kind": "replay",
+        "passed": 2,
+        "n": 2,
+        "flakiness": 0.0,
+        "attribution": {},
+        "failed_cases": [],
+        "sealed": false
+      }
+    ],
+    "cost_usd": 0.0,
+    "cost_tokens": 0,
+    "median_steps": 0.0,
+    "cache_hit_rate": null,
+    "memory_recall": null,
+    "hitl_precision": null,
+    "utility_rate": null,
+    "over_estimate_rate": null,
+    "evaluations": 1,
+    "barren": []
+  }
+]

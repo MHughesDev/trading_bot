@@ -1,6 +1,6 @@
 # Phase 0 — Reconciliation and the first observation
 
-**Completion: 75% (1 / 4 tasks). T-0.4 blocked on engineering only — gate H-7 (venue credential) was withdrawn 2026-10-02 when the owner decided paper trading runs in the app ([ADR-0048](../../../adr/0048-paper-trading-runs-in-the-app.md)).** T-0.1 and T-0.3 were downgraded from `DONE` on 2026-09-21. T-0.1's wire is not in place — the observer is constructed only in tests and the method the file tells a track to call does not exist — and T-0.3's own note says its criterion is not met.
+**Completion: 50% (2 / 4 tasks), plus 1 `PARTIAL` and 1 blocked (re-counted 2026-10-04, track VERIFY; it read 1 / 4). T-0.4 blocked on engineering only — gate H-7 (venue credential) was withdrawn 2026-10-02 when the owner decided paper trading runs in the app ([ADR-0048](../../../adr/0048-paper-trading-runs-in-the-app.md)).** T-0.1 and T-0.3 were downgraded from `DONE` on 2026-09-21. T-0.1's wire is not in place — the observer is constructed only in tests and the method the file tells a track to call does not exist — and T-0.3's own note says its criterion is not met.
 
 > **Status, 2026-09-15 — track 5, `claude/set-t-phase-0-reconciliation`.**
 >
@@ -40,6 +40,7 @@ tell the truth?* — from unanswerable into merely unanswered-yet.
 ---
 
 ### T-0.1 Wire `crates/reconciliation` to the paper fill stream — M
+`PARTIAL` 2026-10-04 (track T-P) — **re-checked, unchanged: the production call sites exist and the remainder is a running deployment.** `ForwardRecorders::install` runs at boot (`main.rs`); `deploy` and `resume_deploy` are called from `apps/platform/src/live_deployments.rs` and the runner calls `on_submit` / `close_bar` / `insert_observation` (`live_runner.rs`, Set U's files). The period-evidence reader that consumes the rows is now tested over planted rows (T-3.1, `a_period_is_judged_on_the_forward_rows_inside_it`). No deployment exists, so `mlops.forward_observation` holds no real row; that step is `BLOCKED:HUMAN` (`docs/operations/forward-clock-runbook.md`).
 `PARTIAL` 2026-09-27 — **the wire in the title is in place now; what remains needs
 a deployment.** `apps/platform/src/main.rs` calls
 `reconciliation::recorder::ForwardRecorders::install()` before anything can produce
@@ -50,6 +51,19 @@ precedes `PaperTradingEngine::realistic()`, `ExecutionEngine::new(` and
 `axum::serve(` — proved load-bearing by moving the block after the engine and
 watching it fail — and a second asserts the call is an unconditional binding whose
 verdict is logged.
+
+> **2026-10-03, track MONITOR — still `PARTIAL`; one production defect fixed, the
+> remaining clause needs a deployment wire in Set U's territory.** Checked against
+> the acceptance: (1) *a paper fill produces a `forward_observation` row within one
+> bar* — not met in production, because nothing calls `ForwardRecorders::deploy`
+> (gap 1 under T-0.4). (2) *element-wise comparable* and (3) *USDT not summed as USD*
+> — met, by the tests listed below. **Fixed:** every function in
+> `crates/reconciliation/src/store.rs` ran on the bare pool. The tables are
+> `FORCE ROW LEVEL SECURITY` on `app.tenant_id`; tests connect as a superuser, who
+> bypasses RLS, so they passed — and in the running platform, as `app_role` with no
+> tenant set, `insert_observation` would have failed its `WITH CHECK` on the first
+> real fill and `load_active_halts` would have read "no strategy is halted". All five
+> now run in a transaction that sets `app.tenant_id` (`store::tenant_tx`).
 
 **Ordering is part of the fix, not decoration.** The registry records
 `execution::fills`' published count when it attaches and the fill stream has no
@@ -184,12 +198,32 @@ window. `TRIAL_STATISTICS` and migration 0106's CHECK are extended together.
 produced an observed row. The gate now has an input *path*; it does not yet have an input.
 
 ### T-0.3 Divergence halts before the next order — M
-`PARTIAL` — **downgraded from `DONE` on 2026-09-21 — by its own note, which
+`DONE` 2026-10-03 (track UI2) — **the one unmet clause, "the halt is visible in the UI with its reason", is met.** `frontend/src/pages/ReconciliationPage.tsx` (route line requested from the orchestrator: `/reconciliation`) lists `GET /api/reconciliation/halts` — strategy, kind, raised-at, the reason, and the standing (`in force`, `in force, not persisted`, `persisted, not in force`) — and clears one through `POST /api/reconciliation/halts/{strategy_id}/clear` behind a confirm that cannot be dismissed with Esc or the scrim, is dead until the strategy id is typed **character for character** (no case folding or trimming) and a note is given, sends exactly `{confirm_strategy, note}`, prints the server's refusal and re-reads rather than dropping the row locally. There is no bulk clear and no control that continues on divergence. A halt list that did not load is "unknown, not empty"; a 404 is "not served by this build". The routes and `spawn_rehydration` are registered (`routes/mod.rs`, `main.rs`). Evidence: `pages/__tests__/the-halt-is-visible-and-clears-only-on-purpose.test.tsx` (8) and the reconciliation block of `lib/ops/__tests__/the-pages-state-what-they-do-not-know.test.ts`, plus the existing `divergence_halts_before_next_order` and `no_divergence_bypass` tests for the order-gate clauses. **Caveat that is not this task's:** no production code *raises* a divergence halt until T-0.4 deploys a recorder, so the page reads an empty list on a real platform today, and says that the empty list is the route's answer and not a measurement of health.
+
+Earlier note — **downgraded from `DONE` on 2026-09-21 — by its own note, which
 already said so.** The note reads verbatim: *"**NOT DONE — 'the halt is visible
 in the UI with its reason'.** No API route and no React surface were built …
 **This criterion is not met.**"* A task carrying an explicitly unmet acceptance
 criterion was marked `DONE`. Confirmed against the tree: no halt route in
 `routes/mod.rs`, no divergence surface in `frontend/src/pages/`.
+
+> **2026-10-03, track MONITOR — still `PARTIAL`, and what is left is two lines and
+> a page outside this track.** Built: `reconciliation::halts` — `active` (the gate's
+> in-memory registry plus durable halts it does not yet hold, which it rehydrates),
+> `clear` (a `HumanActor` and a note → `StrategyHaltRegistry::clear` →
+> `mlops.divergence_halt_clearance`; a failed write leaves the durable halt, which
+> the next rehydration re-imposes) and `spawn_rehydration` (every 30 s, every
+> tenant, so a restart does not forget a halt). Served at
+> `GET /api/reconciliation/halts` (reason, raised-at, `in_force`, `persisted`) and
+> `POST /api/reconciliation/halts/{strategy_id}/clear` (typed strategy id + note,
+> through `require_control` — the same scope agent and service tokens never carry),
+> both in `crates/api/src/routes/monitor.rs`. The store's RLS defect (see T-0.1)
+> would have made the durable half silently empty. **Missing, outside this track:**
+> the two route lines in `routes/mod.rs`, the `spawn_rehydration` line in
+> `apps/platform/src/main.rs` (both requested from the orchestrator), and the React
+> surface that renders the list — so *"the halt is visible in the UI with its
+> reason"* is still not met. Also: no production code *raises* a divergence halt
+> yet, because no `ForwardRecorder` is deployed (T-0.4 gap 1).
 
 SC-6 and FM-4: the system halts on position or balance divergence **before** submitting new
 orders. Per-strategy thresholds declared at deployment (Phase 1) and recorded; when realised
@@ -246,6 +280,9 @@ shaped for a surface; the surface itself belongs with Phase 1's deployment UI an
 it rather than half-built here. **This criterion is not met.**
 
 ### T-0.4 Deploy one hand-authored strategy and start the clock — M
+> **2026-10-04, track F-DATA-T — the operations runbook is written: `docs/operations/forward-clock-runbook.md`.** The exact steps to deploy one hand-authored strategy and start the clock: preconditions to check (platform on 7080, migrations through 0190, monitor lease live, ceilings and `ramp_policy` present, bars flowing, a registered trial), choosing the strategy, the proposal and the human decision, `POST /api/deployments` with the `forward` block (what makes it measurable), the day-1 confirmation queries, the restart caveat (fills not persisted for resume yet), and the arming SQL. **The day-1 action is `BLOCKED:HUMAN`**: it needs the platform running with a deployment, the monitor lease live, and a person to decide the proposal. Nothing was deployed by this track.
+> **2026-10-04 update.** Engineering items 1 and 2 are done and committed by the Set U session (76f37758, 5fe30259): `POST /api/deployments` takes an optional `forward` block, writes `mlops.paper_deployment`, and the live runner attaches a `ForwardRecorder`, steers a shadow run (`backtest::shadow::Shadow`, the same compiled plan on the SimulatedVenue) for the expected series, and stores each observation. **Item 3 (resume) is pending**: `ForwardRecorders::resume_deploy` and `reanchor` exist and are tested in `crates/reconciliation`, but nothing persists forward fills (`ResumeFill`), so every runner start currently opens a fresh recorder and cumulative divergence state resets. The gap itself reads as missing bars. The next step is a fill-persistence migration (0186). The operations half (deploy one strategy, record its date and thresholds, run it for a week) needs the platform running with a real deployment.
+
 `BLOCKED:UPSTREAM` — **on engineering only, since 2026-10-02.** The human half of
 this block (gate H-7, Alpaca paper credentials) is gone: the owner decided paper
 trading runs on the platform's own paper venue
@@ -253,6 +290,82 @@ trading runs on the platform's own paper venue
 `PaperVenue::Platform` / migration 0141 make `platform_paper` the only venue a
 deployment may name. What remains is the three engineering gaps below. Found
 2026-09-27, still true: deploying today would produce zero rows.
+
+> **2026-10-03, track MONITOR — what remains for T-0.4, precisely (not attempted:
+> it needs a live multi-day run).** Engineering, in order:
+> 1. **Deploy a forward recorder with every v3 deployment.** `POST /api/deployments`
+>    (Set U, `crates/api/src/routes/deployments.rs`) must, for a deployment that is
+>    forward evidence, write the `mlops.paper_deployment` row (declared thresholds,
+>    kill criteria, `trial_id`, `numeraire`, `bar_seconds`) and put its id in
+>    `strategy_deployment.forward_deployment_id`, then call
+>    `ForwardRecorders::installed().deploy(spec, starting_capital, gate.halt_registry())`.
+>    (0141 already moved `paper_deployment.venue` to `'platform_paper'`.)
+> 2. **Call the recorder from the runner.** `apps/platform/src/live_runner.rs` (Set U)
+>    must call `recorder.on_submit(&intent, decision_price)` when it submits and
+>    `recorder.close_bar(..)` on each bar close, and persist the result with
+>    `reconciliation::store::insert_observation(pool, tenant, &obs)` — now
+>    tenant-scoped, so it works as `app_role`.
+> 3. **Rehydrate across a restart — built 2026-10-03, call it from the runner.**
+>    `ForwardRecorders::resume_deploy(spec, starting_capital, open_bar, &observations,
+>    &fills, last_mark, halts)` (and `ForwardRecorder::resume`,
+>    `RealisedSeriesBuilder::resume`, `DivergenceMonitor::resume`). `observations` are
+>    the deployment's stored `mlops.forward_observation` rows in bar order
+>    (`reconciliation::fleet_job::load_window` or `store::load_observations`); `fills`
+>    are `Vec<ResumeFill>` from `fills ⋈ orders` for the deployment with the decision
+>    price each was submitted at; `last_mark` is the mark of the last closed bar (the
+>    opening mark if none). Guarantees, each held by a test: the resumed series is
+>    **bit-identical** to one built without the restart (every restart point 0..=5,
+>    including `Vec<BarClose>` for later bars); an out-of-order, duplicate,
+>    off-grid or non-finite stored bar is refused; and a balance that does not match
+>    the stored chain (wrong mark, missing fill) is refused as `ResumeInconsistent`,
+>    never silently re-based. The monitor's running totals are *folded*, not
+>    re-judged, so a restart cannot re-raise a halt a human cleared. **Caller
+>    obligations:** (a) call `recorder.on_submit(&intent, decision_price)` again for
+>    every order still open — pending intents are not stored, and a fill for an
+>    unregistered intent is not attributed; (b) a fill belongs to the bar whose close
+>    is the first `>=` its `filled_at`, so journal fills with their fill time, not
+>    the time they were read; (c) model rejects counted in the still-open bar restart
+>    at zero.
+>
+>    **Restart after a re-anchor (2026-10-04).** After a restart that held a
+>    position, recording pauses until live is flat; the runner then calls
+>    `recorder.reanchor(bar, mark)` (no return for the skipped bars or the anchor
+>    bar; `recorder.gaps()` lists the pauses; `RealisedSeries::align_over_gaps`
+>    reports the missing bars). A *second* restart must still verify what it
+>    resumes: `resume` is unchanged and infers the last anchor from the first
+>    stored bar after a gap (`anchor = bar − bar_seconds`), then checks that the
+>    stored returns **after that anchor** compound, from the anchor's equity, to
+>    the equity the fills and `last_mark` rebuild. If live was **flat at the
+>    anchor** (the designed case) the anchor's equity is just the cash the fills
+>    up to the anchor leave, so no new input is needed. If the anchor held a
+>    position, plain `resume` refuses with `ResumeAnchorUnverifiable` rather than
+>    skip the check, and the caller uses the superset:
+>    `RealisedSeriesBuilder::resume_anchored(spec, opening_balance, open_bar,
+>    returns, fills, last_mark, anchor_mark: Option<Price>)` (`resume` is
+>    `resume_anchored(.., None)`); `anchor_mark` is the mark passed to `reanchor`,
+>    so **persist it with the anchor** if reanchoring at a non-flat bar is ever
+>    allowed. Earlier segments are not re-verified (their equity changes are not
+>    in the stored returns; each was checked when it was resumed). The
+>    `ForwardRecorder`/`ForwardRecorders` wrappers still call plain `resume`.
+>
+>    **Shadow-run expectations (Set U's plan: expected return per live bar from a
+>    shadow run of the same compiled plan on the SimulatedVenue over the identical
+>    bars).** `ExpectedBar` fits — `expected_return` is the shadow equity's return
+>    over the bar, `expected_turnover` its traded notional, `modelled_slippage_bps`
+>    the notional-weighted slippage the simulator charged the shadow fills,
+>    `signal_matched` whether the shadow decided the orders the live run submitted.
+>    One API change was needed: `ExpectedBar` carries no bar, so an expectation for
+>    bar *n-1* would pair silently with bar *n*'s realised return. Build it only with
+>    `ExpectedBar::from_shadow(bar, &ShadowBar { bar, .. })`, which refuses a
+>    different bar (`ShadowBarMismatch`) and a non-finite number (`ShadowNotFinite`).
+>    `close_bar(bar, mark, expected, source)` is otherwise unchanged. Shadow and live
+>    must use the same `bar_seconds` grid and the same close timestamps, or
+>    `RealisedSeries::align` will refuse the comparison later.
+> 4. **Spawn `reconciliation::halts::spawn_rehydration`** from `main.rs` (done by the
+>    orchestrator).
+> Operations, after those: pick one hand-authored strategy, record its thresholds and
+> deployment date here, let it run a week, and record the first realised-vs-expected
+> comparison. The fleet job (T-2.2) and Gate 15 start reading the moment rows exist.
 
 T-0.1's fill-stream wire is in place, so the process is observed. But three things
 between a deployment and a `forward_observation` row do not exist, and none was

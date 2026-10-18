@@ -24,9 +24,16 @@ import { describe, expect, it, vi } from 'vitest'
 
 const proposals = vi.hoisted(() => vi.fn())
 vi.mock('@/api/desk', () => ({ deskApi: { proposals, decideProposal: vi.fn() } }))
+vi.mock('@/api/llm', async (orig) => ({
+  ...(await orig<object>()),
+  llmKeysApi: { models: vi.fn(() => Promise.resolve([])) },
+}))
 
 import { ProposalsQueue } from '../ProposalsQueue'
-import { ProviderCard } from '../Models'
+// The provider card moved to Settings -> AI providers (PROVIDERS track); the rule
+// it is held to here did not change.
+import { ProviderCard } from '@/components/providers/ProviderCard'
+import { PROVIDERS, type ProviderStatus } from '@/api/llm'
 
 function withClient(ui: ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
@@ -83,50 +90,44 @@ describe('the proposals queue says something when it could not be read', () => {
 })
 
 describe('a provider whose credential state was never read says so', () => {
+  const anthropic = PROVIDERS[0]
+  const row = (over: Partial<ProviderStatus>): ProviderStatus => ({
+    provider: 'anthropic',
+    configured: false,
+    key_last4: null,
+    base_url: null,
+    updated_at: null,
+    verified_at: null,
+    last_checked_at: null,
+    last_error: null,
+    default_model: null,
+    is_default: false,
+    ...over,
+  })
+
   it('does not claim the platform holds no key', () => {
-    withClient(
-      <ProviderCard
-        provider="anthropic"
-        label="Anthropic"
-        needsKey
-        configured={null}
-        keyLast4={null}
-        baseUrl={null}
-      />,
-    )
+    withClient(<ProviderCard meta={anthropic} status={null} canSave />)
     expect(screen.getByText('state unknown')).toBeInTheDocument()
-    expect(screen.queryByText('not configured')).toBeNull()
-    // "Connect" asserts there is nothing to connect to. Neither word is true
-    // here, so neither is used.
-    expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull()
+    expect(screen.queryByText('Not connected')).toBeNull()
+    // "Save & test" asserts there is nothing stored. Neither is known here,
+    // so the form is not drawn.
+    expect(screen.queryByRole('button', { name: 'Save & test' })).toBeNull()
   })
 
   it('still says connected when the list answered that it is', () => {
     withClient(
       <ProviderCard
-        provider="anthropic"
-        label="Anthropic"
-        needsKey
-        configured
-        keyLast4="4f2a"
-        baseUrl={null}
+        meta={anthropic}
+        status={row({ configured: true, key_last4: '4f2a', verified_at: new Date().toISOString() })}
+        canSave
       />,
     )
-    expect(screen.getByText(/connected ····4f2a/)).toBeInTheDocument()
+    expect(screen.getByText(/key ending ••••4f2a/)).toBeInTheDocument()
   })
 
-  it('still says not configured when the list answered that it is not', () => {
-    withClient(
-      <ProviderCard
-        provider="anthropic"
-        label="Anthropic"
-        needsKey
-        configured={false}
-        keyLast4={null}
-        baseUrl={null}
-      />,
-    )
-    expect(screen.getByText('not configured')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Connect' })).toBeInTheDocument()
+  it('still says not connected when the list answered that it is not', () => {
+    withClient(<ProviderCard meta={anthropic} status={row({})} canSave />)
+    expect(screen.getByText('Not connected')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save & test' })).toBeInTheDocument()
   })
 })

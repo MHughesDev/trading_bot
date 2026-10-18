@@ -6,4 +6,6 @@
 //! idempotency, with the domain work delegated through a trait.
 
 pub mod backfill;
+pub mod dataset_build;
+pub mod layer1;
 pub mod predict_series;

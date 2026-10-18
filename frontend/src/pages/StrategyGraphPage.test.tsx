@@ -34,7 +34,7 @@ const build = vi.fn(async (input: { text: string } | { graph: StrategyGraph }) =
     ? { valid: true, graph: textGraph, text: input.text, findings: [] }
     : { valid: false, graph: input.graph, text: `strategy ${input.graph.name} kind trading`, findings: [{ code: 'no_rules', at: 'decide', message: 'a trading strategy with no rules never acts', fix: 'add a rule' }] },
 )
-const save = vi.fn(async (id: string) => ({ strategy_id: id, revision_hash: 'a'.repeat(64), actor_kind: 'human', parent_revision: null, text: '' }))
+const save = vi.fn(async (id: string, _graph?: unknown) => ({ strategy_id: id, revision_hash: 'a'.repeat(64), actor_kind: 'human', parent_revision: null, text: '' }))
 const get = vi.fn(async (_id: string) => ({ graph: { ...textGraph, name: 'stored_one' }, text: '' }))
 
 vi.mock('@/api/strategyV3', async (orig) => ({

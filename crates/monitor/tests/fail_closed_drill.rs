@@ -362,6 +362,21 @@ impl Drop for Drill {
                         scope,
                     )
                     .await;
+                    // 0165: a venue this test made disagree keeps that as its
+                    // last word for ever (verdicts are append-only), and one
+                    // left disagreeing refuses every global reset on this
+                    // database. So it ends on an agreement, said to be cleanup.
+                    if let Some(v) = scope.strip_prefix("venue:") {
+                        if let Err(e) = sqlx::query(
+                            "INSERT INTO monitor.venue_reconciliation                                (venue, verdict, instruments_checked, detail, checked_by)                              SELECT $1, 'agreed', 0, 'test cleanup', 'test'                               WHERE NOT monitor.venue_reconciled($1)",
+                        )
+                        .bind(v)
+                        .execute(&pg)
+                        .await
+                        {
+                            eprintln!("CLEANUP FAILED: venue {v} left unreconciled: {e}");
+                        }
+                    }
                 }
                 for event_id in &events {
                     purge(
@@ -707,20 +722,14 @@ async fn an_injected_mismatch_halts_one_venue_and_blocks_resume_until_clean() {
         .await
         .expect("renew");
 
-    let event = MonitorEvent::new(
-        bad_scope.clone(),
-        Family::Venue,
-        EventKind::Halted,
-        "monitor",
-    )
-    .expect("monitor")
-    .with_reason("reconciliation mismatch");
+    // Injected the way `crates/reconciliation` raises it (0165): a `disagreed`
+    // verdict, then the durable trip. A bare `trip` with no verdict is a venue
+    // halted for some other reason, which §8.3 does not hold to reconciliation.
+    let (ks, gate, watcher) = runtime(&store);
     store
-        .trip(&event, "reconciliation mismatch")
+        .carry_out_mismatch(&bad, &ks)
         .await
-        .expect("trip");
-
-    let (_ks, gate, watcher) = runtime(&store);
+        .expect("mismatch recorded");
     watcher.refresh().await;
 
     assert!(matches!(
@@ -748,6 +757,28 @@ async fn an_injected_mismatch_halts_one_venue_and_blocks_resume_until_clean() {
         refused.is_err(),
         "a global resume must wait for reconciliation"
     );
+    // And the venue itself stays halted until a reconciliation of it agrees.
+    let venue_reset = ResetRequest {
+        scope: bad_scope.clone(),
+        typed_confirmation: bad_scope.to_string(),
+        reason: "trying to resume the venue".to_owned(),
+        actor: "human:test".to_owned(),
+        all_venues_reconciled: true,
+    };
+    assert!(
+        matches!(
+            store.reset(&venue_reset).await,
+            Err(monitor::store::StoreError::Reset(
+                monitor::control::ResetRefusal::VenueNotReconciled { .. }
+            ))
+        ),
+        "a venue that disagrees with our book was resumable"
+    );
+    store
+        .record_venue_check(&bad, monitor::reconciled::VenueVerdict::Agreed, 1, None, "reconciliation")
+        .await
+        .expect("agreed");
+    store.reset(&venue_reset).await.expect("clean now, so a human may resume it");
 }
 
 // ── §8.5 — the trip record exists before the first refused order ────────────

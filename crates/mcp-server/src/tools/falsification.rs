@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 use crate::ApiClient;
 
 fn missing(field: &str) -> Value {
-    json!({ "error": "missing_field", "field": field })
+    crate::tool_error::missing_field(field)
 }
 
 fn str_field(params: &Value, key: &str) -> Option<String> {
@@ -61,28 +61,24 @@ fn check_reproduction(params: &Value) -> Result<(), Value> {
         }
     }
     if params.get("seed").and_then(Value::as_u64).is_none() {
-        return Err(json!({
-            "error": "missing_field",
-            "field": "seed",
-            "fix": "a replay that cannot be pinned to a seed is an anecdote"
-        }));
+        return Err(crate::tool_error::missing_field_because("seed", "a replay that cannot be pinned to a seed is an anecdote"));
     }
     if steps_field(params).is_empty() {
-        return Err(json!({
-            "error": "no_steps",
-            "fix": "list the steps to reproduce. A report a human cannot re-run in ten \
-                    minutes scores zero, and one with no steps cannot be re-run at all."
-        }));
+        return Err(crate::tool_error::refuse(
+            "no_steps",
+            "the report lists no steps, so a human cannot re-run it in ten minutes.",
+            "add `steps`: the ordered actions that reproduce the defect",
+        ));
     }
     let expected = str_field(params, "expected").unwrap_or_default();
     let observed = str_field(params, "observed").unwrap_or_default();
     if expected == observed {
-        return Err(json!({
-            "error": "not_falsifiable",
-            "fix": "`expected` and `observed` are the same, so nothing was refuted. State what \
-                    you predicted would happen and what happened instead. A low score is not a \
-                    kill: 'Sharpe is only 0.4' is a result, not a defect."
-        }));
+        return Err(crate::tool_error::refuse(
+            "not_falsifiable",
+            "`expected` and `observed` are the same, so nothing was refuted. A low score is not a \
+             kill: 'Sharpe is only 0.4' is a result, not a defect.",
+            "rewrite `expected` as what you predicted would happen and `observed` as what happened instead",
+        ));
     }
     Ok(())
 }
@@ -131,13 +127,11 @@ pub async fn report_evaluator_defect(api: &ApiClient, params: &Value) -> Value {
         return missing("component");
     };
     let Some(guarantee) = str_field(params, "claimed_guarantee") else {
-        return json!({
-            "error": "missing_field",
-            "field": "claimed_guarantee",
-            "fix": "quote what this component claims to guarantee, from the spec or its own \
-                    docs. A defect is a gap between a claim and a behaviour; without the claim \
-                    there is only a behaviour, and behaviours are not defects."
-        });
+        return crate::tool_error::missing_field_with(
+            "claimed_guarantee",
+            "add `claimed_guarantee`: quote what this component claims to guarantee, from the spec \
+             or its own docs; without the claim there is only a behaviour, not a defect",
+        );
     };
 
     post(
@@ -244,10 +238,11 @@ pub async fn probe_data_quality(api: &ApiClient, params: &Value) -> Value {
 /// `find_similar_trials` — what the ledger already knows.
 pub async fn find_similar_trials(api: &ApiClient, params: &Value) -> Value {
     if str_field(params, "config_hash").is_none() && str_field(params, "experiment_id").is_none() {
-        return json!({
-            "error": "no_selector",
-            "fix": "supply `config_hash` to find exact repeats of a configuration, or                     `experiment_id` to find neighbours in the same line of work"
-        });
+        return crate::tool_error::refuse(
+            "no_selector",
+            "neither `config_hash` nor `experiment_id` was given, so there is nothing to look up.",
+            "supply `config_hash` to find exact repeats of a configuration, or `experiment_id` to find neighbours in the same line of work",
+        );
     }
     post(
         api,
@@ -314,7 +309,7 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
         "description": "Default `taker_both` — the only style honest against OHLCV alone, since a maker fill needs a queue model minute bars cannot supply."
     });
 
-    vec![
+    crate::result_shape::declared(vec![
         ToolSpec::new(
             "report_kill",
             "falsification",
@@ -466,7 +461,485 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
         .internal()
         .evidence(&["trial_id"])
         .notes("find_similar_trials"),
-    ]
+        ToolSpec::new(
+            "regime_failure_search",
+            "falsification",
+            Risk::Read,
+            "ASK WHICH MARKET REGIME A FINISHED RUN LOSES IN, by the platform's own causal \
+             labels, with a multiple-comparisons correction across regimes. Re-reads the run's \
+             equity curve; spends no trial. Regimes are not chosen by you.",
+            json!({
+                "type": "object",
+                "required": ["run_id"],
+                "properties": {
+                    "run_id": { "type": "string" },
+                    "min_obs": { "type": "integer", "minimum": 30, "default": 250,
+                                 "description": "fewest periods a regime needs to be tested; thinner regimes are listed untested" }
+                }
+            }),
+        )
+        .internal()
+        .spends_trial(TrialKind::None)
+        .evidence(&["run_id"])
+        .summary(
+            "worst regime {worst}; failure found: {failure_found}; {n_tested} tested, {n_untested} too thin to test",
+            &[("worst", ""), ("failure_found", ""), ("n_tested", "regimes"), ("n_untested", "regimes")],
+        ),
+        ToolSpec::new(
+            "parameter_fragility_map",
+            "falsification",
+            Risk::Read,
+            "ASK HOW KNIFE-EDGED A FINISHED SWEEP'S WINNER IS: the share of its parameters with a \
+             cliff or no plateau, beside the neighbourhood verdict. Reads the sweep's own \
+             surface; runs nothing and spends no trial.",
+            json!({
+                "type": "object",
+                "required": ["sweep_id"],
+                "properties": { "sweep_id": { "type": "string" } }
+            }),
+        )
+        .internal()
+        .spends_trial(TrialKind::None)
+        .evidence(&["sweep_id"])
+        .summary(
+            "fragility index {fragility_index}: {n_knife_edge} of {n_params} parameters knife-edge; neighbourhood plateau {neighbourhood_plateau}",
+            &[("fragility_index", ""), ("n_knife_edge", "params"), ("n_params", "params"), ("neighbourhood_plateau", "")],
+        ),
+        ToolSpec::new(
+            "timing_jitter_sensitivity",
+            "falsification",
+            Risk::Write,
+            "ASK WHETHER A V3 STRATEGY'S EDGE SURVIVES BEING LATE: the same experiment run with \
+             every decided order held 0..k bars before it reaches the venue. Each delay is a \
+             counted look; the delays are not yours to choose beyond the maximum.",
+            json!({
+                "type": "object",
+                "required": ["experiment_id"],
+                "properties": {
+                    "experiment_id": { "type": "string" },
+                    "max_delay_bars": { "type": "integer", "minimum": 1, "maximum": 12, "default": 3,
+                                        "description": "bars of the experiment's evaluation resolution; delays 0..=this are run" },
+                    "metric": { "type": "string", "enum": ["sharpe", "sortino", "calmar", "cagr", "total_return", "detrended_sharpe", "expectancy"], "default": "sharpe" },
+                    "study_id": { "type": "string", "description": "default `timing-jitter-<max>`" }
+                }
+            }),
+        )
+        .internal()
+        .spends_trial(TrialKind::Falsification)
+        .evidence(&["study_id"])
+        .max_calls_per_run(3)
+        .summary(
+            "timing {verdict}: {baseline} on time, {at_one_bar} one bar late, {at_max} at {max_delay}",
+            &[("verdict", ""), ("baseline", ""), ("at_one_bar", ""), ("at_max", ""), ("max_delay", "bars")],
+        ),
+        ToolSpec::new(
+            "ablation_sweep",
+            "falsification",
+            Risk::Write,
+            "ASK WHICH RULES OF A V1 STRATEGY EARN THEIR PLACE: runs it with each condition and \
+             each exit rule left out and classifies the change as load-bearing, redundant or \
+             harmful against a paired bootstrap interval. Saves each variant as a draft strategy \
+             named `<id>--ablate-<n>`; each run is a counted look.",
+            json!({
+                "type": "object",
+                "required": ["experiment_id"],
+                "properties": {
+                    "experiment_id": { "type": "string" },
+                    "metric": { "type": "string", "enum": ["sharpe", "sortino", "calmar", "cagr", "total_return", "detrended_sharpe", "expectancy"], "default": "sharpe" },
+                    "study_id": { "type": "string", "description": "default `ablation`" }
+                }
+            }),
+        )
+        .internal()
+        .spends_trial(TrialKind::Falsification)
+        .evidence(&["study_id"])
+        .max_calls_per_run(2)
+        .summary(
+            "{n_load_bearing} of {n_components} load-bearing, {n_redundant} redundant, {n_harmful} harmful, {n_inconclusive} inconclusive",
+            &[("n_load_bearing", "components"), ("n_components", "components"), ("n_redundant", "components"), ("n_harmful", "components"), ("n_inconclusive", "components")],
+        ),
+    ])
+}
+
+
+// ── S-3.13: the two re-read falsification tools ──────────────────────────────
+//
+// Neither dispatches anything or reads new data, so neither spends a trial
+// (ADR-D-12). The arithmetic is `research::{regime_search, fragility}`, reached
+// through `/api/agent/falsification/*`; this crate stays a thin client.
+
+/// `regime_failure_search` -- the run's worst regime by the platform's own
+/// causal labels, with a multiple-comparisons correction across regimes.
+pub async fn regime_failure_search(api: &ApiClient, params: &Value) -> Value {
+    let Some(run_id) = str_field(params, "run_id") else {
+        return missing("run_id");
+    };
+    let mut path = format!(
+        "/api/agent/falsification/regime-failure/{}",
+        crate::tools::market::urlencode(&run_id)
+    );
+    if let Some(m) = params.get("min_obs").and_then(Value::as_u64) {
+        path.push_str(&format!("?min_obs={m}"));
+    }
+    let resp = match api.get(&path).await {
+        Ok(v) => v,
+        Err(e) => return e.to_tool_error(),
+    };
+    let s = resp.get("search").cloned().unwrap_or(Value::Null);
+    json!({
+        "summary_fields": {
+            "worst": s.get("worst").cloned().unwrap_or(Value::Null),
+            "failure_found": s.get("failure_found").cloned().unwrap_or(Value::Null),
+            "n_tested": s.get("n_tested").cloned().unwrap_or(Value::Null),
+            "n_untested": s.get("untested").and_then(Value::as_array).map_or(0, Vec::len),
+        },
+        "detail": resp,
+        "n": s.get("n_periods").cloned().unwrap_or(Value::Null),
+        "ids": {},
+    })
+}
+
+/// `parameter_fragility_map` -- how many of a finished sweep's dials the result
+/// is balanced on, as one index beside the neighbourhood verdict.
+pub async fn parameter_fragility_map(api: &ApiClient, params: &Value) -> Value {
+    let Some(sweep_id) = str_field(params, "sweep_id") else {
+        return missing("sweep_id");
+    };
+    let resp = match api
+        .get(&format!(
+            "/api/agent/falsification/fragility/{}",
+            crate::tools::market::urlencode(&sweep_id)
+        ))
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_tool_error(),
+    };
+    let f = resp.get("fragility").cloned().unwrap_or(Value::Null);
+    json!({
+        "summary_fields": {
+            "fragility_index": f.get("fragility_index").cloned().unwrap_or(Value::Null),
+            "n_knife_edge": f.get("n_knife_edge").cloned().unwrap_or(Value::Null),
+            "n_params": f.get("n_params").cloned().unwrap_or(Value::Null),
+            "neighbourhood_plateau": f.get("neighbourhood_plateau").cloned().unwrap_or(Value::Null),
+        },
+        "detail": resp,
+        "ids": {},
+    })
+}
+// ── S-3.13: timing jitter and ablation ───────────────────────────────────────
+//
+// Both run real backtests through the one door that counts them (`run_study`),
+// so neither can spend a look the ledger does not see. What these add is the
+// question, fixed -- the delays and the variants are the platform's, not the
+// caller's -- and the reading of the answer.
+
+/// Metrics whose sign means "there is an edge to lose": positive is good, zero is
+/// none. `max_drawdown` and `profit_factor` do not fit that reading.
+const EDGE_METRICS: [&str; 7] = [
+    "sharpe",
+    "sortino",
+    "calmar",
+    "cagr",
+    "total_return",
+    "detrended_sharpe",
+    "expectancy",
+];
+
+fn metric_arg(params: &Value) -> Result<String, Value> {
+    let m = str_field(params, "metric").unwrap_or_else(|| "sharpe".to_string());
+    if EDGE_METRICS.contains(&m.as_str()) {
+        Ok(m)
+    } else {
+        Err(crate::tool_error::refuse_extra(
+            "unsupported_metric",
+            format!("metric `{m}` is not one this tool can compute."),
+            format!("set metric to one of {}", EDGE_METRICS.join(", ")),
+            json!({ "got": m }),
+        ))
+    }
+}
+
+/// Retained share at which a lag is called tolerable. A platform constant: a caller
+/// who can set it can set it until the strategy passes.
+pub const JITTER_TOLERANT_RETAINED: f64 = 0.8;
+
+/// Read a timing-jitter distribution (member order = delay order).
+///
+/// * `no_edge_to_delay` -- the on-time metric is not positive, so lateness has
+///   nothing to take away and the question does not apply;
+/// * `timing_fragile` -- the edge is gone (metric <= 0) by one bar of delay;
+/// * `timing_tolerant` -- at the longest delay at least [`JITTER_TOLERANT_RETAINED`]
+///   of the on-time metric is still there;
+/// * `timing_sensitive` -- in between;
+/// * `unmeasured` -- a delay's run did not complete, so the curve has a hole. A
+///   curve with a hole is not read at all: skipping the failed delay would show the
+///   survivors, which are the delays that flattered it.
+#[must_use]
+pub fn read_timing_curve(dist: &[f64], bars: &[u32]) -> Value {
+    if dist.len() != bars.len() || bars.first() != Some(&0) || dist.iter().any(|v| !v.is_finite()) {
+        return json!({
+            "verdict": "unmeasured",
+            "reason": format!(
+                "{} of {} delays produced a finite metric; a curve with a missing delay is not \
+                 read, because the delays that completed are the ones that flatter it. A v1 \
+                 strategy cannot be delayed at all: its simulator has no order-hold path",
+                dist.iter().filter(|v| v.is_finite()).count().min(bars.len()),
+                bars.len()
+            ),
+        });
+    }
+    let base = dist[0];
+    let curve: Vec<Value> = bars
+        .iter()
+        .zip(dist)
+        .map(|(b, v)| {
+            json!({
+                "delay_bars": b,
+                "metric": v,
+                "retained": if base > 0.0 { json!(v / base) } else { Value::Null },
+            })
+        })
+        .collect();
+    let at = |bar: u32| bars.iter().position(|b| *b == bar).map(|i| dist[i]);
+    let last = *dist.last().unwrap_or(&base);
+    let max_delay = *bars.last().unwrap_or(&0);
+    let first_dead = bars.iter().zip(dist).find(|(b, v)| **b > 0 && **v <= 0.0).map(|(b, _)| *b);
+    let verdict = if base <= 0.0 {
+        "no_edge_to_delay"
+    } else if first_dead.is_some_and(|b| b <= 1) {
+        "timing_fragile"
+    } else if last / base >= JITTER_TOLERANT_RETAINED {
+        "timing_tolerant"
+    } else {
+        "timing_sensitive"
+    };
+    json!({
+        "verdict": verdict,
+        "baseline": base,
+        "at_one_bar": at(1),
+        "at_max": last,
+        "max_delay": max_delay,
+        "edge_gone_at_delay_bars": first_dead,
+        "curve": curve,
+        "tolerant_if_retained_at_least": JITTER_TOLERANT_RETAINED,
+    })
+}
+
+/// `timing_jitter_sensitivity` -- one `timing_jitter` study over delays 0..=k.
+pub async fn timing_jitter_sensitivity(api: &ApiClient, params: &Value) -> Value {
+    let Some(experiment_id) = str_field(params, "experiment_id") else {
+        return missing("experiment_id");
+    };
+    let max_delay = params
+        .get("max_delay_bars")
+        .map_or(Some(3), Value::as_u64);
+    let Some(max_delay) = max_delay.filter(|m| (1..=12).contains(m)) else {
+        return crate::tool_error::refuse(
+            "invalid_max_delay_bars",
+            "max_delay_bars is outside 1 to 12.",
+            "set max_delay_bars to an integer from 1 to 12",
+        );
+    };
+    let metric = match metric_arg(params) {
+        Ok(m) => m,
+        Err(e) => return e,
+    };
+    let bars: Vec<u32> = (0..=u32::try_from(max_delay).unwrap_or(3)).collect();
+    let study_id =
+        str_field(params, "study_id").unwrap_or_else(|| format!("timing-jitter-{max_delay}"));
+    let body = json!({
+        "study_id": study_id,
+        "kind": "timing_jitter",
+        "vary": { "vary": "fill_delays", "bars": bars },
+        "metric": metric,
+        "question": format!(
+            "Does the edge survive every decided order reaching the venue 0 to {max_delay} late?"
+        ),
+    });
+    let view = match api
+        .post(
+            &format!(
+                "/api/backtest/experiments/{}/studies",
+                crate::tools::market::urlencode(&experiment_id)
+            ),
+            body,
+        )
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_tool_error(),
+    };
+    let dist: Vec<f64> = view
+        .pointer("/distribution/dist")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_f64).collect())
+        .unwrap_or_default();
+    let read = read_timing_curve(&dist, &bars);
+    json!({
+        "summary_fields": {
+            "verdict": read["verdict"],
+            "baseline": read.get("baseline").cloned().unwrap_or(Value::Null),
+            "at_one_bar": read.get("at_one_bar").cloned().unwrap_or(Value::Null),
+            "at_max": read.get("at_max").cloned().unwrap_or(Value::Null),
+            "max_delay": max_delay,
+        },
+        "detail": { "reading": read, "metric": metric, "study": view, "delay_unit": "bars of the experiment's evaluation resolution" },
+        "n": bars.len(),
+        "ids": { "study_id": study_id },
+    })
+}
+
+/// Tally the per-component verdicts the classify route returned.
+#[must_use]
+pub fn tally_ablation(components: &[Value]) -> Value {
+    let count = |v: &str| {
+        components
+            .iter()
+            .filter(|c| c.pointer("/result/verdict").and_then(Value::as_str) == Some(v))
+            .count()
+    };
+    json!({
+        "n_components": components.len(),
+        "n_load_bearing": count("load_bearing"),
+        "n_redundant": count("redundant"),
+        "n_harmful": count("harmful"),
+        "n_inconclusive": count("inconclusive"),
+    })
+}
+
+/// `ablation_sweep` -- variants as draft strategies, one study, the verdicts.
+pub async fn ablation_sweep(api: &ApiClient, params: &Value) -> Value {
+    let Some(experiment_id) = str_field(params, "experiment_id") else {
+        return missing("experiment_id");
+    };
+    let metric = match metric_arg(params) {
+        Ok(m) => m,
+        Err(e) => return e,
+    };
+    let study_id = str_field(params, "study_id").unwrap_or_else(|| "ablation".to_string());
+    let exp = crate::tools::market::urlencode(&experiment_id);
+
+    // 1. The plan: what to leave out, and the id each variant is stored under.
+    let plan = match api
+        .get(&format!("/api/agent/falsification/ablation/{exp}/variants"))
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => return e.to_tool_error(),
+    };
+    let base_ref = plan["strategy_ref"].as_str().unwrap_or_default().to_string();
+    let variants = plan["variants"].as_array().cloned().unwrap_or_default();
+    if base_ref.is_empty() || variants.is_empty() {
+        return crate::tool_error::refuse_extra(
+            "no_plan",
+            "the platform returned an ablation plan with no base strategy or no variants.",
+            "check `strategy_id` names a stored strategy with at least one removable rule, then call again",
+            json!({ "detail": plan }),
+        );
+    }
+
+    // 2. Register each variant as a draft strategy through the ordinary door. A
+    // retry finds the slug already has a head, and the lineage parameter is then
+    // refused as ambiguous; the retry without it re-saves the same document, which
+    // is a no-op, so a second call does not litter the table.
+    let mut registered: Vec<Value> = Vec::new();
+    let mut refs = vec![Value::String(base_ref.clone())];
+    let mut components: Vec<String> = Vec::new();
+    for v in &variants {
+        let id = v["strategy_id"].as_str().unwrap_or_default();
+        let component = v["component"].as_str().unwrap_or_default();
+        let def = v["definition"].clone();
+        let with_parent = format!(
+            "/api/strategies?parent_strategy_id={}",
+            crate::tools::market::urlencode(&base_ref)
+        );
+        let mut res = api.post(&with_parent, def.clone()).await;
+        if res.is_err() {
+            res = api.post("/api/strategies", def).await;
+        }
+        match res {
+            Ok(_) => {
+                registered.push(json!({"component": component, "strategy_id": id}));
+                refs.push(Value::String(id.to_string()));
+                components.push(component.to_string());
+            }
+            Err(e) => {
+                return crate::tool_error::refuse_extra(
+                    "variant_not_registered",
+                    format!("variant `{id}` (without `{component}`) could not be registered; nothing was run and no look was spent."),
+                    "call ablation_sweep again; a retry finds the variants already registered and continues",
+                    json!({
+                        "component": component,
+                        "strategy_id": id,
+                        "detail": e.to_tool_error(),
+                        "registered_so_far": registered,
+                    }),
+                );
+            }
+        }
+    }
+
+    // 3. One study over [baseline, variants..]: each member a counted look.
+    let study = match api
+        .post(
+            &format!("/api/backtest/experiments/{exp}/studies"),
+            json!({
+                "study_id": study_id,
+                "kind": "ablation",
+                "vary": { "vary": "strategy_refs", "refs": refs },
+                "metric": metric,
+                "question": "Which of this strategy's rules earn their place?",
+            }),
+        )
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            return crate::tool_error::refuse_extra(
+                "study_failed",
+                "the ablation study could not be started; the variants are registered and no look was spent.",
+                "call ablation_sweep again; the variants already exist and the study is retried",
+                json!({ "detail": e.to_tool_error(), "registered": registered }),
+            )
+        }
+    };
+
+    // 4. The verdicts, from the members' own equity curves.
+    let classified = match api
+        .post(
+            &format!("/api/agent/falsification/ablation/{exp}/classify"),
+            json!({"study_id": study_id, "components": components}),
+        )
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            return crate::tool_error::refuse_extra(
+                "classification_failed",
+                "the study ran but its members could not be classified; the looks are spent.",
+                "do not re-run the study; read `study` and report the members' metrics unclassified",
+                json!({ "detail": e.to_tool_error(), "registered": registered, "study": study }),
+            )
+        }
+    };
+    let rows = classified["components"].as_array().cloned().unwrap_or_default();
+    let tally = tally_ablation(&rows);
+    json!({
+        "summary_fields": tally,
+        "detail": {
+            "classification": classified,
+            "registered": registered,
+            "metric": metric,
+            "study": study,
+            "reading": "load_bearing: removing it makes the strategy worse by more than noise; \
+                        redundant: indistinguishable from noise either way; harmful: removing \
+                        it helps. The interval is a paired stationary bootstrap with a derived \
+                        block length and a fixed seed.",
+        },
+        "n": rows.len(),
+        "ids": { "study_id": study_id },
+    })
 }
 
 #[cfg(test)]
@@ -500,8 +973,8 @@ mod tests {
         p["expected"] = json!("sharpe is 0.4");
         p["observed"] = json!("sharpe is 0.4");
         let e = err(p);
-        assert_eq!(e["error"], "not_falsifiable");
-        assert!(e["fix"]
+        assert_eq!(e["error"]["code"], "not_falsifiable");
+        assert!(e["error"]["message"]
             .as_str()
             .unwrap()
             .contains("A low score is not a kill"));
@@ -512,16 +985,16 @@ mod tests {
         let mut p = good();
         p["expected"] = json!("  same  ");
         p["observed"] = json!("same");
-        assert_eq!(err(p)["error"], "not_falsifiable");
+        assert_eq!(err(p)["error"]["code"], "not_falsifiable");
     }
 
     #[test]
     fn a_report_without_steps_is_rejected() {
         let mut p = good();
         p["steps"] = json!([]);
-        assert_eq!(err(p.clone())["error"], "no_steps");
+        assert_eq!(err(p.clone())["error"]["code"], "no_steps");
         p["steps"] = json!(["   ", ""]);
-        assert_eq!(err(p)["error"], "no_steps");
+        assert_eq!(err(p)["error"]["code"], "no_steps");
     }
 
     #[test]
@@ -530,7 +1003,7 @@ mod tests {
         p["seed"] = Value::Null;
         let e = err(p);
         assert_eq!(e["field"], "seed");
-        assert!(e["fix"].as_str().unwrap().contains("anecdote"));
+        assert!(e["error"]["message"].as_str().unwrap().contains("anecdote"));
     }
 
     #[test]
@@ -585,8 +1058,8 @@ mod tests {
         let specs = specs();
         assert_eq!(
             specs.len(),
-            7,
-            "four falsification tools plus three evidence tools"
+            11,
+            "four falsification tools, three evidence tools, the two re-read searches and the two run-and-read tools (S-3.13)"
         );
         for s in &specs {
             assert!(!s.description.is_empty(), "{}", s.name);
@@ -599,7 +1072,18 @@ mod tests {
                 "{} has no properties",
                 s.name
             );
-            // Every one of these moved prose out, so every one must point at it.
+            // Every one of these moved prose out, so every one must point at it --
+            // except the two re-read searches (S-3.13), which carry no moved prose
+            // and whose descriptions are complete as written.
+            if matches!(
+                s.name,
+                "regime_failure_search"
+                    | "parameter_fragility_map"
+                    | "timing_jitter_sensitivity"
+                    | "ablation_sweep"
+            ) {
+                continue;
+            }
             assert_eq!(
                 s.notes_section,
                 Some(s.name),
@@ -711,5 +1195,66 @@ mod tests {
             "route failure onward: {n}"
         );
         assert!(described("run_oracle_test").contains("EVALUATOR CAN SEE AN EDGE"));
+    }
+
+    // ── S-3.13: timing jitter and ablation ───────────────────────────────────
+
+    #[test]
+    fn a_curve_that_dies_at_one_bar_is_fragile_and_one_that_holds_is_tolerant() {
+        let bars = [0, 1, 2, 3];
+        let fragile = read_timing_curve(&[1.4, -0.1, -0.5, -0.9], &bars);
+        assert_eq!(fragile["verdict"], "timing_fragile");
+        assert_eq!(fragile["edge_gone_at_delay_bars"], 1);
+        let tolerant = read_timing_curve(&[1.4, 1.35, 1.3, 1.2], &bars);
+        assert_eq!(tolerant["verdict"], "timing_tolerant");
+        let sensitive = read_timing_curve(&[1.4, 1.1, 0.9, 0.6], &bars);
+        assert_eq!(sensitive["verdict"], "timing_sensitive");
+        assert!(sensitive["curve"][3]["retained"].as_f64().unwrap() < 0.5);
+    }
+
+    #[test]
+    fn no_edge_on_time_means_the_question_does_not_apply_and_a_hole_is_not_read() {
+        let none = read_timing_curve(&[-0.2, -0.3, -0.4], &[0, 1, 2]);
+        assert_eq!(none["verdict"], "no_edge_to_delay");
+        assert!(none["curve"][1]["retained"].is_null(), "a share of nothing is not a number");
+        // A failed delay leaves fewer values than delays: refused, not skipped.
+        let hole = read_timing_curve(&[1.4, 1.3], &[0, 1, 2]);
+        assert_eq!(hole["verdict"], "unmeasured");
+        assert!(hole["reason"].as_str().unwrap().contains("order-hold"));
+        // And a curve that does not start at the on-time baseline is not read either.
+        assert_eq!(read_timing_curve(&[1.0, 1.0], &[1, 2])["verdict"], "unmeasured");
+    }
+
+    #[test]
+    fn the_jitter_and_ablation_tools_refuse_a_metric_with_no_edge_reading() {
+        assert!(metric_arg(&json!({"metric": "sharpe"})).is_ok());
+        assert_eq!(metric_arg(&json!({})).unwrap(), "sharpe");
+        let e = metric_arg(&json!({"metric": "max_drawdown"})).unwrap_err();
+        assert_eq!(e["error"]["code"], "unsupported_metric");
+    }
+
+    #[test]
+    fn the_ablation_tally_counts_each_verdict_and_an_unrun_variant_as_inconclusive() {
+        let rows = vec![
+            json!({"result": {"verdict": "load_bearing"}}),
+            json!({"result": {"verdict": "redundant"}}),
+            json!({"result": {"verdict": "redundant"}}),
+            json!({"result": {"verdict": "inconclusive", "reason": "the variant's run did not complete"}}),
+        ];
+        let t = tally_ablation(&rows);
+        assert_eq!(t["n_components"], 4);
+        assert_eq!(t["n_load_bearing"], 1);
+        assert_eq!(t["n_redundant"], 2);
+        assert_eq!(t["n_inconclusive"], 1);
+        assert_eq!(t["n_harmful"], 0);
+    }
+
+    #[test]
+    fn both_tools_are_declared_as_falsification_trials_and_named_in_the_catalogue() {
+        for name in ["timing_jitter_sensitivity", "ablation_sweep"] {
+            let s = specs().into_iter().find(|s| s.name == name).expect(name);
+            assert_eq!(s.spends_trial, crate::spec::TrialKind::Falsification, "{name} runs backtests");
+            assert!(s.max_calls_per_run.is_some(), "{name} must be bounded");
+        }
     }
 }

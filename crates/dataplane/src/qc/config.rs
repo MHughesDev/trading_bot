@@ -47,6 +47,12 @@ pub struct BadTickThresholds {
     pub reversal_fraction: f64,
     /// Window for the rolling standard deviation, in bars.
     pub sigma_window: usize,
+    /// A reversing spike on a bar whose volume is at least this multiple of the
+    /// rolling median volume is a *traded* move, not a bad print, and is not
+    /// counted (ADR-P1-7a: 16 of 16 such spikes in the 3-year Coinbase backfill
+    /// were corroborated by Kraken's own trades). A print nobody traded
+    /// through has no volume behind it. `0` disables the exemption.
+    pub volume_confirm_multiple: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -66,6 +72,11 @@ pub struct VolumeThresholds {
     /// Multiple of the rolling median that counts as a spike.
     pub spike_multiple: f64,
     pub median_window: usize,
+    /// Share of bars that may be spikes before the check fires (ADR-P1-7b). A
+    /// count rule ("any spike fails") is certain to fire on a million-bar 1m
+    /// series, whose volume is heavy-tailed; a feed that is *wrong* about volume
+    /// shows far above one bar in a hundred.
+    pub max_spike_share: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -93,6 +104,7 @@ impl Default for BadTickThresholds {
             sigma_multiple: 8.0,
             reversal_fraction: 0.8,
             sigma_window: 50,
+            volume_confirm_multiple: 3.0,
         }
     }
 }
@@ -122,6 +134,7 @@ impl Default for VolumeThresholds {
             max_zero_share: 0.10,
             spike_multiple: 20.0,
             median_window: 50,
+            max_spike_share: 0.01,
         }
     }
 }

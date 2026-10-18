@@ -285,8 +285,25 @@ const fn flattening_side(side: ExitSide) -> OrderSide {
 /// to the most expensive schedule in the book and says so in its tier name.
 /// That direction is deliberate — a strategy priced too cheaply gets promoted,
 /// and one priced too dearly gets rejected and re-examined.
-fn schedule_for(venue_id: &str) -> FeeSchedule {
-    FeeBook::platform_default().resolve(Some(&venue_id.to_lowercase()), None)
+fn schedule_for(venue_id: &str, cost_scale_bp: i32) -> FeeSchedule {
+    let mut schedule = FeeBook::platform_default().resolve(Some(&venue_id.to_lowercase()), None);
+    scale_costs(&mut schedule, cost_scale_bp);
+    schedule
+}
+
+/// Scale every cost in a schedule by `cost_scale_bp` hundredths of a percent
+/// (`+2000` is +20 %). The perturbation a cost-sensitivity replicate applies
+/// (SPEC §11.5): all three components move together, because a venue that is
+/// dearer is dearer on every leg. Zero returns the schedule unchanged, bit for
+/// bit.
+fn scale_costs(schedule: &mut FeeSchedule, cost_scale_bp: i32) {
+    if cost_scale_bp == 0 {
+        return;
+    }
+    let factor = 1.0 + f64::from(cost_scale_bp) / 10_000.0;
+    schedule.taker_bps *= factor;
+    schedule.maker_bps *= factor;
+    schedule.half_spread_bps *= factor;
 }
 
 /// Per-fill charge as a fraction of notional.
@@ -339,7 +356,7 @@ struct Setup {
 }
 
 /// Builds the venue/instrument/strategy/bars setup shared by both run paths.
-fn build_setup(inputs: &SimulationInputs) -> anyhow::Result<Setup> {
+fn build_setup(inputs: &SimulationInputs, cost_scale_bp: i32) -> anyhow::Result<Setup> {
     anyhow::ensure!(!inputs.bars.is_empty(), "no bars to simulate");
 
     let order_specs = order_specs(&inputs.definition)?;
@@ -373,7 +390,7 @@ fn build_setup(inputs: &SimulationInputs) -> anyhow::Result<Setup> {
     let venue = Venue::from(inputs.venue_id.to_uppercase().as_str());
     let preset = VenuePreset::from_asset_class(&inputs.asset_class);
     let price_increment = price(&increment_str(price_precision))?;
-    let schedule = schedule_for(&inputs.venue_id);
+    let schedule = schedule_for(&inputs.venue_id, cost_scale_bp);
     let instrument = if preset == VenuePreset::Equity {
         equity_instrument_priced(
             venue,
@@ -527,7 +544,7 @@ pub fn run_simulation(
         bars: engine_bars,
         handler,
         ..
-    } = build_setup(&inputs)?;
+    } = build_setup(&inputs, 0)?;
     let BarSimulationSpec {
         venue,
         preset,
@@ -585,13 +602,24 @@ pub fn run_simulation_detailed(
     inputs: SimulationInputs,
     control: &Arc<SimulationControl>,
 ) -> anyhow::Result<DetailedOutcome> {
+    run_simulation_detailed_scaled(inputs, control, 0)
+}
+
+/// [`run_simulation_detailed`] with every trading cost scaled by `cost_scale_bp`
+/// hundredths of a percent (`RunConfig::cost_scale_bp`). Zero is the modelled cost.
+#[allow(clippy::needless_pass_by_value)]
+pub fn run_simulation_detailed_scaled(
+    inputs: SimulationInputs,
+    control: &Arc<SimulationControl>,
+    cost_scale_bp: i32,
+) -> anyhow::Result<DetailedOutcome> {
     let Setup {
         spec,
         bars: engine_bars,
         handler,
         exits,
         schedule,
-    } = build_setup(&inputs)?;
+    } = build_setup(&inputs, cost_scale_bp)?;
     let BarSimulationSpec {
         venue,
         preset,
@@ -921,6 +949,37 @@ impl DetailedOutcome {
                      opinion about it"
                 ),
             );
+        }
+
+        // Which declared exit rule closed how many trades, typed, so
+        // `suggest_moves` can read it instead of waiting for a caller to
+        // transcribe it (S-5.11). Present only when the run had declared exits
+        // AND closed trades; a run with neither has no distribution to report,
+        // and an empty array would read as "no exit ever fired" for a run that
+        // simply has none declared. The share is of the harvested trade rows,
+        // and trades no declared exit closed are counted under `signal_exit`
+        // rather than dropped, so the shares sum to one.
+        if !self.exit_fills.is_empty() && harvested > 0 {
+            let mut by_rule: std::collections::BTreeMap<&str, u64> =
+                std::collections::BTreeMap::new();
+            for f in &self.exit_fills {
+                *by_rule.entry(f.rule.as_str()).or_insert(0) += 1;
+            }
+            let declared: u64 = by_rule.values().sum();
+            let total = (harvested as u64).max(declared);
+            let mut rows: Vec<Value> = by_rule
+                .iter()
+                .map(|(rule, n)| {
+                    json!({ "reason": rule, "trades": n, "share": *n as f64 / total as f64 })
+                })
+                .collect();
+            if total > declared {
+                let n = total - declared;
+                rows.push(json!({
+                    "reason": "signal_exit", "trades": n, "share": n as f64 / total as f64,
+                }));
+            }
+            doc.insert("exit_reasons".into(), Value::Array(rows));
         }
 
         let engine_did_something =
@@ -1325,6 +1384,19 @@ mod tests {
     use crate::requirements::FeatureKind;
     use rust_decimal_macros::dec;
 
+    #[test]
+    fn a_cost_scale_moves_every_component_and_zero_moves_none() {
+        let base = schedule_for("coinbase_advanced", 0);
+        let dear = schedule_for("coinbase_advanced", 2000);
+        let cheap = schedule_for("coinbase_advanced", -2000);
+        assert_eq!(base, FeeBook::platform_default().resolve(Some("coinbase_advanced"), None));
+        assert!((dear.taker_bps - base.taker_bps * 1.2).abs() < 1e-9);
+        assert!((cheap.taker_bps - base.taker_bps * 0.8).abs() < 1e-9);
+        assert!((dear.half_spread_bps - base.half_spread_bps * 1.2).abs() < 1e-9);
+        assert!(fill_rate(&dear, true) > fill_rate(&base, true));
+        assert!(fill_rate(&cheap, true) < fill_rate(&base, true));
+    }
+
     /// A `DetailedOutcome` with an arbitrary aggregate document and trade list,
     /// built without the engine so the document rules are testable on their own.
     fn outcome(stats: serde_json::Value, trades: Vec<Trade>) -> DetailedOutcome {
@@ -1466,6 +1538,51 @@ mod tests {
         .result_document();
         assert_eq!(clean["exit_repricing_applied"], serde_json::json!(0));
         assert!(clean.get("stats_precede_exit_repricing").is_none());
+    }
+
+    /// `suggest_moves` reads which exit rule closed the trades (S-5.11), so the
+    /// stored document has to carry it, typed, with shares that sum to one and
+    /// the trades no declared exit closed counted rather than dropped.
+    #[test]
+    fn the_stored_document_says_which_exit_rule_closed_how_many_trades() {
+        let mut o = outcome(
+            serde_json::json!({ "total_orders": 8, "total_positions": 4 }),
+            vec![
+                round_trip(dec!(1), dec!(0.1)),
+                round_trip(dec!(1), dec!(0.1)),
+                round_trip(dec!(1), dec!(0.1)),
+                round_trip(dec!(1), dec!(0.1)),
+            ],
+        );
+        for rule in ["stop_loss", "stop_loss", "take_profit"] {
+            o.exit_fills.push(ExitFill {
+                ts: DateTime::from_timestamp(1_700_003_600, 0).unwrap(),
+                rule: rule.into(),
+                side: ExitSide::Long,
+                level: dec!(98),
+                venue_fill: dec!(98),
+                charged: dec!(98),
+                bars_held: 3,
+                qty: dec!(2),
+            });
+        }
+        let doc = o.result_document();
+        let rows = doc["exit_reasons"].as_array().expect("exit_reasons");
+        let get = |r: &str| rows.iter().find(|x| x["reason"] == r).unwrap_or_else(|| panic!("{rows:?}"));
+        assert_eq!(get("stop_loss")["trades"], serde_json::json!(2));
+        assert_eq!(get("stop_loss")["share"], serde_json::json!(0.5));
+        assert_eq!(get("signal_exit")["trades"], serde_json::json!(1));
+        let sum: f64 = rows.iter().map(|x| x["share"].as_f64().unwrap()).sum();
+        assert!((sum - 1.0).abs() < 1e-9, "the shares sum to one: {sum}");
+
+        // No declared exits, no distribution: an empty array would say no exit
+        // ever fired on a run that simply declared none.
+        let clean = outcome(
+            serde_json::json!({ "total_orders": 2, "total_positions": 1 }),
+            vec![round_trip(dec!(1), dec!(0.1))],
+        )
+        .result_document();
+        assert!(clean.get("exit_reasons").is_none());
     }
 
     /// A non-object aggregate cannot be merged into. Dropping it to make room

@@ -68,8 +68,8 @@ export const authApi = {
   getVenueCredentials: () => api.get('/auth/venue-credentials'),
   putVenueCredentials: (data: Record<string, string>) =>
     api.put('/auth/venue-credentials', data),
-  verifyVenueCredentials: (data: Record<string, string>) =>
-    api.post('/auth/venue-credentials/verify', data),
+  verifyVenueCredentials: (venue: string, data: Record<string, string>) =>
+    api.post(`/auth/venue-credentials/${venue}/verify`, data),
 }
 
 // ── System status ─────────────────────────────────────────────────────────────

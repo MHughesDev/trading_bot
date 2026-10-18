@@ -120,7 +120,7 @@ Verified against the repository, not against the plan files' own claims.
 | **No live agent session has ever run** | needs a provider credential; two Set S acceptance criteria are `BLOCKED:HUMAN` behind it | Set L §4, Set S §7, task S-4.14 |
 | ✎ **Campaign child workers: `ResearchRun` now exists** (S-10.11, registered in `apps/platform`); `Study` and `EvalTask` are still unregistered, so a campaign reaching EXPERIMENT or COMPARE still fails with `no_worker` | a campaign fails at its first unserved dispatching phase; nothing consumes `Comparison` | HANDOFF §5.2 |
 | **5 of 16 gates have no evidence source** (3, 4, 10, 12, 15) | the funnel cannot render a complete verdict | HANDOFF §5.3 |
-| ~~Gate 15 has no input~~ | **built 2026-09-15 (track 5).** Reconciliation is wired, the verdict leads with its observation count and window, and a backfilled row planted inside the window provably does not enter the count. It has never rendered a real verdict because **nothing has produced a fill** — blocked on track 16 and on gate H-7 | Set T Phase 0 |
+| ~~Gate 15 has no input~~ | **built 2026-09-15 (track 5).** Reconciliation is wired, the verdict leads with its observation count and window, and a backfilled row planted inside the window provably does not enter the count. It has never rendered a real verdict because **nothing has produced a fill**. It is blocked on track 16. Gate H-7 was withdrawn on 2026-10-02: under ADR-0048 paper fills come from the in-app paper engine, so no broker credential is needed | Set T Phase 0 |
 | **AT-61 unwritten** | no framework can claim `bit_identical` resume, so every resume restarts under the same trial | HANDOFF §5.1 |
 | **Phase 3 writers unscheduled** | `asset_embedding` and the outcome tensor have code and tests but nothing writes them | HANDOFF §5.4 |
 | **The external MCP front door writes no audit trail** | a named exemption, not an oversight, but a real hole | AT-64 |
@@ -197,7 +197,7 @@ Stage 2  │ COMPLETE THE EVIDENCE SURFACE   pack remainder · Q-residual · 16/
                              │
                              ▼
          ┌──────────────────────────────────────────────────────────────────┐
-Stage 3  │ PAPER AT SCALE    Set T Ph.3-4 · Set E · COMP-007 live · ramp     │
+Stage 3  │ PAPER AT SCALE    Set T Ph.3   · Set E · COMP-007 live · ramp     │
          └──────────────────────────────────────────────────────────────────┘
                              │
                              ▼
@@ -271,10 +271,12 @@ computed from 16 real inputs, with no `NotComputable` and no gate judging on a p
 
 **Goal.** Many candidates on paper, continuously, safely, with the monitor live.
 
-Set T Phases 3–4 (deployment proposals, capital-ramp mechanics, the paper fleet), COMP-007
-promoted from "built in Set S Phase 7" to "running in production with drills", and Set E's
-remaining 25 production-readiness items, which become load-bearing the moment something
-runs unattended against a broker.
+Set T Phase 3 (capital-ramp mechanics), with Phase 2's paper fleet running at scale. Set T has
+phases 0–3 only; this line used to cite "Phases 3–4", which do not exist, and was corrected on
+2026-10-03. Deployment proposals are Phase 1. Also in this stage: COMP-007 promoted from
+"built in Set S Phase 7" to "running in production with drills", and Set E's remaining 25
+production-readiness items. Those items become load-bearing the moment something runs
+unattended: first on the in-app paper venue (ADR-0048), later against a live broker.
 
 **Exit.** Paper fills reconcile with backtest distributions across a fleet; a kill-switch
 drill stops order flow within one cadence; DONE-3's forward-observation count is
@@ -322,19 +324,28 @@ approval envelope.
 organised around the agent rather than around subsystems, so it took pieces out of four of
 them. This table is the honest remainder, and it replaces that section.
 
-| Letter | Original scope | Taken by Set S | **Residual scope** | Stage |
-|---|---|---|---|---|
-| **M** Engine truthfulness | `FE-`, `BT-`, `ST-` Layer 1 | the DATA-006 F1/F2 feature engine and the one-engine rule (Phase 5) | backtest-engine truthfulness: `BT-01…BT-11` beyond features, fill realism, the `market_simulator` contract | 4 |
-| **N** Models | `MD-01…MD-13`, TB §3.7 | nothing | whole, **plus Set H Phases 4–5** (inference service, studio frontend) | 4 |
-| **O** Strategy Language v2 | `ST-05…ST-12`, `UI-09` | SLv2 as the model-facing language, compiler, moves (Phase 5) | the **visual builder's** v2 surface, `UI-09` | 4 |
-| **P** Data reach | `DA-10…DA-12`, S1–S7 | nothing | **whole — written 2026-09-15, [`set-P/MASTER.md`](plan-sets/set-P/MASTER.md)** | **0–1** |
-| **Q** Research standard | `EV-01`, `EV-03…EV-08` | the honesty arithmetic and the leakage battery (Phases 3, 8) | remaining `EV-` extensions; 11 §8 High tools not in the Set S catalogue | 2 |
-| **R-a** Skills lifecycle | `SK-02…SK-08, 10, 12…15`, `UI-06` | playbook admission, episodic + semantic memory (Phase 4) | the registry, materialiser, propose/verify, project admission, `UI-06` | 5 |
-| **R-b** Knowledge and autonomy | `KM-02…KM-10`, `SK-11/16/17`, `EV-09` | campaigns as the `optimise` workflow; autonomy as continuous research (Phases 10–11) | the **regime engine**, knowledge promotion, curator, A/B, random arm, R1 techniques | 5 |
-| **T** Forward evidence | was "Track (own set)" | nothing | **whole — written 2026-09-15, [`set-T/MASTER.md`](plan-sets/set-T/MASTER.md)** | **0–3** |
+**Updated 2026-10-04 (track F-RESERVED):** M, N, Q, R-a and R-b are no longer reserved
+letters. Each now has a `MASTER.md` and phase files with sized tasks, acceptance clauses,
+dependencies and migration needs, and each says what Set S and Set U already own so that
+nothing is built twice. Task ids are `M-`, `N-`, `Q-`, `RA-` and `RB-` (the id grammar the
+count test reads is an uppercase prefix, so `R-a` becomes `RA`). Their counts are held by
+`the_plan_counts_what_the_plans_say` as *planned sets*, outside the PLAN.md headline until
+they are promoted into its live-set list.
 
-Letters already used and closed: A, B, C, D, E, F, G, H, I, J, K, L, S. The next free
-letter after T is **U**.
+| Letter | Original scope | Taken by Sets S and U | **Residual scope** | Plan | Stage |
+|---|---|---|---|---|---|
+| **M** Engine truthfulness | `FE-`, `BT-`, `ST-` Layer 1 | the DATA-006 F1/F2 feature engine and the one-engine rule (S Phase 5); the native venue, order vocabulary, fill timing, Layer 2 driver and model leakage check (U) | Layer 1 position series and the Gate-0 truncation test, dated cost models, `RunConfig` honouring, outputs v2, batch and tier-0, tick replay, research-to-deploy reconciliation | [set-M](plan-sets/set-M/MASTER.md) | 4 |
+| **N** Models | `MD-01…MD-13`, TB §3.7 | per-fold models, the prediction series, typed model contracts (U) | the dataset **declaration**, the family registry, real sequence windows, scoring additions with the hard usage rules, calibration and serving, **plus Set H Phases 4–5** | [set-N](plan-sets/set-N/MASTER.md) | 4 |
+| **O** Strategy Language v2 | `ST-05…ST-12`, `UI-09` | SLv2 as the model-facing language, compiler, moves (S Phase 5); SLv3 and the unified engine (U) | the **visual builder's** v2 surface, `UI-09` — and the SLv2/SLv3 reconciliation (OPEN-TASKS C5) is still undecided | not yet planned | 4 |
+| **P** Data reach | `DA-10…DA-12`, S1–S7 | nothing | **whole — written 2026-09-15, [`set-P/MASTER.md`](plan-sets/set-P/MASTER.md)** | [set-P](plan-sets/set-P/MASTER.md) | **0–1** |
+| **Q** Research standard | `EV-01`, `EV-03…EV-08` | the honesty arithmetic and the leakage battery (S Phases 3, 8) | the §8 evaluation tools that do not exist (the table has 8 High and 4 Medium, not 11), and the G3 rules that consume them | [set-Q](plan-sets/set-Q/MASTER.md) | 2 |
+| **R-a** Skills lifecycle | `SK-02…SK-08, 10, 12…15`, `UI-06` | playbook admission, episodic + semantic memory (S Phase 4); core skills and the v0 materialiser (L, LEGACY) | the registry, admission, the scoped materialiser, propose/verify, search, `UI-06` | [set-R-a](plan-sets/set-R-a/MASTER.md) | 5 |
+| **R-b** Knowledge and autonomy | `KM-02…KM-10`, `SK-11/16/17`, `EV-09` | campaigns as the `optimise` workflow; autonomy as continuous research (S Phases 10–11) | knowledge (move memory, curator, analogs, tainting), skill promotion and evaluation, the **random arm**, the **regime engine**, learned tiers behind ledger-size triggers, FEAT-003 phases 2–4 | [set-R-b](plan-sets/set-R-b/MASTER.md) | 5 |
+| **T** Forward evidence | was "Track (own set)" | nothing | **whole — written 2026-09-15, [`set-T/MASTER.md`](plan-sets/set-T/MASTER.md)** | [set-T](plan-sets/set-T/MASTER.md) | **0–3** |
+
+Letters already used and closed: A, B, C, D, E, F, G, H, I, J, K, L, S. Letters now planned and open:
+M, N, P, Q, R-a, R-b, T, U. The next free letter after U is **V**; Set O is the one reserved
+letter still without a plan.
 
 ---
 
@@ -413,7 +424,7 @@ Everything else is delegated. These are not.
 | ~~H-1~~ | The dirty working tree | — | **CLOSED 2026-09-15, commit `37faade`.** 161 files, +27,518. The two `Cargo.toml` workspace-member lines, the 13 untracked catalogue tools, `ExitTracker`, `FeeBook`, the falsification ledger, `webfetch`, `skills`, migrations 0058–0060, `.gitattributes` — and the plan corpus itself (`ROADMAP`, `EXECUTION-BOARD`, plan-sets P/S/T, AGENT-005…014, ADR-0034–0037), which was also untracked. **Every worktree can now rebase onto a baseline that contains what its task depends on**, and the mirrored "user's work" commits on ~25 branches should be dropped rather than deduplicated at integration |
 | **H-2** | A model provider credential in the encrypted store | the **only two** acceptance criteria in all of Set S an agent cannot close (AGENT-005 §10.2's cache-hit measurement, AGENT-009's `decode` suite); every live agent session | **open — track 22 is building everything either side of it** |
 | **H-3** | Monthly research budget ceiling (the platform default is $25/day per continuous session) | continuous research at scale | default set, revisit at Stage 2 |
-| ~~H-7~~ | ~~**Alpaca paper credentials.**~~ **Withdrawn 2026-10-02 (ADR-0048): the owner decided paper trading runs in the app, so no paper credential is needed.** T-0.4 is now blocked only on its recorded engineering. Original text: Track 5 built the whole forward-evidence pipeline and cannot start it: T-0.4 is blocked on a paper fill (track 16) **and** on credentials in `.env`, which an agent must not enter. This is the second of the two locks on the Gate 15 clock | **DONE-3, the only calendar-bound condition** | **open — minutes of your time** |
+| ~~H-7~~ | ~~**Alpaca paper credentials.**~~ **Withdrawn 2026-10-02 (ADR-0048): the owner decided paper trading runs in the app, so no paper credential is needed.** T-0.4 is now blocked only on its recorded engineering. Original text: Track 5 built the whole forward-evidence pipeline and cannot start it: T-0.4 is blocked on a paper fill (track 16) **and** on credentials in `.env`, which an agent must not enter. This is the second of the two locks on the Gate 15 clock | **DONE-3, the only calendar-bound condition** | **withdrawn 2026-10-02 (ADR-0048)** |
 | **H-4** | **Q-4: capital and liability.** Whose broker, whose money, who is liable when a friend's strategy loses | **all of Stage 6** | **open since inception** |
 | ~~H-5~~ | Whether Set C and Set F are retired or re-derived | — | **closed 2026-09-15 without needing you.** The audit answered both from evidence: Set F is 9/11 shipped with 2 deliberately reversed; Set C is 54/68 shipped with 2 open items worth doing |
 | **H-6** | Whether equities/futures onboarding is coming, which turns several vacuous invariants live (INV-03, INV-07, INV-08, corporate actions) | Set P scope beyond crypto | open |
@@ -484,9 +495,9 @@ Distinct from per-set risks, which live in each MASTER.
 
 In order, starting now:
 
-1. ~~Answer H-1~~ **— done, `37faade`.** Answer **H-2** (a model-provider credential) and
-   **H-7** (Alpaca paper credentials). Those two are all that is left that you have to
-   decide, and H-7 is the only one on a calendar.
+1. ~~Answer H-1~~ **— done, `37faade`.** Answer **H-2** (a model-provider credential).
+   ~~**H-7** (Alpaca paper credentials)~~ was withdrawn on 2026-10-02: ADR-0048 runs paper
+   trading in the app's own engine, so the paper clock needs no credential from you.
 2. **Run Set P Phase 0** — measure coverage, publish it, switch on the forward collectors.
    Days, not weeks. This is the irreversible one.
 3. **Run Set T Phase 0** — wire reconciliation, deploy one hand-authored strategy to paper.

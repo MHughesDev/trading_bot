@@ -66,10 +66,14 @@ pub enum PaperTradeError {
     PostOnlyWouldTake { instrument_id: String },
     #[error("reduce-only order on {instrument_id} would open or increase a position")]
     ReduceOnlyWouldIncrease { instrument_id: String },
+    /// The account's lock was poisoned by a panic; its state may be
+    /// half-updated, so it takes no new orders until reset (Set E #8).
+    #[error("paper account {asset_class:?} is unavailable after an internal panic; reset it to resume")]
+    AccountUnavailable { asset_class: AssetClass },
 }
 
 /// One open position inside a paper account (quantity is signed).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PaperPosition {
     /// Positive = long, negative = short (shorts only on margin accounts).
     pub quantity: Decimal,
@@ -109,6 +113,27 @@ pub struct PaperAccountSnapshot {
     /// Closing trades whose realized P&L was positive.
     pub winning_trades: u64,
     pub positions: Vec<PaperPositionView>,
+}
+
+/// Everything a [`PaperAccount`] holds, in a form that survives a restart
+/// (Set E audit item #5, migration 0153).
+///
+/// The policy is not stored: it is a function of the asset class, so a
+/// restored account takes the current binary's policy, exactly as a freshly
+/// seeded one does.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PaperAccountState {
+    /// `AssetClass::as_str()` — also the `paper_account_state` primary key.
+    pub asset_class: String,
+    pub cash: Decimal,
+    pub positions: std::collections::BTreeMap<String, PaperPosition>,
+    pub realized_pnl: Decimal,
+    pub realized_by_day: std::collections::BTreeMap<chrono::NaiveDate, Decimal>,
+    pub fees_paid: Decimal,
+    pub closed_trades: u64,
+    pub winning_trades: u64,
+    pub ledger: Vec<PaperLedgerEntry>,
+    pub ledger_next_seq: u64,
 }
 
 /// Mark-price lookup the engine passes in (reads its internal mark board).
@@ -181,6 +206,65 @@ impl PaperAccount {
 
     pub fn asset_class(&self) -> AssetClass {
         self.asset_class
+    }
+
+    /// The account's whole state, for persistence (Set E #5).
+    pub fn export_state(&self) -> PaperAccountState {
+        let (ledger, ledger_next_seq) = self.ledger.export();
+        PaperAccountState {
+            asset_class: self.asset_class.as_str().to_owned(),
+            cash: self.cash,
+            positions: self
+                .positions
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            realized_pnl: self.realized_pnl,
+            realized_by_day: self.realized_by_day.iter().map(|(k, v)| (*k, *v)).collect(),
+            fees_paid: self.fees_paid,
+            closed_trades: self.closed_trades,
+            winning_trades: self.winning_trades,
+            ledger,
+            ledger_next_seq,
+        }
+    }
+
+    /// Rebuild an account from [`Self::export_state`]. Refuses a state that
+    /// names a different asset class rather than loading one account's
+    /// positions into another's.
+    ///
+    /// # Errors
+    /// The asset-class mismatch, as text.
+    pub fn from_state(
+        asset_class: AssetClass,
+        state: PaperAccountState,
+        clock: std::sync::Arc<dyn crate::clock::VenueClock>,
+    ) -> Result<Self, String> {
+        if state.asset_class != asset_class.as_str() {
+            return Err(format!(
+                "stored paper state is for {:?}, not {:?}",
+                state.asset_class,
+                asset_class.as_str()
+            ));
+        }
+        Ok(Self {
+            asset_class,
+            policy: AccountPolicy::for_asset_class(asset_class),
+            cash: state.cash,
+            positions: state.positions.into_iter().collect(),
+            realized_pnl: state.realized_pnl,
+            realized_by_day: state.realized_by_day.into_iter().collect(),
+            fees_paid: state.fees_paid,
+            closed_trades: state.closed_trades,
+            winning_trades: state.winning_trades,
+            ledger: PaperLedger::restore(
+                asset_class,
+                std::sync::Arc::clone(&clock),
+                state.ledger,
+                state.ledger_next_seq,
+            ),
+            clock,
+        })
     }
 
     pub fn policy(&self) -> &AccountPolicy {

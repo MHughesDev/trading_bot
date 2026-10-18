@@ -3,7 +3,13 @@
 //!
 //! Follows the platform's job pattern (ModelManager::start_train): insert a
 //! status row, `tokio::spawn` a driver that updates it as it goes, poll over
-//! REST. Runs do not survive a restart — `recover_orphans` marks them failed.
+//! REST.
+//!
+//! **One driver, every tier** (AGENT-010 §2; S-2.10). The tier decides the
+//! profile and the profile decides the transport; nothing here branches on it.
+//! Runs survive a restart: `recover_orphans` resumes each from its effect log
+//! (S-2.6), and a run suspended on a platform job is resumed by the job watcher
+//! when the job ends (S-2.11).
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -16,14 +22,12 @@ use uuid::Uuid;
 
 use cfg::model::AgentConfig;
 use llm::{LlmClient, Provider};
-use mcp_server_lib::ApiClient;
 
 use crate::credentials::LlmCredentialStore;
 
 use super::control::{PauseRefused, PauseWindow, ResumeRefused, RunControl};
 use super::conversations;
-use super::driver::{self, DriverParams};
-use super::local_driver::{self, LocalRunParams};
+use super::local_driver::{self, Ended, LocalRunParams};
 use super::prompt;
 
 #[derive(Debug, thiserror::Error)]
@@ -109,16 +113,88 @@ pub struct AgentManager {
     /// a persisted copy would be a second thing that can disagree with what the
     /// provider actually has.
     prefixes: Mutex<HashMap<Uuid, harness::context::prefix::Prefix>>,
+    /// Runs suspended on a platform job (AGENT-010 §8; S-2.11).
+    ///
+    /// Not in `running`: a suspended run holds no task, no model connection and
+    /// no capacity slot. What it does hold is a service token, kept so the
+    /// watcher can ask the platform about its job and so the resumed run can
+    /// carry on under the identity it started with.
+    waiting: Mutex<HashMap<Uuid, WaitingRun>>,
+    /// Set once the job watcher is running, so a second `recover_orphans` does
+    /// not start a second one.
+    watcher_started: AtomicBool,
+    /// The credential store, read from the environment on first use. Resume and
+    /// escalation need a client for a run nobody is currently sending a message
+    /// to, and there is no request to take one from.
+    creds: Mutex<Option<LlmCredentialStore>>,
 }
+
+/// A run suspended on a job, and what is needed to resume it.
+#[derive(Debug, Clone)]
+struct WaitingRun {
+    user_id: Uuid,
+    conversation_id: Uuid,
+    job_id: String,
+    token: String,
+}
+
+/// What the conversation door may say about a turn beyond its text
+/// (AGENT-012 §3.3; S-2.14).
+///
+/// Every field optional, so `{text}` alone still means what it always meant: a
+/// Research turn under the default workflow.
+#[derive(Debug, Clone, Default)]
+pub struct TurnOptions {
+    /// The stage skeleton. `None` is `investigate`.
+    pub workflow: Option<harness::state::Workflow>,
+    /// Chat or Research. `None` is Research, the front door's existing default.
+    pub mode: Option<harness::state::Mode>,
+    /// Deliver the text to the conversation's live run as a steer rather than
+    /// start a second turn. With no live run it starts a turn, so the message is
+    /// never dropped.
+    pub steer: bool,
+    /// Stop after this many trials, with one report turn (a session child's
+    /// lease: `lease.max_trials_per_task()`; S-11.6). `None` is no cap, which is
+    /// what every existing caller gets.
+    pub max_trials: Option<u32>,
+}
+
+/// What [`AgentManager::drain_run`] found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrainRun {
+    /// This process is not driving the run (finished, suspended, or elsewhere).
+    NotRunning,
+    /// The run stopped at a step boundary, still `running`, with its next effect
+    /// in the log. [`AgentManager::resume_drained`] — or the next boot — picks it
+    /// up. Nothing was killed and nothing was lost.
+    Drained,
+    /// The deadline passed with the run still inside a tool or a model call. It
+    /// has been asked to stop at its next boundary and will; it was not killed.
+    StillInStep,
+}
+
+/// How often the job watcher looks at the runs it is holding.
+///
+/// One read per suspended run per interval, and no model call ever. A run
+/// waiting on a forty-minute sweep costs this and nothing else.
+const JOB_WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// What the conversation front door asks the tier for.
 ///
-/// `MultiStep` rather than `SingleLookup`, and the two are not the same
-/// question: `TaskDemand` is a statement about the *tier* — can this run take
-/// more than one step — and `Mode` is a statement about the *product*. They are
-/// derived from each other here only because nothing yet sets the mode
-/// independently (S-10.2).
-const CHAT_DEMAND: harness::hardware::TaskDemand = harness::hardware::TaskDemand::MultiStep;
+/// `SingleLookup`: the front door is **Chat** (AGENT-013 §2.1; S-10.2). A Chat
+/// turn is ring 0 with no trial-spending tool in its slice, and a goal that reads
+/// as research ends the turn in `Outcome::Offered` -- the card the desk renders --
+/// or, for a user who has said "always start research" for the scope, starts a
+/// Research run itself (`Ended::StartResearch`, `start_offered_research`). A
+/// caller who wants a Research run says so with `StartOptions::mode`.
+///
+/// This was `MultiStep` while the offer, its Start action and the standing
+/// preference did not exist: declaring Chat then would have removed a capability
+/// and built no door in its place. All three exist now. ADR-S10-12 (rejected: keep
+/// the front door as Research and let Chat be opt-in -- it leaves every plain
+/// conversation able to spend trials the user never asked for, which is the
+/// property Chat mode exists to remove).
+const CHAT_DEMAND: harness::hardware::TaskDemand = harness::hardware::TaskDemand::SingleLookup;
 
 /// States a run can be in once it is over.
 ///
@@ -142,6 +218,9 @@ pub const TERMINAL_RUN_STATES: &[&str] = &[
     "refused",
     "suspended",
     "offered",
+    // A run whose log could not be replayed (S-2.6): stopped with its working
+    // state kept, never silently restarted.
+    "interrupted",
 ];
 
 /// How an enum serialises, which is what the column stores.
@@ -168,6 +247,116 @@ impl AgentManager {
             running: Mutex::new(HashMap::new()),
             draining: AtomicBool::new(false),
             prefixes: Mutex::new(HashMap::new()),
+            waiting: Mutex::new(HashMap::new()),
+            watcher_started: AtomicBool::new(false),
+            creds: Mutex::new(None),
+        }
+    }
+
+    /// The credential store, built from the environment the first time it is
+    /// needed.
+    fn credentials(&self) -> LlmCredentialStore {
+        let mut slot = self.creds.lock().expect("agent creds lock");
+        slot.get_or_insert_with(|| {
+            LlmCredentialStore::new(
+                self.pg.clone(),
+                crate::credentials::CredentialCrypto::from_env()
+                    .ok()
+                    .map(Arc::new),
+            )
+        })
+        .clone()
+    }
+
+    /// A client for `provider` on behalf of `user_id`, from their stored key.
+    async fn client_for(&self, user_id: Uuid, provider: &str) -> Result<LlmClient, StartError> {
+        let provider = Provider::from_str(provider).map_err(StartError::InvalidRequest)?;
+        let cred = self
+            .credentials()
+            .load(user_id, provider.as_str())
+            .await
+            .map_err(|e| StartError::Internal(e.to_string()))?;
+        let (api_key, base_url) = match cred {
+            Some(c) => ((!c.api_key.is_empty()).then_some(c.api_key), c.base_url),
+            None if provider.requires_api_key() => {
+                return Err(StartError::NotConfigured(provider.as_str().to_string()))
+            }
+            None => (None, None),
+        };
+        Ok(crate::model_policy::client(provider, api_key, base_url))
+    }
+
+    /// The profile a turn runs under (AGENT-010 §2; S-2.9, S-2.10).
+    ///
+    /// Every model runs on the one loop, so every model needs a profile. In
+    /// order:
+    ///
+    /// 1. its own, when one is shipped;
+    /// 2. on a **hosted** provider, the shipped frontier profile with the model
+    ///    id swapped in — the hosted driver this replaces ran every hosted model
+    ///    at frontier settings, and the loop under a frontier profile is the same
+    ///    shape with budgets, approvals and resume added;
+    /// 3. on a **local** provider, the configured conservative default
+    ///    (`TBOT_FALLBACK_PROFILE`), as guide §1.2 asks;
+    /// 4. otherwise refused, naming the fix. Running an unknown local model at
+    ///    frontier settings is the failure §1.2 exists to prevent.
+    ///
+    /// The substitution is returned so the run says which profile it actually
+    /// ran under.
+    fn profile_for(
+        &self,
+        provider: &str,
+        model: &str,
+    ) -> Result<(harness::Profile, Option<String>), StartError> {
+        if let Some(p) = self.profiles.get(model) {
+            return Ok((p.clone(), None));
+        }
+        let hosted = Provider::from_str(provider).is_ok_and(|p| !p.is_local());
+        if hosted {
+            // The provider's own frontier profile when one is shipped, so an
+            // OpenAI model runs under OpenAI's window and budgets rather than
+            // Claude's (PROVIDERS track, ADR-PROV-03). Any frontier profile
+            // otherwise, which is what every hosted model got before.
+            let frontier: Vec<&harness::Profile> = self
+                .profiles
+                .ids()
+                .into_iter()
+                .filter_map(|id| self.profiles.get(id))
+                .filter(|p| p.tier == harness::profile::Tier::Frontier)
+                .collect();
+            let template = frontier
+                .iter()
+                .find(|p| p.provider.contains(provider))
+                .or_else(|| frontier.first())
+                .map(|p| (*p).clone());
+            if let Some(mut p) = template {
+                let from = p.model_id.clone();
+                p.model_id = model.to_string();
+                p.provider = provider.to_string();
+                return Ok((
+                    p,
+                    Some(format!(
+                        "no capability profile for {model:?}; it runs under the frontier profile {from:?} with its model id swapped in"
+                    )),
+                ));
+            }
+        }
+        match self.profiles.resolve_for_execution(model) {
+            harness::profile::Resolution::Exact(p) => Ok((p.clone(), None)),
+            harness::profile::Resolution::Substituted {
+                profile, reason, ..
+            } => {
+                let mut p = profile.clone();
+                p.model_id = model.to_string();
+                Ok((p, Some(reason)))
+            }
+            harness::profile::Resolution::Unknown { requested } => {
+                Err(StartError::InvalidRequest(format!(
+                    "no capability profile for {requested:?} and no fallback is configured. Add \
+                     config/profiles/{requested}.yaml, or set TBOT_FALLBACK_PROFILE to a profile \
+                     this model may run under."
+                )))
+            }
         }
     }
 
@@ -179,49 +368,91 @@ impl AgentManager {
         self
     }
 
-    /// Classify runs orphaned by a previous process (AGENT-010 §5, S-2.6).
+    /// Resume runs orphaned by a previous process (AGENT-010 §5; S-2.6).
     ///
-    /// The policy used to be the same as backtests': everything unfinished becomes
-    /// `failed`. That is honest and expensive — a forty-minute sweep nineteen minutes
-    /// in loses nineteen minutes, and the model's findings go with it.
+    /// The policy used to be the same as backtests': everything unfinished became
+    /// `failed`, and a forty-minute sweep nineteen minutes in lost nineteen
+    /// minutes and the model's findings with them. Now each orphan is resumed
+    /// from its effect log:
     ///
-    /// The effect log (S-2.5) makes a better answer possible, and this reports what
-    /// it would be for each orphan before doing anything. **Still marking them
-    /// failed**, deliberately: replaying inputs through a fresh `Loop` needs the
-    /// driver to accept a pre-seeded loop, which it does not yet, and a recovery that
-    /// half-works is worse than one that says it did not.
+    /// * a run that was **mid-step** (running, or paused on a human) is replayed
+    ///   and continues — an interrupted write is answered from the durable record
+    ///   or reported to the model, never re-run, and a pending approval is
+    ///   re-attached to the row a human may already have answered;
+    /// * a run **suspended on a job** is handed to the job watcher, which resumes
+    ///   it when the job ends;
+    /// * a run whose log cannot be replayed is marked `interrupted`, with its
+    ///   working state and any job result kept.
     ///
-    /// So this is the diagnosis without the treatment, and it is worth having on its
-    /// own: the log says which orphans *could* have resumed, which is how anyone
-    /// finds out whether the rest of S-2.6 is worth building.
-    pub async fn recover_orphans(&self) {
+    /// Then the job watcher starts. It is started here because this is the one
+    /// call every boot makes.
+    pub async fn recover_orphans(self: &Arc<Self>) {
         self.report_resumable_orphans().await;
-        match sqlx::query(
-            "UPDATE agent_runs SET status = 'failed',
-                 error = 'interrupted by platform restart', finished_at = now()
-             WHERE status IN ('queued', 'running', 'waiting_backtest', 'awaiting_approval')",
+        let orphans: Vec<(Uuid, Uuid, Option<Uuid>, String, String, String)> = match sqlx::query_as(
+            "SELECT r.run_id, r.user_id, r.conversation_id, r.status, r.provider, r.model
+               FROM agent_runs r
+              WHERE r.status IN ('queued', 'running', 'waiting_backtest', 'awaiting_approval')",
         )
-        .execute(&self.pg)
+        .fetch_all(&self.pg)
         .await
         {
-            Ok(r) if r.rows_affected() > 0 => {
-                tracing::info!(
-                    count = r.rows_affected(),
-                    "agent runs marked failed on restart"
-                );
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "could not list orphaned agent runs");
+                Vec::new()
             }
-            Ok(_) => {}
-            Err(e) => tracing::warn!(error = %e, "agent orphan recovery failed"),
+        };
+
+        for (run_id, user_id, conversation_id, status, provider, _model) in orphans {
+            let Some(conversation_id) = conversation_id else {
+                // A run from before conversations existed has no workspace to
+                // resume into.
+                self.mark_failed(run_id, "interrupted by platform restart").await;
+                continue;
+            };
+            if status == "waiting_backtest" {
+                match self.suspended_job(run_id).await {
+                    Some(job_id) => {
+                        match self.mint_run_token(user_id, run_id).await {
+                            Ok(token) => {
+                                self.waiting.lock().expect("agent waiting lock").insert(
+                                    run_id,
+                                    WaitingRun {
+                                        user_id,
+                                        conversation_id,
+                                        job_id,
+                                        token,
+                                    },
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(%run_id, error = %e, "could not re-issue a token for a suspended run");
+                            }
+                        }
+                    }
+                    // Waiting under the old driver, which kept no resume contract.
+                    None => {
+                        self.mark_failed(run_id, "interrupted by platform restart").await;
+                    }
+                }
+                continue;
+            }
+            let Ok(client) = self.client_for(user_id, &provider).await else {
+                self.mark_failed(
+                    run_id,
+                    "interrupted by platform restart: no credential to resume it with",
+                )
+                .await;
+                continue;
+            };
+            self.spawn_resume(run_id, user_id, conversation_id, client, None)
+                .await;
         }
 
-        // A run that died holding a pending approval leaves a question nobody is
-        // listening to. The approval row is deliberately written before the wait so
-        // it outlives the process (guide 14.3) - but the loop state is not persisted
-        // yet, so there is nothing left to resume when it is answered.
-        //
-        // Cancelling is the honest form of that: an approval a human can still answer,
-        // to no effect, is worse than one that says plainly it is gone. Durable
-        // resume is what would let this become a real resume instead.
+        // Approvals whose runs did not survive (failed, interrupted) are
+        // cancelled: an approval a human can still answer, to no effect, is
+        // worse than one that says plainly it is gone. Approvals of resumed runs
+        // are left alone — the resumed run re-attaches to them.
         match sqlx::query(
             "UPDATE approval_requests a SET state = 'cancelled'
                FROM agent_runs r
@@ -238,6 +469,349 @@ impl AgentManager {
             ),
             Ok(_) => {}
             Err(e) => tracing::warn!(error = %e, "approval orphan recovery failed"),
+        }
+
+        if !self.watcher_started.swap(true, Ordering::SeqCst) {
+            let manager = Arc::clone(self);
+            tokio::spawn(async move { manager.watch_jobs().await });
+        }
+    }
+
+    async fn mark_failed(&self, run_id: Uuid, why: &str) {
+        let _ = sqlx::query(
+            "UPDATE agent_runs SET status = 'failed', error = $2, finished_at = now()
+              WHERE run_id = $1",
+        )
+        .bind(run_id)
+        .bind(why)
+        .execute(&self.pg)
+        .await;
+    }
+
+    /// The job a suspended run is waiting on, from its resume contract.
+    async fn suspended_job(&self, run_id: Uuid) -> Option<String> {
+        sqlx::query_scalar(
+            "SELECT payload_json->>'job_id' FROM agent_effect_log
+              WHERE run_id = $1 AND direction = 'state' AND kind = 'Suspended'
+              ORDER BY seq DESC LIMIT 1",
+        )
+        .bind(run_id)
+        .fetch_optional(&self.pg)
+        .await
+        .ok()
+        .flatten()
+        .flatten()
+    }
+
+    /// A run-scoped service token, labelled with the run so the audit trail can
+    /// attribute the run's calls to it (and so it can be found to delete).
+    async fn mint_run_token(&self, user_id: Uuid, run_id: Uuid) -> Result<String, sqlx::Error> {
+        let token = crate::auth::handlers::new_session_token();
+        // No wall clock (§6): an expiry short enough to matter would kill long
+        // work. Seven days, as for a fresh turn.
+        let expires_at = Utc::now() + ChronoDuration::days(7);
+        sqlx::query(
+            "INSERT INTO sessions (token, user_id, label, kind, expires_at)
+             VALUES ($1, $2, $3, 'service', $4)",
+        )
+        .bind(&token)
+        .bind(user_id)
+        .bind(format!("agent-run-{run_id}"))
+        .bind(expires_at)
+        .execute(&self.pg)
+        .await?;
+        Ok(token)
+    }
+
+    /// Delete a run's service tokens. By label rather than by value: the store
+    /// may hold a hash of the token rather than the token (migration 0150), and a
+    /// delete keyed on the raw value would then silently match nothing.
+    async fn revoke_run_tokens(&self, run_id: Uuid) {
+        let _ = sqlx::query("DELETE FROM sessions WHERE label = $1 AND kind = 'service'")
+            .bind(format!("agent-run-{run_id}"))
+            .execute(&self.pg)
+            .await;
+    }
+
+    /// Resume one run in the background, under a fresh token.
+    async fn spawn_resume(
+        self: &Arc<Self>,
+        run_id: Uuid,
+        user_id: Uuid,
+        conversation_id: Uuid,
+        client: LlmClient,
+        job_done: Option<local_driver::JobDone>,
+    ) {
+        let token = match self.mint_run_token(user_id, run_id).await {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(%run_id, error = %e, "could not mint a token to resume this run");
+                return;
+            }
+        };
+        let control = Arc::new(RunControl::new());
+        self.running
+            .lock()
+            .expect("agent running lock")
+            .insert(run_id, Arc::clone(&control));
+        let exposure_out = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let params = local_driver::ResumeParams {
+            run_id,
+            user_id,
+            conversation_id,
+            workspace_root: workspace_root(),
+            api_base: self.base_url.clone(),
+            service_token: token.clone(),
+            exposure_out: Arc::clone(&exposure_out),
+            job_done,
+        };
+        let manager = Arc::clone(self);
+        let pg = self.pg.clone();
+        tokio::spawn(async move {
+            let resumed = local_driver::resume(pg, client, params, control).await;
+            let ended = match resumed {
+                local_driver::Resumed::Ran(e) => e,
+                local_driver::Resumed::Interrupted(_) => Ended::Finished,
+                local_driver::Resumed::StillWaiting => {
+                    // Back to the watcher; it asked too early.
+                    manager.finish(run_id);
+                    return;
+                }
+            };
+            manager
+                .after_run(run_id, user_id, conversation_id, token, ended)
+                .await;
+        });
+    }
+
+    /// The job watcher (AGENT-010 §8; S-2.11).
+    ///
+    /// Every interval it asks the platform, once per suspended run, whether that
+    /// run's job has ended — a read on the platform's own API, no model call, no
+    /// tokens. When one has, the run is resumed from its effect log with the
+    /// job's result delivered as `Input::JobDone`, which is the result of the
+    /// tool call that started it, arriving late.
+    ///
+    /// A watcher polling the job service is still a poll, and it is the honest
+    /// form of one: sweeps live in the research manager's memory rather than in
+    /// `crates/jobs`, so there is no completion event to subscribe to. What
+    /// §8 forbids is a *run* polling — holding a model connection and writing a
+    /// status row every thirty seconds for forty minutes — and no run does.
+    ///
+    /// Boxed: the watcher resumes runs, a resumed run can suspend again, and a
+    /// suspension can start the watcher — a cycle an `async fn` cannot name.
+    fn watch_jobs(
+        self: Arc<Self>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+        Box::pin(async move { self.watch_jobs_inner().await })
+    }
+
+    async fn watch_jobs_inner(self: Arc<Self>) {
+        loop {
+            tokio::time::sleep(JOB_WATCH_INTERVAL).await;
+            if self.is_draining() {
+                return;
+            }
+            let held: Vec<(Uuid, WaitingRun)> = self
+                .waiting
+                .lock()
+                .expect("agent waiting lock")
+                .iter()
+                .map(|(k, v)| (*k, v.clone()))
+                .collect();
+            for (run_id, w) in held {
+                // Cancelled while it waited: the row says so, and there is nothing
+                // to resume.
+                let status: Option<String> =
+                    sqlx::query_scalar("SELECT status FROM agent_runs WHERE run_id = $1")
+                        .bind(run_id)
+                        .fetch_optional(&self.pg)
+                        .await
+                        .ok()
+                        .flatten();
+                if status.as_deref() != Some("waiting_backtest") {
+                    self.waiting.lock().expect("agent waiting lock").remove(&run_id);
+                    self.revoke_run_tokens(run_id).await;
+                    continue;
+                }
+                let Some(done) = job_status(&self.base_url, &w.token, &w.job_id).await else {
+                    continue;
+                };
+                self.waiting.lock().expect("agent waiting lock").remove(&run_id);
+                let provider: Option<String> =
+                    sqlx::query_scalar("SELECT provider FROM agent_runs WHERE run_id = $1")
+                        .bind(run_id)
+                        .fetch_optional(&self.pg)
+                        .await
+                        .ok()
+                        .flatten();
+                let client = match provider {
+                    Some(p) => self.client_for(w.user_id, &p).await,
+                    None => Err(StartError::Internal("the run row is gone".into())),
+                };
+                match client {
+                    Ok(client) => {
+                        self.revoke_run_tokens(run_id).await;
+                        self.spawn_resume(run_id, w.user_id, w.conversation_id, client, Some(done))
+                            .await;
+                    }
+                    Err(e) => {
+                        tracing::warn!(%run_id, error = %e, "the job ended but the run cannot be resumed without a client");
+                        self.mark_failed(run_id, &format!("its job ended and it could not resume: {e}"))
+                            .await;
+                    }
+                }
+            }
+        }
+    }
+
+    /// What happens once a run's time in this process ends, however it ends.
+    async fn after_run(
+        self: &Arc<Self>,
+        run_id: Uuid,
+        user_id: Uuid,
+        conversation_id: Uuid,
+        token: String,
+        ended: Ended,
+    ) {
+        conversations::touch(&self.pg, conversation_id).await;
+        match ended {
+            Ended::Suspended { job_id, .. } => {
+                // The token stays: the watcher asks about the job with it.
+                self.waiting.lock().expect("agent waiting lock").insert(
+                    run_id,
+                    WaitingRun {
+                        user_id,
+                        conversation_id,
+                        job_id,
+                        token,
+                    },
+                );
+                let manager = Arc::clone(self);
+                if !self.watcher_started.swap(true, Ordering::SeqCst) {
+                    tokio::spawn(async move { manager.watch_jobs().await });
+                }
+            }
+            Ended::StartResearch { spec, workflow } => {
+                self.revoke_run_tokens(run_id).await;
+                self.start_offered_research(user_id, conversation_id, *spec, workflow)
+                    .await;
+            }
+            Ended::Escalated { to, state, spec } => {
+                self.revoke_run_tokens(run_id).await;
+                self.escalate(user_id, conversation_id, run_id, &to, state, *spec)
+                    .await;
+            }
+            Ended::Finished | Ended::Detached => {
+                self.revoke_run_tokens(run_id).await;
+            }
+        }
+        self.finish(run_id);
+    }
+
+    /// Start the Research run a Chat turn offered, because the user's standing
+    /// preference says to (S-10.2). The same conversation, the same goal and
+    /// profile, but a multi-step turn under the offered workflow. Every failure
+    /// is logged: the Chat turn has already ended with its offer on record.
+    async fn start_offered_research(
+        self: &Arc<Self>,
+        user_id: Uuid,
+        conversation_id: Uuid,
+        spec: local_driver::RunSpec,
+        workflow: harness::state::Workflow,
+    ) {
+        let provider = if spec.profile.provider.contains("anthropic") {
+            "anthropic".to_string()
+        } else {
+            spec.profile.provider.clone()
+        };
+        let client = match self.client_for(user_id, &provider).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(%conversation_id, error = %e, "could not auto-start the offered research run");
+                return;
+            }
+        };
+        let launch = Launch {
+            user_id,
+            conversation_id,
+            text: spec.goal.clone(),
+            model: crate::model_policy::or_baseline(&provider, spec.profile.model_id.clone()),
+            provider,
+            profile: spec.profile.clone(),
+            substituted: None,
+            workflow,
+            demand: harness::hardware::TaskDemand::MultiStep,
+            constraints: spec.constraints.clone(),
+            resumed_state: None,
+            escalated_from: None,
+            max_trials: spec.max_trials,
+        };
+        if let Err(e) = self.launch(launch, client).await {
+            tracing::warn!(%conversation_id, error = %e, "the offered research run did not start");
+        }
+    }
+
+    /// Start the escalation target with the working state the lower tier ended
+    /// on (AGENT-008 §4, AGENT-010 §6; S-2.12).
+    ///
+    /// A new turn in the same conversation, so the timeline shows both: the tier
+    /// that could not finish, and the one that resumed it. The new run's loop is
+    /// seeded with the state, so the plan steps already done stay done and the
+    /// trials already spent are counted once. Every failure here is recorded on
+    /// the escalated run rather than raised: it has already ended.
+    async fn escalate(
+        self: &Arc<Self>,
+        user_id: Uuid,
+        conversation_id: Uuid,
+        from: Uuid,
+        to: &str,
+        state: Option<Box<harness::state::WorkingState>>,
+        spec: local_driver::RunSpec,
+    ) {
+        let Some(state) = state else {
+            // Admission-time escalation: nothing was done, so nothing to carry.
+            return;
+        };
+        let Some(profile) = self.profiles.get(to).cloned() else {
+            tracing::warn!(%from, to, "escalation target has no profile; the run stays escalated");
+            return;
+        };
+        let provider = if profile.provider.contains("anthropic") {
+            "anthropic"
+        } else {
+            profile.provider.as_str()
+        };
+        let client = match self.client_for(user_id, provider).await {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = sqlx::query(
+                    "UPDATE agent_runs SET error = COALESCE(error, '') || $2 WHERE run_id = $1",
+                )
+                .bind(from)
+                .bind(format!(" — escalation to {to} could not start: {e}"))
+                .execute(&self.pg)
+                .await;
+                return;
+            }
+        };
+        let launch = Launch {
+            user_id,
+            conversation_id,
+            text: spec.goal.clone(),
+            provider: provider.to_string(),
+            model: profile.model_id.clone(),
+            profile,
+            substituted: None,
+            workflow: spec.workflow,
+            demand: spec.demand,
+            constraints: spec.constraints.clone(),
+            resumed_state: Some(*state),
+            escalated_from: Some(from),
+            max_trials: spec.max_trials,
+        };
+        if let Err(e) = self.launch(launch, client).await {
+            tracing::warn!(%from, to, error = %e, "escalation did not start");
         }
     }
 
@@ -334,6 +908,42 @@ impl AgentManager {
         self.draining.store(true, Ordering::SeqCst);
         tracing::info!("draining: no new agent turns will be accepted");
 
+        // Every run in flight stops at its next boundary still `running`, with
+        // its next effect already in the log, and the next process resumes it
+        // (S-2.15). Not cancelled: a deploy is not a reason to end a run.
+        for control in self
+            .running
+            .lock()
+            .expect("agent running lock")
+            .values()
+        {
+            control.detach();
+        }
+
+        // Tell the monitor (COMP-007 §4.3). A rolling deploy otherwise reads as a
+        // platform heartbeat loss and can trip a global halt; an open window is
+        // the one thing allowed to suppress that, and only that. Opened by the
+        // platform, never by an agent — `MaintenanceWindow::open` refuses an
+        // `agent:` opener.
+        match monitor::window::MaintenanceWindow::open(
+            "platform:deploy",
+            "agent runtime draining for a deploy (AGENT-010 §10.1)",
+            monitor::window::DEFAULT_WINDOW_MINUTES,
+            Utc::now(),
+        ) {
+            Ok(w) => {
+                if let Err(e) = monitor::store::MonitorStore::new(self.pg.clone())
+                    .open_window(&w)
+                    .await
+                {
+                    tracing::warn!(error = %e, "could not open a maintenance window for the deploy");
+                } else {
+                    tracing::info!(window = %w.window_id, "maintenance window opened for the deploy");
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "maintenance window refused"),
+        }
+
         let started = std::time::Instant::now();
         while started.elapsed() < deadline {
             let left = self.active_count();
@@ -358,6 +968,60 @@ impl AgentManager {
         left
     }
 
+    /// Drain **one** run: stop it at its next step boundary, leaving it
+    /// `running` with its next effect in the log (S-2.15, S-11.6, S-11.7).
+    ///
+    /// For a session child at a schedule-window boundary or when the kill switch
+    /// trips. The same contract as the platform drain, per run: never killed
+    /// mid-write, resumable by [`Self::resume_drained`] or the next boot. A run
+    /// suspended on a job needs nothing — it holds no process — and reports
+    /// [`DrainRun::NotRunning`].
+    pub async fn drain_run(&self, run_id: Uuid, deadline: std::time::Duration) -> DrainRun {
+        let Some(control) = self.control(run_id) else {
+            return DrainRun::NotRunning;
+        };
+        control.detach();
+        let started = std::time::Instant::now();
+        while started.elapsed() < deadline {
+            if self.control(run_id).is_none() {
+                return DrainRun::Drained;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        if self.control(run_id).is_none() {
+            DrainRun::Drained
+        } else {
+            DrainRun::StillInStep
+        }
+    }
+
+    /// Resume a run [`Self::drain_run`] stopped, from its effect log.
+    ///
+    /// `Ok(false)` when there is nothing to resume: the run is not `running`, or
+    /// this process is already driving it.
+    pub async fn resume_drained(self: &Arc<Self>, run_id: Uuid) -> Result<bool, StartError> {
+        if self.control(run_id).is_some() || self.is_draining() {
+            return Ok(false);
+        }
+        let row: Option<(Uuid, Option<Uuid>, String, String)> = sqlx::query_as(
+            "SELECT user_id, conversation_id, status, provider FROM agent_runs WHERE run_id = $1",
+        )
+        .bind(run_id)
+        .fetch_optional(&self.pg)
+        .await
+        .map_err(|e| StartError::Internal(e.to_string()))?;
+        let Some((user_id, Some(conversation_id), status, provider)) = row else {
+            return Ok(false);
+        };
+        if status != "running" {
+            return Ok(false);
+        }
+        let client = self.client_for(user_id, &provider).await?;
+        self.spawn_resume(run_id, user_id, conversation_id, client, None)
+            .await;
+        Ok(true)
+    }
+
     #[must_use]
     pub fn is_draining(&self) -> bool {
         self.draining.load(Ordering::SeqCst)
@@ -376,16 +1040,9 @@ impl AgentManager {
 
     /// Sends one user message into a conversation, starting a turn.
     ///
-    /// This is the whole user-facing surface now. No instrument, no timeframe, no
-    /// iteration cap, no time budget: the agent chooses what to look at, how many
-    /// backtests to run and when it is done, because those were never decisions a
-    /// user could make correctly in advance.
-    /// `workflow` is `None` from the conversation front door, which offers no
-    /// workflow chip (AGENT-012 §3.3) and therefore starts every turn as the
-    /// default. The session driver passes the agenda item's workflow, so a run
-    /// started to replicate a stale finding says `replicate` on its row and in
-    /// its loop rather than claiming to be an investigation. One value feeds
-    /// both, which is what keeps the row and the loop from disagreeing.
+    /// The session driver's and the research door's entry point; the
+    /// conversation door uses [`Self::send_turn`], which can also say Chat or
+    /// steer a live run.
     pub async fn send_message(
         self: &Arc<Self>,
         user_id: Uuid,
@@ -394,33 +1051,106 @@ impl AgentManager {
         creds: &LlmCredentialStore,
         workflow: Option<harness::state::Workflow>,
     ) -> Result<Uuid, StartError> {
+        self.send_message_capped(user_id, conversation_id, text, creds, workflow, None)
+            .await
+    }
+
+    /// [`Self::send_message`] with a trial cap: the run stops after
+    /// `max_trials` trials, with one report turn (S-11.6). `None` is exactly
+    /// `send_message`.
+    pub async fn send_message_capped(
+        self: &Arc<Self>,
+        user_id: Uuid,
+        conversation_id: Uuid,
+        text: &str,
+        creds: &LlmCredentialStore,
+        workflow: Option<harness::state::Workflow>,
+        max_trials: Option<u32>,
+    ) -> Result<Uuid, StartError> {
+        self.send_turn(
+            user_id,
+            conversation_id,
+            text,
+            creds,
+            TurnOptions {
+                workflow,
+                max_trials,
+                ..TurnOptions::default()
+            },
+        )
+        .await
+    }
+
+    /// One user message into a conversation: a new turn, or a steer for the
+    /// live one (S-2.14).
+    ///
+    /// No instrument, no timeframe, no iteration cap, no time budget: the agent
+    /// chooses what to look at and when it is done.
+    pub async fn send_turn(
+        self: &Arc<Self>,
+        user_id: Uuid,
+        conversation_id: Uuid,
+        text: &str,
+        creds: &LlmCredentialStore,
+        opts: TurnOptions,
+    ) -> Result<Uuid, StartError> {
         let text = text.trim();
         if text.is_empty() {
             return Err(StartError::InvalidRequest("the message is empty".into()));
+        }
+        // Remember the store the caller holds, so resume and escalation can
+        // build a client later without a request to take one from.
+        {
+            let mut slot = self.creds.lock().expect("agent creds lock");
+            if slot.is_none() {
+                *slot = Some(creds.clone());
+            }
         }
 
         let convo = conversations::get(&self.pg, user_id, conversation_id)
             .await
             .map_err(|_| StartError::InvalidRequest("conversation not found".into()))?;
 
-        // One turn at a time. Two agents on one thread would interleave their tool
-        // calls and their notes in one workspace, and the transcript would stop being
-        // a sequence anyone could read.
-        let (turn_index, live_run) = conversations::next_turn(&self.pg, conversation_id)
+        let (_, live_run) = conversations::next_turn(&self.pg, conversation_id)
             .await
             .map_err(|e| StartError::Internal(e.to_string()))?;
         if let Some(run_id) = live_run {
+            if opts.steer {
+                // Delivered at the run's next step boundary (S-2.14).
+                return match self.control(run_id) {
+                    Some(c) if c.steer(text) => {
+                        let _ = sqlx::query(
+                            "INSERT INTO agent_messages (run_id, seq, kind, content_json)
+                             SELECT $1, COALESCE(MAX(seq), 0) + 1, 'user', $2
+                               FROM agent_messages WHERE run_id = $1",
+                        )
+                        .bind(run_id)
+                        .bind(serde_json::json!({ "content": text, "steer": true }))
+                        .execute(&self.pg)
+                        .await;
+                        Ok(run_id)
+                    }
+                    Some(_) => Err(StartError::InvalidRequest(format!(
+                        "run {run_id} is stopping; a steer would reach nobody"
+                    ))),
+                    None => Err(StartError::InvalidRequest(format!(
+                        "run {run_id} is not taking steps right now (it is waiting on a job or \
+                         on another process), so a steer cannot reach it until it resumes"
+                    ))),
+                };
+            }
             // Named, because the three things a caller can do about this all need
             // the id: look at it, stop it, or decide it is stale (S-2.14).
             return Err(StartError::InvalidRequest(format!(
-                "this conversation is still working on run {run_id} — watch it, or stop it                  first. Two turns in one conversation would share a workspace with no lock,                  and two working states for one goal is not something the desk can render."
+                "this conversation is still working on run {run_id} — watch it, stop it, or \
+                 send this with `steer: true` to redirect it. Two turns in one conversation \
+                 would share a workspace with no lock, and two working states for one goal is \
+                 not something the desk can render."
             )));
         }
 
-        let provider = Provider::from_str(&convo.provider).map_err(StartError::InvalidRequest)?;
-        // Refused before capacity, because the two answers differ and this one is
-        // the more specific: a caller told "at capacity" during a deploy waits for a
-        // run to finish that is never going to start.
+        // Refused before capacity: a caller told "at capacity" during a deploy
+        // waits for a run to finish that is never going to start.
         if self.is_draining() {
             return Err(StartError::Draining {
                 seconds: DRAIN_DEADLINE_SECS,
@@ -430,37 +1160,65 @@ impl AgentManager {
             return Err(StartError::Busy);
         }
 
-        let cred = creds
-            .load(user_id, provider.as_str())
+        let (profile, substituted) = self.profile_for(&convo.provider, &convo.model)?;
+        let client = self.client_for(user_id, &convo.provider).await?;
+
+        let demand = match opts.mode {
+            Some(harness::state::Mode::Chat) => harness::hardware::TaskDemand::SingleLookup,
+            // A Research turn is multi-step work. Before this arm it fell through to the
+            // single-lookup default, so a session's children ran as Chat and ended in an offer.
+            Some(harness::state::Mode::Research) => harness::hardware::TaskDemand::MultiStep,
+            _ => CHAT_DEMAND,
+        };
+        self.launch(
+            Launch {
+                user_id,
+                conversation_id,
+                text: text.to_string(),
+                provider: convo.provider.clone(),
+                model: convo.model.clone(),
+                profile,
+                substituted,
+                workflow: opts
+                    .workflow
+                    .unwrap_or(harness::state::Workflow::Investigate),
+                demand,
+                constraints: serde_json::json!({}),
+                resumed_state: None,
+                escalated_from: None,
+                max_trials: opts.max_trials,
+            },
+            client,
+        )
+        .await
+    }
+
+    /// Write the run row and start the one driver (S-2.10).
+    #[allow(clippy::too_many_lines)]
+    ///
+    /// Boxed for the same reason as the watcher: a launched run can escalate, and
+    /// escalation launches.
+    fn launch<'a>(
+        self: &'a Arc<Self>,
+        l: Launch,
+        llm_client: LlmClient,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Uuid, StartError>> + Send + 'a>>
+    {
+        Box::pin(self.launch_inner(l, llm_client))
+    }
+
+    async fn launch_inner(
+        self: &Arc<Self>,
+        l: Launch,
+        llm_client: LlmClient,
+    ) -> Result<Uuid, StartError> {
+        let (turn_index, _) = conversations::next_turn(&self.pg, l.conversation_id)
             .await
             .map_err(|e| StartError::Internal(e.to_string()))?;
-        let (api_key, base_url) = match cred {
-            Some(c) => ((!c.api_key.is_empty()).then_some(c.api_key), c.base_url),
-            None if provider.requires_api_key() => {
-                return Err(StartError::NotConfigured(provider.as_str().to_string()))
-            }
-            None => (None, None),
-        };
-        let llm_client = LlmClient::new(provider, api_key, base_url);
-
         let run_id = Uuid::new_v4();
-        let workflow = workflow.unwrap_or(harness::state::Workflow::Investigate);
         // The row says what the loop will say, derived from the same input
-        // (AGENT-013 §2.1, §4; S-10.1).
-        //
-        // **This path writes `research`, not `chat`, and that is deliberate.**
-        // §2.2 makes the conversation front door a Chat turn — ring 0, lookups
-        // only, a Research *offer* when the question needs more. The offer and
-        // its Start action are S-10.2's other half and are not built yet, so
-        // declaring this front door Chat today would take the platform's main
-        // capability away and leave nothing in its place. Recorded in the phase
-        // plan as the one thing S-10.2 is waiting on rather than left as a
-        // surprise.
-        //
-        // What matters here is that the row and the loop cannot disagree: both
-        // read `TaskDemand`, through the same enum, so "what was this run
-        // allowed to do" has one answer.
-        let (mode, ring) = match CHAT_DEMAND {
+        // (AGENT-013 §2.1, §4; S-10.1): both read `TaskDemand`.
+        let (mode, ring) = match l.demand {
             harness::hardware::TaskDemand::SingleLookup => {
                 (harness::state::Mode::Chat, harness::state::Ring::Research)
             }
@@ -469,111 +1227,77 @@ impl AgentManager {
                 harness::state::Ring::PlatformArtifacts,
             ),
         };
-        let mode_str = enum_name(&mode);
-        let ring_str = enum_name(&ring);
         sqlx::query(
             "INSERT INTO agent_runs (run_id, user_id, status, goal, provider, model,
                  constraints_json, conversation_id, turn_index, mode, ring, workflow)
-             VALUES ($1, $2, 'queued', $3, $4, $5, '{}'::jsonb, $6, $7, $8, $9, $10)",
+             VALUES ($1, $2, 'queued', $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
         .bind(run_id)
-        .bind(user_id)
-        .bind(text)
-        .bind(&convo.provider)
-        .bind(&convo.model)
-        .bind(conversation_id)
+        .bind(l.user_id)
+        .bind(&l.text)
+        .bind(&l.provider)
+        .bind(&l.model)
+        .bind(&l.constraints)
+        .bind(l.conversation_id)
         .bind(turn_index)
-        // What this run is allowed to do, on the row rather than only inside the
-        // run (AGENT-013 §2.1, §4; S-10.1). "Could this run have armed an
-        // automation?" must be answerable without re-deriving it from a
-        // transcript.
-        //
-        // Derived here from the same two facts `Loop::new` derives them from —
-        // the demand and the mode — so the row and the state card cannot
-        // disagree about what the run was.
-        .bind(mode_str)
-        .bind(ring_str)
-        // The workflow is on the run *and* on every trial it spends (§3), so the
-        // ledger can answer "how many of our trials are replications" and the
-        // scorecard can answer "which workflows does the 7B actually complete".
-        .bind(enum_name(&workflow))
+        .bind(enum_name(&mode))
+        .bind(enum_name(&ring))
+        .bind(enum_name(&l.workflow))
         .execute(&self.pg)
         .await
         .map_err(|e| StartError::Internal(e.to_string()))?;
 
-        conversations::touch(&self.pg, conversation_id).await;
+        conversations::touch(&self.pg, l.conversation_id).await;
 
-        // Every Research conversation is a session (AGENT-014 §2.1, §10;
-        // S-11.1). A bounded run is `continuous = false` with one agenda item,
-        // so the desk, the digest and the agenda have one shape to read rather
-        // than two — and a run started here and a run started by the session
-        // driver are the same kind of thing.
-        //
-        // Best-effort and after the run row: a session row that could not be
-        // written must not stop a turn the user asked for. What it costs is that
-        // the conversation has no agenda card, which is visible; what refusing
-        // would cost is the turn, which is the thing they came for.
-        if mode == harness::state::Mode::Research {
-            self.ensure_session(user_id, conversation_id, &convo.model, text, run_id)
+        if mode == harness::state::Mode::Research && l.escalated_from.is_none() {
+            self.ensure_session(l.user_id, l.conversation_id, &l.model, &l.text, run_id)
                 .await;
         }
 
-        // The prompt is the first thing in the transcript, so a reader sees the
-        // question before the work. Written here rather than by the driver because it
-        // must be there even if the driver never starts.
+        // The prompt is the first thing in the transcript, written here so it is
+        // there even if the driver never starts.
+        let mut opening = serde_json::json!({ "content": l.text });
+        if let Some(from) = l.escalated_from {
+            opening["escalated_from"] = serde_json::json!(from);
+        }
+        if let Some(why) = &l.substituted {
+            opening["profile_substituted"] = serde_json::json!(why);
+        }
         let _ = sqlx::query(
             "INSERT INTO agent_messages (run_id, seq, kind, content_json)
              VALUES ($1, 0, 'user', $2)",
         )
         .bind(run_id)
-        .bind(serde_json::json!({ "content": text }))
+        .bind(&opening)
         .execute(&self.pg)
         .await;
 
-        // Title the conversation from its first prompt, in the background. It is one
-        // cheap call and nothing waits on it — a sidebar row that says the first few
-        // words for a second is fine; a request that blocks on a summariser is not.
         if turn_index == 0 {
-            // A name immediately, so the sidebar row is never anonymous, and a better
-            // one when the summariser answers. On a cold local model that second call
-            // is nearly three minutes.
             conversations::set_title(
                 &self.pg,
-                conversation_id,
-                &conversations::provisional_title(text),
+                l.conversation_id,
+                &conversations::provisional_title(&l.text),
             )
             .await;
-
             let pg = self.pg.clone();
             let client = llm_client.clone();
-            let model = convo.model.clone();
-            let prompt = text.to_string();
+            let model = l.model.clone();
+            let prompt = l.text.clone();
+            let conversation_id = l.conversation_id;
             tokio::spawn(async move {
                 let title = conversations::generate_title(&client, &model, &prompt).await;
                 conversations::set_title(&pg, conversation_id, &title).await;
             });
         }
 
-        let prior = conversations::prior_context(&self.pg, conversation_id, turn_index)
+        let prior = conversations::prior_context(&self.pg, l.conversation_id, turn_index)
             .await
             .unwrap_or_default();
 
-        let run_token = crate::auth::handlers::new_session_token();
-        // The token outlives any single turn by a wide margin: there is no wall clock
-        // any more, so an expiry short enough to be useful would be an expiry that
-        // kills long work.
-        let expires_at = Utc::now() + ChronoDuration::days(7);
-        sqlx::query(
-            "INSERT INTO sessions (token, user_id, label, kind, expires_at)
-             VALUES ($1, $2, $3, 'service', $4)",
-        )
-        .bind(&run_token)
-        .bind(user_id)
-        .bind(format!("agent-run-{run_id}"))
-        .bind(expires_at)
-        .execute(&self.pg)
-        .await
-        .map_err(|e| StartError::Internal(e.to_string()))?;
+        let run_token = self
+            .mint_run_token(l.user_id, run_id)
+            .await
+            .map_err(|e| StartError::Internal(e.to_string()))?;
 
         let cancel = Arc::new(RunControl::new());
         self.running
@@ -581,114 +1305,67 @@ impl AgentManager {
             .expect("agent running lock")
             .insert(run_id, cancel.clone());
 
+        // Per-kind charter (§21), from the same classifier the loop uses.
+        let charter = prompt::charter_for(harness::state::GoalKind::classify(&l.text, &[]));
+        // The slice the previous turn ended with, so this one appends to it
+        // (§21): a cached prefix matches by bytes.
+        let prior_exposure = self
+            .prefixes
+            .lock()
+            .expect("agent prefix lock")
+            .get(&l.conversation_id)
+            .map(|p| p.tools().to_vec())
+            .unwrap_or_default();
+        let exposure_out = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let charter_for_prefix = charter.clone();
+        let params = LocalRunParams {
+            run_id,
+            user_id: l.user_id,
+            conversation_id: l.conversation_id,
+            prior_exposure,
+            exposure_out: Arc::clone(&exposure_out),
+            workflow: l.workflow,
+            goal: l.text.clone(),
+            charter,
+            prior,
+            constraints: l.constraints.clone(),
+            profile: l.profile,
+            // `data` up front: a live test on 2026-10-05 asked for the latest BTC price, the
+            // run had no bars tool exposed, and gpt-4o-mini looped on `list_lanes` until fenced.
+            namespaces: vec!["core".into(), "discovery".into(), "data".into()],
+            demand: l.demand,
+            api_base: self.base_url.clone(),
+            service_token: run_token.clone(),
+            workspace_root: workspace_root(),
+            resumed_state: l.resumed_state,
+            max_trials: l.max_trials,
+        };
         let manager = Arc::clone(self);
         let pg = self.pg.clone();
-        let base_url = self.base_url.clone();
-        let model = convo.model.clone();
-
-        let local = self
-            .profiles
-            .get(&model)
-            .filter(|p| p.tier.is_local())
-            .cloned();
-
-        if let Some(profile) = local {
-            // Per-kind (§21), from the same classifier the loop uses.
-            let charter = prompt::charter_for(harness::state::GoalKind::classify(text, &[]));
-            // The slice the previous turn ended with, so this one appends to it
-            // rather than re-choosing an order (§21). A cached prefix matches by
-            // bytes, so the same tools in a different order is a miss.
-            let prior_exposure = self
+        let (user_id, conversation_id) = (l.user_id, l.conversation_id);
+        tokio::spawn(async move {
+            let ended = local_driver::run(pg, llm_client, params, cancel).await;
+            // Fold this turn into the conversation's prefix. A conversation paying
+            // more than one cold prefix is a defect, and this is where it shows.
+            let used = exposure_out.lock().map(|s| s.clone()).unwrap_or_default();
+            let continuity = manager
                 .prefixes
                 .lock()
                 .expect("agent prefix lock")
-                .get(&conversation_id)
-                .map(|p| p.tools().to_vec())
-                .unwrap_or_default();
-            let exposure_out = Arc::new(std::sync::Mutex::new(Vec::new()));
-            let charter_for_prefix = charter.clone();
-            let params = LocalRunParams {
-                run_id,
-                user_id,
-                conversation_id,
-                prior_exposure,
-                exposure_out: Arc::clone(&exposure_out),
-                // The same value the row above was written from. The
-                // conversation front door still offers no chip and passes
-                // `None`; the session driver passes its agenda item's.
-                workflow,
-                goal: text.to_string(),
-                charter,
-                prior,
-                // The chat path carries none; the field exists so the research
-                // path can, and so both drivers frame a turn identically.
-                constraints: serde_json::json!({}),
-                profile,
-                namespaces: vec!["core".into(), "discovery".into()],
-                demand: CHAT_DEMAND,
-                api_base: base_url,
-                service_token: run_token.clone(),
-                workspace_root: workspace_root(),
-            };
-            tokio::spawn(async move {
-                local_driver::run(pg.clone(), llm_client, params, cancel).await;
-                // Fold this turn into the conversation's prefix. `extend` says
-                // whether the turn continued it; a conversation paying more than
-                // one cold prefix is a defect, and this is where it becomes
-                // visible rather than showing up only as a bill.
-                let used = exposure_out.lock().map(|s| s.clone()).unwrap_or_default();
-                let continuity = manager
-                    .prefixes
-                    .lock()
-                    .expect("agent prefix lock")
-                    .entry(conversation_id)
-                    .or_default()
-                    .extend(&charter_for_prefix, &used);
-                if !continuity.is_continuous() {
-                    tracing::debug!(
-                        %conversation_id,
-                        reason = continuity.broken_by.as_deref().unwrap_or(""),
-                        "turn paid a cold prefix"
-                    );
-                }
-                conversations::touch(&pg, conversation_id).await;
-                let _ = sqlx::query("DELETE FROM sessions WHERE token = $1")
-                    .bind(&run_token)
-                    .execute(&pg)
-                    .await;
-                manager.finish(run_id);
-            });
-            return Ok(run_id);
-        }
-
-        let budget = self
-            .profiles
-            .get(&model)
-            .map(harness::Profile::input_budget_tokens);
-        let params = DriverParams {
-            run_id,
-            user_id,
-            goal: text.to_string(),
-            model,
-            constraints: serde_json::json!({}),
-            prior,
-            conversation_id: Some(conversation_id),
-            workspace_root: workspace_root(),
-            // The same 95% trigger the local tier uses, from the model's own profile.
-            input_budget_tokens: budget,
-            llm_max_tokens_per_call: self.cfg.llm_max_tokens_per_call,
-        };
-        let api = ApiClient::new(base_url, run_token.clone());
-        tokio::spawn(async move {
-            driver::drive(&pg, api, llm_client, params, cancel).await;
-            conversations::touch(&pg, conversation_id).await;
-            let _ = sqlx::query("DELETE FROM sessions WHERE token = $1")
-                .bind(&run_token)
-                .execute(&pg)
+                .entry(conversation_id)
+                .or_default()
+                .extend(&charter_for_prefix, &used);
+            if !continuity.is_continuous() {
+                tracing::debug!(
+                    %conversation_id,
+                    reason = continuity.broken_by.as_deref().unwrap_or(""),
+                    "turn paid a cold prefix"
+                );
+            }
+            manager
+                .after_run(run_id, user_id, conversation_id, run_token, ended)
                 .await;
-            manager.finish(run_id);
         });
-
         Ok(run_id)
     }
 
@@ -948,6 +1625,41 @@ impl AgentManager {
         }
     }
 
+    /// Pin a tool for a run's next step (S-6.11). The tool must exist in the
+    /// catalogue the run is routed from; the loop reads the pin at its next
+    /// boundary and routes the tool first.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the ownership lookup's database error.
+    pub async fn pin_tool(
+        &self,
+        user_id: Uuid,
+        run_id: Uuid,
+        tool: &str,
+    ) -> Result<PinOutcome, sqlx::Error> {
+        let Some(status) = self.owned_status(user_id, run_id).await? else {
+            return Ok(PinOutcome::NoSuchRun);
+        };
+        if Self::is_terminal(&status) {
+            return Ok(PinOutcome::AlreadyFinished(status));
+        }
+        let known = super::bridge::registry()
+            .map(|r| r.get(tool).is_some())
+            .unwrap_or(false);
+        if !known {
+            return Ok(PinOutcome::UnknownTool);
+        }
+        let Some(control) = self.control(run_id) else {
+            return Ok(PinOutcome::NotDrivenHere(status));
+        };
+        if control.pin(tool) {
+            Ok(PinOutcome::Pinned)
+        } else {
+            Ok(PinOutcome::Stopping)
+        }
+    }
+
     /// What this process can honestly say about a run's pause.
     ///
     /// The run reads go through here rather than through a bare
@@ -970,6 +1682,174 @@ impl AgentManager {
             Some(c) => c.paused_until().map_or(PauseView::Running, PauseView::Held),
             None => PauseView::Unobserved,
         }
+    }
+}
+
+/// Everything [`AgentManager::launch`] needs for one run.
+struct Launch {
+    user_id: Uuid,
+    conversation_id: Uuid,
+    text: String,
+    provider: String,
+    model: String,
+    profile: harness::Profile,
+    /// Why the profile is not the model's own, when it is not.
+    substituted: Option<String>,
+    workflow: harness::state::Workflow,
+    demand: harness::hardware::TaskDemand,
+    constraints: serde_json::Value,
+    resumed_state: Option<harness::state::WorkingState>,
+    escalated_from: Option<Uuid>,
+    max_trials: Option<u32>,
+}
+
+/// The platform's answer about a job, when it has ended (S-2.11).
+///
+/// `None` while it runs, and on a transient failure to ask — the watcher asks
+/// again next interval. A job the platform no longer knows (a 4xx) has ended as
+/// far as the run is concerned, and the run is told so rather than left waiting
+/// for a job that will never finish.
+async fn job_status(base_url: &str, token: &str, job_id: &str) -> Option<local_driver::JobDone> {
+    let api = mcp_server_lib::ApiClient::new(base_url.to_string(), token.to_string());
+    let path = if let Some(id) = job_id.strip_prefix("sweep:") {
+        format!("/api/research/sweeps/{id}")
+    } else if let Some(id) = job_id.strip_prefix("backtest:") {
+        format!("/api/backtests/{id}")
+    } else if let Some(id) = job_id.strip_prefix("campaign:") {
+        format!("/api/lifecycle/campaigns/{id}")
+    } else if let Some(rest) = job_id.strip_prefix("training:") {
+        // `training:<model_id>:<run_id>`; ids are UUIDs or slugs without a colon.
+        match rest.split_once(':') {
+            Some((model, run)) => format!("/api/models/{model}/runs/{run}"),
+            None => {
+                return Some(local_driver::JobDone {
+                    job_id: job_id.to_string(),
+                    output: format!("{job_id} is not a training handle"),
+                    ok: false,
+                })
+            }
+        }
+    } else if let Some(rest) = job_id.strip_prefix("study:") {
+        match rest.split_once(':') {
+            Some((exp, _)) => format!("/api/backtest/experiments/{exp}/studies"),
+            None => {
+                return Some(local_driver::JobDone {
+                    job_id: job_id.to_string(),
+                    output: format!("{job_id} is not a study handle"),
+                    ok: false,
+                })
+            }
+        }
+    } else {
+        // A job kind this watcher does not know cannot be resumed by it.
+        return Some(local_driver::JobDone {
+            job_id: job_id.to_string(),
+            output: format!("the platform cannot report on job {job_id}"),
+            ok: false,
+        });
+    };
+    match api.get(&path).await {
+        Ok(snapshot) => {
+            // A study's list holds every study of the experiment; the run is
+            // handed only its own.
+            let output = study_entry(job_id, &snapshot).unwrap_or_else(|| snapshot.clone());
+            snapshot_outcome(job_id, &snapshot).map(|ok| local_driver::JobDone {
+                job_id: job_id.to_string(),
+                output: output.to_string(),
+                ok,
+            })
+        }
+        Err(e) if matches!(e.status, Some(s) if s < 500) => Some(local_driver::JobDone {
+            job_id: job_id.to_string(),
+            output: e.to_tool_error().to_string(),
+            ok: false,
+        }),
+        Err(_) => None,
+    }
+}
+
+/// The one study a `study:<experiment>:<study>` handle names, from the
+/// experiment's study list, or its failure record.
+fn study_entry(job_id: &str, snapshot: &serde_json::Value) -> Option<serde_json::Value> {
+    let study = job_id.strip_prefix("study:")?.split_once(':')?.1;
+    snapshot
+        .get("studies")?
+        .as_array()?
+        .iter()
+        .find(|s| s.get("study_id").and_then(serde_json::Value::as_str) == Some(study))
+        .cloned()
+}
+
+/// Whether a job's snapshot says it has ended, and if so whether it succeeded.
+///
+/// A sweep or a backtest reports a `status`. A campaign has no status: it reports
+/// the phase it is in and a `terminal` phase once it has ended, so a campaign is
+/// over exactly when `terminal` is a string, and it succeeded unless it was
+/// halted. `None` is "still running".
+fn snapshot_outcome(job_id: &str, snapshot: &serde_json::Value) -> Option<bool> {
+    if let Some(rest) = job_id.strip_prefix("study:") {
+        let study = rest.split_once(':').map_or("", |(_, s)| s);
+        // Sealed: it is in the list, and that is success.
+        if study_entry(job_id, snapshot).is_some() {
+            return Some(true);
+        }
+        return match snapshot.pointer(&format!("/detached/{study}/status")).and_then(serde_json::Value::as_str) {
+            Some("running") => None,
+            Some(_) => Some(false),
+            // Neither sealed nor running: the process that was running it is gone
+            // (the registry is in memory). Ended, and not a success.
+            None => Some(false),
+        };
+    }
+    if job_id.starts_with("training:") {
+        let status = snapshot.get("status").and_then(serde_json::Value::as_str).unwrap_or("");
+        return matches!(status, "succeeded" | "completed" | "failed" | "cancelled" | "error")
+            .then(|| matches!(status, "succeeded" | "completed"));
+    }
+    if job_id.starts_with("campaign:") {
+        let terminal = snapshot.get("terminal").and_then(serde_json::Value::as_str)?;
+        return Some(terminal != "halted");
+    }
+    let status = snapshot
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    matches!(status, "completed" | "failed" | "cancelled").then(|| status == "completed")
+}
+
+#[cfg(test)]
+mod snapshot_outcome_tests {
+    use super::snapshot_outcome;
+    use serde_json::json;
+
+    #[test]
+    fn a_study_and_a_training_run_resume_their_run_when_they_end() {
+        let sealed = json!({"studies": [{"study_id": "s1"}], "detached": {}});
+        assert_eq!(snapshot_outcome("study:e:s1", &sealed), Some(true));
+        let running = json!({"studies": [], "detached": {"s1": {"status": "running"}}});
+        assert_eq!(snapshot_outcome("study:e:s1", &running), None);
+        let failed = json!({"studies": [], "detached": {"s1": {"status": "failed", "error": "x"}}});
+        assert_eq!(snapshot_outcome("study:e:s1", &failed), Some(false));
+        // Gone with the process that was running it: ended, not still waiting.
+        assert_eq!(snapshot_outcome("study:e:s1", &json!({"studies": [], "detached": {}})), Some(false));
+        assert_eq!(snapshot_outcome("training:m:r", &json!({"status": "running"})), None);
+        assert_eq!(snapshot_outcome("training:m:r", &json!({"status": "succeeded"})), Some(true));
+        assert_eq!(snapshot_outcome("training:m:r", &json!({"status": "failed"})), Some(false));
+        assert_eq!(super::study_entry("study:e:s1", &sealed), Some(json!({"study_id": "s1"})));
+    }
+
+    #[test]
+    fn a_campaign_is_over_when_it_has_a_terminal_phase_and_not_before() {
+        let running = json!({"campaign_id": "c", "phase": "experiment", "terminal": null});
+        assert_eq!(snapshot_outcome("campaign:c", &running), None);
+        let done = json!({"phase": "converged", "terminal": "converged"});
+        assert_eq!(snapshot_outcome("campaign:c", &done), Some(true));
+        let halted = json!({"phase": "halted", "terminal": "halted"});
+        assert_eq!(snapshot_outcome("campaign:c", &halted), Some(false));
+        // A sweep still reads its status; a campaign's `status` key means nothing.
+        assert_eq!(snapshot_outcome("sweep:1", &json!({"status": "completed"})), Some(true));
+        assert_eq!(snapshot_outcome("sweep:1", &json!({"status": "running"})), None);
+        assert_eq!(snapshot_outcome("campaign:c", &json!({"status": "completed"})), None);
     }
 }
 
@@ -1027,6 +1907,18 @@ pub enum PauseOutcome {
     Stopping,
 }
 
+/// What [`AgentManager::pin_tool`] decided.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PinOutcome {
+    Pinned,
+    NoSuchRun,
+    AlreadyFinished(String),
+    NotDrivenHere(String),
+    /// The name is not in the catalogue; nothing was queued.
+    UnknownTool,
+    Stopping,
+}
+
 /// What [`AgentManager::resume`] decided.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResumeOutcome {
@@ -1036,4 +1928,73 @@ pub enum ResumeOutcome {
     NotDrivenHere(String),
     NotPaused,
     Stopping,
+}
+
+#[cfg(test)]
+mod one_runtime_tests {
+    //! AGENT-010 §14.1 and S-2.10's acceptance, held structurally: the property is
+    //! about which code exists, and a behavioural test would need a provider.
+
+    use std::path::Path;
+
+    fn code_of(src: &str) -> String {
+        // Production code only: this module names the strings it forbids.
+        let src = src.split("#[cfg(test)]").next().unwrap_or(src);
+        src.lines()
+            .filter(|l| {
+                let t = l.trim_start();
+                !t.starts_with("//") && !t.starts_with("///") && !t.starts_with("//!")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// `crates/api/src/agent` contains one driver. The hosted loop is gone, and a
+    /// second one appearing would be the two-runtimes problem this phase removed.
+    #[test]
+    fn the_agent_module_contains_one_driver() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/agent");
+        let drivers: Vec<String> = std::fs::read_dir(&dir)
+            .expect("the agent module exists")
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".rs") && n.contains("driver"))
+            .collect();
+        assert_eq!(drivers, vec!["local_driver.rs".to_string()], "{drivers:?}");
+    }
+
+    /// `manager.rs` has no tier branch: every profile goes to the one driver.
+    #[test]
+    fn the_manager_does_not_branch_on_tier() {
+        let code = code_of(include_str!("manager.rs"));
+        for forbidden in ["tier.is_local()", "driver::drive(", "DriverParams"] {
+            assert!(
+                !code.contains(forbidden),
+                "manager.rs still contains `{forbidden}`: a second path by tier"
+            );
+        }
+        assert!(code.contains("local_driver::run("), "the one driver is reached");
+    }
+
+    /// AGENT-005 P6: nothing the runtime writes can read `[elided` without a
+    /// handle. The only elision left is the transcript's, which always leaves
+    /// one, and the driver writes the file that handle names.
+    #[test]
+    fn no_runtime_code_writes_an_unrecoverable_elision() {
+        let agent = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/agent");
+        for entry in std::fs::read_dir(&agent).unwrap().filter_map(Result::ok) {
+            let src = std::fs::read_to_string(entry.path()).unwrap();
+            let code = code_of(&src);
+            assert!(
+                !code.contains("[elided"),
+                "{} writes `[elided …]` with no handle",
+                entry.path().display()
+            );
+        }
+        let driver = include_str!("local_driver.rs");
+        assert!(
+            driver.contains("work/transcript/"),
+            "the driver no longer writes the bodies the transcript's handles name"
+        );
+    }
 }

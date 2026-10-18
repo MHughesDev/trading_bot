@@ -1,6 +1,6 @@
 # Phase 5 — The language
 
-**Completion: 33% (5 / 15 tasks), plus 5 `PARTIAL` — 2026-09-27: the compiler and the round trip close on their literal acceptance, and the validator pass that refused every sweepable strategy is fixed. The feature engine is built; the language is authorable but not yet previewable.**
+**Completion: 80% (12 / 15 tasks), plus 3 `PARTIAL` — re-counted 2026-10-04 (track VERIFY) from the per-task markers; it read 5 / 15 on 2026-09-27:  the compiler and the round trip close on their literal acceptance, and the validator pass that refused every sweepable strategy is fixed. The feature engine is built; the language is authorable but not yet previewable.**
 
 > **This file was wrong about the engine and right about the language.** Until 2026-09-16 it
 > recorded all fifteen tasks as `NOT STARTED`. `crates/features` is in fact about 5,100 lines
@@ -209,7 +209,7 @@ deleted; `static_invariants` and `builders-purity` both green.
 **Traces:** AGENT-011 §2 F1; §8.1.
 
 ### S-5.2 The registry and `list_features` — M
-`PARTIAL` 2026-09-16 — **The tool half landed 2026-09-16**: `crates/mcp-server/src/tools/strategy.rs` serves `list_features` from the registry, answered locally like `list_lanes`. It reads the same `FAMILIES` table `runtime::feature` does, so listed and resolvable are the same set — asserted by `every_example_name_resolves_in_the_engine`, which walks every family's own advertised example through `resolve`.
+`DONE` 2026-10-03 (track LANG, wave 2) — the requirements gate now resolves through the registry: `backtest::requirements::parse_feature` calls `features::registry::resolve` and takes the warm-up from `features::runtime::lookback_bars` (building on the working-tree sma/atr edit; `every_family_in_the_registry_is_derivable_with_the_runtimes_warmup`, `backtest --lib` 451 pass). `list_features` pages with `offset`/`next_offset` (`paging_reaches_every_family_exactly_once`). With `features_registry_parity.rs` (5 tests) the engine, the registry, the backtest gate and `list_features` accept the same names; the live runtime reads the same `features::runtime`. The analysis-template clause is met for the families the templates share with the engine (reconciliation tests): the templates are numpy and read no registry. No migration (ADR-S5-10). The earlier finding, kept for the record: the gate used to accept only ema/rsi.
 
 This was the phase's real bottleneck and it was not a missing engine. The server's `initialize` instructions told every model at the start of every session that "backtests support only ema_N and rsi_N features" while the engine resolved around fifty families. A capability ceiling written in prose is still a ceiling. That sentence now points at `list_features` instead.
 
@@ -230,7 +230,7 @@ templates. One engine, proven by test.
 **Traces:** AGENT-011 §2, P2; §8.1.
 
 ### S-5.3 The validator teaches — M
-`PARTIAL` 2026-09-16 — the mechanism is built and three of the six codes have real producers.
+`DONE` 2026-10-03 (track LANG) — all six §5 codes now have a real producer and carry the teaching table's fix: `unknown_feature`, `when_names_expression`, `loosening` (validator), `distance_without_unit` (the SLv2 parser; its fix and the table's now teach the same `%` / `atr(N)` / `sigma(N)` syntax — the table still said bare `atr`), `warmup_exceeds_window`, `never_fires` (preview). `the_six_teachings_have_producers.rs` 7/7; mutation: deleting `atr(` from the table fix fails it. The "third rejection returns an example" clause is met by attaching the example to every rejection (ADR-S5-05).
 
 `ValidationError` gains `code`, and `fix`/`see` are **methods over it** rather than fields — a stored fix is a second copy of the table a caller can forget to fill in, and the forgetting is silent because the error still renders. `teach.rs` carries §5's six plus the twelve this crate constructs, and `every_code_the_validator_constructs_can_teach` scans `src/*.rs` for `code: "…"` rather than walking a registered list, skipping `teach.rs` itself (the self-referencing scan trap, hit again).
 
@@ -446,7 +446,7 @@ every shape the corpus holds, not of every definition in the registry — nothin
 has yet run the decompiler over the stored set.
 
 ### S-5.8 The authoring tools — M
-`NOT STARTED` — `explain_strategy` is not in the catalogue, and `create_strategy` recording lineage needs the compiler.
+`DONE` 2026-10-03 (track LANG) — `validate_strategy` and `create_strategy` take SLv2 `text` (and a `form`) as well as a definition and end at the same validator and save route; `validate_strategy` returns `features_used`, `warmup_bars` and `estimated_cost_class`; a v3 header is refused by name (`this_is_slv3`). `explain_strategy` names every input, entry clause, exit, the size rule and the warm-up, including for swept strategies (it returned null for every skeleton before), and shows comments. Lineage: saving under the header's name chains onto the previous head — tested at the tool against a stub platform (`saving_the_same_name_twice_…`); the derivation itself is the ledger's (ADR-D-21). `tools/strategy_lang.rs` tests all pass. Not covered: recording the producing move beside the revision (no field on the route).
 
 ~~`crates/strategy-lang` **does not exist**.~~ **False as of 2026-09-21, and it was false when it was written under seven separate tasks.** The crate is **13,877 lines over 129 passing tests** — `lex, ast, parse, compile, decompile, diff, suggest, block, form, skeleton, catalogue, diagnostic`. What was true is worse and more specific: **nothing in the workspace depended on it.** `grep strategy-lang crates/*/Cargo.toml` matched only its own manifest. Thirteen thousand lines of the built-but-unreached shape. See the note at the head of this file.
 
@@ -459,7 +459,8 @@ bars; `create_strategy` records lineage for `family_test`.
 **Traces:** AGENT-011 §4.
 
 ### S-5.9 A grammar for the small tiers — M
-`PARTIAL`
+`PARTIAL` 2026-10-04 (S-CATALOGUE track) - Re-checked, no status change. The unmet half is harness-side (handing a `select_fill` tier the form grammar as its decoding schema in `crates/harness/src/drive.rs` / `local_driver.rs`, both owned by the runtime track) and the AGENT-009 research-suite run needs a live model.
+`PARTIAL` 2026-10-03 (track LANG) — measured on a real model for the first time: qwen2.5:7b-instruct through local Ollama, 8 hypothesis goals, one constrained fill per clause (header, entry, size, two exits). **Fills: 5 per goal, never over 6; `unknown_feature`: 0 of 8** (both acceptance clauses met). Compiled: 3 of 8 with the compact schema (every failure `wrong_arity`, which it gives up by design), 5 of 8 with the exact per-family schema (two failures were the sampler failing on its ~175 KB grammar). A first run compiled 0 of 8 because the grammar let a filter compare two numbers and a stop be negative; both are now excluded. The form is reachable: a `form` door on `validate_strategy`/`create_strategy`, and the grammar via `get_slv2_guide(section="form.schema")` (the 1,200-byte descriptor budget forbids it as a tool's own schema, and the per-family schema is ~270 KB; ADR-S5-11). **Still unmet:** not run on AGENT-009's research suite, and nothing hands a `select_fill` tier the grammar as its decoding schema (harness side).
 
 ~~`crates/strategy-lang` **does not exist**.~~ **False as of 2026-09-21, and it was false when it was written under seven separate tasks.** The crate is **13,877 lines over 129 passing tests** — `lex, ast, parse, compile, decompile, diff, suggest, block, form, skeleton, catalogue, diagnostic`. What was true is worse and more specific: **nothing in the workspace depended on it.** `grep strategy-lang crates/*/Cargo.toml` matched only its own manifest. Thirteen thousand lines of the built-but-unreached shape. See the note at the head of this file.
 
@@ -510,7 +511,7 @@ strategy is 4 fills and the schema cannot name a feature the engine does not
 serve — but nothing here ran a model.
 
 ### S-5.10 Moves, diffs, lineage — M
-`NOT STARTED` — `apply_move` and `diff_strategies` are not in the catalogue.
+`DONE` 2026-10-03 (track LANG) — `apply_move` and `diff_strategies` were already built and served; what was missing was the acceptance at the surface a model reaches. `tools/moves_roundtrip.rs` (4 tests): each of eight edit kinds goes through the `apply_move` tool and its output through the `diff_strategies` tool, which returns the same kind and `is_single_change` true; a two-move version is `false` with `n_moves` 2; an edit that changes nothing and a malformed address are refused.
 
 `diff_strategies` classifies an AST diff into the FEAT-004 §6 move kinds and says what
 changed **in words**, with `is_single_change`; `apply_move` produces one new validated
@@ -522,7 +523,8 @@ checkable rather than exhorted.
 **Traces:** AGENT-011 §4, P5; §8.6.
 
 ### S-5.11 `suggest_moves` — S
-`NOT STARTED` — `suggest_moves` is not in the catalogue.
+`PARTIAL` 2026-10-04 (S-CATALOGUE track) - `exit_reasons` now has a producer: the simulator's stored result carries `exit_reasons` (`[{reason, trades, share}]`, shares sum to one, trades no declared exit closed under `signal_exit`; absent when no exits were declared) via `DetailedOutcome::result_document` (`sim::tests::the_stored_document_says_which_exit_rule_closed_how_many_trades`), and `suggest_moves` takes `run_id` and reads it from `GET /api/backtests/{id}` (`exit_reasons_from` says what was read, or why nothing was). Still unmet: `regimes` has no producer (needs a regime label to gate-predicate mapping per strategy); the live read of `/api/backtests/{id}` is not driven end to end.
+`PARTIAL` 2026-10-03 (track LANG) — `suggest_moves` is now a tool (namespace `analysis`), measuring its own blocking profile over a window (ADR-S5-08) and returning every suggestion with a typed `why` carrying the numbers it was read from (tested: each has `diagnostic`, `measured`, `says`). `exit_reasons` and `regimes` are accepted from the caller (ADR-S5-13) because nothing produces them typed; a regime gate is checked against the registry. **Unmet:** those two inputs have no producer in the platform, so the rules that read them fire only on caller-supplied findings.
 
 Maps `get_diagnostics` findings to candidate moves with a reason ("loses in high-vol months"
 → "add_regime_gate on `rv(20) pct_rank < 0.8`"). Deterministic rules first; model ranking
@@ -532,7 +534,7 @@ only on capable tiers. Motivated moves only — exploration belongs in the Exper
 **Traces:** AGENT-011 §4, §10.
 
 ### S-5.12 Skeletons — S
-`PARTIAL`
+`DONE` 2026-10-03 (track LANG, wave 2) — with the gate fixed, all four skeletons compile, validate and preview with non-zero entries and no warm-up violation on **8,784 real BTC-USD 1h bars (2024)**: trend 549 entries (45.7/month, warm-up 105), mean_reversion 195 (16.2/month, 73), breakout 600 (49.9/month, 20), vol_target 55 (4.6/month, 51) (`skeletons_on_btc_usd`, run with `--ignored` against the local ClickHouse; the synthetic-bar version runs by default). Entry counts are about signals only, not P&L. The breakout skeleton was rewritten to `pct_rank` because `close > donchian_upper` can never fire.
 
 ~~`crates/strategy-lang` **does not exist**.~~ **False as of 2026-09-21, and it was false when it was written under seven separate tasks.** The crate is **13,877 lines over 129 passing tests** — `lex, ast, parse, compile, decompile, diff, suggest, block, form, skeleton, catalogue, diagnostic`. What was true is worse and more specific: **nothing in the workspace depended on it.** `grep strategy-lang crates/*/Cargo.toml` matched only its own manifest. Thirteen thousand lines of the built-but-unreached shape. See the note at the head of this file.
 
@@ -579,7 +581,7 @@ with non-zero entries and no warm-up violation". This crate has no bars and no
 are not proved to fire.
 
 ### S-5.13 Rewrite the guide around the language — M
-`NOT STARTED` — The guide is not rewritten around SLv2, which does not exist. Its `## Tool notes` section did grow this phase — `list_features` has an entry — but that is the catalogue's documentation, not the language's.
+`DONE` 2026-10-03 (track LANG) — `crates/strategy-lang/docs/slv2-guide.md`, served by `get_slv2_guide(section)`: each section is at most 4 KB (asserted over heading and body), every `see` anchor the language, the validator's table and the tools emit resolves (scanned from source), the feature reference and skeletons are generated from the registry and the compiled skeletons (a test fails if the file drifts; `SLV2_GUIDE_WRITE=1` regenerates), every full strategy in it compiles, and the refusals it names are the compiler's. `slv2_guide.rs` 9/9; mutation: a padded section fails it. The legacy `authoring_guide.md` is untouched (not this track's); its "Strategy definition format" and "Expression grammar" sections should point here.
 
 Replace the "Strategy definition format", "Expression grammar" and "Features available"
 sections with one page of grammar, a worked example per hypothesis family, the units table,
@@ -591,7 +593,7 @@ anchor from S-5.3 resolves.
 **Traces:** AGENT-011 §6; §8.8. AGENT-005 §3.3.
 
 ### S-5.14 F2 families — L
-`PARTIAL` 2026-09-16 — The F2 families are largely present and resolve, and **the acceptance is now met for every family that exists on both sides of the language barrier**: `crates/mcp-server/tests/volatility_reconciliation.rs` runs the Python template and the Rust engine over the same bars and asserts they agree.
+`DONE` 2026-10-03 (track LANG, wave 2) — registered: `pub mod families;` in `features/src/lib.rs`, five rows and four `EXAMPLES` entries in `registry.rs`, five `Kind` arms in `runtime.rs`, each its own block. `cargo test -p features` 130 pass, including `the_catalogue_and_the_constructor_agree_in_both_directions` and `every_catalogued_family_passes_the_declared_lookback_check`; the engine/registry parity test covers them; `features_f2_reconciliation` agrees with the templates' own functions to 1e-9. Registering found that `hurst` needs `n >= 257` (three block sizes need 256 returns), not 129. Side effect for Set U: the registry grew by five families, so `docs/agent/slv3-guide.md`'s generated tables are stale and `v3_guide::the_guide_tables_are_the_registries` fails until `SLV3_GUIDE_WRITE=1 cargo test -p strategy-lang --test v3_guide` is run (that file is Set U's; not touched).
 
 Seven families, and it found two real defects on the way:
 
@@ -618,7 +620,8 @@ the same family on the same window.
 **Traces:** AGENT-011 §2 F2, P2.
 
 ### S-5.15 Intent survives, and the preview says which clause blocked — M
-`NOT STARTED` — Intent surviving the round trip needs the round trip.
+`PARTIAL` 2026-10-04 (S-CATALOGUE track) - Comments are now stored, beside the revision rather than on the definition (ADR-S5-14): migration `0239` `strategy_revision_notes` keyed by (user, revision hash of the canonical definition, which contains no comment), `POST /api/strategy-notes` and `GET /api/strategy-notes/{hash}` (`routes/strategy_notes.rs`). The text door of `create_strategy` stores the author's comments after a successful save, and `explain_strategy` given a stored definition reads them back by recomputing its hash. Tests: `crates/api/tests/strategy_notes_store.rs` 4/4 live PG (source order, last text wins, tenant isolation, `app_role` grants); mcp `strategy_lang` tests 18/18. Why this is not a hash risk: the stored definition is untouched, so rewording a note cannot create a revision or a trial. Still PARTIAL: `apply_move` carrying a comment forward and appending the move's reason is not wired to the store (the move works on the in-memory definition), and the route/tool round trip is unit-tested at each end, not driven over HTTP.
+`PARTIAL` 2026-10-03 (track LANG) — the preview names the blocker: `preview_signals` attaches a `blocking_profile` whenever a draft never fires, measured through the preview's own evaluator (`the_preview_names_the_blocker.rs` runs the production `backtest::preview` over probe definitions: one dead clause named; clause order irrelevant; three clauses; two dead clauses give no single blocker; siblings sharing a signal measured alone; a firing entry reports the preview's own count). The tests found two real bugs in the first design (probes ignored precedence; clauses counted on bars before warm-up). Mutation-checked. The preview route now materialises parameters at their defaults (`agent_preview.rs`), so swept drafts preview for every caller. **Comments are not stored** (ADR-S5-07): they are parsed, addressed, and shown by `explain_strategy` from the author's text; they do not survive the stored form.
 
 ~~`crates/strategy-lang` **does not exist**.~~ **False as of 2026-09-21, and it was false when it was written under seven separate tasks.** The crate is **13,877 lines over 129 passing tests** — `lex, ast, parse, compile, decompile, diff, suggest, block, form, skeleton, catalogue, diagnostic`. What was true is worse and more specific: **nothing in the workspace depended on it.** `grep strategy-lang crates/*/Cargo.toml` matched only its own manifest. Thirteen thousand lines of the built-but-unreached shape. See the note at the head of this file.
 
@@ -643,6 +646,29 @@ blocking profile identifies the sole blocker on a fixture built to have one.
 **Traces:** AGENT-011 §3, §4; §8.3.
 
 ---
+
+## Decisions recorded 2026-10-03 (track LANG)
+
+Set U landed SLv3 — a second text language over a typed graph (`strategy_lang::v3`, `/api/v3/*`,
+`*_strategy_v3` tools, `docs/agent/slv3-guide.md`) — while this phase was open. SLv2 and SLv3
+overlap in purpose, so before touching any task each one was decided against what Set U built:
+**(a)** still needed on SLv2 as written, **(b)** already covered by Set U, **(c)** retargeted so one
+piece serves both. The ADR-INDEX (`docs/ml-platform-context-pack/decisions/ADR-INDEX.md`) is outside
+this track's territory and does not yet carry these rows; the orchestrator should mirror them.
+
+| ID | Decision | Rejected alternative | Why |
+|---|---|---|---|
+| ADR-S5-05 | **Every validator rejection carries a worked example**, not only the third on one path. AGENT-011 §5's "a third identical rejection" is met by a stronger behaviour. | A per-run rejection counter in the MCP server, keyed by `path`. | §5 counts rejections *within a run*; `strategy-validator` is a pure function of one document and the MCP server holds no per-run state a counter could live in without becoming a second ledger. An example the model did not need costs one clause of context; a withheld example costs a model's turn. `rejects_loosening` is untouched. |
+| ADR-S5-06 | **The ten tasks are decided per task against SLv3, and nothing SLv2 is removed before U-8.4.** (a) S-5.8, S-5.9, S-5.10, S-5.11, S-5.12, S-5.15 stay on SLv2/v1 — they operate on the text and the stored v1 definition, which are what the live preview, backtest and paper paths still run. (b) none closes wholly on Set U: SLv3's `validate`/`compile`/`explain`/`build` cover *v3 graphs*, not v1 definitions or SLv2 text. (c) S-5.2, S-5.13, S-5.14 are retargeted so one piece serves both: the feature registry is read by SLv2's `Catalogue`, SLv3's `v3::catalogue::features()` and `list_features` alike, so a family added to `crates/features` appears in all three; the SLv2 guide follows SLv3's `## Title` / anchor / ≤ 4 KB convention in its own file. A v3 header handed to an SLv2 tool is refused by name (`this_is_slv3`) with the pointer to the `*_strategy_v3` tools, not parsed into a diagnostic about a clause the author did not write. | Close the SLv2 tasks as superseded by SLv3. | Set U's own MASTER (§5) and phase 8 keep the old evaluators and grammars until U-8.3/U-8.4, and every strategy stored today is v1 (U-7.3 translated a corpus, not the database). Three of the ten tasks (the registry, the F2 families, the validator's teaching table) are language-independent and would have been lost with it. |
+| ADR-S5-07 | **Comments are not stored on the canonical definition.** S-5.15's "the compiler stores it on the canonical node and the decompiler emits it back" is not built. They are parsed, kept on the syntax tree, addressed like every other clause (`strategy_lang::intent::notes`) and shown by `explain_strategy` when the caller supplies the text. | A comment field on `domain::strategy_def` nodes. | `domain::strategy_def::revision` documents that a comment-like field makes two behaviourally identical documents hash differently, which would make every rewording of a note a new revision and a new apparent trial for anything deduplicating on the content hash — the error `N_eff` exists to prevent. SLv3's graph excludes comments for the same reason (ADR-0045), and v1 retires at U-8.4. What would close the gap without touching the hash is a `source_text` column on `strategy_revision` (a ledger migration; reported, not built). |
+| ADR-S5-08 | **The blocking profile is measured by previewing the same definition with one clause swapped in at a time** (`strategy_lang::probes`, `ProbeSet::counts`), through the platform's own preview route. 1 preview for a one-clause entry, `n + 1` for two, `2n + 1` for three or more; capped at 24 with a named refusal. | Per-clause counting inside `backtest::preview`'s loop, as the task text implies. | Set U forbids new callers of the preview's evaluation loop and retires it at U-8.3, so the new code would have been written into a loop scheduled for deletion; and the language would have to be taught to `crates/backtest`. The preview already reports how many bars a signal was true on, which is the one number every probe needs. Probes keep the strategy's declared inputs, so every probe has the same warm-up and the counts can be subtracted — asserted per run (`probes_disagree`). |
+| ADR-S5-09 | **`lookback_ensemble` is registered as two families, `lookback_ensemble_zscore_n1_n2_n3` and `lookback_ensemble_returns_n1_n2_n3`**, equal-weight over exactly three lookbacks. | DATA-006's `lookback_ensemble(f, n=[…])` over any feature `f`. | The registry's names are `family_p1_p2…` over integers so a 7B can write the catalogue under a grammar, and a feature cannot take a feature as a parameter — the same limit that keeps `pct_rank(rv(close, 20), 200)` out of the language (ADR-D-14, "a scheduled language item"). An ensemble of one lookback is bit-identical to `zscore_n`/`returns_n`, tested. |
+| ADR-S5-10 | **No migration `0082_feature_registry.sql`; the registry's version is the feature-set hash that already exists.** `runtime::feature_set_version_hash` covers `(feature_id, version, code_hash)` per feature, so any dataset or run that used a feature set records exactly the registry state it read. | A table persisting a registry version. | The registry is code. A table of versions is a second copy a deploy can forget to update, and nothing reads it. |
+| ADR-S5-11 | **S-5.9's measurement uses eight hypothesis goals written for the test, not AGENT-009's research suite.** | Feeding `evals/tasks/planted_edge/*.yaml` prompts to the form. | Those prompts ask an agent to "find out whether it contains any exploitable structure" over a whole funnel; they carry no hypothesis for a clause fill to render, so a fill count over them would measure the harness, not the grammar. Stated so the number is not read as an AGENT-009 result. |
+| ADR-S5-12 | **The skeleton and blocking tests run the production preview over a deterministic synthetic hourly series, not BTC-USD.** | Reading BTC-USD from ClickHouse in a test. | No database is available to a test. What is asserted is about the language (a skeleton fires; a clause is named as the blocker), which a deterministic series can establish; "fires on BTC-USD" is a property of the market and is not claimed. |
+| ADR-S5-13 | **`suggest_moves` accepts `exit_reasons` and `regimes` from the caller** alongside the blocking profile it measures itself. | Waiting for typed producers, which would leave every rule that reads them unreachable. | Nothing in the platform yet produces labelled regime windows or per-exit-reason shares in a typed form. A caller's regime gate is a `Predicate`, checked against the registry at construction, so an unknown feature cannot be smuggled in. |
+| ADR-S5-14 | **Comments are stored beside the revision in `strategy_revision_notes` (0239), keyed by the canonical definition's hash; the definition and its hash are unchanged.** Supersedes the "not stored" half of ADR-S5-07 (owner instruction: store them). | A comment field on `domain::strategy_def` (ADR-S5-07's rejected alternative: it changes the hash, so rewording a note becomes a new revision and a new apparent trial; also ~68 struct literals, mostly Set U). A `source_text` column on the revision table (a ledger migration, stores the whole text). | A side table cannot change an identity the ledger counts. Last text wins per (user, revision). |
+| ADR-S5-15 | **`exit_reasons` is produced by the simulator's stored result, not transcribed by the caller; caller-supplied values still win.** | Adding an exit reason column to `Trade` (changes a type every trade reader touches). | `ExitFill.rule` already records which declared exit fired; counting it is additive in `result_document`. |
 
 ## Exit criteria
 

@@ -1,7 +1,12 @@
 //! AMM/DEX paper swap simulator — used for DEX spot (CryptoSpotDex / 0x).
 //!
-//! Phase 1 skeleton: takes a `FirmQuote` input and returns the quoted
-//! out-amount.  Real 0x HTTP wiring lands in Phase 4.
+//! Fills against a `FirmQuote`. A quote can come from the caller, or from the
+//! real 0x `/swap/permit2/price` endpoint through
+//! `ZeroXQuoter::fetch_quote` (Set E 3.3), whose answer [`firm_quote_from_price`]
+//! shapes. The network call lives in `venues::zerox`, not here: this file is the
+//! venue core and takes prices from what it is handed. The bps model in
+//! [`PaperFillSimulator::simulate_fill`] is the offline / backtest fallback and
+//! needs no network.
 //!
 //! Default configuration models a typical Uniswap v2-style pool:
 //! - 30 bps price impact (linear approximation of x·y=k curve)
@@ -23,8 +28,8 @@ use super::{wallet::InsufficientBalance, DexPaperWallet, PaperFill, PaperFillSim
 
 /// A firm price quote from a DEX aggregator.
 ///
-/// In Phase 1 this is caller-supplied (mocked); Phase 4 populates it from
-/// the 0x Swap API `/price` endpoint.
+/// Caller-supplied, or built from a real 0x price answer by
+/// [`firm_quote_from_price`].
 #[derive(Debug, Clone)]
 pub struct FirmQuote {
     /// Quoted output amount for the swap (in base asset for buys).
@@ -56,6 +61,32 @@ impl Default for AmmQuoteSwapSimulator {
             protocol_fee_bps: dec!(30), // Uniswap v2 standard 0.3% pool fee
             flat_fee: dec!(2),          // ~$2 gas (Ethereum moderate congestion)
         }
+    }
+}
+
+/// Build a [`FirmQuote`] from a parsed 0x price. Pure.
+///
+/// `native_usd` is the USD price of the chain's native token (ETH on mainnet),
+/// supplied by the caller from its own mark board -- 0x reports the fee in the
+/// native token, and a USD figure invented here would be a fabricated cost.
+///
+/// For a **sell** of the base, `out_amount` is the quote token received and the
+/// price is quote per base; for a **buy**, `out_amount` is the base received
+/// and the price is quote spent per base received.
+#[must_use]
+pub fn firm_quote_from_price(
+    price: &crate::venues::zerox::ZeroXPrice,
+    side: Side,
+    native_usd: Decimal,
+) -> FirmQuote {
+    let (out_amount, per_base) = match side {
+        Side::Sell => (price.buy_amount, price.buy_amount / price.sell_amount),
+        Side::Buy => (price.buy_amount, price.sell_amount / price.buy_amount),
+    };
+    FirmQuote {
+        out_amount,
+        effective_price: Price::from_decimal(per_base),
+        fee_usd: price.network_fee_native * native_usd,
     }
 }
 
@@ -117,5 +148,68 @@ impl PaperFillSimulator for AmmQuoteSwapSimulator {
             fill_price,
             fee,
         }
+    }
+}
+
+#[cfg(test)]
+mod quote_tests {
+    use super::*;
+    use crate::venues::zerox::{parse_price_response, ZeroXPrice};
+    use serde_json::json;
+
+    #[test]
+    fn a_usdc_sell_uses_six_decimals_not_eighteen() {
+        // Sell 1 WETH (18 dp) for 2,500 USDC (6 dp).
+        let body = json!({
+            "sellAmount": "1000000000000000000",
+            "buyAmount": "2500000000",
+            "totalNetworkFee": "6000000000000000",
+            "liquidityAvailable": true
+        });
+        let p = parse_price_response(&body, 18, 6).unwrap();
+        assert_eq!(p.sell_amount, Decimal::ONE);
+        assert_eq!(p.buy_amount, Decimal::from(2500));
+        assert_eq!(p.network_fee_native, dec!(0.006));
+        let q = firm_quote_from_price(&p, Side::Sell, dec!(2500));
+        assert_eq!(q.effective_price.inner(), Decimal::from(2500));
+        assert_eq!(q.out_amount, Decimal::from(2500));
+        assert_eq!(q.fee_usd, Decimal::from(15), "0.006 ETH x $2500");
+    }
+
+    #[test]
+    fn a_buy_prices_the_quote_token_spent_per_base_received() {
+        // Spend 2,550 USDC, receive 1 WETH.
+        let p = ZeroXPrice {
+            buy_amount: Decimal::ONE,
+            sell_amount: Decimal::from(2550),
+            network_fee_native: Decimal::ZERO,
+        };
+        let q = firm_quote_from_price(&p, Side::Buy, dec!(2500));
+        assert_eq!(q.effective_price.inner(), Decimal::from(2550));
+        assert_eq!(q.out_amount, Decimal::ONE);
+    }
+
+    #[test]
+    fn an_unusable_answer_is_an_error_not_a_zero_price() {
+        assert!(parse_price_response(&json!({"liquidityAvailable": false}), 18, 6).is_err());
+        assert!(parse_price_response(&json!({"sellAmount": "1", "buyAmount": "0", "totalNetworkFee": "0"}), 18, 6).is_err());
+        assert!(parse_price_response(&json!({"sellAmount": "1", "buyAmount": "2"}), 18, 6).is_err(), "no fee");
+        assert!(parse_price_response(&json!({"sellAmount": "1", "buyAmount": "2", "totalNetworkFee": "0"}), 19, 6).is_err());
+    }
+
+    #[test]
+    fn the_offline_fallback_still_fills_with_no_network() {
+        let sim = AmmQuoteSwapSimulator::default();
+        let intent = OrderIntent::new(
+            "WETH-USDC",
+            Side::Buy,
+            domain::order::OrderType::Market,
+            domain::money::Size::from_decimal(Decimal::ONE),
+            None,
+            None,
+        );
+        let fill = sim.simulate_fill(&intent, Price::from_decimal(Decimal::from(2500)));
+        assert!(fill.fill_price.inner() > Decimal::from(2500), "a buy pays impact");
+        assert!(fill.fee >= dec!(2));
     }
 }

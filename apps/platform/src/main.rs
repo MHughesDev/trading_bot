@@ -5,6 +5,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod allocator;
 mod bar_persist;
 mod book_feed;
+mod census_jobs;
 mod feature_jobs;
 mod health_jobs;
 mod hot_path;
@@ -17,6 +18,7 @@ mod parity_jobs;
 mod pipeline_manager;
 mod regime_jobs;
 mod screener_jobs;
+mod retention_jobs;
 mod series_runner;
 mod tee;
 #[cfg(test)]
@@ -53,6 +55,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     info!(version = env!("CARGO_PKG_VERSION"), "platform starting");
+
+    // Prometheus exporter (E-5.1). Loopback only; a bind failure must not stop trading.
+    match observability::init_metrics(std::net::SocketAddr::from(([127, 0, 0, 1], 9100))).await {
+        Ok(addr) => info!(%addr, "metrics exporter listening"),
+        Err(e) => warn!(error = %e, "metrics exporter did not start"),
+    }
 
     // Connect to Postgres as the owner for migrations only.
     let owner_pg = storage::postgres::connect(&cfg.database.url)
@@ -110,6 +118,15 @@ async fn main() -> anyhow::Result<()> {
     parity_jobs::spawn(pg.clone());
     leakage_jobs::spawn(pg.clone());
     health_jobs::spawn(pg.clone(), cfg.clickhouse.url.clone());
+    census_jobs::spawn(pg.clone(), cfg.clickhouse.url.clone());
+    // Memory retention sweep (S-4.16) and the nightly replayability sampler (S-4.8).
+    api::memory_store::spawn_retention_sweep(pg.clone());
+    api::trace_from_effects::spawn_replay_sampler(pg.clone());
+    // Standing eval-holdout draw (S-4.17) and the daily token calibration (S-4.12).
+    api::eval_store::spawn_eval_jobs(pg.clone());
+    // The attribution corpus read and weight fit (S-9.10, S-9.12): reports on whatever exists.
+    api::context_corpus::spawn_context_corpus_job(pg.clone());
+    retention_jobs::spawn(pg.clone(), cfg.clickhouse.url.clone());
     // The rule-tier regime labeller (SPEC §5.4, ADR-P3-02). Scoped to the
     // instruments that have bars: a regime is read against the market a strategy
     // trades, and there is no platform-wide "the market" that means the same
@@ -164,6 +181,18 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("failed to sync identity dimensions")?;
     storage::identity::install(identity);
+    // Forward funding-rate / open-interest collector (Set P P-0.3). Data not collected
+    // today cannot be collected later at any price, so it starts at boot. A missing
+    // source is an error here, not a task that died silently.
+    {
+        let ids = collectors::derivs::sink::SourceIds::new(
+            storage::clickhouse::forward::source_ids(&pg)
+                .await
+                .context("failed to read dataplane.source for the forward collector")?,
+        );
+        collectors::derivs::runner::spawn(cfg.clickhouse.url.clone(), ids)
+            .context("failed to start the forward derivatives collector")?;
+    }
     let canonical = storage::clickhouse::canonical::migrate_to_canonical(&cfg.clickhouse.url, &pg)
         .await
         .context("failed to migrate bars into market_bar")?;
@@ -184,6 +213,11 @@ async fn main() -> anyhow::Result<()> {
         risk::GlobalRiskLimits::default(),
         Arc::clone(&kill_switch),
     ));
+    // A reconciliation halt must survive a restart, and only a human clears it (T-0.3).
+    reconciliation::halts::spawn_rehydration(pg.clone(), Arc::clone(risk_gate.halt_registry()));
+    // The capital-ramp review (Set T T-3.2, T-3.3): its effects land on this very
+    // kill switch, which the gate above reads for a strategy's size (ADR-T3-03).
+    health_jobs::spawn_ramp(pg.clone(), Arc::clone(&kill_switch));
 
     // Attach reconciliation to the fill stream, before anything can produce a
     // fill (T-0.1). This is the wire the whole forward-evidence set waits on:
@@ -242,6 +276,13 @@ async fn main() -> anyhow::Result<()> {
     let paper_engine = Arc::new(execution::paper::PaperTradingEngine::realistic());
     let paper_broker = paper_engine.multi_asset_broker();
     let execution_engine = Arc::new(execution::ExecutionEngine::new(Arc::new(paper_broker)));
+    // Accounts, positions and cash survive a restart (E audit #5). `restore` runs before
+    // any order or mark can arrive; a state version it does not know refuses boot rather
+    // than silently reseeding.
+    execution::paper::persist::restore(&paper_engine, &pg)
+        .await
+        .context("paper account state could not be restored")?;
+    execution::paper::persist::spawn_saver(Arc::clone(&paper_engine), pg.clone());
     info!("in-house paper trading engine initialised (per-class accounts, realism gates on, no external APIs)");
 
     // Perpetual-swap funding: charge open perp positions hourly at a flat
@@ -337,6 +378,8 @@ async fn main() -> anyhow::Result<()> {
                 live_sidecar,
                 model_registry::provider::llm::LlmCaps::default(),
             )),
+            // Loaded per deployment by the supervisor (P-3.6).
+            external: None,
         },
         pg.clone(),
         cfg.clickhouse.url.clone(),
@@ -433,6 +476,37 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // A training run that was in flight when the platform died resumes from its last
+    // checkpoint, or fails with a named reason (never left `running` forever).
+    {
+        let mm = Arc::clone(&model_manager);
+        tokio::spawn(async move {
+            let report = mm.recover_interrupted_runs().await;
+            info!(?report, "interrupted training runs recovered");
+        });
+    }
+
+    // Nightly retrain (H-4.8): models flagged `auto_retrain` get a fresh training run
+    // each period. It starts training only; nothing it starts is promoted. The period
+    // is `TBOT_RETRAIN_PERIOD_HOURS` (default 24; 0 turns the scheduler off), and the
+    // first tick is a full period after boot, so a restart does not retrain.
+    {
+        let hours: u64 = std::env::var("TBOT_RETRAIN_PERIOD_HOURS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(24);
+        if hours > 0 {
+            model_registry::scheduler::RetrainScheduler::new(
+                Arc::clone(&model_manager),
+                std::time::Duration::from_secs(hours * 3600),
+            )
+            .spawn();
+            info!(hours, "retrain scheduler running");
+        } else {
+            info!("retrain scheduler disabled (TBOT_RETRAIN_PERIOD_HOURS=0)");
+        }
+    }
+
     // Internal agent orchestrator — LLM-driven strategy design + backtest
     // loop. Its tool calls go through this platform's own HTTP API on
     // loopback with a run-scoped service token (same path as the MCP server).
@@ -519,6 +593,10 @@ async fn main() -> anyhow::Result<()> {
     // semaphore that nothing outside the backtest manager could see or tune (JB-05).
     // The lease reaper is what makes a job outlive the worker running it: a worker
     // that dies simply stops renewing, and the job returns to the queue (JB-04).
+    // The model quality monitor (N-4.1): CUSUM over realised forecasts. Built and wired into state
+    // but never started before this call.
+    app_state.quality_monitor.clone().spawn();
+
     if let Some(job_store) = app_state.jobs.clone() {
         tokio::spawn(jobs::run_lease_reaper(job_store.clone()));
 
@@ -532,6 +610,19 @@ async fn main() -> anyhow::Result<()> {
             (jobs::WorkerClass::Trainer, 1),
         ];
 
+        // The campaign's children (Set S ML-platform gaps: EXPERIMENT, BASELINE and
+        // COMPARE had no worker, so a campaign that reached them failed `no_worker`).
+        let campaign_eval: std::sync::Arc<dyn api::campaign_driver::study_worker::CampaignEvaluator> =
+            std::sync::Arc::new(api::campaign_driver::study_worker::SuiteEvaluator::new(
+                app_state.suite.clone(),
+                app_state.research.clone(),
+            ));
+
+        // Nightly: re-run a sample of the last thirty days' Runs under their own
+        // receipts and file an evaluator defect on drift (S-10.8). A reproduction
+        // runs under a reproduction ticket and spends no trial.
+        api::repro_drift::spawn(app_state.suite.clone(), app_state.pg.clone());
+
         for (class, parallel) in pools.iter().copied() {
             let mut pool = jobs::WorkerPool::new(job_store.clone(), class, parallel);
             // Register the workers this class knows how to run. Kinds with no
@@ -544,7 +635,37 @@ async fn main() -> anyhow::Result<()> {
                 // look at its out-of-sample behaviour, and the counter climbs
                 // for it like everything else (INV-1).
                 pool = pool.register(std::sync::Arc::new(
-                    api::gate_worker::GateAdvanceWorker::new(app_state.pg.clone()),
+                    api::gate_worker::GateAdvanceWorker::new(app_state.pg.clone()).with_funnel(
+                        std::sync::Arc::new(api::campaign_driver::funnel_worker::SuiteFunnel::new(
+                            app_state.suite.clone(),
+                            campaign_eval.clone(),
+                            app_state.pg.clone(),
+                        )),
+                    ),
+                ));
+                pool = pool.register(std::sync::Arc::new(
+                    api::campaign_driver::study_worker::StudyWorker::new(
+                        job_store.clone(),
+                        app_state.pg.clone(),
+                        campaign_eval.clone(),
+                    ),
+                ));
+                pool = pool.register(std::sync::Arc::new(
+                    api::campaign_driver::study_worker::BaselineWorker::new(
+                        job_store.clone(),
+                        app_state.pg.clone(),
+                        campaign_eval.clone(),
+                    ),
+                ));
+            }
+            if class == jobs::WorkerClass::Eval {
+                // The COMPARE stage: the first production caller of `ComparisonPlan::judge`.
+                pool = pool.register(std::sync::Arc::new(
+                    api::campaign_driver::compare_worker::CompareWorker::new(
+                        job_store.clone(),
+                        app_state.pg.clone(),
+                        campaign_eval.clone(),
+                    ),
                 ));
             }
             if class == jobs::WorkerClass::Trainer {
@@ -561,9 +682,19 @@ async fn main() -> anyhow::Result<()> {
                 ));
             }
             if class == jobs::WorkerClass::Data {
+                pool = pool.register(std::sync::Arc::new(
+                    api::knowledge_jobs::instrument_profile_worker::InstrumentProfileWorker::new(
+                        app_state.pg.clone(),
+                        cfg.clickhouse.url.clone(),
+                        std::sync::Arc::new(
+                            api::knowledge_jobs::instrument_profile_worker::HttpProfileSidecar::from_env(),
+                        ),
+                    ),
+                ));
                 pool = pool.register(std::sync::Arc::new(api::workers::DataQcWorker::new(
                     cfg.clickhouse.url.clone(),
-                )));
+                )
+                .with_pool(app_state.pg.clone())));
                 // Deep history (Set P P-1.1). **`JobKind::Backfill` had no worker
                 // anywhere**, so every submitted window queued for ever — the same
                 // shape as S-10.11's `ResearchRun`, one aisle over. Registered here
@@ -621,6 +752,24 @@ async fn main() -> anyhow::Result<()> {
                             cursors.clone(),
                         ),
                     ));
+                // Kraken's downloadable history files (P-1.3). Inert until
+                // `config/kraken_archive.toml` declares its checksums.
+                let backfill = match collectors::backfill::kraken::KrakenArchiveBackfill::from_config_file(
+                    "config/kraken_archive.toml",
+                ) {
+                    Ok(Some(archive)) => backfill.with(std::sync::Arc::new(
+                        jobs::kinds::backfill::BackfillEngine::new(
+                            std::sync::Arc::new(archive),
+                            sink.clone(),
+                            cursors.clone(),
+                        ),
+                    )),
+                    Ok(None) => backfill,
+                    Err(e) => {
+                        warn!(error = %e, "kraken archive backfill config is invalid; not registered");
+                        backfill
+                    }
+                };
                 info!(
                     sources = ?backfill.sources(),
                     "backfill worker registered"
@@ -632,6 +781,21 @@ async fn main() -> anyhow::Result<()> {
                 // rather than a data one because it produces instruments for
                 // research to consume, and because the data pool is the one that
                 // must stay free for live collection.
+                // Layer 1 research strategies (Set M M-1.5): runs the function and its
+                // Gate-0 truncation re-runs, then dispatches the one counted evaluation.
+                // Registered here because `JobKind::Layer1Run` is a Research-class kind.
+                pool = pool.register(std::sync::Arc::new(api::layer1_worker::Layer1Worker::new(
+                    job_store.clone(),
+                    app_state.pg.clone(),
+                    cfg.clickhouse.url.clone(),
+                    app_state.artifacts.clone(),
+                )));
+                // `JobKind::DatasetBuild` had no worker (Set N N-1.5): builds a declared
+                // dataset and runs the leakage harness; a leak ends terminal and nothing
+                // is registered. Research-class kind.
+                pool = pool.register(std::sync::Arc::new(
+                    api::dataset_build_worker::worker(app_state.pg.clone()),
+                ));
                 pool = pool.register(std::sync::Arc::new(
                     api::synthetic_worker::SimulatePathsWorker::new(
                         cfg.clickhouse.url.clone(),
@@ -685,6 +849,9 @@ async fn main() -> anyhow::Result<()> {
             tokio::spawn(std::sync::Arc::new(pool).run_forever());
         }
 
+        // Hourly tensor-projection rebuild and the daily instrument-profile job.
+        api::knowledge_jobs::spawn_timers(app_state.pg.clone(), Some(job_store.clone()));
+
         info!(
             backtest = cfg.jobs.backtest_parallel,
             research = cfg.jobs.research_parallel,
@@ -694,20 +861,14 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    let guard_pg = app_state.pg.clone();
     let router = api::router(app_state);
 
-    // Safety guardrail (M-17): refuse to bind on a network-accessible address
-    // while bearer-token auth is still the placeholder (any non-empty token
-    // accepted).  Remove this check when Phase 2 session validation lands.
-    let is_loopback = matches!(cfg.api.host.as_str(), "127.0.0.1" | "::1" | "localhost");
-    if !is_loopback {
-        anyhow::bail!(
-            "SECURITY: auth is placeholder-only (M-17) — refusing to bind on \
-             non-loopback address '{}'. Set api.host to 127.0.0.1 or implement \
-             Phase 2 session validation first.",
-            cfg.api.host
-        );
-    }
+    // Session validation has landed (E-1.1..1.6), so the guard checks that the hardening
+    // is present in the database rather than assuming it is absent.
+    api::auth::hardening::require_bindable(&cfg.api.host, &guard_pg)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     // Bind and serve.
     let addr = format!("{}:{}", cfg.api.host, cfg.api.port);

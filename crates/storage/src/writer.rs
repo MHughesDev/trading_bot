@@ -78,6 +78,33 @@ pub struct RawEvent {
     pub raw_json: Vec<u8>,
 }
 
+impl RawEvent {
+    /// The archive row for one normalized trade envelope: the envelope as JSON
+    /// (`EventEnvelope` is `Serialize`), partitioned by lane, venue, instrument
+    /// and the UTC date of its **exchange** timestamp.
+    ///
+    /// `event_id` is `venue/instrument/source/sequence` — unique per source
+    /// stream, which is what [`DedupRing`] needs. `None` when the envelope
+    /// cannot be named or dated (an unknown interned id or an out-of-range
+    /// timestamp): such an event is not archived into a guessed partition.
+    #[must_use]
+    pub fn from_envelope(lane: &str, env: &domain::EventEnvelope) -> Option<Self> {
+        let venue = domain::interned::venue_name(env.venue_id)?;
+        let instrument = domain::interned::instrument_name(env.instrument_id)?;
+        let source = domain::interned::source_name(env.source_id)?;
+        let date = chrono::DateTime::from_timestamp_nanos(env.timestamp_ns).date_naive();
+        let raw_json = serde_json::to_vec(env).ok()?;
+        Some(Self {
+            lane: lane.to_owned(),
+            venue_id: venue.clone(),
+            instrument_id: instrument.clone(),
+            date,
+            event_id: format!("{venue}/{instrument}/{source}/{}", env.sequence),
+            raw_json,
+        })
+    }
+}
+
 /// Handle to the background batching writer.
 pub struct StorageWriter {
     tx: mpsc::Sender<RawEvent>,
@@ -87,7 +114,17 @@ impl StorageWriter {
     /// Create and spawn the background writer task.
     pub fn new(pg: PgPool, ch: ChClient, parquet: Arc<ParquetWriter>) -> Self {
         let (tx, rx) = mpsc::channel(100_000);
-        tokio::spawn(writer_task(rx, pg, ch, parquet));
+        let _ = (pg, ch);
+        tokio::spawn(archive_task(rx, parquet));
+        Self { tx }
+    }
+
+    /// A writer that only archives to Parquet. The Postgres and ClickHouse
+    /// handles `new` takes are unused by the writer task (it has only ever
+    /// written Parquet), so the ingest path should not have to hold them.
+    pub fn archive_only(parquet: Arc<ParquetWriter>) -> Self {
+        let (tx, rx) = mpsc::channel(100_000);
+        tokio::spawn(archive_task(rx, parquet));
         Self { tx }
     }
 
@@ -103,12 +140,7 @@ impl StorageWriter {
 // Background task
 // ---------------------------------------------------------------------------
 
-async fn writer_task(
-    mut rx: mpsc::Receiver<RawEvent>,
-    _pg: PgPool,
-    _ch: ChClient,
-    parquet: Arc<ParquetWriter>,
-) {
+async fn archive_task(mut rx: mpsc::Receiver<RawEvent>, parquet: Arc<ParquetWriter>) {
     let mut batch: Vec<RawEvent> = Vec::with_capacity(BATCH_SIZE);
     let mut ticker = interval(FLUSH_INTERVAL);
     let mut dedup = DedupRing::new(DEDUP_CAPACITY);
@@ -187,5 +219,36 @@ async fn flush_batch(
         }
     }
 
+    observability::metrics::inc(
+        "archive_flushes_total",
+        "Raw-event archive batches flushed to Parquet.",
+        &[],
+    );
     batch.clear();
+}
+
+#[cfg(test)]
+mod from_envelope_tests {
+    use super::*;
+
+    #[test]
+    fn an_envelope_becomes_a_dated_partitioned_row_with_a_stable_id() {
+        let env = domain::EventEnvelope::new(
+            domain::interned::intern_instrument("ARCHIVE-TEST-USD"),
+            domain::interned::intern_venue("archive_test_venue"),
+            domain::interned::intern_source("archive_test_ws"),
+            7,
+            1_780_000_000_000_000_000,
+            vec![1, 2, 3],
+        );
+        let ev = RawEvent::from_envelope("market.trades", &env).expect("nameable");
+        assert_eq!(ev.venue_id, "archive_test_venue");
+        assert_eq!(ev.instrument_id, "ARCHIVE-TEST-USD");
+        assert_eq!(
+            ev.event_id,
+            "archive_test_venue/ARCHIVE-TEST-USD/archive_test_ws/7"
+        );
+        assert_eq!(ev.date.to_string(), "2026-05-28");
+        assert!(!ev.raw_json.is_empty());
+    }
 }

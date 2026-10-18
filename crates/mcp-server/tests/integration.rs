@@ -568,7 +568,7 @@ async fn compare_backtests_returns_side_by_side_rows() {
         json!({ "backtest_ids": ["one"] }),
     )
     .await;
-    assert_eq!(r["error"], "invalid_request");
+    assert_eq!(r["error"]["code"], "invalid_request");
 }
 
 // ─── Automations ─────────────────────────────────────────────────────────────
@@ -600,7 +600,7 @@ async fn automations_route_through_api_and_live_is_gated() {
     )
     .await;
     assert_eq!(
-        r.get("error").and_then(|v| v.as_str()),
+        r.pointer("/error/code").and_then(|v| v.as_str()),
         Some("live_automations_disabled")
     );
 
@@ -644,7 +644,7 @@ async fn duplicate_node_id_returns_error() {
     call(&ctx, "add_condition_node", node.clone()).await;
     let r = call(&ctx, "add_condition_node", node).await;
     assert_eq!(
-        r.get("error").and_then(|v| v.as_str()),
+        r.pointer("/error/code").and_then(|v| v.as_str()),
         Some("duplicate_node_id")
     );
 }

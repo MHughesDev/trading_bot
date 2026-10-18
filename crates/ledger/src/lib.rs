@@ -15,9 +15,11 @@ pub mod audit;
 pub mod campaign;
 pub mod capacity;
 pub mod capital;
+pub mod deployment_path;
 pub mod evidence;
 pub mod falsification;
 pub mod falsification_store;
+pub mod fleet_ceiling;
 pub mod gates;
 pub mod holdout;
 pub mod internal;
@@ -29,6 +31,9 @@ pub mod portfolio;
 pub mod prereg;
 pub mod presets;
 pub mod proposal;
+pub mod ramp;
+pub mod ramp_gate;
+pub mod reproduction;
 pub mod reservation;
 pub mod state;
 pub mod tiers;
@@ -368,6 +373,10 @@ pub struct TrialTicket {
     tenant_id: String,
     config_hash: String,
     state: TrialState,
+    /// Set only on a reproduction ticket: the completed trial this ticket
+    /// authorises a re-run of. A reproduction has no trial row of its own, so
+    /// `trial_id` is a fresh id nothing in `mlops.trial` carries.
+    reproduces: Option<Uuid>,
 }
 
 impl TrialTicket {
@@ -390,6 +399,37 @@ impl TrialTicket {
     pub fn state(&self) -> TrialState {
         self.state
     }
+
+    /// The completed trial this ticket authorises a re-run of, when it is a
+    /// reproduction ticket (ADR-S10-18). `None` for a trial's own ticket.
+    #[must_use]
+    pub fn reproduces(&self) -> Option<Uuid> {
+        self.reproduces
+    }
+
+    /// Refuse a trial operation on a reproduction ticket.
+    pub(crate) fn refuse_if_reproduction(&self) -> Result<(), LedgerError> {
+        match self.reproduces {
+            Some(original) => Err(LedgerError::ReproductionIsNotATrial(original)),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Mint a reproduction ticket for a trial that already completed. Crate-private:
+/// the ledger decides that the original exists and completed before one is minted.
+pub(crate) fn mint_reproduction(
+    original: Uuid,
+    tenant_id: String,
+    config_hash: String,
+) -> TrialTicket {
+    TrialTicket {
+        trial_id: Uuid::new_v4(),
+        tenant_id,
+        config_hash,
+        state: TrialState::Registered,
+        reproduces: Some(original),
+    }
 }
 
 pub(crate) fn mint(trial_id: Uuid, tenant_id: String, config_hash: String) -> TrialTicket {
@@ -398,6 +438,7 @@ pub(crate) fn mint(trial_id: Uuid, tenant_id: String, config_hash: String) -> Tr
         tenant_id,
         config_hash,
         state: TrialState::Registered,
+        reproduces: None,
     }
 }
 
@@ -547,6 +588,10 @@ pub enum LedgerError {
     Invalid(String),
     #[error("unknown trial {0}")]
     UnknownTrial(Uuid),
+    #[error("a reproduction ticket authorises a re-run of trial {0} and nothing else: it cannot be transitioned, settled or given a return series, because each of those is a look and a reproduction is not one (ADR-P2-17, ADR-S10-18)")]
+    ReproductionIsNotATrial(Uuid),
+    #[error("nothing to reproduce: no completed trial of this tenant has run id `{0}`")]
+    NothingToReproduce(String),
     #[error("ledger backend: {0}")]
     Backend(String),
 }
@@ -573,6 +618,50 @@ pub trait TrialLedger: Send + Sync {
     /// The most recent terminal, non-deduplicated trial with this config hash —
     /// the target a deduplicated dispatch points at (AT-25).
     fn prior_trial(&self, tenant_id: &str, config_hash: &str) -> Option<Uuid>;
+
+    /// A ticket authorising a **re-run** of a trial that already completed, with
+    /// no trial row of its own (ADR-P2-17, ADR-S10-18). `run_id` is the
+    /// `config_hash` the original registered under.
+    ///
+    /// The ticket is refused by `transition`, `settle` and `persist_returns`: a
+    /// reproduction is a check on a look and not a look.
+    ///
+    /// # Errors
+    /// [`LedgerError::NothingToReproduce`] when no completed trial of this tenant
+    /// carries `run_id`.
+    fn begin_reproduction(
+        &self,
+        tenant_id: &str,
+        run_id: &str,
+    ) -> Result<TrialTicket, LedgerError> {
+        let original = self
+            .prior_trial(tenant_id, run_id)
+            .ok_or_else(|| LedgerError::NothingToReproduce(run_id.to_string()))?;
+        Ok(mint_reproduction(
+            original,
+            tenant_id.to_string(),
+            run_id.to_string(),
+        ))
+    }
+
+    /// Append what a reproduction found, consuming its ticket. Writes
+    /// `mlops.reproduction` and nothing in `mlops.trial`.
+    ///
+    /// # Errors
+    /// A ticket that is not a reproduction ticket, a record that fails
+    /// [`reproduction::ReproductionRecord::validate`], and backend failures. The
+    /// default refuses: a ledger that cannot persist the finding must not let a
+    /// reproduction run and vanish.
+    fn record_reproduction(
+        &self,
+        ticket: TrialTicket,
+        record: &reproduction::ReproductionRecord,
+    ) -> Result<(), LedgerError> {
+        let _ = (ticket, record);
+        Err(LedgerError::Backend(
+            "this ledger does not record reproductions".into(),
+        ))
+    }
 
     /// Every look on this stream: failures, cache hits and exploration included.
     fn trial_count(&self, tenant_id: &str) -> usize;
@@ -785,6 +874,20 @@ impl<T: TrialLedger + ?Sized> TrialLedger for std::sync::Arc<T> {
     }
     fn prior_trial(&self, tenant_id: &str, config_hash: &str) -> Option<Uuid> {
         (**self).prior_trial(tenant_id, config_hash)
+    }
+    fn begin_reproduction(
+        &self,
+        tenant_id: &str,
+        run_id: &str,
+    ) -> Result<TrialTicket, LedgerError> {
+        (**self).begin_reproduction(tenant_id, run_id)
+    }
+    fn record_reproduction(
+        &self,
+        ticket: TrialTicket,
+        record: &reproduction::ReproductionRecord,
+    ) -> Result<(), LedgerError> {
+        (**self).record_reproduction(ticket, record)
     }
     fn trial_count(&self, tenant_id: &str) -> usize {
         (**self).trial_count(tenant_id)
@@ -1191,12 +1294,26 @@ pub struct InMemoryLedger {
     /// Appended part-by-part like the Postgres tables, so a second write that
     /// carries only a factor battery does not erase the cost ladder.
     gate_evidence: Mutex<std::collections::BTreeMap<(String, Uuid), evidence::TrialEvidence>>,
+    /// `(tenant, original trial, record)`, append-only like `mlops.reproduction`.
+    reproductions: Mutex<Vec<(String, Uuid, reproduction::ReproductionRecord)>>,
 }
 
 impl InMemoryLedger {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The reproductions recorded for a tenant, oldest first.
+    #[must_use]
+    pub fn reproductions(&self, tenant_id: &str) -> Vec<(Uuid, reproduction::ReproductionRecord)> {
+        self.reproductions
+            .lock()
+            .expect("ledger poisoned")
+            .iter()
+            .filter(|(t, _, _)| t == tenant_id)
+            .map(|(_, o, r)| (*o, r.clone()))
+            .collect()
     }
 
     /// The shaped gate evidence recorded for a trial, or `None` when none was.
@@ -1381,6 +1498,7 @@ impl TrialLedger for InMemoryLedger {
     }
 
     fn transition(&self, ticket: &mut TrialTicket, event: TrialEvent) -> Result<(), LedgerError> {
+        ticket.refuse_if_reproduction()?;
         if event.state.is_some_and(TrialState::is_terminal) {
             return Err(LedgerError::Invalid(
                 "terminal transitions go through settle(), which consumes the ticket".into(),
@@ -1391,12 +1509,31 @@ impl TrialLedger for InMemoryLedger {
     }
 
     fn settle(&self, ticket: TrialTicket, event: TrialEvent) -> Result<(), LedgerError> {
+        ticket.refuse_if_reproduction()?;
         if !event.state.is_some_and(TrialState::is_terminal) {
             return Err(LedgerError::Invalid(
                 "settle() requires a terminal state".into(),
             ));
         }
         self.append(ticket.trial_id, &event, ticket.state)?;
+        Ok(())
+    }
+
+    fn record_reproduction(
+        &self,
+        ticket: TrialTicket,
+        record: &reproduction::ReproductionRecord,
+    ) -> Result<(), LedgerError> {
+        let Some(original) = ticket.reproduces else {
+            return Err(LedgerError::Invalid(
+                "only a reproduction ticket records a reproduction".into(),
+            ));
+        };
+        record.validate().map_err(LedgerError::Invalid)?;
+        self.reproductions
+            .lock()
+            .expect("ledger poisoned")
+            .push((ticket.tenant_id, original, record.clone()));
         Ok(())
     }
 
@@ -1441,6 +1578,7 @@ impl TrialLedger for InMemoryLedger {
         ticket: &TrialTicket,
         series: &neff::ReturnSeries,
     ) -> Result<String, LedgerError> {
+        ticket.refuse_if_reproduction()?;
         series.validate()?;
         if !self
             .trials
@@ -1958,6 +2096,120 @@ mod tests {
             .unwrap();
         assert_eq!(l.events(second_id)[0].deduplicated_of, Some(first_id));
         assert_eq!(l.trial_count("tenant-a"), 2, "the dedup is still a look");
+    }
+
+    /// S-10.8 / ADR-S10-18: a reproduction is not a look. It runs under a ticket
+    /// the ledger mints for a completed trial, and nothing in the trial table or
+    /// any count moves.
+    #[test]
+    fn a_reproduction_is_not_a_look() {
+        let l = InMemoryLedger::new();
+        let c = ctx();
+        let s = subject(9);
+        let mut first = l.register(&Registration::new(&c, &s, 0.5)).unwrap();
+        let first_id = first.trial_id();
+        l.transition(&mut first, TrialEvent::to(TrialState::Running))
+            .unwrap();
+        l.settle(first, TrialEvent::completed("run9", None)).unwrap();
+        let rows_before = l.rows("tenant-a");
+        let count_before = l.trial_count("tenant-a");
+        let n_eff_before = l.n_eff("tenant-a").unwrap().value();
+
+        let ticket = l.begin_reproduction("tenant-a", &s.config_hash).unwrap();
+        assert_eq!(ticket.reproduces(), Some(first_id));
+        assert_ne!(ticket.trial_id(), first_id, "it has no trial row of its own");
+        l.record_reproduction(
+            ticket,
+            &reproduction::ReproductionRecord {
+                run_id: s.config_hash.clone(),
+                outcome: "bit_identical".into(),
+                receipt_stored: None,
+                receipt_rerun: serde_json::json!({}),
+                differences: serde_json::json!([]),
+                was_value: None,
+                now_value: None,
+                reproduced_by: "test".into(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(l.trial_count("tenant-a"), count_before, "no trial was counted");
+        assert_eq!(l.rows("tenant-a"), rows_before, "the hash chain did not move");
+        assert_eq!(l.n_eff("tenant-a").unwrap().value().to_bits(), n_eff_before.to_bits());
+        assert_eq!(l.reproductions("tenant-a").len(), 1);
+        assert!(l.reproductions("tenant-a")[0].1.receipt_missing());
+    }
+
+    /// The ticket authorises a re-run and nothing else: every trial operation
+    /// refuses it, so a reproduction cannot become a look in disguise.
+    #[test]
+    fn a_reproduction_ticket_cannot_do_what_a_trial_ticket_does() {
+        let l = InMemoryLedger::new();
+        let c = ctx();
+        let s = subject(10);
+        let mut first = l.register(&Registration::new(&c, &s, 0.5)).unwrap();
+        l.transition(&mut first, TrialEvent::to(TrialState::Running))
+            .unwrap();
+        l.settle(first, TrialEvent::completed("run10", None)).unwrap();
+
+        let mut t = l.begin_reproduction("tenant-a", &s.config_hash).unwrap();
+        assert!(matches!(
+            l.transition(&mut t, TrialEvent::to(TrialState::Running)),
+            Err(LedgerError::ReproductionIsNotATrial(_))
+        ));
+        let series = neff::ReturnSeries {
+            timestamps: (0..3)
+                .map(|d| chrono::DateTime::from_timestamp(86_400 * d, 0).unwrap())
+                .collect(),
+            returns: vec![0.01, 0.02, -0.01],
+        };
+        assert!(matches!(
+            l.persist_returns(&t, &series),
+            Err(LedgerError::ReproductionIsNotATrial(_))
+        ));
+        assert!(matches!(
+            l.settle(t, TrialEvent::completed("x", None)),
+            Err(LedgerError::ReproductionIsNotATrial(_))
+        ));
+    }
+
+    /// Nothing to reproduce is refused rather than minted: the authorisation is
+    /// "this look exists and completed".
+    #[test]
+    fn a_reproduction_of_nothing_is_refused() {
+        let l = InMemoryLedger::new();
+        assert!(matches!(
+            l.begin_reproduction("tenant-a", "sha256:never-ran"),
+            Err(LedgerError::NothingToReproduce(_))
+        ));
+        // A registered but unfinished trial is not a completed look either.
+        let c = ctx();
+        let s = subject(11);
+        l.register(&Registration::new(&c, &s, 0.5)).unwrap();
+        assert!(matches!(
+            l.begin_reproduction("tenant-a", &s.config_hash),
+            Err(LedgerError::NothingToReproduce(_))
+        ));
+    }
+
+    /// A trial's own ticket cannot record a reproduction.
+    #[test]
+    fn a_trial_ticket_cannot_record_a_reproduction() {
+        let l = InMemoryLedger::new();
+        let c = ctx();
+        let s = subject(12);
+        let t = l.register(&Registration::new(&c, &s, 0.5)).unwrap();
+        let rec = reproduction::ReproductionRecord {
+            run_id: "r".into(),
+            outcome: "bit_identical".into(),
+            receipt_stored: None,
+            receipt_rerun: serde_json::json!({}),
+            differences: serde_json::json!([]),
+            was_value: None,
+            now_value: None,
+            reproduced_by: "t".into(),
+        };
+        assert!(l.record_reproduction(t, &rec).is_err());
     }
 
     #[test]

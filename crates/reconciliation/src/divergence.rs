@@ -100,6 +100,11 @@ pub fn check_position_divergence(
 ) -> ReconcileOutcome {
     let outcome = compare_position(instrument_id, internal_qty, broker_qty);
     if let ReconcileOutcome::Diverged { .. } = &outcome {
+        observability::metrics::inc(
+            "reconciliation_divergences_total",
+            "Position divergences that halted trading.",
+            &[],
+        );
         error!(
             %instrument_id,
             %internal_qty,
@@ -151,6 +156,11 @@ pub async fn check_position_divergence_at_venue(
 ) -> Result<ReconcileOutcome, StoreError> {
     let outcome = compare_position(instrument_id, internal_qty, broker_qty);
     if let ReconcileOutcome::Diverged { .. } = &outcome {
+        observability::metrics::inc(
+            "reconciliation_divergences_total",
+            "Position divergences that halted trading.",
+            &[],
+        );
         error!(
             %instrument_id,
             %venue_id,
@@ -236,6 +246,33 @@ impl DivergenceMonitor {
             bars: 0,
             signal_matches: 0,
         })
+    }
+
+    /// Rebuild a monitor after a restart from the bars already judged.
+    ///
+    /// `folded` is `(realised, expected, signal_matched)` per stored bar, in
+    /// order. They are **folded, not judged**: replaying them through
+    /// [`Self::on_bar`] would re-raise a halt a human has already cleared, which
+    /// is a restart resuming the very divergence it was told was resolved. A halt
+    /// still in force comes back through the halt table, not through here.
+    ///
+    /// # Errors
+    /// An invalid [`DeploymentSpec`].
+    pub fn resume(
+        spec: DeploymentSpec,
+        halts: Arc<StrategyHaltRegistry>,
+        folded: impl IntoIterator<Item = (f64, f64, bool)>,
+    ) -> Result<Self, ForwardError> {
+        let mut m = Self::new(spec, halts)?;
+        for (realised, expected, matched) in folded {
+            m.bars += 1;
+            if matched {
+                m.signal_matches += 1;
+            }
+            m.realised_growth *= 1.0 + realised;
+            m.expected_growth *= 1.0 + expected;
+        }
+        Ok(m)
     }
 
     #[must_use]
@@ -363,6 +400,26 @@ mod tests {
 
     fn ks() -> Arc<KillSwitch> {
         Arc::new(KillSwitch::new(false))
+    }
+
+    /// Set E E-5.1: a divergence that halts is counted. The registry is
+    /// process-global and other tests in this binary diverge too, so this can
+    /// only assert that the count went up, never that a match left it alone.
+    #[test]
+    fn a_divergence_that_halts_is_counted() {
+        let count = || {
+            observability::metrics::global()
+                .counter_value("reconciliation_divergences_total", &[])
+                .unwrap_or(0)
+        };
+        let before = count();
+        let _ = check_position_divergence(
+            "BTC-USD",
+            Decimal::from_str("1.0").unwrap(),
+            Decimal::from_str("0.5").unwrap(),
+            &ks(),
+        );
+        assert!(count() > before, "a halting divergence was not counted");
     }
 
     #[test]

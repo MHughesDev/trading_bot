@@ -257,7 +257,12 @@ fn repo_root() -> PathBuf {
 /// the failure this whole file exists because of.
 fn production_source(path: &Path) -> String {
     let body = std::fs::read_to_string(path).unwrap_or_default();
-    let code = match body.find("\n#[cfg(test)]") {
+    // The trailing test *module*, not the first `#[cfg(test)]`: a test-only
+    // `mod` declaration near the top of a file (apps/platform/src/main.rs has
+    // `#[cfg(test)] mod test_support;` on line 20) would otherwise cut the whole
+    // file out and make a wired binary read as having no wire at all.
+    let body = body.replace("\r\n", "\n");
+    let code = match body.find("\n#[cfg(test)]\nmod tests") {
         Some(i) => &body[..i],
         None => &body[..],
     };

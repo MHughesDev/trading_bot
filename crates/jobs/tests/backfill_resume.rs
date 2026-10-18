@@ -212,7 +212,7 @@ impl BackfillStateStore for MemState {
             let floor = r.cursor.unwrap_or(r.key.window_start);
             r.cursor = Some(floor.max(cursor.min(r.key.window_end)));
             r.pages_fetched += 1;
-            r.rows_written = rows_written;
+            r.rows_written += rows_written;
             r.status = BackfillStatus::Running;
             r.backoff_until = None;
             r.last_error = None;
@@ -345,11 +345,25 @@ async fn killing_the_worker_mid_window_refetches_no_page_and_skips_none() {
     assert_tiles_exactly(&calls, m.window_start, m.window_end);
 
     // And nothing reached the store twice.
-    let written = sink.written.lock().unwrap();
-    assert_eq!(written.len(), 24 * 60, "one row per minute of the window");
-    assert!(
-        written.values().all(|n| *n == 1),
-        "a bar was written more than once: the resume refetched"
+    {
+        let written = sink.written.lock().unwrap();
+        assert_eq!(written.len(), 24 * 60, "one row per minute of the window");
+        assert!(
+            written.values().all(|n| *n == 1),
+            "a bar was written more than once: the resume refetched"
+        );
+    }
+
+    // The cursor row's tally survives the restart too. `advance` is handed each
+    // page's own count and the store adds it; the engine used to hand it the
+    // run's running total, which the live store summed into a triangle number
+    // (896 rows recorded as 79,597, 2026-10-03) and which restarts at zero
+    // after a kill.
+    let st = state.load(&m.key()).await.unwrap().unwrap();
+    assert_eq!(
+        st.rows_written,
+        24 * 60,
+        "rows_written must equal the rows that landed, across both runs"
     );
 }
 
@@ -613,4 +627,43 @@ async fn an_unknown_timeframe_fails_rather_than_guessing_a_period() {
         0,
         "nothing is fetched for a window we cannot interpret"
     );
+}
+
+/// A source that declares how much one request can carry: the engine must ask for
+/// exactly that, not the policy's fixed slice, and still tile the window.
+struct WideSource(CountingSource);
+
+#[async_trait]
+impl BackfillSource for WideSource {
+    fn source_name(&self) -> &str {
+        self.0.source_name()
+    }
+    fn declared_limit(&self) -> RateLimit {
+        self.0.declared_limit()
+    }
+    fn max_page_span(&self, _period_secs: u32) -> Option<Duration> {
+        Some(Duration::hours(10))
+    }
+    async fn fetch_page(&self, req: &PageRequest) -> Result<BackfillPage, FetchError> {
+        self.0.fetch_page(req).await
+    }
+}
+
+/// A venue's declared page span sets the page size: 24 h in 10 h pages is three
+/// requests, not the five a fixed 5 h policy slice costs, and coverage still tiles.
+#[tokio::test]
+async fn the_engine_pages_by_the_span_the_venue_declares() {
+    let m = manifest();
+    let state = Arc::new(MemState::default());
+    let src = Arc::new(WideSource(CountingSource::new()));
+    let sink = Arc::new(CountingSink::default());
+    let engine = BackfillEngine::new(src.clone(), sink.clone(), state).with_policy(policy(99));
+    assert!(matches!(
+        engine.run(&m, &never_cancelled()).await.unwrap(),
+        RunOutcome::Completed { .. }
+    ));
+    let calls = src.0.calls.lock().unwrap().clone();
+    assert_eq!(calls.len(), 3, "{calls:?}");
+    assert_tiles_exactly(&calls, m.window_start, m.window_end);
+    assert_eq!(sink.written.lock().unwrap().len(), 24 * 60);
 }

@@ -140,6 +140,7 @@ fn v3_run(
         fill_policy: FillPolicy::NextBarOpen,
         strategy_id: "ema_cross".into(),
         sims: SimulatorSet::realistic(),
+        external: strategy_engine::ExternalData::default(),
     }
 }
 
@@ -511,5 +512,46 @@ fn an_intent_only_preview_records_orders_and_never_fills_them() {
     assert!(
         sim.rules[1].fired > 0,
         "with fills, the exit rule does fire"
+    );
+}
+
+// ── S-10.10: the cost axis reaches a v3 run ─────────────────────────────────
+
+#[test]
+fn a_v3_run_charges_scaled_costs_and_zero_is_the_modelled_cost() {
+    let hourly = bars(t0_ns(), HOUR, &wave(500));
+    let start = t0_ns() + 60 * HOUR;
+    let costs = |scale: i32| -> Decimal {
+        let mut r = v3_run(
+            &ema_cross(serde_json::Value::Null),
+            &ParamMap::new(),
+            vec![hourly.clone()],
+            start,
+        );
+        runner::scale_costs(&mut r.sims, scale);
+        let out = runner::run(r, &mut NoModels).unwrap();
+        assert!(!out.trades.is_empty());
+        out.trades.iter().map(|t| t.costs_paid).sum()
+    };
+    let (cheaper, modelled, dearer) = (costs(-2000), costs(0), costs(2000));
+    assert!(
+        cheaper < modelled && modelled < dearer,
+        "{cheaper} < {modelled} < {dearer}"
+    );
+    // Zero is no change at all.
+    let (mut unscaled, base) = (SimulatorSet::realistic(), SimulatorSet::realistic());
+    runner::scale_costs(&mut unscaled, 0);
+    let c = AssetClass::CryptoSpotCex;
+    assert_eq!(
+        unscaled.clob_overrides[&c].fee_rate,
+        base.clob_overrides[&c].fee_rate
+    );
+    assert_eq!(
+        unscaled.clob_overrides[&c].maker_fee_rate,
+        base.clob_overrides[&c].maker_fee_rate
+    );
+    assert_eq!(
+        unscaled.clob_overrides[&c].half_spread_bps,
+        base.clob_overrides[&c].half_spread_bps
     );
 }

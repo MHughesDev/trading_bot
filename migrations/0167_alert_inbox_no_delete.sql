@@ -1,0 +1,19 @@
+-- 0167 — alert_inbox_state is not deletable by the platform (FB-RX-005).
+--
+-- 0158 grants SELECT, INSERT, UPDATE on `alert_inbox_state` to app_role and says
+-- in its header, and in `routes/alerts_inbox.rs`, that DELETE is not among them.
+-- It was never true: 0044 ran `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT
+-- SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_role`, so every table later
+-- created in `public` by the migration owner arrives with DELETE already
+-- granted, and an explicit narrower GRANT cannot take a privilege away. Owner
+-- connected tests cannot see it; `pg_alert_inbox_grants` acts as app_role and
+-- did.
+--
+-- A dismissal is a record of what a user did. A platform role that could delete
+-- one could un-dismiss it, which is the one thing the inbox's "a critical item
+-- in force cannot be dismissed" rule is not there to prevent — it only stops
+-- dismissal of live items, not the erasure of past ones. Nothing in the
+-- workspace deletes from this table (`ON DELETE CASCADE` from `users` is a
+-- foreign-key action and needs no privilege on the child), so the revoke
+-- removes nothing anyone uses.
+REVOKE DELETE ON alert_inbox_state FROM app_role;

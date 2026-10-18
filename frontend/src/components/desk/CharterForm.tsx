@@ -49,15 +49,96 @@ function listField(
   )
 }
 
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+/**
+ * The 7 × 24 schedule grid (AGENT-014 §2.1), Monday first — the order
+ * `desk_charter::windows_from_grid` reads it in, and ISO weekday 1.
+ *
+ * Empty is **any time**, matching `Schedule::default`: the server reads an empty
+ * grid as always open, not as never. So the grid starts empty and says so, and
+ * the first click materialises the full 7 × 24 — sending a partial grid is a
+ * 400, because a grid the wrong size is refused rather than guessed at.
+ */
+export function ScheduleGrid({
+  value,
+  onChange,
+}: {
+  value: boolean[][]
+  onChange: (next: boolean[][]) => void
+}) {
+  const full = value.length === 7 && value.every((d) => d.length === 24)
+  const grid = full ? value : Array.from({ length: 7 }, () => Array<boolean>(24).fill(false))
+  const open = full && value.some((d) => d.some(Boolean))
+  function toggle(day: number, hour: number) {
+    onChange(grid.map((d, i) => (i === day ? d.map((h, j) => (j === hour ? !h : h)) : d.slice())))
+  }
+  return (
+    <div data-testid="schedule-grid">
+      <p className="sub" style={{ margin: 0 }} data-testid="schedule-reading">
+        {open
+          ? `${grid.flat().filter(Boolean).length} of 168 hours open, in the charter's timezone`
+          : 'any time — no hour is marked, and an empty schedule is always open'}
+        {open && (
+          <>
+            {' '}
+            <button type="button" className="chip" onClick={() => onChange([])}>
+              clear (any time)
+            </button>
+          </>
+        )}
+      </p>
+      <div
+        role="grid"
+        aria-label="Schedule"
+        style={{ display: 'grid', gridTemplateColumns: 'auto repeat(24, minmax(8px, 1fr))', gap: 1, marginTop: 'var(--s-1)' }}
+      >
+        {grid.map((hours, day) => (
+          <div role="row" key={DAYS[day]} style={{ display: 'contents' }}>
+            <span className="lbl" role="rowheader" style={{ paddingRight: 'var(--s-1)' }}>
+              {DAYS[day]}
+            </span>
+            {hours.map((on, hour) => (
+              <button
+                key={hour}
+                type="button"
+                role="gridcell"
+                aria-pressed={on}
+                aria-label={`${DAYS[day]} ${String(hour).padStart(2, '0')}:00`}
+                title={`${DAYS[day]} ${String(hour).padStart(2, '0')}:00–${String(hour + 1).padStart(2, '0')}:00`}
+                onClick={() => toggle(day, hour)}
+                style={{
+                  height: 12,
+                  padding: 0,
+                  border: '1px solid var(--line-default)',
+                  background: on ? 'var(--bg-accent)' : 'transparent',
+                  cursor: 'pointer',
+                }}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function CharterForm({
   value,
   onChange,
   /** Set when the chosen profile's judgement score is below threshold. */
   autonomousDisabledReason,
+  replenishDisabledReason,
 }: {
   value: Charter
   onChange: (next: Charter) => void
   autonomousDisabledReason?: string
+  /**
+   * Set while the server refuses `replenish` (it does until S-11.11 builds the
+   * survey run that refills an agenda). Offering a switch the route answers 400
+   * to is a control that reaches a refusal, so it is drawn disabled with why.
+   */
+  replenishDisabledReason?: string
 }) {
   const set = <K extends keyof Charter>(k: K, v: Charter[K]) => onChange({ ...value, [k]: v })
 
@@ -162,6 +243,12 @@ export function CharterForm({
         </Field>
       </div>
 
+      <div className="full">
+        <Field label="Schedule" hint="when the session may start runs; leave empty for any time">
+          <ScheduleGrid value={value.schedule} onChange={(g) => set('schedule', g)} />
+        </Field>
+      </div>
+
       <div className="full">{listField('Seeds', value.seeds, (v) => set('seeds', v), 'the questions to start from')}</div>
       <div className="full">{listField('Exclusions', value.exclusions, (v) => set('exclusions', v))}</div>
       <div className="full">
@@ -188,9 +275,12 @@ export function CharterForm({
           checked={value.replenish}
           onCheckedChange={(v) => set('replenish', v)}
           label="Keep generating questions"
+          disabled={!!replenishDisabledReason && !value.replenish}
         />
         <span style={{ fontSize: 'var(--t-12)' }}>Keep generating questions</span>
-        <span className="sub">when the agenda empties, the session writes more rather than ending</span>
+        <span className="sub" data-testid="replenish-hint">
+          {replenishDisabledReason ?? 'when the agenda empties, the session writes more rather than ending'}
+        </span>
       </div>
     </div>
   )

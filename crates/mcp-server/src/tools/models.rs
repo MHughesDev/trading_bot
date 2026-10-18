@@ -70,7 +70,7 @@ pub async fn get_model(api: &ApiClient, params: &Value) -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     if id.is_empty() {
-        return json!({ "error": "missing_field", "field": "model_id" });
+        return crate::tool_error::missing_field("model_id");
     }
     match api.get(&format!("/api/models/{}", urlencode(id))).await {
         Ok(v) => v,
@@ -97,14 +97,14 @@ pub async fn get_model(api: &ApiClient, params: &Value) -> Value {
 pub async fn call_model(api: &ApiClient, params: &Value) -> Value {
     let model_id = str_arg(params, "model_id");
     if model_id.is_empty() {
-        return json!({ "error": "missing_field", "field": "model_id" });
+        return crate::tool_error::missing_field("model_id");
     }
     let instrument_id = str_arg(params, "instrument_id");
     if instrument_id.is_empty() {
         // Not defaulted to the model id, which is what the route under this used
         // to do: it keyed the gateway's cache and trace on a model id in the
         // instrument slot. "Which market" has no sensible default.
-        return json!({ "error": "missing_field", "field": "instrument_id" });
+        return crate::tool_error::missing_field("instrument_id");
     }
 
     let mut query = format!("instrument_id={}", urlencode(instrument_id));
@@ -148,16 +148,15 @@ pub async fn train_model(
 ) -> Value {
     let slug = str_arg(params, "slug");
     if slug.is_empty() {
-        return json!({
-            "error": "missing_field",
-            "field": "slug",
-            "fix": "give the model a short stable name, e.g. \"btc-1h-direction\"; calling \
-                    train_model again with the same slug retrains it rather than making a copy"
-        });
+        return crate::tool_error::missing_field_with(
+            "slug",
+            "add `slug`: a short stable name such as \"btc-1h-direction\"; calling train_model \
+             again with the same slug retrains it rather than making a copy",
+        );
     }
     let instrument = str_arg(params, "instrument_id");
     if instrument.is_empty() {
-        return json!({ "error": "missing_field", "field": "instrument_id" });
+        return crate::tool_error::missing_field("instrument_id");
     }
     let kind = match str_arg(params, "model_kind") {
         "" => "forecaster",
@@ -222,11 +221,12 @@ pub async fn train_model(
                 Ok(v) => match v.get("model_id").and_then(Value::as_str) {
                     Some(id) => id.to_string(),
                     None => {
-                        return json!({
-                            "error": "create_model_failed",
-                            "detail": "the registry accepted the request but returned no model_id",
-                            "response": v
-                        })
+                        return crate::tool_error::refuse_extra(
+                            "create_model_failed",
+                            "the registry accepted the request but returned no model_id.",
+                            "call train_model again with the same slug; if it repeats, report a registry fault",
+                            json!({ "response": v }),
+                        )
                     }
                 },
                 Err(e) => return e.to_tool_error(),
@@ -255,11 +255,12 @@ pub async fn train_model(
         Ok(v) => match v.get("run_id").and_then(Value::as_str) {
             Some(r) => r.to_string(),
             None => {
-                return json!({
-                    "error": "start_train_failed",
-                    "model_id": model_id,
-                    "response": v
-                })
+                return crate::tool_error::refuse_extra(
+                    "start_train_failed",
+                    "the registry accepted the training request but returned no run_id.",
+                    "call train_model again with the same slug; if it repeats, report a registry fault",
+                    json!({ "model_id": model_id, "response": v }),
+                )
             }
         },
         Err(e) => return e.to_tool_error(),
@@ -354,7 +355,7 @@ pub async fn get_training_run(api: &ApiClient, params: &Value) -> Value {
     let model_id = str_arg(params, "model_id");
     let run_id = str_arg(params, "run_id");
     if model_id.is_empty() || run_id.is_empty() {
-        return json!({ "error": "missing_field", "field": "model_id and run_id" });
+        return crate::tool_error::missing_field("model_id and run_id");
     }
     match api
         .get(&format!(
@@ -369,32 +370,47 @@ pub async fn get_training_run(api: &ApiClient, params: &Value) -> Value {
     }
 }
 
-/// `promote_model_version` — make a trained version the one strategies resolve to.
+/// `promote_model_version` — propose that a trained version become the one strategies resolve
+/// to (Set N N-4.3, N-0.2).
 ///
-/// Separate from training on purpose: training produces a candidate, and deciding it
-/// is good enough to be referenced by a strategy is a different judgement with a
-/// different blast radius.
-pub async fn promote_model_version(api: &ApiClient, params: &Value) -> Value {
+/// An agent cannot move an alias: `/promote` answers 403 to a service token, and a person
+/// decides a promotion in the approvals inbox (AGENT-001 section 16). This tool therefore files
+/// a proposal, `POST /api/models/{id}/versions/{v}/promotion-proposals`, which freezes the
+/// usage-rule evidence onto it and waits for a human.
+///
+/// Returns `(path, body)` for the proposal, or the tool error for a call missing a field.
+pub fn promotion_proposal_request(params: &Value) -> Result<(String, Value), Value> {
     let model_id = str_arg(params, "model_id");
     let version = str_arg(params, "version");
     if model_id.is_empty() || version.is_empty() {
-        return json!({ "error": "missing_field", "field": "model_id and version" });
+        return Err(crate::tool_error::missing_field("model_id and version"));
     }
-    let alias = match str_arg(params, "alias") {
-        "" => "production",
-        a => a,
+    let rationale = str_arg(params, "rationale").trim();
+    if rationale.is_empty() {
+        return Err(crate::tool_error::missing_field(
+            "rationale (say why this version should be promoted)",
+        ));
+    }
+    let environment = match str_arg(params, "environment") {
+        "" => "paper",
+        e => e,
     };
-    match api
-        .post(
-            &format!(
-                "/api/models/{}/versions/{}/promote",
-                urlencode(model_id),
-                urlencode(version)
-            ),
-            json!({ "alias": alias }),
-        )
-        .await
-    {
+    Ok((
+        format!(
+            "/api/models/{}/versions/{}/promotion-proposals",
+            urlencode(model_id),
+            urlencode(version)
+        ),
+        json!({ "environment": environment, "rationale": rationale }),
+    ))
+}
+
+pub async fn promote_model_version(api: &ApiClient, params: &Value) -> Value {
+    let (path, body) = match promotion_proposal_request(params) {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    match api.post(&path, body).await {
         Ok(v) => v,
         Err(e) => e.to_tool_error(),
     }
@@ -412,7 +428,7 @@ pub async fn list_feature_sets(api: &ApiClient) -> Value {
 pub fn specs() -> Vec<crate::spec::ToolSpec> {
     use crate::spec::{Envelope, ToolSpec};
     use crate::taxonomy::Risk;
-    vec![
+    crate::result_shape::declared(vec![
         ToolSpec::new(
             "list_models",
             "model",
@@ -525,19 +541,51 @@ pub fn specs() -> Vec<crate::spec::ToolSpec> {
             "promote_model_version",
             "model",
             Risk::Write,
-            "Point an alias (default 'production') at a trained model version, so strategies \
-             referencing the model resolve to it.",
+            "PROPOSE promoting a trained model version (you cannot move an alias): files a              promotion proposal with the usage-rule evidence attached; a human decides it in              the approvals inbox. Needs model_id, version and a rationale.",
             json!({
                 "type": "object",
-                "required": ["model_id", "version"],
+                "required": ["model_id", "version", "rationale"],
                 "properties": {
                     "model_id": { "type": "string" },
                     "version": { "type": "string" },
-                    "alias": { "type": "string", "description": "Default production." }
+                    "rationale": { "type": "string", "description": "Why this version." },
+                    "environment": { "type": "string", "description": "Default paper." }
                 }
             }),
         )
         .internal()
         .envelope(Envelope::Promotion),
-    ]
+    ])
+}
+
+#[cfg(test)]
+mod promotion_tests {
+    use super::*;
+
+    #[test]
+    fn promoting_files_a_proposal_and_never_calls_the_alias_route() {
+        let (path, body) = promotion_proposal_request(&json!({
+            "model_id": "vol", "version": "3", "rationale": "beats HARQ on QLIKE"
+        }))
+        .unwrap();
+        assert_eq!(path, "/api/models/vol/versions/3/promotion-proposals");
+        assert!(!path.ends_with("/promote"));
+        assert_eq!(body["environment"], "paper");
+        assert_eq!(body["rationale"], "beats HARQ on QLIKE");
+        assert!(body.get("alias").is_none(), "a proposal does not choose an alias");
+    }
+
+    #[test]
+    fn a_proposal_without_a_rationale_or_a_version_is_refused_before_any_call() {
+        assert!(promotion_proposal_request(&json!({"model_id": "m", "version": "1"})).is_err());
+        assert!(promotion_proposal_request(&json!({"model_id": "m", "version": "1", "rationale": "  "})).is_err());
+        assert!(promotion_proposal_request(&json!({"model_id": "m", "rationale": "x"})).is_err());
+    }
+
+    #[test]
+    fn the_descriptor_says_it_proposes() {
+        let spec = specs().into_iter().find(|s| s.name == "promote_model_version").unwrap();
+        assert!(spec.description.contains("PROPOSE") && spec.description.contains("human"));
+        assert!(spec.description.len() + spec.input_schema.to_string().len() <= 1200);
+    }
 }

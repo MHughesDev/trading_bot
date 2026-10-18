@@ -25,6 +25,7 @@
     ["kpss_statistic", ""],
     ["kpss_verdict", ""],
     ["joint_verdict", ""],
+    ["fracdiff_min_d", ""],
     ["half_life", "bars"]
   ],
   "wall_seconds": 120,
@@ -181,6 +182,64 @@ def _half_life(y):
     return float(-math.log(2.0) / math.log(1.0 + theta)) if (1.0 + theta) > 0 else None
 
 
+_FRACDIFF_WINDOW = 64
+_FRACDIFF_GRID = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+
+
+def _fracdiff_weights(d, n):
+    """The binomial series of (1 - B)^d: w0 = 1, wk = -w(k-1) * (d - k + 1) / k."""
+    w = [1.0]
+    for k in range(1, n):
+        w.append(-w[-1] * (d - k + 1.0) / k)
+    return np.asarray(w, dtype=float)
+
+
+def _fracdiff_last(log_price, d, n=_FRACDIFF_WINDOW):
+    """Fractional difference of order `d` at the last observation, over `n` bars.
+
+    The value the feature engine serves as `fracdiff_N_D` (D in hundredths): a
+    fixed window of the log close, newest bar weighted 1. A fixed window rather
+    than an expanding one, so the value is a function of exactly its declared
+    lookback. Compared with the engine over the same bars by
+    `features_f2_reconciliation`.
+    """
+    x = np.asarray(log_price, dtype=float)
+    if x.size < n:
+        return None
+    window = x[-n:][::-1]  # newest first
+    return float(np.dot(_fracdiff_weights(d, n), window))
+
+
+def _fracdiff_series(log_price, d, n=_FRACDIFF_WINDOW):
+    """`_fracdiff_last` at every bar that has a full window."""
+    x = np.asarray(log_price, dtype=float)
+    if x.size < n:
+        return np.empty(0, dtype=float)
+    w = _fracdiff_weights(d, n)
+    # correlate(x, w[::-1]) puts w[0] on the newest bar of each window.
+    return np.correlate(x, w[::-1], mode="valid")
+
+
+def _fracdiff_min_d(level, critical):
+    """The smallest order on the grid at which ADF rejects a unit root.
+
+    Differencing buys stationarity at the cost of memory, and an integer
+    difference spends all of it. The smallest order that is stationary is the
+    one that keeps the most, which is the number a feature pipeline wants and
+    the one ADF and KPSS on the level cannot give. `None` when no order on the
+    grid rejects, which is a statement about this window and not a failure.
+    """
+    for d in _FRACDIFF_GRID:
+        series = _fracdiff_series(level, d)
+        if series.size < 60:
+            return None
+        fit = _adf_regression(series, _select_lags(series, 4))
+        if fit and math.isfinite(fit["statistic"]):
+            if fit["statistic"] < _adf_critical(series.size)["5%"]:
+                return d
+    return None
+
+
 def run(payload: dict) -> dict:
     frame = load(payload, "primary")
     close = pd.to_numeric(frame["close"], errors="coerce").to_numpy(dtype=float)
@@ -222,6 +281,7 @@ def run(payload: dict) -> dict:
         joint = "fits neither model — look for a structural break or fractional integration"
 
     half_life = _half_life(level) if adf_rejects else None
+    fracdiff_min_d = _fracdiff_min_d(np.log(close), critical)
 
     warnings = []
     if not adf_rejects and not kpss_rejects:
@@ -262,6 +322,7 @@ def run(payload: dict) -> dict:
         "kpss_verdict": "rejects stationarity" if kpss_rejects else "does not reject stationarity",
         "kpss_on_returns": kpss_returns,
         "joint_verdict": joint,
+        "fracdiff_min_d": fracdiff_min_d,
         "half_life": half_life,
         "warnings": warnings,
         "window": {

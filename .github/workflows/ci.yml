@@ -122,6 +122,24 @@ jobs:
         env:
           CONSISTENCY_E2E_CLICKHOUSE_URL: http://trading:trading@localhost:8123
         run: cargo test -p api --test pg_feature_consistency -- --ignored --test-threads=1
+      # Set P: these suites self-skip without a ClickHouse URL, so without this step a
+      # point-in-time bar store, a retention pass, the forward-series dedup and the
+      # alternative-data PIT reads could all be broken and the build would stay green.
+      # Each is a named integration-test target (a bare name filter after `--` matches
+      # test FUNCTION names, not files, and would run nothing). They are not #[ignore]d:
+      # the env var is the switch, and each creates and drops its own scratch database.
+      # Deliberately absent: canonical_read_live (reads the operator's backfilled
+      # 2026-09-15 BTC-USD day, which a CI ClickHouse does not have) and qc_reports_live
+      # (needs the platform Postgres schema as well; run it by hand with STORAGE_QC_*).
+      - name: Bar store, retention, forward series and alt-data PIT against ClickHouse
+        env:
+          BACKTEST_E2E_CLICKHOUSE_URL: http://trading:trading@localhost:8123
+          STORAGE_RETENTION_CLICKHOUSE_URL: http://trading:trading@localhost:8123
+          STORAGE_ALT_CLICKHOUSE_URL: http://trading:trading@localhost:8123
+          STORAGE_MIGRATE_CLICKHOUSE_URL: http://trading:trading@localhost:8123
+        run: |
+          cargo test -p backtest --test bar_store_pit -- --test-threads=1
+          cargo test -p storage --test clickhouse_alt_pit --test clickhouse_forward_idempotent --test clickhouse_retention --test clickhouse_migrate -- --test-threads=1
 
   leakage-suite:
     name: Leakage suite (SPEC 12.5)
@@ -190,6 +208,19 @@ jobs:
       - name: Run f64 check
         run: cargo xtask check-money-f64
 
+  # Set C: the market-data hot path carries rkyv, not JSON. Decoding a venue's
+  # response at the protocol boundary is allowed; encoding a payload as JSON in
+  # collectors / event-bus / strategy-runtime / features is not.
+  lint-no-json-hotpath:
+    name: Hot path (no JSON payload encoding)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run the JSON hot-path lint
+        run: cargo xtask lint-no-json-hotpath
+
   check-bars-v1-frozen:
     name: Bars schema (nothing writes the retired market_bars)
     runs-on: ubuntu-latest
@@ -240,6 +271,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run the free-only source fence
         run: cargo xtask check-free-sources
+      - name: Delisted instruments are retained, not deleted
+        run: cargo xtask check-instruments-retained
 
   auditor-suite:
     name: Auditor suite (AGENT-004 AE-02)

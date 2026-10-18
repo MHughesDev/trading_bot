@@ -20,6 +20,12 @@ rust_decimal_macros = { workspace = true }
 uuid = { workspace = true }
 sqlx = { workspace = true }
 async-trait = "0.1"
+# Order, fill and paper-state counters (Set E 5.1).
+observability = { workspace = true }
+# Coinbase ES256 JWT signing (Set E 3.5). `ring` and `base64` are already in the
+# workspace lock through rustls and event-bus; no new crate enters the build.
+ring = "0.17"
+base64 = "0.22"
 
 [features]
 # Exposes the non-durable in-memory order journal.  Tests only: installing it

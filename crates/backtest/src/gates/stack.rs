@@ -242,14 +242,21 @@ pub fn evaluate_stack(
         "probability of backtest overfitting",
     ));
 
-    // 8 — deflated Sharpe on the platform's own trial count.
-    outcomes.push(threshold_gate(
-        8,
-        "deflated_sharpe",
-        evidence.dsr,
-        t.dsr_gte,
-        Direction::GreaterOrEqual,
-        "deflated Sharpe ratio",
+    // 8 — deflated Sharpe on the platform's own trial count, and the theme
+    // posterior (Set Q Q-2.1, EV-07): a candidate whose shrunk credible interval
+    // includes zero fails here even if its deflated Sharpe cleared the bar. The
+    // clause reads the same `family` Gate 14 does, so it needs no new evidence.
+    outcomes.push(super::theme_posterior::apply(
+        threshold_gate(
+            8,
+            "deflated_sharpe",
+            evidence.dsr,
+            t.dsr_gte,
+            Direction::GreaterOrEqual,
+            "deflated Sharpe ratio",
+        ),
+        evidence.family,
+        evidence.candidate_index,
     ));
 
     // 9 — minimum length.
@@ -329,6 +336,10 @@ pub fn evaluate_stack(
         profile,
         evidence.capital_fraction,
         &with_16,
+        // No forward review period exists at research time: the stack states
+        // eligibility. A period's own judgement is rendered by the review worker
+        // (`api::ramp_worker`), which hands `gate_16_capital_ramp` the `StepJudgement`.
+        None,
     ));
 
     let blocked_at = outcomes.iter().find(|o| !o.passed).map(|o| o.gate_no);
@@ -626,5 +637,106 @@ mod tests {
             .find(|o| o.gate_no == 2)
             .expect("gate 2");
         assert!(two.inconclusive && !two.passed, "{}", two.detail);
+    }
+
+    // ── Set Q Q-2.1 / Q-2.2: the G3 clauses that read the candidate family ──────────
+
+    /// A deterministic member with a given mean, so a test plants structure without a generator.
+    fn member(mean: f64, phase: f64, n: usize) -> Vec<f64> {
+        (0..n)
+            .map(|t| {
+                #[allow(clippy::cast_precision_loss)]
+                let t = t as f64;
+                mean + 0.01 * (0.7 * t + phase).sin() + 0.004 * (1.9 * t + 2.0 * phase).cos()
+            })
+            .collect()
+    }
+
+    fn family_of(means: &[f64], n: usize) -> Vec<Vec<f64>> {
+        means
+            .iter()
+            .enumerate()
+            .map(|(j, m)| {
+                #[allow(clippy::cast_precision_loss)]
+                member(*m, j as f64, n)
+            })
+            .collect()
+    }
+
+    fn outcome(verdict: &StackVerdict, gate: i32) -> &GateOutcome {
+        verdict.outcomes.iter().find(|o| o.gate_no == gate).expect("gate present")
+    }
+
+    #[test]
+    fn q_2_1_a_posterior_interval_that_includes_zero_fails_gate_8_with_that_reason() {
+        let checks = ["causal_access"];
+        let noise = family_of(&[0.0001, 0.0, -0.0001, 0.00005, 0.0, -0.00005, 0.00002, 0.0], 300);
+        let mut evidence = empty_evidence(&checks);
+        evidence.dsr = Some(0.97); // clears strict_v1's 0.95 on its own
+        evidence.family = &noise;
+        evidence.candidate_index = 0;
+        let v = evaluate_stack(&GateProfile::strict_v1(), &evidence, Utc::now());
+        let g8 = outcome(&v, 8);
+        assert!(!g8.passed, "{}", g8.detail);
+        assert!(g8.detail.contains("includes zero"), "{}", g8.detail);
+        assert!(g8.detail.contains("0.9700"), "the DSR reading is still there: {}", g8.detail);
+    }
+
+    #[test]
+    fn q_2_1_the_old_deflated_sharpe_and_pbo_clauses_are_unchanged() {
+        let checks = ["causal_access"];
+        // No family at all: there is no theme, so the gate is exactly what it was.
+        let mut evidence = empty_evidence(&checks);
+        evidence.dsr = Some(0.97);
+        evidence.pbo = Some(0.1);
+        let v = evaluate_stack(&GateProfile::strict_v1(), &evidence, Utc::now());
+        assert!(outcome(&v, 8).passed, "{}", outcome(&v, 8).detail);
+        assert!(outcome(&v, 8).detail.contains("theme posterior not applied"));
+        assert!(outcome(&v, 7).passed, "PBO has no posterior clause");
+        // And a DSR below the bar still fails whatever the posterior says.
+        evidence.dsr = Some(0.5);
+        let v = evaluate_stack(&GateProfile::strict_v1(), &evidence, Utc::now());
+        assert!(!outcome(&v, 8).passed);
+        // A clear edge in a family that varies keeps both clauses satisfied.
+        let fam = family_of(&[0.004, 0.0003, -0.0002, 0.0001, -0.0003, 0.0002], 600);
+        evidence.dsr = Some(0.97);
+        evidence.family = &fam;
+        let v = evaluate_stack(&GateProfile::strict_v1(), &evidence, Utc::now());
+        assert!(outcome(&v, 8).passed, "{}", outcome(&v, 8).detail);
+        assert!(outcome(&v, 8).detail.contains("excludes zero"));
+    }
+
+    #[test]
+    fn q_2_2_a_campaign_candidate_the_family_test_rejects_fails_naming_the_adjusted_p() {
+        let checks = ["causal_access"];
+        // Candidate 0 is a real edge among noise; candidate 3 is one of the noise members.
+        let fam = family_of(&[0.004, 0.0003, -0.0002, 0.0001, -0.0003, 0.0002], 600);
+        let mut evidence = empty_evidence(&checks);
+        evidence.family = &fam;
+        evidence.candidate_index = 0;
+        let v = evaluate_stack(&GateProfile::strict_v1(), &evidence, Utc::now());
+        let winner = outcome(&v, 14);
+        assert!(winner.passed, "the planted edge survives the family test: {}", winner.detail);
+
+        evidence.candidate_index = 3;
+        let v = evaluate_stack(&GateProfile::strict_v1(), &evidence, Utc::now());
+        let loser = outcome(&v, 14);
+        assert!(!loser.passed && !loser.inconclusive, "{}", loser.detail);
+        assert!(loser.detail.contains("stepdown-adjusted p"), "{}", loser.detail);
+        assert!(loser.statistic.is_some(), "the adjusted p is the statistic that decided it");
+    }
+
+    #[test]
+    fn q_2_2_a_solo_experiment_has_no_family_clause_to_fail() {
+        let checks = ["causal_access"];
+        let solo = family_of(&[0.004], 600);
+        let mut evidence = empty_evidence(&checks);
+        evidence.family = &solo;
+        let v = evaluate_stack(&GateProfile::strict_v1(), &evidence, Utc::now());
+        let g14 = outcome(&v, 14);
+        assert!(g14.inconclusive && !g14.passed, "a hole is reported as a hole, not a failure: {}", g14.detail);
+        assert!(g14.detail.contains("whole candidate family"));
+        // ...and the theme clause is not applicable either, so Gate 8 reads its DSR alone.
+        assert!(outcome(&v, 8).detail.contains("not applied"));
     }
 }

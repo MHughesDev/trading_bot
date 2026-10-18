@@ -48,6 +48,31 @@ const LeaderboardPage = lazy(() =>
 const DeskPage = lazy(() =>
   import('@/pages/DeskPage').then((m) => ({ default: m.DeskPage })),
 )
+// Operations surfaces: reconciliation, data coverage, governance, execution quality, alerts.
+const SkillsPage = lazy(() =>
+  import('@/pages/SkillsPage').then((m) => ({ default: m.SkillsPage })),
+)
+const ModelStudioPage = lazy(() =>
+  import('@/pages/ModelStudioPage').then((m) => ({ default: m.ModelStudioPage })),
+)
+const DeploymentsPage = lazy(() =>
+  import('@/pages/DeploymentsPage').then((m) => ({ default: m.DeploymentsPage })),
+)
+const ReconciliationPage = lazy(() =>
+  import('@/pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage })),
+)
+const CoveragePage = lazy(() =>
+  import('@/pages/CoveragePage').then((m) => ({ default: m.CoveragePage })),
+)
+const GovernancePage = lazy(() =>
+  import('@/pages/GovernancePage').then((m) => ({ default: m.GovernancePage })),
+)
+const ExecutionQualityPage = lazy(() =>
+  import('@/pages/ExecutionQualityPage').then((m) => ({ default: m.ExecutionQualityPage })),
+)
+const AlertsPage = lazy(() =>
+  import('@/pages/AlertsPage').then((m) => ({ default: m.AlertsPage })),
+)
 // The design-system preview is public on purpose: the system must be reviewable
 // without a session (spec §8.7 — every state reachable outside the app).
 const DesignSystemPage = lazy(() =>
@@ -174,6 +199,7 @@ export default function App() {
               <Route path="/mlops/create" element={<ModelCreatePage />} />
               <Route path="/mlops/graph" element={<ModelLineagePage />} />
               <Route path="/mlops/leaderboard" element={<LeaderboardPage />} />
+              <Route path="/mlops/studio/*" element={<ModelStudioPage />} />
               <Route path="/mlops/:id" element={<ModelDetailPage />} />
               {/* One desk (AGENT-012). /agent and /research were two surfaces
                   showing the same run in two vocabularies; both redirect here. */}
@@ -197,6 +223,13 @@ export default function App() {
               <Route path="/strategy-builder" element={<Navigate to="/strategy" replace />} />
               {/* ML Ops was renamed from "AI Models"; keep old /models* deep links alive. */}
               <Route path="/models/*" element={<ModelsRedirect />} />
+              <Route path="/reconciliation" element={<ReconciliationPage />} />
+              <Route path="/deployments" element={<DeploymentsPage />} />
+              <Route path="/skills" element={<SkillsPage />} />
+              <Route path="/data/coverage" element={<CoveragePage />} />
+              <Route path="/governance" element={<GovernancePage />} />
+              <Route path="/execution-quality" element={<ExecutionQualityPage />} />
+              <Route path="/alerts" element={<AlertsPage />} />
 
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>

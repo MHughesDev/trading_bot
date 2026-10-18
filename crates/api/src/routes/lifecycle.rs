@@ -282,6 +282,10 @@ pub struct HypothesisBody {
     family_id: Option<String>,
     #[serde(default)]
     run_id: Option<Uuid>,
+    /// What the hypothesis claims to rest on. A finding id is refused here (KM-03, ADR-RB-04);
+    /// the platform derives a hypothesis's evidence from tickets, not from this list.
+    #[serde(default)]
+    evidence_ids: Vec<String>,
 }
 
 /// `POST /api/lifecycle/hypotheses` — state one, with its falsifier.
@@ -295,6 +299,9 @@ pub async fn state_hypothesis(
     _token: BearerToken,
     Json(body): Json<HypothesisBody>,
 ) -> impl IntoResponse {
+    if let Some(refusal) = crate::knowledge_routes::finding_evidence_refusal(&body.evidence_ids) {
+        return refusal;
+    }
     let check = serde_json::json!({
         "falsifier": body.falsifier,
         "role": body.role,
@@ -366,7 +373,7 @@ fn days_between(start: &str, end: &str) -> Option<f64> {
     };
     let (a, b) = (parse(start)?, parse(end)?);
     let days = (b - a).num_days();
-    (days >= 0).then(|| days as f64)
+    (days >= 0).then_some(days as f64)
 }
 
 #[derive(Debug, Deserialize)]
@@ -621,7 +628,7 @@ pub fn normalise_statement(s: &str) -> String {
     let lowered = s.trim().to_lowercase();
     let collapsed: String = lowered.split_whitespace().collect::<Vec<_>>().join(" ");
     collapsed
-        .trim_end_matches(|c: char| c == '.' || c == '?' || c == '!')
+        .trim_end_matches(['.', '?', '!'])
         .to_string()
 }
 
@@ -1482,4 +1489,293 @@ pub async fn barren_rates(
 pub struct BarrenQuery {
     #[serde(default)]
     days: Option<i32>,
+}
+
+// ── compare_candidates (S-10.10) ──────────────────────────────────────────────
+
+/// `POST /api/lifecycle/compare` — SPEC §11.5 as one door.
+///
+/// N candidates are measured on the same paired replicate grid — windows crossed
+/// with a -20 % / modelled / +20 % cost perturbation — and judged pairwise with
+/// Holm across the pairs (`research::compare`). The body names an Experiment and
+/// the candidates; **it has no seed, no `delta_practical`, no ROPE bound and no
+/// replicate count**, and one sent anyway is refused by name
+/// (`deny_unknown_fields`). `delta_practical` is read from the Experiment, where
+/// it was declared before any trial ran.
+pub async fn compare_candidates(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(body): Json<crate::compare_candidates::CompareBody>,
+) -> impl IntoResponse {
+    use crate::compare_candidates::{run, CompareFail, Inputs};
+    use crate::campaign_driver::study_worker::{SuiteEvaluator, Window as CmpWindow};
+
+    let user = token.user_id();
+    let Some(view) = state.suite.get_experiment(user, body.experiment) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "not_found", "message": "no such experiment" })),
+        )
+            .into_response();
+    };
+    let Some(delta) = state
+        .suite
+        .experiment_delta_practical(user, body.experiment)
+    else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "not_found", "message": "no such experiment" })),
+        )
+            .into_response();
+    };
+    let Some(objective) = view.objective.clone() else {
+        return bad_request(
+            "no_objective",
+            "this Experiment declared no objective, so there is no metric to compare on"
+                .to_string(),
+            "create the Experiment with an objective (SPEC §10): the comparison is on its primary metric",
+        )
+        .into_response();
+    };
+    let tenant = user.to_string();
+    let n_eff = match ledger::pg::PgTrialLedger::new(state.pg.clone())
+        .n_eff_async(&tenant)
+        .await
+    {
+        Ok(n) => n.value(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "storage", "message": format!("reading N_eff: {e}") })),
+            )
+                .into_response()
+        }
+    };
+    let evaluator = SuiteEvaluator::new(state.suite.clone(), state.research.clone());
+    let inputs = Inputs {
+        evaluator: &evaluator,
+        user,
+        experiment: body.experiment,
+        metric: objective.primary,
+        research: CmpWindow {
+            start: view.research_start,
+            end: view.research_end,
+        },
+        delta_practical: delta,
+        profile_id: crate::agent::local_driver::DEFAULT_GATE_PROFILE.to_string(),
+        n_eff,
+        trials: view.trial_counter,
+    };
+    match run(inputs, &body).await {
+        Ok(v) => Json(v).into_response(),
+        Err(CompareFail::Request(m)) => {
+            bad_request("bad_comparison", m, "name at least two distinct candidates").into_response()
+        }
+        Err(CompareFail::NotFound) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "not_found", "message": "no such experiment" })),
+        )
+            .into_response(),
+        Err(CompareFail::NoObjective) => bad_request(
+            "no_objective",
+            "no objective".to_string(),
+            "declare one on the Experiment",
+        )
+        .into_response(),
+        Err(CompareFail::Measure(m)) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": "measure_failed", "message": m })),
+        )
+            .into_response(),
+        Err(CompareFail::Refused(m)) => bad_request(
+            "comparison_refused",
+            m,
+            "a comparison the protocol will not make says nothing about the candidates; \
+             widen the research slice or check the failing runs",
+        )
+        .into_response(),
+    }
+}
+
+// ── reproduce (S-10.8) ────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReproduceBody {
+    /// The stored Run to re-run. Only a Run reachable through a Study the caller
+    /// owns.
+    run_id: String,
+}
+
+/// `POST /api/lifecycle/reproduce` — re-run a stored result under its own config
+/// and report whether the platform still computes the same thing.
+///
+/// **Spends no trial.** A reproduction is not a look (ADR-P2-17, ADR-S10-18): it
+/// runs under a reproduction ticket the ledger mints for the completed trial, and
+/// the finding is appended to `mlops.reproduction`. There is no tolerance in the
+/// comparison and no argument that would add one.
+pub async fn reproduce(
+    State(state): State<AppState>,
+    token: BearerToken,
+    Json(body): Json<ReproduceBody>,
+) -> impl IntoResponse {
+    let suite = state.suite.clone();
+    let user = token.user_id();
+    let run_id = body.run_id.clone();
+    match tokio::task::spawn_blocking(move || suite.reproduce_run(user, &run_id)).await {
+        Ok(Ok(report)) => {
+            let differences = match &report.reproduction {
+                backtest::receipt::Reproduction::ReceiptChanged { differences } => {
+                    serde_json::to_value(differences).unwrap_or_default()
+                }
+                _ => json!([]),
+            };
+            Json(json!({
+                "run_id": body.run_id,
+                "outcome": report.reproduction.as_str(),
+                "is_platform_defect": report.reproduction.is_platform_defect(),
+                "receipt_missing": report.receipt_missing,
+                "differences": differences,
+                "was": report.was,
+                "now": report.now,
+                "trials_spent": 0,
+                "note": if report.receipt_missing {
+                    "the original carried no receipt, so this rests on the number alone"
+                } else {
+                    "compared bit for bit; there is no tolerance"
+                },
+            }))
+            .into_response()
+        }
+        Ok(Err(backtest::suite::SuiteError::NotFound)) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "not_found", "message": "no such run for this user" })),
+        )
+            .into_response(),
+        Ok(Err(e)) => bad_request(
+            "not_reproducible",
+            e.to_string(),
+            "only a Run this process executed, with its config on record, can be re-run",
+        )
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "reproduce_panicked", "message": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// `GET /api/lifecycle/repro-drift` — the share of the last thirty days'
+/// reproductions that changed under an unchanged receipt.
+///
+/// `drift_rate` is `null` over an empty sample: "0 % drift over nothing" reads as
+/// a healthy platform and is the absence of a measurement.
+pub async fn repro_drift(State(state): State<AppState>, token: BearerToken) -> impl IntoResponse {
+    let tenant = token.user_id().to_string();
+    match crate::repro_drift::drift_since(
+        &state.pg,
+        &tenant,
+        backtest::receipt::NIGHTLY_WINDOW_DAYS,
+    )
+    .await
+    {
+        Ok(r) => Json(json!({
+            "window_days": backtest::receipt::NIGHTLY_WINDOW_DAYS,
+            "sampled": r.sampled,
+            "bit_identical": r.bit_identical,
+            "drifted": r.drifted,
+            "receipt_changed": r.receipt_changed,
+            "drift_rate": r.drift_rate(),
+            "files_a_defect": r.files_a_defect(),
+        }))
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "storage", "message": e })),
+        )
+            .into_response(),
+    }
+}
+
+// ── hypotheses, read (S-10.15 server side) ────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct HypothesesQuery {
+    /// The run whose hypotheses to read. Required: a hypothesis row carries no
+    /// owner of its own, so ownership is the run's.
+    run_id: Uuid,
+}
+
+/// `GET /api/lifecycle/hypotheses?run_id=` — a run's hypotheses with the verdicts
+/// the platform wrote and the numbers that decided them.
+///
+/// Shape (documented here for the desk sub-track, which renders it through the
+/// falsifier card):
+///
+/// ```json
+/// { "run_id": "…", "hypotheses": [{
+///     "hypothesis_id": "…", "statement": "…", "falsifier": "sharpe <= 0",
+///     "role": "primary", "family_id": null,
+///     "status": "open" | "supported" | "refuted" | "inconclusive",
+///     "why": null | "insufficient_data" | "protocol_unstable" | "evidence_conflict"
+///             | "budget_exhausted" | "evidence_incomplete",
+///     "decided_at": null | "<rfc3339>",
+///     "inputs": null | {
+///        "metric": "sharpe", "comparator": "<=", "threshold": 0.0, "role": "primary",
+///        "measurements": [{ "value": -0.2, "ticket_id": "…", "se": null, "fired": true }],
+///        "fired_by": null | { "value": -0.2, "ticket_id": "…" },
+///        "n": 12,
+///        "battery": { "out_of_sample_ticket": "…"|null, "cost_model_ticket": null,
+///                     "benchmark_ticket": null, "repro_spec": null },
+///        "protocol_unstable": false, "budget_exhausted": false }
+/// }] }
+/// ```
+///
+/// `inputs: null` means **not recorded** (an open hypothesis, or one decided before
+/// 0242) and is never to be drawn as zero.
+pub async fn list_hypotheses(
+    State(state): State<AppState>,
+    token: BearerToken,
+    axum::extract::Query(q): axum::extract::Query<HypothesesQuery>,
+) -> impl IntoResponse {
+    let rows = sqlx::query(
+        "SELECT h.hypothesis_id, h.statement, h.falsifier, h.role, h.family_id,
+                h.status, h.inconclusive_why, h.decided_at, h.verdict_inputs
+           FROM agent_lifecycle.hypothesis h
+           JOIN agent_runs r ON r.run_id = h.run_id
+          WHERE h.run_id = $1 AND r.user_id = $2
+          ORDER BY h.created_at",
+    )
+    .bind(q.run_id)
+    .bind(token.user_id())
+    .fetch_all(&state.pg)
+    .await;
+    match rows {
+        Ok(rows) => {
+            let hypotheses: Vec<Value> = rows
+                .iter()
+                .map(|r| {
+                    json!({
+                        "hypothesis_id": r.get::<Uuid, _>("hypothesis_id"),
+                        "statement": r.get::<String, _>("statement"),
+                        "falsifier": r.get::<String, _>("falsifier"),
+                        "role": r.get::<String, _>("role"),
+                        "family_id": r.get::<Option<String>, _>("family_id"),
+                        "status": r.get::<String, _>("status"),
+                        "why": r.get::<Option<String>, _>("inconclusive_why"),
+                        "decided_at": r
+                            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("decided_at"),
+                        "inputs": r.get::<Option<Value>, _>("verdict_inputs"),
+                    })
+                })
+                .collect();
+            Json(json!({ "run_id": q.run_id, "hypotheses": hypotheses })).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "storage", "message": e.to_string() })),
+        )
+            .into_response(),
+    }
 }

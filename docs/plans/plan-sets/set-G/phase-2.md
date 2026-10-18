@@ -1,6 +1,6 @@
 # Phase 2 — Plans Migration
 
-**Completion: 50% (1 / 2) — G-2.1 DONE (landed at `docs/plans/plan-sets/`); G-2.2 OPEN, 8 stale references (audited 2026-09-15)**
+**Completion: 100% (2 / 2) — G-2.1 DONE (landed at `docs/plans/plan-sets/`); G-2.2 DONE 2026-10-03 (the 8 stale references plus 3 move casualties in `reference/rust-rewrite-master-plan.md`, `set-B/master-plan.md` and `set-C/agents/README.md`; link check 0 dead in every touched file)**
 
 **Goal:** Move the `plans/` folder from the repo root into `docs/plans/` so
 that all documentation lives under a single `docs/` tree. Update every
@@ -11,7 +11,7 @@ location.
 
 ## Tasks
 
-### ☐ G-2.1 Move plans/ → docs/plans/ (git mv) — M
+### ☑ G-2.1 Move plans/ → docs/plans/ (git mv) — M — DONE
 
 **Why.** `plans/` at the repo root sits alongside `docs/` with no structural
 connection between them. Moving it inside `docs/` creates a single authoritative
@@ -53,7 +53,7 @@ set-G will be at the new path. Update internal self-references if any.
 
 ---
 
-### ☐ G-2.2 Update all cross-references from plans/ to docs/plans/ — M
+### ☑ G-2.2 Update all cross-references from plans/ to docs/plans/ — M — DONE 2026-10-03
 
 **Why.** After the move, any file that links to `plans/…` will have a broken
 link. This includes procedure docs, the root `README.md`, `docs/README.md`,

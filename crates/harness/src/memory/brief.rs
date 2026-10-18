@@ -509,6 +509,29 @@ fn push(
     });
 }
 
+/// The ids among `retrieved` that `text` names (S-6.10).
+///
+/// What a run **cited** is what its `record_finding` / `finish_task` evidence
+/// names, and the driver feeds that text here. An id counts only as a whole
+/// token: `f_1` is not cited by a claim that mentions `f_12`, and an id the brief
+/// never showed is not returned however confidently the model names it (the
+/// counterpart of [`Brief::mark_cited`]'s "named an id that was never retrieved").
+#[must_use]
+pub fn cited_ids(retrieved: &[Retrieval], text: &str) -> Vec<String> {
+    let tokens: std::collections::BTreeSet<&str> = text
+        .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '-' || c == '.'))
+        .map(|t| t.trim_matches(|c: char| c == '.' || c == '-'))
+        .filter(|t| !t.is_empty())
+        .collect();
+    let mut out: Vec<String> = Vec::new();
+    for r in retrieved {
+        if tokens.contains(r.entry_id.as_str()) && !out.contains(&r.entry_id) {
+            out.push(r.entry_id.clone());
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -984,5 +1007,23 @@ mod tests {
             &[],
         );
         assert_eq!(a, b, "a reordering brief is a prompt-cache miss every step");
+    }
+
+    /// S-6.10: only whole ids the brief showed are cited.
+    #[test]
+    fn a_citation_is_a_whole_retrieved_id() {
+        let mk = |id: &str| Retrieval {
+            run_id: "r".into(),
+            entry_id: id.into(),
+            rank: 1,
+            slot: Slot::Finding,
+            why: String::new(),
+            cited: false,
+        };
+        let shown = vec![mk("f_1"), mk("f_2"), mk("q-7")];
+        assert_eq!(cited_ids(&shown, "f_1, q-7."), vec!["f_1", "q-7"]);
+        assert!(cited_ids(&shown, "f_12 and xf_1").is_empty(), "prefix is not a cite");
+        assert!(cited_ids(&shown, "f_99").is_empty(), "never shown, never cited");
+        assert_eq!(cited_ids(&shown, "[f_2] f_2"), vec!["f_2"], "once");
     }
 }

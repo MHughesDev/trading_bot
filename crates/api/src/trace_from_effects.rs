@@ -90,6 +90,72 @@ pub async fn spans_for_run(pool: &PgPool, run_id: Uuid) -> Result<Vec<Span>, Tra
     Ok(spans)
 }
 
+/// What one pass of the replayability sampler found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReplaySample {
+    pub sampled: usize,
+    pub replayable: usize,
+    /// Run id and why, for every sampled run whose trajectory cannot replay.
+    pub unreplayable: Vec<(Uuid, String)>,
+}
+
+/// Sample the most recent runs that logged anything and ask `is_replayable` of
+/// each trajectory (S-4.8: "`is_replayable` returns true for a nightly sample of
+/// real runs").
+///
+/// This is the consumer `harness::trace` was missing. A run with no effect rows
+/// at all is not in the sample (it never reached the log), and one that logged
+/// only inputs projects to an empty trajectory, which `is_replayable` refuses by
+/// naming the missing model call.
+///
+/// # Errors
+/// [`TrajectoryError::Sqlx`] if the log cannot be read.
+pub async fn sample_replayable(
+    pool: &PgPool,
+    limit: i64,
+) -> Result<ReplaySample, TrajectoryError> {
+    let runs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT run_id FROM agent_effect_log GROUP BY run_id           ORDER BY max(created_at) DESC LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    let mut out = ReplaySample::default();
+    for run in runs {
+        let spans = spans_for_run(pool, run).await?;
+        out.sampled += 1;
+        if harness::trace::is_replayable(&spans) {
+            out.replayable += 1;
+        } else {
+            let why = harness::trace::unreplayable_reason(&spans)
+                .unwrap_or_else(|| "not replayable".to_string());
+            out.unreplayable.push((run, why));
+        }
+    }
+    Ok(out)
+}
+
+/// The nightly loop: sample 20 recent runs and log the share that replay. Needs
+/// one line in the platform's `main.rs`:
+/// `api::trace_from_effects::spawn_replay_sampler(pg.clone());`.
+pub fn spawn_replay_sampler(pool: PgPool) {
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+        loop {
+            match sample_replayable(&pool, 20).await {
+                Ok(r) => tracing::info!(
+                    sampled = r.sampled,
+                    replayable = r.replayable,
+                    unreplayable = r.unreplayable.len(),
+                    "nightly replayability sample"
+                ),
+                Err(e) => tracing::warn!(error = %e, "nightly replayability sample failed"),
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(24 * 3600)).await;
+        }
+    });
+}
+
 /// One log row as a trace event, or `None` for a row a replay does not need.
 ///
 /// Rows are skipped rather than mapped to a placeholder: `is_replayable` counts
@@ -98,6 +164,24 @@ pub async fn spans_for_run(pool: &PgPool, run_id: Uuid) -> Result<Vec<Span>, Tra
 /// the shape that check exists to catch. A trace that logged names without
 /// arguments "looks complete in a dashboard and cannot reproduce anything".
 fn event_for(direction: &str, kind: &str, payload: &Value) -> Option<Event> {
+    // The parent's side of a delegation (S-2.12): a state row, because it is the
+    // driver writing down that it dispatched a sub-run, not a decision to replay.
+    if direction == "state" && kind == "Delegation" {
+        return Some(Event::Delegation {
+            child_trace_id: payload
+                .get("child_trace_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            goal: payload
+                .get("goal")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            tool_grant: Vec::new(),
+            budget_usd: 0.0,
+        });
+    }
     if direction != "effect" {
         return None;
     }
@@ -272,6 +356,7 @@ mod tests {
 #[cfg(test)]
 mod projection_matches_the_log {
     use super::*;
+    use serde_json::json;
     use harness::drive::{Effect, Note};
 
     /// The projection reads what the log actually writes.
@@ -286,19 +371,40 @@ mod projection_matches_the_log {
         let effect = Effect::Note(Note::CoreTool {
             name: "record_finding".into(),
             detail: "BTC-USD momentum — stored suggestive".into(),
+            args: json!({ "finding": "BTC-USD momentum", "evidence": "exp_1" }),
         });
         let (kind, payload) = crate::agent::local_driver::describe_effect_for_test(&effect);
         assert_eq!(kind, "Note");
 
         let event = event_for("effect", kind, &payload)
             .expect("the row the log writes is a row the projection reads");
-        match event {
-            Event::CoreTool { name, reply, .. } => {
+        match &event {
+            Event::CoreTool { name, reply, args, .. } => {
                 assert_eq!(name, "record_finding");
                 assert!(reply.contains("suggestive"));
+                assert_eq!(args["evidence"], "exp_1", "the arguments reach the trace");
             }
             other => panic!("expected CoreTool, got {other:?}"),
         }
+        // Was pinned broken (S-4.8): a core-tool row carried no arguments, so any
+        // run that used `record_finding` or `finish_task` was reported
+        // unreplayable. It is replayable now, which is what this holds.
+        let spans = vec![
+            Span::new(
+                "t",
+                "t:1",
+                "orchestrator",
+                1,
+                event_for("effect", "CallModel", &json!({"prompt_bytes": 4096, "step": 1}))
+                    .expect("a model call maps"),
+            ),
+            Span::new("t", "t:2", "orchestrator", 1, event),
+        ];
+        assert!(
+            harness::trace::is_replayable(&spans),
+            "a trajectory that used record_finding must be replayable: {:?}",
+            harness::trace::unreplayable_reason(&spans)
+        );
     }
 
     /// And a note that is not a core tool still logs, and still projects to

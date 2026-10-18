@@ -34,7 +34,13 @@ pub struct LabelSpec {
     #[serde(default)]
     pub min_return_threshold: Option<f64>,
     pub sample_weight_method: SampleWeightMethod,
-    pub code_hash: String,
+    pub code_hash: String,    /// Where a triple barrier looks for a touch (N-1.4). Absent on every spec written before
+    /// it existed, and then omitted from the serialised form so those ids do not change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub barrier_path: Option<crate::barrier::BarrierPath>,
+    /// How rows are chosen (N-1.7); absent means every bar. Omitted when absent, as above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampling: Option<crate::sampling::SamplingSpec>,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -138,6 +144,8 @@ mod tests {
             min_return_threshold: None,
             sample_weight_method: SampleWeightMethod::None,
             code_hash: "x".into(),
+            barrier_path: None,
+            sampling: None,
         };
         assert!(s.overlapping_labels_unweighted());
     }

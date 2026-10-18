@@ -117,6 +117,16 @@ pub enum SeriesKind {
     /// so asking for them spends no trial. A materialisation that ran the family
     /// to answer a read would be a read that spent a day of budget.
     TrialReturns,
+    /// A model version's out-of-sample answers beside what the market then did:
+    /// `ts` (ns, UTC), `y_hat` (the chosen scalar output) and `y_h<k>` (the
+    /// realised log return over the `k` bars after the decision), one column per
+    /// requested horizon, NaN where the horizon runs past the readable bars.
+    ///
+    /// Read from the prediction series (`model_prediction_series`, Set U U-5.5)
+    /// and the same point-in-time bar read every other kind uses, so a label is
+    /// never taken from a bar the project may not see. Nothing is dispatched: a
+    /// series that has not been filled is an empty read, reported as such.
+    Predictions,
 }
 
 /// What series a template needs materialised before it runs (§3.3).
@@ -140,6 +150,13 @@ pub struct SeriesRequest {
     /// Which argument names the experiment, for [`SeriesKind::TrialReturns`].
     #[serde(default = "default_experiment_arg")]
     pub experiment_arg: String,
+    /// Which argument names the model (`name@version`), for [`SeriesKind::Predictions`].
+    #[serde(default = "default_model_arg")]
+    pub model_arg: String,
+}
+
+fn default_model_arg() -> String {
+    "model".into()
 }
 
 fn default_instrument_arg() -> String {

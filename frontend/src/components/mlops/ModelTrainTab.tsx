@@ -9,7 +9,12 @@ import {
   useStartTrain,
   useCancelRun,
   useMarketInstruments,
+  useModelVersions,
+  useEvaluateVersion,
+  useTrainingCurve,
 } from '@/hooks/useMlOps'
+import { appendSample, type ProgressSample } from './studio.helpers'
+import { BestOverlay, LinkLostBanner, LossCurve, ProgressCurve, RunEta } from './TrainLive'
 import type { ModelRunSnapshot } from '@/api/mlops'
 import { formatDistanceToNow } from 'date-fns'
 import { HyperparamEditor } from './HyperparamEditor'
@@ -99,7 +104,12 @@ export function ModelTrainTab({ modelId }: Props) {
   const framework = model?.definition.framework ?? 'xgboost'
   const runtime = model?.definition.runtime ?? 'python'
 
-  const { data: runs, isLoading: runsLoading } = useModelRuns(modelId)
+  const runsQ = useModelRuns(modelId)
+  const runs = runsQ.data
+  const runsLoading = runsQ.isLoading
+  const versionsQ = useModelVersions(modelId)
+  const evaluate = useEvaluateVersion(modelId)
+  const [samples, setSamples] = useState<ProgressSample[]>([])
   const { data: marketInstruments } = useMarketInstruments()
   const startMut = useStartTrain(modelId)
   const cancelMut = useCancelRun(modelId)
@@ -144,7 +154,8 @@ export function ModelTrainTab({ modelId }: Props) {
   useEffect(() => {
     if (!activeRun) return
     const line = `[${new Date().toLocaleTimeString()}] Phase: ${activeRun.phase} (${Math.round(activeRun.progress)}%)`
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- appends observed phase transitions, which the polled payload does not carry and nothing can derive.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the progress curve is the series of readings this browser observed; the polled row carries only the latest.
+    setSamples((prev) => appendSample(prev, { t: Date.now(), progress: activeRun.progress }))
     setLogLines((prev) => {
       const last = prev[prev.length - 1]
       // Avoid duplicate lines
@@ -165,6 +176,7 @@ export function ModelTrainTab({ modelId }: Props) {
   async function handleStart() {
     if (!hyperparamsValid) return
     setLogLines([])
+    setSamples([])
     await startMut.mutateAsync({
       version_note: versionNote.trim() || undefined,
       hyperparams: Object.keys(hyperparams).length > 0 ? hyperparams : undefined,
@@ -186,8 +198,14 @@ export function ModelTrainTab({ modelId }: Props) {
   }
 
   const displayRun = activeRun ?? latestRun
+  const curveQ = useTrainingCurve(modelId, displayRun?.run_id ?? null, displayRun?.status === 'running')
+  const newestVersion = versionsQ.data?.length
+    ? Math.max(...versionsQ.data.map((v) => v.version))
+    : null
 
   return (
+    <>
+    {runsQ.isError && <LinkLostBanner onRetry={() => void runsQ.refetch()} />}
     <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr_220px] gap-4">
       {/* Left — Config */}
       <div className="rounded-xl border border-border bg-surface p-4 space-y-4">
@@ -386,6 +404,34 @@ export function ModelTrainTab({ modelId }: Props) {
               <p className="text-xs text-neg text-center px-4">{displayRun.error}</p>
             )}
 
+            <RunEta samples={samples} run={displayRun} />
+            <div className="w-full">
+              <LossCurve points={curveQ.data} failed={curveQ.isError} />
+            </div>
+            <div className="w-full">
+              <ProgressCurve samples={samples} />
+            </div>
+
+            {displayRun.status === 'succeeded' && newestVersion !== null && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-fg-secondary">Training finished.</span>
+                <Button
+                  className="text-xs h-7"
+                  onClick={() => evaluate.mutate(newestVersion)}
+                  disabled={evaluate.isPending || evaluate.isSuccess}
+                >
+                  {evaluate.isSuccess ? 'Evaluation started' : `Evaluate v${newestVersion}`}
+                </Button>
+              </div>
+            )}
+            {evaluate.isError && (
+              <p className="text-xs text-neg" role="alert">The evaluation could not be started.</p>
+            )}
+
+            <div className="w-full">
+              <BestOverlay run={displayRun} versions={versionsQ.data} />
+            </div>
+
             <div className="flex gap-2 flex-wrap justify-center">
               {displayRun.metrics &&
                 Object.entries(displayRun.metrics)
@@ -459,5 +505,6 @@ export function ModelTrainTab({ modelId }: Props) {
         )}
       </div>
     </div>
+    </>
   )
 }

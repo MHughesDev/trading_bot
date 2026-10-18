@@ -23,6 +23,14 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useCreateModel } from '@/hooks/useMlOps'
 import type { ModelKind } from '@/api/mlops'
+import {
+  adapterBlock,
+  adapterFieldErrors,
+  errorFor,
+  parseValidationErrors,
+  type AdapterFields,
+  type FieldError,
+} from '@/components/mlops/studio.helpers'
 
 const SPRING = { type: 'spring' as const, stiffness: 380, damping: 30 }
 
@@ -195,6 +203,10 @@ export function ModelCreatePage() {
   const [versionNote, setVersionNote] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [description, setDescription] = useState('')
+  // The adapter block an external LLM needs (domain validation REQUIRES it).
+  const [adapterFields, setAdapter] = useState<AdapterFields>({ provider: '', model: '', endpoint: '', costPer1k: '' })
+  const [serverErrors, setServerErrors] = useState<FieldError[]>([])
+  const adapterErrs = adapterFieldErrors(adapterFields)
 
   const slug = slugify(displayName)
 
@@ -219,13 +231,14 @@ export function ModelCreatePage() {
     step === 0
       ? selectedKind !== null
       : step === 1
-        ? true
+        ? selectedKind !== 'external_llm_adapter' || Object.keys(adapterErrs).length === 0
         : step === 2
           ? true
           : displayName.trim().length > 0
 
   async function handleSubmit() {
     if (!selectedKind) return
+    setServerErrors([])
     try {
       const isExternal =
         selectedKind === 'external_llm_adapter' || selectedKind === 'embedding'
@@ -245,7 +258,7 @@ export function ModelCreatePage() {
 
       const adapter =
         selectedKind === 'external_llm_adapter'
-          ? { provider: '', model: '', endpoint: '' }
+          ? adapterBlock(adapterFields)
           : undefined
 
       const res = await createMutation.mutateAsync({
@@ -263,8 +276,10 @@ export function ModelCreatePage() {
         },
       })
       navigate(`/mlops/${res.data.model_id}`)
-    } catch {
-      // error shown via mutation state
+    } catch (err) {
+      // A 422 carries `errors: [{ path, message }]`; those are shown against the
+      // field they name. Anything else falls through to the general message.
+      setServerErrors(parseValidationErrors(err))
     }
   }
 
@@ -350,6 +365,37 @@ export function ModelCreatePage() {
                       <Check className="h-4 w-4 text-accent ml-auto shrink-0" />
                     </div>
                   </div>
+                  {selectedKind === 'external_llm_adapter' && (
+                    <div className="mt-5 space-y-3" data-testid="adapter-fields">
+                      <h2 className="text-base font-medium text-text">Adapter</h2>
+                      {(
+                        [
+                          ['provider', 'Provider', 'ollama, openai, anthropic'],
+                          ['model', 'Model', 'gemma2:9b'],
+                          ['endpoint', 'Endpoint', 'http://localhost:11434'],
+                          ['costPer1k', 'Cost per 1k tokens (USD, optional)', '0.0'],
+                        ] as const
+                      ).map(([key, label, hint]) => (
+                        <label key={key} className="block text-xs text-fg-secondary">
+                          {label}
+                          <input
+                            value={adapterFields[key]}
+                            placeholder={hint}
+                            onChange={(e) => setAdapter((a) => ({ ...a, [key]: e.target.value }))}
+                            className="mt-1 w-full h-9 rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:border-accent"
+                          />
+                          {adapterErrs[key] && adapterFields[key] !== '' && (
+                            <span className="text-neg" role="alert">{adapterErrs[key]}</span>
+                          )}
+                          {errorFor(serverErrors, `adapter.${key === 'costPer1k' ? 'cost_per_1k_tokens' : key}`) && (
+                            <span className="text-neg" role="alert">
+                              {errorFor(serverErrors, `adapter.${key === 'costPer1k' ? 'cost_per_1k_tokens' : key}`)}
+                            </span>
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <>
@@ -585,7 +631,17 @@ export function ModelCreatePage() {
 
               {createMutation.isError && (
                 <div className="rounded-lg bg-neg/10 border border-neg/20 px-4 py-3 text-sm text-neg">
-                  Failed to create model. Please try again.
+                  {serverErrors.length > 0 ? (
+                    <ul data-testid="server-errors" className="space-y-1">
+                      {serverErrors.map((e) => (
+                        <li key={e.path + e.message}>
+                          <span className="font-mono">{e.path}</span>: {e.message}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    'Failed to create model. Please try again.'
+                  )}
                 </div>
               )}
             </div>

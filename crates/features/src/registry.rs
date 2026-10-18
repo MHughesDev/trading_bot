@@ -261,6 +261,10 @@ const EXAMPLES: &[(&str, usize)] = &[
     ("halflife", 10),
     ("lag", 1),
     ("horizon", 4),
+    ("n1", 10),
+    ("n2", 20),
+    ("n3", 40),
+    ("d", 40),
 ];
 
 /// A resolved name: the family it belongs to and its parameters.
@@ -369,6 +373,11 @@ static FAMILIES: &[Family] = &[
     Family::new("autocorr",            p![Param::new("n", 4, 100_000), Param::new("lag", 1, 1_000)], Lookback::Nested { outer: 0, inner: 1, mult: 1, plus: 1 }, CostClass::Rolling, Phase::F2, "autocorrelation of bar returns at the given lag over n bars"),
     Family::new("variance_ratio",      p![Param::new("n", 8, 100_000), Param::new("horizon", 2, 1_000)], Lookback::Nested { outer: 0, inner: 1, mult: 2, plus: 1 }, CostClass::Rolling, Phase::F2, "Lo-MacKinlay variance ratio at horizon q; above 1 is trending, below 1 mean-reverting"),
     Family::new("efficiency_ratio",    p![Param::new("n", 2, 100_000)], Lookback::Scaled { i: 0, mult: 1, plus: 1 }, CostClass::Rolling, Phase::F2, "net move over total path length, 0..1; the persistence filter a trend rule wants"),
+    Family::new("yang_zhang_vol", p![Param::new("n", 3, 100_000)], Lookback::Scaled { i: 0, mult: 1, plus: 0 }, CostClass::Rolling, Phase::F2, "Yang-Zhang volatility over n bars; handles gaps between bars as well as the range"),
+    Family::new("hurst", p![Param::new("n", 257, 100_000)], Lookback::Scaled { i: 0, mult: 1, plus: 0 }, CostClass::Rolling, Phase::F2, "rescaled-range Hurst exponent of bar returns; above 0.55 trending, below 0.45 mean-reverting"),
+    Family::new("fracdiff", p![Param::new("n", 2, 100_000), Param::new("d", 1, 99)], Lookback::Scaled { i: 0, mult: 1, plus: 0 }, CostClass::Rolling, Phase::F2, "fractional difference of log close, order d/100 over n bars; stationary but keeps memory"),
+    Family::new("lookback_ensemble_zscore", p![Param::new("n1", 2, 100_000), Param::new("n2", 2, 100_000), Param::new("n3", 2, 100_000)], Lookback::MaxScaled { mult: 1, plus: 0 }, CostClass::Rolling, Phase::F2, "equal-weight mean of zscore over three lookbacks; a mean-reversion rule that does not hinge on one window"),
+    Family::new("lookback_ensemble_returns", p![Param::new("n1", 1, 100_000), Param::new("n2", 1, 100_000), Param::new("n3", 1, 100_000)], Lookback::MaxScaled { mult: 1, plus: 1 }, CostClass::Rolling, Phase::F2, "equal-weight mean of simple returns over three lookbacks; a momentum rule that does not hinge on one window"),
 ];
 
 /// Bars of window per halflife for [`ewma`](FAMILIES), on the same argument as

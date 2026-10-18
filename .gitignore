@@ -59,3 +59,6 @@ Thumbs.db
 
 # Local write-once ledger anchor store (PLATFORM_WORM_DIR)
 data/worm/
+
+# Agent runner workspaces (per-run transcripts and skill copies; runtime output)
+agent-workspaces/

@@ -96,19 +96,35 @@ fn alpaca_symbol(instrument_id: &str) -> String {
     instrument_id.replace('-', "")
 }
 
-fn domain_side(side: &str) -> Side {
-    if side == "buy" {
-        Side::Buy
-    } else {
-        Side::Sell
+/// Alpaca's side string → `Side`.  Anything but `buy`/`sell` is an error.
+///
+/// This was `if side == "buy" { Buy } else { Sell }` (Set E audit item #9):
+/// an empty, truncated, re-cased or unexpected value from the venue silently
+/// became a **sell**, and a platform that rebuilds positions from broker
+/// records would have booked a long as a short.  Outbound mapping was always
+/// exact; the inbound side now is too.
+fn domain_side(side: &str) -> Result<Side, BrokerError> {
+    match side {
+        "buy" => Ok(Side::Buy),
+        "sell" => Ok(Side::Sell),
+        other => Err(BrokerError::Serialization(format!(
+            "alpaca reported order side {other:?}; refusing to guess a direction"
+        ))),
     }
 }
 
-fn domain_order_type(t: &str) -> OrderType {
+/// Alpaca's order type → `OrderType`.  Unknown text is an error, never `Market`
+/// — the same fail-open shape as the side, one field over.
+fn domain_order_type(t: &str) -> Result<OrderType, BrokerError> {
     match t {
-        "limit" => OrderType::Limit,
-        "stop_limit" => OrderType::StopLimit,
-        _ => OrderType::Market,
+        "market" => Ok(OrderType::Market),
+        "limit" => Ok(OrderType::Limit),
+        "stop" => Ok(OrderType::Stop),
+        "stop_limit" => Ok(OrderType::StopLimit),
+        "trailing_stop" => Ok(OrderType::TrailingStop),
+        other => Err(BrokerError::Serialization(format!(
+            "alpaca reported order type {other:?}; refusing to guess one"
+        ))),
     }
 }
 
@@ -228,8 +244,8 @@ impl Broker for AlpacaBroker {
         Ok(BrokerOrderStatus {
             broker_order_id: parsed.id,
             instrument_id: parsed.symbol,
-            side: domain_side(&parsed.side),
-            order_type: domain_order_type(&parsed.order_type),
+            side: domain_side(&parsed.side)?,
+            order_type: domain_order_type(&parsed.order_type)?,
             submitted_qty,
             filled_qty,
             avg_fill_price,
@@ -260,17 +276,19 @@ impl Broker for AlpacaBroker {
             .await
             .map_err(|e| BrokerError::Serialization(e.to_string()))?;
 
-        Ok(parsed
+        // One unreadable order fails the whole listing: dropping it would hide
+        // an open order from reconciliation, and guessing its side is the bug.
+        parsed
             .into_iter()
             .map(|o| {
                 let submitted_qty = Decimal::from_str(&o.qty).unwrap_or(Decimal::ZERO);
                 let filled_qty = Decimal::from_str(&o.filled_qty).unwrap_or(Decimal::ZERO);
                 let avg_fill_price = o.filled_avg_price.as_deref().and_then(parse_price);
-                BrokerOrderStatus {
+                Ok(BrokerOrderStatus {
                     broker_order_id: o.id,
                     instrument_id: o.symbol,
-                    side: domain_side(&o.side),
-                    order_type: domain_order_type(&o.order_type),
+                    side: domain_side(&o.side)?,
+                    order_type: domain_order_type(&o.order_type)?,
                     submitted_qty,
                     filled_qty,
                     avg_fill_price,
@@ -278,9 +296,9 @@ impl Broker for AlpacaBroker {
                     // `None`, never zero -- see BrokerOrderStatus::commission.
                     commission: None,
                     state: parse_broker_state(&o.status),
-                }
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn query_positions(&self) -> Result<Vec<BrokerPosition>, BrokerError> {
@@ -314,5 +332,31 @@ impl Broker for AlpacaBroker {
                 })
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod inbound_parsing_tests {
+    use super::*;
+
+    #[test]
+    fn an_unrecognised_inbound_side_is_refused_not_read_as_a_sell() {
+        assert_eq!(domain_side("buy").unwrap(), Side::Buy);
+        assert_eq!(domain_side("sell").unwrap(), Side::Sell);
+        for bad in ["", "Buy", "BUY", "sel", "short", "sell ", "b"] {
+            assert!(
+                domain_side(bad).is_err(),
+                "side {bad:?} must be refused, not read as a sell"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unrecognised_inbound_order_type_is_refused_not_read_as_market() {
+        assert_eq!(domain_order_type("limit").unwrap(), OrderType::Limit);
+        assert_eq!(domain_order_type("stop").unwrap(), OrderType::Stop);
+        for bad in ["", "Market", "lmt", "oco"] {
+            assert!(domain_order_type(bad).is_err(), "type {bad:?} must be refused");
+        }
     }
 }

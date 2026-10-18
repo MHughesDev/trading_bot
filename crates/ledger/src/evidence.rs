@@ -66,6 +66,31 @@ pub struct CapacityPoint {
     pub member_trial_id: Uuid,
 }
 
+/// SPEC §16.1: **at most 100 000 distinct metric keys per tenant**, a hard
+/// ceiling and not a soft one. The reason is not storage: a metric series per
+/// instrument per run degrades the backend, then the dashboards, then the
+/// observability layer itself (checklist 5.2).
+///
+/// What holds it here is the **closed vocabulary**: every metric key this ledger
+/// writes is a name in [`crate::TRIAL_STATISTICS`], refused by `record_statistic`
+/// and CHECKed by migration 0106, so the number of distinct keys per tenant is a
+/// constant of the build (~45) and cannot grow with instruments or runs. The
+/// test `the_closed_vocabulary_is_far_inside_the_key_budget` holds that
+/// arithmetic, and `no_metric_name_embeds_an_instrument_id` holds the other half
+/// (nothing builds a name by interpolation).
+pub const METRIC_KEY_BUDGET_PER_TENANT: usize = 100_000;
+
+/// The most instruments one trial's per-instrument cross-section may carry.
+///
+/// SPEC §16.1's worked example is 3 000 tickers; this leaves headroom over it
+/// and stops short of unbounded. Per-instrument results are **rows of an
+/// artifact table, never metric series** — that rule is what keeps the key
+/// budget above true — and a table keyed `(trial, instrument)` still grows with
+/// every trial, so a single trial's contribution is capped and *refused*, not
+/// truncated: a cross-section with its tail silently dropped would give Gate 12
+/// a concentration computed over a subset of the book.
+pub const MAX_INSTRUMENT_ROWS_PER_TRIAL: usize = 5_000;
+
 /// One instrument's contribution, read by Gate 12 (concentration) and Gate 4
 /// (participation).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -203,6 +228,12 @@ impl TrialEvidence {
             return bad("a capacity curve with no base AUM has nothing to be a fraction of".into());
         }
 
+        if self.instrument_pnl.len() > MAX_INSTRUMENT_ROWS_PER_TRIAL {
+            return bad(format!(
+                "a per-instrument cross-section of {} rows exceeds the {MAX_INSTRUMENT_ROWS_PER_TRIAL}                  one trial may carry (SPEC §16.1). It is refused rather than truncated: Gate 12's                  concentration over a book with its tail dropped is a statement about a different book",
+                self.instrument_pnl.len()
+            ));
+        }
         let mut seen: BTreeSet<&str> = BTreeSet::new();
         for i in &self.instrument_pnl {
             if i.instrument.trim().is_empty() || i.numeraire.trim().is_empty() {
@@ -440,5 +471,43 @@ mod tests {
             })
             .collect();
         assert!(e.validate().is_err());
+    }
+
+    /// SPEC §16.1's ceiling is held by construction: the vocabulary of metric
+    /// keys is a closed set, so the number of distinct keys a tenant can have is
+    /// a constant of the build.
+    #[test]
+    fn the_closed_vocabulary_is_far_inside_the_key_budget() {
+        let distinct: std::collections::BTreeSet<&&str> = crate::TRIAL_STATISTICS.iter().collect();
+        assert_eq!(distinct.len(), crate::TRIAL_STATISTICS.len(), "no duplicate names");
+        assert!(
+            crate::TRIAL_STATISTICS.len() * 100 < METRIC_KEY_BUDGET_PER_TENANT,
+            "the vocabulary ({}) should be orders of magnitude inside the {METRIC_KEY_BUDGET_PER_TENANT}-key budget",
+            crate::TRIAL_STATISTICS.len()
+        );
+        // And no name embeds an instrument: a name with a symbol in it is a
+        // series per instrument, which is the failure the budget exists for.
+        for name in crate::TRIAL_STATISTICS {
+            assert!(
+                name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                "{name} is not a plain snake_case metric name"
+            );
+        }
+    }
+
+    /// A cross-section larger than one trial may carry is refused, never
+    /// truncated.
+    #[test]
+    fn an_oversized_cross_section_is_refused_not_truncated() {
+        let mut e = TrialEvidence::produced_by("test");
+        e.instrument_pnl = (0..=MAX_INSTRUMENT_ROWS_PER_TRIAL)
+            .map(|i| pnl(&format!("SYM{i}"), "USD", 1.0))
+            .collect();
+        let err = e.validate().unwrap_err().to_string();
+        assert!(err.contains("refused rather than truncated"), "{err}");
+        // At the cap it is accepted.
+        e.instrument_pnl.pop();
+        assert_eq!(e.instrument_pnl.len(), MAX_INSTRUMENT_ROWS_PER_TRIAL);
+        e.validate().expect("exactly at the cap is allowed");
     }
 }

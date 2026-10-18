@@ -326,6 +326,24 @@ impl SourceDecl {
         }
     }
 
+    /// Kraken's downloadable OHLCVT history archives (P-1.3).
+    ///
+    /// Its own source, not `kraken_rest`: the backfill router keys on
+    /// `source_name()`, so two adapters answering one name cannot both be routed,
+    /// and a vendor file is a different provenance from a REST page even when the
+    /// candles agree. Same 60 s sentinel as the API path, because it is the same
+    /// venue's same candles; mirrors `dataplane.source` row 23 (migration 0156).
+    #[must_use]
+    pub const fn kraken_archive() -> Self {
+        Self {
+            name: "kraken_archive",
+            kind: SourceKind::VendorFile,
+            declared_lag: Duration::from_secs(60),
+            cost_class: CostClass::Free,
+            notes: "Kraken OHLCVT history archives, verified by sha256 before any row is read",
+        }
+    }
+
     /// Alpaca free-plan historical bars (P-1.4).
     ///
     /// Mirrors `dataplane.source` row 5, and the 900 s is the point: it is fifteen
@@ -351,6 +369,7 @@ impl SourceDecl {
         Self::tradier_chain,
         Self::coinbase_rest,
         Self::kraken_rest,
+        Self::kraken_archive,
         Self::alpaca_rest,
     ];
 
@@ -713,6 +732,7 @@ mod tests {
         let seeded: &[(&str, u64)] = &[
             ("coinbase_rest", 60_000),
             ("kraken_rest", 60_000),
+            ("kraken_archive", 60_000),
             ("alpaca_rest", 900_000),
             ("kraken_futures_rest", 3_600_000),
             ("kraken_futures_history", 3_600_000),

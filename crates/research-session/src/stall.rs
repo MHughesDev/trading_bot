@@ -295,8 +295,14 @@ impl FinishedRun {
     /// no cost *per unit*, and a finite number in that column is a number
     /// readers will average.
     #[must_use]
+    ///
+    /// Nor does a run that **cost nothing**: a `survey` cannot spend a trial
+    /// (AGENT-013 §3), so its cost is a true zero, and a free question is not
+    /// evidence of a cheap session. Counting it would drag the session's own
+    /// median toward zero and make the next ordinary run look like drift.
     pub fn cost_per_knowledge_unit(&self) -> Option<f64> {
-        (self.knowledge_units > 0).then(|| self.cost / f64::from(self.knowledge_units))
+        (self.knowledge_units > 0 && self.cost > 0.0)
+            .then(|| self.cost / f64::from(self.knowledge_units))
     }
 
     fn only_from(&self, source: Source) -> bool {
@@ -1500,6 +1506,17 @@ mod tests {
         assert_eq!(median(&mut [4.0]), Some(4.0));
         assert_eq!(median(&mut [3.0, 1.0, 2.0]), Some(2.0));
         assert_eq!(median(&mut [4.0, 1.0, 3.0, 2.0]), Some(2.5));
+    }
+
+    #[test]
+    fn a_run_that_cost_nothing_has_no_cost_per_unit_and_cannot_pull_the_median_down() {
+        assert_eq!(
+            run(3, "survey")
+                .producing(3, 0)
+                .costing(0.0)
+                .cost_per_knowledge_unit(),
+            None
+        );
     }
 
     #[test]

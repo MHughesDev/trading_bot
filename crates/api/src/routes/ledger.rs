@@ -77,6 +77,35 @@ pub struct ReserveBody {
     family_id: Option<String>,
 }
 
+/// The mode of a run this tenant owns, or `None` when no such run exists (a run id
+/// the tenant does not hold is not one whose mode it may learn).
+///
+/// # Errors
+/// The read failed.
+pub async fn run_mode(
+    pg: &sqlx::PgPool,
+    run_id: Uuid,
+    user_id: Uuid,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar("SELECT mode FROM agent_runs WHERE run_id = $1 AND user_id = $2")
+        .bind(run_id)
+        .bind(user_id)
+        .fetch_optional(pg)
+        .await
+        .map(Option::flatten)
+}
+
+/// The refusal for a reservation naming a Chat run, if it is one.
+#[must_use]
+pub fn chat_refusal(mode: Option<&str>) -> Option<Value> {
+    (mode == Some("chat")).then(|| {
+        json!({
+            "error": "chat_turn_spends_no_trials",
+            "message": "this run is a Chat turn, and a Chat turn spends no trials. Start a                         Research run (the offer card's Start action) to spend one",
+        })
+    })
+}
+
 /// `POST /api/ledger/reservations`
 pub async fn reserve(
     State(state): State<AppState>,
@@ -107,6 +136,32 @@ pub async fn reserve(
             Json(json!({ "error": "invalid_reservation", "message": e.to_string() })),
         )
             .into_response();
+    }
+
+    // A Chat turn spends no trial, whoever asks (AGENT-013 §2.2; S-10.2). The gate
+    // refuses at the door (`CallGate::for_chat_turn`) and the exposure filter hides
+    // the tools, but both are properties of the *client*: a request that reaches this
+    // route by another way -- a forged body naming a Chat run's id -- would otherwise
+    // be granted. The ledger is the party that cannot be talked out of it. A run the
+    // platform cannot read the mode of is refused too: not knowing is not "research".
+    if let Some(run_id) = r.run_id {
+        match run_mode(&state.pg, run_id, token.user_id()).await {
+            Ok(mode) => {
+                if let Some(refusal) = chat_refusal(mode.as_deref()) {
+                    return (StatusCode::FORBIDDEN, Json(refusal)).into_response();
+                }
+            }
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": "run_mode_unreadable",
+                        "message": format!("the run's mode could not be read, so the reservation is refused: {e}"),
+                    })),
+                )
+                    .into_response();
+            }
+        }
     }
 
     let reservation_id = Uuid::new_v4();
@@ -312,5 +367,23 @@ mod tests {
         };
         assert_eq!(h(json!({ "a": 1 })), h(json!({ "a": 1 })));
         assert_ne!(h(json!({ "a": 1 })), h(json!({ "a": 2 })));
+    }
+}
+
+#[cfg(test)]
+mod chat_reservation_tests {
+    use super::chat_refusal;
+
+    /// S-10.2's adversarial clause, at the one place a forged request lands: only a
+    /// Chat run is refused, and the reason names what to do instead.
+    #[test]
+    fn a_reservation_naming_a_chat_run_is_refused_and_a_research_run_is_not() {
+        let refusal = chat_refusal(Some("chat")).expect("a chat run spends no trials");
+        assert_eq!(refusal["error"], "chat_turn_spends_no_trials");
+        assert!(refusal["message"].as_str().unwrap().contains("Research run"));
+        assert!(chat_refusal(Some("research")).is_none());
+        // A run with no recorded mode (a front door with no agent behind it) is not
+        // a Chat turn; the mode that cannot be *read* is refused by the handler.
+        assert!(chat_refusal(None).is_none());
     }
 }

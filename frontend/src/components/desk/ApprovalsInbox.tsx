@@ -14,6 +14,7 @@
 // timeout, and the **time left**. A reviewer who cannot see what happens if they
 // do nothing is not making a decision, they are clearing a notification.
 import { useState } from 'react'
+import { invalidateApprovals } from '@/lib/desk/approvals'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/primitives/Badge'
 import { Button } from '@/components/primitives/Button'
@@ -172,7 +173,9 @@ export function ApprovalsInbox({
     refetchInterval: 15_000,
   })
   const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: key })
+    // Every list, not only this one: desk home's *Needs you* holds the same
+    // approval under its own key.
+    invalidateApprovals(queryClient)
     onAnswered?.()
   }
 

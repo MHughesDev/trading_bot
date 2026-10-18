@@ -54,10 +54,74 @@ fn map_err(e: SuiteError) -> axum::response::Response {
 pub async fn create_experiment(
     State(state): State<AppState>,
     token: BearerToken,
-    Json(spec): Json<CreateExperimentSpec>,
+    Json(mut body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
+    // Data admission (Set P P-2.3). The optional `qc_waiver_id` names an approved
+    // `approval_requests.kind = 'qc_waiver'` row; it is taken off the body before
+    // the spec is parsed because it is evidence about this Experiment, not a field
+    // of it.
+    let waiver_id = body
+        .as_object_mut()
+        .and_then(|o| o.remove("qc_waiver_id"))
+        .and_then(|v| v.as_str().and_then(|s| s.parse::<Uuid>().ok()));
+    // Evidence offered for the Experiment: a finding is a memory of a measurement, never one
+    // (KM-03). Taken off the body like `qc_waiver_id`, so it is checked and not parsed as a
+    // spec field.
+    let offered: Vec<String> = body
+        .as_object_mut()
+        .and_then(|o| o.remove("evidence_ids"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    if let Some(refusal) = crate::knowledge_routes::finding_evidence_refusal(&offered) {
+        return refusal;
+    }
+    let spec: CreateExperimentSpec = match serde_json::from_value(body) {
+        Ok(s) => s,
+        Err(e) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "error": "invalid_request", "message": e.to_string() })),
+            )
+                .into_response()
+        }
+    };
+    let (verdicts, skipped) = crate::data_admission::check_experiment_data(
+        &state.pg,
+        &spec.universe_ref,
+        spec.eval_resolution.as_deref(),
+        waiver_id,
+    )
+    .await;
+    if verdicts.iter().any(|v| !v.admitted()) {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(crate::data_admission::refusal_body(&verdicts)),
+        )
+            .into_response();
+    }
+    let experiment_id = spec.experiment_id.clone();
     match state.suite.create_experiment(token.user_id(), spec) {
-        Ok(view) => (StatusCode::CREATED, Json(view)).into_response(),
+        Ok(view) => {
+            let lineage = crate::data_admission::record_admission(
+                &state.pg,
+                &experiment_id,
+                token.user_id(),
+                &verdicts,
+            )
+            .await;
+            let mut out = serde_json::to_value(&view).unwrap_or_else(|_| json!({}));
+            out["data_admission"] = json!({
+                "series": verdicts,
+                "ungraded": verdicts
+                    .iter()
+                    .filter(|v| v.grade.is_none())
+                    .map(|v| &v.instrument)
+                    .collect::<Vec<_>>(),
+                "not_graded_here": skipped,
+                "lineage_recorded": lineage.is_ok(),
+            });
+            (StatusCode::CREATED, Json(out)).into_response()
+        }
         Err(e) => map_err(e),
     }
 }
@@ -109,16 +173,70 @@ pub async fn retire_experiment(
 
 // ── studies ────────────────────────────────────────────────────────────────
 
+/// A Study started with `detach: true`: the HTTP call returned at once and the
+/// Study runs on a blocking task (AGENT-010 §8; S-2.11). Held in memory, which
+/// is honest about what it is: a restart loses a running Study, and the status
+/// read says so (`lost`) rather than leaving a run waiting on a job that is gone.
+#[derive(Clone, Debug)]
+pub enum DetachedStudy {
+    Running,
+    Failed(String),
+}
+
+type DetachedKey = (Uuid, String);
+
+fn detached_studies(
+) -> &'static std::sync::Mutex<std::collections::HashMap<DetachedKey, DetachedStudy>> {
+    static M: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<DetachedKey, DetachedStudy>>,
+    > = std::sync::OnceLock::new();
+    M.get_or_init(Default::default)
+}
+
+/// Where a detached Study stands, for the list read.
+fn detached_status(id: Uuid) -> serde_json::Value {
+    let m = detached_studies().lock().expect("detached studies lock");
+    let mut out = serde_json::Map::new();
+    for ((exp, study), st) in m.iter().filter(|((e, _), _)| *e == id) {
+        let _ = exp;
+        out.insert(
+            study.clone(),
+            match st {
+                DetachedStudy::Running => json!({ "status": "running" }),
+                DetachedStudy::Failed(why) => json!({ "status": "failed", "error": why }),
+            },
+        );
+    }
+    serde_json::Value::Object(out)
+}
+
 /// GET /api/backtest/experiments/:id/studies — sealed Study distributions.
+///
+/// `detached` is additive: the state of any Study started with `detach: true`
+/// that has not sealed (a sealed one is simply in `studies`).
 pub async fn list_studies(
     State(state): State<AppState>,
     token: BearerToken,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
     match state.suite.list_studies(token.user_id(), id) {
-        Some(studies) => Json(json!({ "studies": studies })).into_response(),
+        Some(studies) => {
+            Json(json!({ "studies": studies, "detached": detached_status(id) })).into_response()
+        }
         None => map_err(SuiteError::NotFound),
     }
+}
+
+/// The body of `POST .../studies`: the Study itself plus whether to wait for it.
+#[derive(Debug, Deserialize)]
+pub struct StudyBody {
+    #[serde(flatten)]
+    pub spec: RunStudySpec,
+    /// Return 202 at once and run the Study in the background. A caller that
+    /// would otherwise hold a connection for minutes (the agent, which suspends
+    /// on it) sets this.
+    #[serde(default)]
+    pub detach: bool,
 }
 
 /// POST /api/backtest/experiments/:id/studies — run a research Study.
@@ -126,11 +244,50 @@ pub async fn run_study(
     State(state): State<AppState>,
     token: BearerToken,
     Path(id): Path<Uuid>,
-    Json(spec): Json<RunStudySpec>,
+    Json(body): Json<StudyBody>,
 ) -> impl IntoResponse {
+    let StudyBody { spec, detach } = body;
     // Real Runs take minutes: keep the async worker free.
     let suite = state.suite.clone();
     let user = token.user_id();
+    if detach {
+        let study_id = spec.study_id.clone();
+        let key = (id, study_id.clone());
+        {
+            let mut m = detached_studies().lock().expect("detached studies lock");
+            if matches!(m.get(&key), Some(DetachedStudy::Running)) {
+                return (
+                    StatusCode::ACCEPTED,
+                    Json(json!({ "detached": true, "experiment_id": id, "study_id": study_id,
+                                 "status": "running", "already_running": true })),
+                )
+                    .into_response();
+            }
+            m.insert(key.clone(), DetachedStudy::Running);
+        }
+        tokio::spawn(async move {
+            let done = tokio::task::spawn_blocking(move || suite.run_study(user, id, spec)).await;
+            let mut m = detached_studies().lock().expect("detached studies lock");
+            match done {
+                // Sealed: the Study is in the suite's list, which is the answer.
+                Ok(Ok(_)) => {
+                    m.remove(&key);
+                }
+                Ok(Err(e)) => {
+                    m.insert(key, DetachedStudy::Failed(format!("{e:?}")));
+                }
+                Err(e) => {
+                    m.insert(key, DetachedStudy::Failed(format!("the study panicked: {e}")));
+                }
+            }
+        });
+        return (
+            StatusCode::ACCEPTED,
+            Json(json!({ "detached": true, "experiment_id": id, "study_id": study_id,
+                         "status": "running" })),
+        )
+            .into_response();
+    }
     match tokio::task::spawn_blocking(move || suite.run_study(user, id, spec)).await {
         Ok(Ok(view)) => (StatusCode::CREATED, Json(view)).into_response(),
         Ok(Err(e)) => map_err(e),

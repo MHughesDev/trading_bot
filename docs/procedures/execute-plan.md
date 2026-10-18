@@ -12,7 +12,7 @@ Use this procedure when:
 
 ## Inputs
 Before starting:
-- The formal plan file in `plans/` with all tasks in `NOT STARTED` status
+- The formal plan file in `docs/plans/plan-sets/set-X/` with all tasks in `NOT STARTED` status
 - `Derivation Status` is `Current` — if it says `STALE`, re-derive the plan first (see `add-plan.md`)
 - Confirm the milestone's upstream dependencies are met
 

@@ -357,7 +357,8 @@ pub fn census(
         Some(bps) => u32::try_from(bps).unwrap_or(10_000),
     };
 
-    let (longest_gap_periods, longest_continuous_bars) = runs(&opens, period_ns, calendar);
+    let tolerance = no_trade_tolerance_periods(period_secs);
+    let (longest_gap_periods, longest_continuous_bars) = runs(&opens, period_ns, calendar, tolerance);
     let longest_continuous_secs =
         longest_continuous_bars.saturating_mul(u64::from(period_secs.max(1)));
     let longest_continuous_secs = i64::try_from(longest_continuous_secs).unwrap_or(i64::MAX);
@@ -414,12 +415,38 @@ fn expected_between(first_ns: i64, last_ns: i64, period_ns: i64, calendar: &Cale
     }
 }
 
+/// A missing stretch this short, in wall-clock seconds, is a *no-trade interval*,
+/// not a gap (ADR-P1-7c, 2026-10-04).
+///
+/// Coinbase publishes a 1m candle only for a minute in which something traded, so
+/// a quiet minute is simply absent. 50 of the 58 holes in three years of BTC-USD
+/// 1m are 1-12 minutes long; the other eight are venue outages (the largest, 391
+/// minutes on 2026-05-08, is not served by Coinbase's candle endpoint even now).
+/// Counting a quiet minute as a break reset the run at every one of them and
+/// reported a 305-day "continuous" span for a series that is present for 3.09
+/// years. Fifteen minutes is the smallest round figure above the longest
+/// no-trade hole seen (12), and below the first outage (25).
+///
+/// It is wall-clock, not a count of periods, so it forgives nothing at 1h or 1d:
+/// a missing hourly bar on a 24/7 pair is not a quiet hour. The missing bars are
+/// still counted as missing, in coverage and in the grade; only the *run* is
+/// carried across them.
+pub const NO_TRADE_TOLERANCE_SECS: i64 = 900;
+
+/// The tolerance in whole periods for a timeframe.
+#[must_use]
+pub fn no_trade_tolerance_periods(period_secs: u32) -> u64 {
+    u64::try_from(NO_TRADE_TOLERANCE_SECS / i64::from(period_secs.max(1))).unwrap_or(0)
+}
+
 /// `(longest gap in periods, longest continuous run in bars)`.
 ///
 /// A "gap" counts only periods the calendar says should have had a bar, so an
-/// overnight session break is not a gap. The run is broken by any gap of one
-/// expected period or more.
-fn runs(opens: &[i64], period_ns: i64, calendar: &Calendar) -> (u64, u64) {
+/// overnight session break is not a gap. The run is broken by any gap longer than
+/// `tolerance` periods; a shorter hole is a no-trade interval, carried across, and
+/// its slots count toward the run's length because the run is a *span*.
+/// `longest_gap` still reports every hole, tolerated or not.
+fn runs(opens: &[i64], period_ns: i64, calendar: &Calendar, tolerance: u64) -> (u64, u64) {
     if opens.is_empty() {
         return (0, 0);
     }
@@ -429,11 +456,11 @@ fn runs(opens: &[i64], period_ns: i64, calendar: &Calendar) -> (u64, u64) {
     for w in opens.windows(2) {
         let (prev, cur) = (w[0], w[1]);
         let missing = expected_strictly_between(prev, cur, period_ns, calendar);
-        if missing == 0 {
-            run += 1;
+        longest_gap = longest_gap.max(missing);
+        if missing <= tolerance {
+            run += 1 + missing;
             longest_run = longest_run.max(run);
         } else {
-            longest_gap = longest_gap.max(missing);
             run = 1;
         }
     }
@@ -580,9 +607,38 @@ mod tests {
         assert_eq!(c.expected_bars, 50);
         assert_eq!(c.missing_bars, 3);
         assert_eq!(c.longest_gap_periods, 3, "a 3-bar hole is a 3-period gap");
-        // The longer of the two sides: bars 23..49 is 27 bars.
-        assert_eq!(c.longest_continuous_bars, 27);
+        // ADR-P1-7c: three missing minutes are a no-trade interval, so the run is
+        // carried across them: the whole 50-slot span.
+        assert_eq!(c.longest_continuous_bars, 50);
         assert_eq!(c.missing_bps, 600);
+    }
+
+    /// A hole longer than the no-trade tolerance is an outage and breaks the run.
+    #[test]
+    fn a_hole_longer_than_the_no_trade_tolerance_breaks_the_run() {
+        let mut bars = dense(100);
+        // 20 minutes missing: bars 30..50.
+        bars.retain(|b| !(30..50).contains(&(b.open_ns / MIN)));
+        let c = census("BTC-USD", "coinbase", "1m", 60, &bars, &crypto(), at(0));
+        assert_eq!(c.longest_gap_periods, 20);
+        assert_eq!(c.missing_bars, 20);
+        // Bars 50..99 (50) against 0..29 (30): the longer side.
+        assert_eq!(c.longest_continuous_bars, 50);
+
+        // Exactly at the tolerance (15) is still a no-trade interval.
+        let mut edge = dense(100);
+        edge.retain(|b| !(30..45).contains(&(b.open_ns / MIN)));
+        let c = census("BTC-USD", "coinbase", "1m", 60, &edge, &crypto(), at(0));
+        assert_eq!(c.longest_gap_periods, 15);
+        assert_eq!(c.longest_continuous_bars, 100);
+    }
+
+    /// The tolerance is wall-clock: it forgives nothing at 1h.
+    #[test]
+    fn the_no_trade_tolerance_does_not_apply_to_hourly_bars() {
+        assert_eq!(no_trade_tolerance_periods(60), 15);
+        assert_eq!(no_trade_tolerance_periods(3600), 0);
+        assert_eq!(no_trade_tolerance_periods(86_400), 0);
     }
 
     #[test]

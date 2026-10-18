@@ -1,160 +1,163 @@
-// Lineage Graph — /mlops/graph
+// Lineage Graph -- /mlops/graph?model=<id>
 //
-// Renders the global model lineage graph using @xyflow/react.  Each node
-// represents an entity in the pipeline (dataset version → training run →
-// model version → deployment → strategy); edges show data/artifact flow.
-//
-// Per-model lineage can be reached from the Cockpit; this page shows the
-// full cross-model view.
-import { ReactFlow, Background, Controls, MiniMap, useNodesState, useEdgesState, type Node, type Edge } from '@xyflow/react'
+// `GET /api/models/{id}/lineage` answers aliases only (its own `note` says the
+// full graph waits on dataset refs), so the graph is DERIVED here from what the
+// registry does serve -- versions, training runs, deployments, aliases and the
+// strategies that reference the model -- and the page says so. Datasets are not
+// drawn: nothing the registry serves names one.
+import { useMemo, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { ReactFlow, Background, Controls, MiniMap, type Node, type Edge, type NodeProps } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
-import { modelsApi, type LineageGraph } from '@/api/mlops'
+import { Button } from '@/components/primitives/Button'
+import { EmptyState, ErrorState, PanelLoading } from '@/components/primitives/States'
+import { Segmented } from '@/components/primitives/Segmented'
+import { LineageGraphView } from '@/components/models/LineageGraphView'
+import {
+  useModel,
+  useModels,
+  useModelAliases,
+  useModelDeployments,
+  useModelRuns,
+  useModelUsedBy,
+  useModelVersions,
+} from '@/hooks/useMlOps'
+import { KIND_LABELS, deriveLineage, layoutLineage, type LineageNode } from '@/components/mlops/studio.helpers'
 
-/* Lineage node identity uses the fixed categorical Instrument scale in slot
-   order (spec §2.8.3, V7). Slots are assigned once here and never cycled, so a
-   dataset is the same colour on every lineage graph in the product. */
-
-const NODE_COLORS: Record<string, string> = {
-  dataset: 'var(--chart-1)',
+/* Entity identity uses the fixed categorical scale in slot order (spec §2.8.3),
+   assigned once here so a deployment is the same colour on every graph. */
+const NODE_COLORS: Record<LineageNode['type'], string> = {
   training_run: 'var(--chart-2)',
+  model: 'var(--chart-1)',
   model_version: 'var(--chart-3)',
   deployment: 'var(--chart-4)',
   strategy: 'var(--chart-5)',
-  default: 'var(--fg-tertiary)',
 }
 
-function nodeColor(type: string) {
-  return NODE_COLORS[type] ?? NODE_COLORS.default
+const NODE_NAMES: Record<LineageNode['type'], string> = {
+  training_run: 'Training run',
+  model: 'Model',
+  model_version: 'Model version',
+  deployment: 'Deployment',
+  strategy: 'Strategy',
 }
 
-function buildNodes(raw: LineageGraph['nodes']): Node[] {
-  return raw.map((n, i) => ({
-    id: n.id,
-    type: 'default',
-    position: { x: (i % 4) * 220, y: Math.floor(i / 4) * 130 },
-    data: {
-      label: (
-        <div style={{ fontSize: 12, textAlign: 'center' }}>
-          <div
-            style={{
-              background: nodeColor(n.type),
-              color: 'var(--fg-on-accent)',
-              borderRadius: 'var(--r-xs)',
-              padding: '2px 6px',
-              marginBottom: 4,
-              fontWeight: 600,
-              fontSize: 10,
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-            }}
-          >
-            {n.type.replace(/_/g, ' ')}
-          </div>
-          <div>{String(n.data?.label ?? n.id)}</div>
-        </div>
-      ),
-    },
-    style: {
-      background: 'var(--node-bg)',
-      border: `1px solid ${nodeColor(n.type)}`,
-      borderRadius: 'var(--r-md)',
-      padding: '8px 12px',
-      color: 'var(--fg-primary)',
-      minWidth: 140,
-    },
-  }))
-}
-
-function buildEdges(raw: LineageGraph['edges']): Edge[] {
-  return raw.map((e) => ({
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    animated: false,
-    style: { stroke: 'var(--edge)', strokeWidth: 1.5 },
-  }))
-}
-
-// ── Empty state when no lineage data is available ─────────────────────────────
-
-function EmptyState({ title, message }: { title: string; message: string }) {
+function LineageNodeView({ data }: NodeProps) {
+  const d = data as { type: LineageNode['type']; label: string }
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-4">
-      <div className="text-6xl">📊</div>
-      <div className="text-center">
-        <h3 className="text-lg font-semibold text-fg">{title}</h3>
-        <p className="text-sm text-fg-tertiary max-w-sm mt-1">{message}</p>
+    <div
+      style={{
+        background: 'var(--node-bg)',
+        border: `1px solid ${NODE_COLORS[d.type]}`,
+        borderRadius: 'var(--r-md)',
+        minWidth: 150,
+        overflow: 'hidden',
+        color: 'var(--fg-primary)',
+        fontSize: 12,
+      }}
+    >
+      <div
+        style={{
+          background: NODE_COLORS[d.type],
+          color: 'var(--fg-on-accent)',
+          padding: '2px 8px',
+          fontWeight: 600,
+          fontSize: 10,
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+        }}
+      >
+        {NODE_NAMES[d.type]}
       </div>
+      <div style={{ padding: '6px 8px' }}>{d.label}</div>
     </div>
   )
 }
 
-// ── Per-model lineage panel ───────────────────────────────────────────────────
+const NODE_TYPES = { lineage: LineageNodeView }
 
 function ModelLineagePanel({ modelId }: { modelId: string }) {
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['models', modelId, 'lineage'],
-    queryFn: () => modelsApi.lineage(modelId).then((r) => r.data),
-  })
+  const model = useModel(modelId)
+  const versions = useModelVersions(modelId)
+  const runs = useModelRuns(modelId)
+  const deployments = useModelDeployments(modelId)
+  const aliases = useModelAliases(modelId)
+  const usedBy = useModelUsedBy(modelId)
+  const navigate = useNavigate()
 
-  const rawNodes = data?.nodes ?? []
-  const rawEdges = data?.edges ?? []
+  const graph = useMemo(() => {
+    if (!model.data || !versions.data) return null
+    const g = deriveLineage({
+      modelId,
+      modelName: model.data.display_name,
+      versions: versions.data,
+      runs: runs.data ?? [],
+      deployments: deployments.data ?? [],
+      aliases: aliases.data ?? {},
+      usedBy: usedBy.data ?? [],
+    })
+    const pos = layoutLineage(g.nodes)
+    const nodes: Node[] = g.nodes.map((n) => ({
+      id: n.id,
+      type: 'lineage',
+      position: pos.get(n.id) ?? { x: 0, y: 0 },
+      data: { type: n.type, label: n.label },
+    }))
+    const edges: Edge[] = g.edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      style: { stroke: 'var(--edge)', strokeWidth: 1.5 },
+    }))
+    return { nodes, edges }
+  }, [model.data, versions.data, runs.data, deployments.data, aliases.data, usedBy.data, modelId])
 
-  const [nodes, , onNodesChange] = useNodesState(
-    rawNodes.length > 0 ? buildNodes(rawNodes) : [],
-  )
-  const [edges, , onEdgesChange] = useEdgesState(
-    rawEdges.length > 0 ? buildEdges(rawEdges) : [],
-  )
-
-  if (isLoading) {
+  if (model.isLoading || versions.isLoading) return <PanelLoading lines={6} />
+  if (model.isError || versions.isError || !graph) {
     return (
-      <div className="flex items-center justify-center h-full text-sm text-fg-tertiary">
-        Loading lineage…
-      </div>
-    )
-  }
-
-  if (isError) {
-    return (
-      <EmptyState
-        title="Lineage unavailable"
-        message="Could not load the model's lineage graph. Try again later."
+      <ErrorState
+        message="Lineage could not be built."
+        detail="The model or its versions could not be read."
+        onRetry={() => {
+          void model.refetch()
+          void versions.refetch()
+        }}
       />
     )
   }
-
-  if (rawNodes.length === 0) {
+  if (graph.nodes.length <= 1) {
     return (
       <EmptyState
-        title="No lineage data yet"
-        message="Once you train versions and deploy this model to a strategy, its lineage history will appear here."
+        message="No lineage yet"
+        detail="Train a version and deploy it to a strategy; its history appears here."
       />
     )
   }
 
   return (
     <ReactFlow
-      nodes={nodes}
-      edges={edges}
-      onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesChange}
+      nodes={graph.nodes}
+      edges={graph.edges}
+      nodeTypes={NODE_TYPES}
       fitView
       fitViewOptions={{ padding: 0.2 }}
       nodesDraggable={false}
       nodesConnectable={false}
-      elementsSelectable={false}
       panOnDrag
       zoomOnScroll
+      onNodeClick={(_, node) => {
+        if (node.id.startsWith('version:')) navigate(`/mlops/${modelId}?tab=versions`)
+        else if (node.id.startsWith('deployment:')) navigate(`/mlops/${modelId}?tab=deployments`)
+        else if (node.id.startsWith('run:')) navigate(`/mlops/${modelId}?tab=train`)
+        else if (node.id.startsWith('model:')) navigate(`/mlops/${modelId}`)
+      }}
     >
       <Background color="var(--canvas-dot)" gap={24} />
       <Controls showInteractive={false} />
       <MiniMap
         nodeColor={(n) => {
-          const type = typeof n.data?.type === 'string' ? n.data.type : 'default'
-          return nodeColor(type)
+          const t = (n.data as { type?: LineageNode['type'] }).type
+          return t ? NODE_COLORS[t] : 'var(--fg-tertiary)'
         }}
         maskColor="var(--bg-scrim)"
       />
@@ -162,68 +165,88 @@ function ModelLineagePanel({ modelId }: { modelId: string }) {
   )
 }
 
-// ── Global lineage page ───────────────────────────────────────────────────────
-
-export function ModelLineagePage() {
-  // Optional ?model=<id> query param to show a specific model's lineage.
-  const searchParams = new URLSearchParams(window.location.search)
-  const focusId = searchParams.get('model')
-
+/** With no model chosen there is no cross-model graph to draw; offer the models. */
+function ModelPicker() {
+  const { data, isLoading, isError, refetch } = useModels()
+  if (isLoading) return <PanelLoading lines={4} />
+  if (isError) return <ErrorState message="Models could not be loaded." onRetry={() => void refetch()} />
+  const models = data?.models ?? []
+  if (models.length === 0) {
+    return <EmptyState message="No models yet" detail="Create a model to see its lineage." />
+  }
   return (
-    <div className="flex flex-col h-full min-h-[600px]">
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b bg-surface backdrop-blur">
-        <div>
-          <h1 className="text-lg font-semibold">Lineage Graph</h1>
-          <p className="text-sm text-fg-tertiary mt-0.5">
-            {focusId
-              ? `Showing lineage for model ${focusId}`
-              : 'Global artifact flow: datasets → runs → versions → deployments → strategies'}
-          </p>
-        </div>
-        <div className="flex items-center gap-3 text-xs text-fg-tertiary">
-          {/* Legend */}
-          {[
-            { label: 'Dataset', color: NODE_COLORS.dataset },
-            { label: 'Training run', color: NODE_COLORS.training_run },
-            { label: 'Model version', color: NODE_COLORS.model_version },
-            { label: 'Deployment', color: NODE_COLORS.deployment },
-            { label: 'Strategy', color: NODE_COLORS.strategy },
-          ].map(({ label, color }) => (
-            <span key={label} className="flex items-center gap-1">
-              <span
-                style={{ background: color, width: 8, height: 8, borderRadius: 2, display: 'inline-block' }}
-              />
-              {label}
-            </span>
-          ))}
-        </div>
-        <Link
-          to="/mlops"
-          className="text-xs text-fg-tertiary hover:text-fg transition-colors"
-        >
-          ← All models
-        </Link>
-      </div>
-
-      {/* Canvas */}
-      <div className="flex-1 bg-background">
-        {focusId ? (
-          <ModelLineagePanel modelId={focusId} />
-        ) : (
-          // Global view shows the stub graph until real cross-model lineage is wired.
-          <GlobalLineageCanvas />
-        )}
-      </div>
+    <div style={{ padding: 'var(--s-5)' }}>
+      <p className="mut" style={{ marginBottom: 'var(--s-3)' }}>
+        Lineage is shown per model. Choose one.
+      </p>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--s-2)' }}>
+        {models.map((m) => (
+          <li key={m.model_id}>
+            <Link to={`/mlops/graph?model=${m.model_id}`}>
+              {m.display_name} <span className="mut">· {KIND_LABELS[m.model_kind]}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
 
-function GlobalLineageCanvas() {
+export function ModelLineagePage() {
+  const [params] = useSearchParams()
+  const focusId = params.get('model')
+  const navigate = useNavigate()
+  // N-5.9: the content-hash chain is the default; the registry-derived graph stays.
+  const [view, setView] = useState<'chain' | 'registry'>('chain')
+
   return (
-    <EmptyState
-      title="Global lineage coming soon"
-      message="The cross-model artifact flow visualization is being developed. For now, view individual model lineage from the model detail pages."
-    />
+    <>
+      <div className="pagehead">
+        <h1 className="h1">Lineage</h1>
+        <span className="lbl">
+          {focusId
+            ? 'Versions, training runs, deployments and the strategies that use this model'
+            : 'Choose a model'}
+        </span>
+        <div className="spacer" />
+        {focusId && (
+          <Segmented<'chain' | 'registry'>
+            ariaLabel="Lineage view"
+            value={view}
+            onChange={setView}
+            options={[
+              { value: 'chain', label: 'Content hashes' },
+              { value: 'registry', label: 'Registry' },
+            ]}
+          />
+        )}
+        {focusId && (
+          <Button size="sm" onClick={() => navigate(`/mlops/${focusId}`)}>
+            Open cockpit
+          </Button>
+        )}
+        <Button size="sm" onClick={() => navigate('/mlops')}>All models</Button>
+      </div>
+      <div className="page-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
+        {focusId && view === 'registry' && (
+          <div style={{ display: 'flex', gap: 'var(--s-4)', flexWrap: 'wrap', fontSize: 'var(--t-11)' }}>
+            {(Object.keys(NODE_NAMES) as LineageNode['type'][]).map((t) => (
+              <span key={t} style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                <i style={{ width: 8, height: 8, borderRadius: 2, background: NODE_COLORS[t], display: 'inline-block' }} />
+                {NODE_NAMES[t]}
+              </span>
+            ))}
+            <span className="mut">Derived from the registry&apos;s versions, runs, deployments and used-by; datasets are not served, so none is drawn.</span>
+          </div>
+        )}
+        <div style={{ flex: 1, minHeight: 520, border: '1px solid var(--line-hairline)', borderRadius: 'var(--r-md)' }}>
+          {focusId ? (
+            view === 'chain' ? <div style={{ padding: 'var(--s-3)' }}><LineageGraphView modelId={focusId} /></div> : <ModelLineagePanel modelId={focusId} />
+          ) : (
+            <ModelPicker />
+          )}
+        </div>
+      </div>
+    </>
   )
 }

@@ -1,6 +1,6 @@
 # Phase 3 — Archive Prune
 
-**Completion: ~90% — the 22 duplicates were deleted; sub-step 4 (update `docs/archive/README.md`) is OPEN, 24 dead links (audited 2026-09-15)**
+**Completion: 100% — the 24 duplicates were deleted in `5febac2`; sub-step 4 DONE 2026-10-03 (`docs/archive/README.md` rebuilt, 0 dead links)**
 
 **Prerequisite:** Phase 0 (G-0.1) must be complete. The audit table must exist
 before any file is deleted.
@@ -13,7 +13,7 @@ in place.
 
 ## Tasks
 
-### ☐ G-3.1 Delete duplicate archive files per audit inventory — M
+### ☑ G-3.1 Delete duplicate archive files per audit inventory — M — DONE
 
 **Why.** `docs/archive/` currently contains 30+ files from past reorganisations.
 Many are older versions of files now maintained in `docs/adr/`, `docs/specs/`,

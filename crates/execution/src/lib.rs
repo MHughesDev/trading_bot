@@ -147,13 +147,16 @@ impl ExecutionEngine {
                     .map_err(|e| ExecutionError::Database(e.to_string()))?
                     .into_iter()
                     .next_back();
+                let audit = vec![AuditEntry::broker_query(
+                    idempotency_key,
+                    broker_order_id.clone(),
+                    "duplicate-submit: idempotent replay".to_owned(),
+                )];
+                append_audit(&*journal, &audit).await;
+                count_order("duplicate");
                 return Ok(SubmitResult {
                     broker_order_id,
-                    audit: vec![AuditEntry::broker_query(
-                        idempotency_key,
-                        "duplicate-submit".to_owned(),
-                        "idempotent-replay".to_owned(),
-                    )],
+                    audit,
                     duplicate: true,
                     fill,
                 });
@@ -180,7 +183,19 @@ impl ExecutionEngine {
             });
         }
 
-        // 2. Record before submitting.
+        // 2. Record before submitting — the audit trail's first row, then the
+        //    order.  Both fail closed: an order whose trail cannot be started
+        //    is not submitted (Set E audit item #3), exactly as an order that
+        //    cannot be recorded is not (FM-4).
+        journal
+            .record_audit(&[AuditEntry::state_transition(
+                idempotency_key,
+                None,
+                OrderState::Accepted,
+                None,
+            )])
+            .await
+            .map_err(|e| ExecutionError::Database(e.to_string()))?;
         journal
             .record_order(&order.intent, OrderState::Accepted)
             .await
@@ -192,6 +207,17 @@ impl ExecutionEngine {
         let broker_order_id = match self.broker.submit(&order).await {
             Ok(id) => id,
             Err(e) => {
+                append_audit(
+                    &*journal,
+                    &[AuditEntry::state_transition(
+                        idempotency_key,
+                        Some(OrderState::Accepted),
+                        OrderState::Rejected,
+                        Some(e.to_string()),
+                    )],
+                )
+                .await;
+                count_order("venue_rejected");
                 if let Err(je) = journal
                     .set_state(idempotency_key, OrderState::Rejected)
                     .await
@@ -234,6 +260,12 @@ impl ExecutionEngine {
                 &mut audit,
             )
             .await?;
+
+        // The rest of the trail.  The order is at the venue now, so a failed
+        // write cannot un-submit it; it is logged loudly instead of turning a
+        // placed order into a reported failure the caller might retry.
+        append_audit(&*journal, &audit).await;
+        count_order("submitted");
 
         Ok(SubmitResult {
             broker_order_id,
@@ -354,6 +386,7 @@ impl ExecutionEngine {
             // post-restart resubmit must not look like a second forward
             // observation to reconciliation or to Gate 15.
             fills::publish(&event);
+            count_fill("submit");
         } else {
             tracing::debug!(
                 %idempotency_key,
@@ -463,6 +496,7 @@ impl ExecutionEngine {
                         "fill recorded from a broker sync"
                     );
                     fills::publish(&event);
+                    count_fill("sync");
                 }
 
                 Some((event, result))
@@ -478,12 +512,54 @@ impl ExecutionEngine {
             None => (None, None),
         };
 
+        append_audit(&*journal, &audit).await;
+
         Ok(SyncResult {
             new_state,
             fill,
             audit,
             fill_result,
         })
+    }
+}
+
+/// `execution_orders_total{outcome}` — one per `submit` call that reached a
+/// decision (Set E 5.1). Outcomes: submitted, duplicate, venue_rejected.
+fn count_order(outcome: &str) {
+    observability::metrics::inc(
+        "execution_orders_total",
+        "Orders through ExecutionEngine::submit, by outcome.",
+        &[("outcome", outcome)],
+    );
+}
+
+/// `execution_fills_total{path}` — new fills recorded and published.
+fn count_fill(path: &str) {
+    observability::metrics::inc(
+        "execution_fills_total",
+        "New fills recorded and published to the fill stream, by path (submit or sync).",
+        &[("path", path)],
+    );
+}
+
+/// Append entries to the durable audit trail after the point of no return.
+///
+/// Errors are logged, not returned: by the time this runs the venue has the
+/// order, and reporting failure would invite a retry of something that
+/// happened.  The first entry of every order is written fail-closed in
+/// [`ExecutionEngine::submit`] instead.
+async fn append_audit(journal: &dyn journal::OrderJournal, entries: &[AuditEntry]) {
+    if let Err(e) = journal.record_audit(entries).await {
+        observability::metrics::inc(
+            "execution_audit_write_failures_total",
+            "Order audit entries that could not be written after submission.",
+            &[],
+        );
+        tracing::error!(
+            error = %e,
+            entries = entries.len(),
+            "order audit trail write failed — these transitions are in the logs only"
+        );
     }
 }
 

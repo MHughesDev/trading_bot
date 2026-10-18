@@ -17,16 +17,29 @@
 //! pool or executor: everything that touches data goes through the
 //! [`SweepBackend`] trait the API layer implements.
 
+pub mod ablation;
+pub mod analog;
 pub mod calibration;
+pub mod campaign;
 pub mod compare;
+pub mod fragility;
+pub mod layer1_sweep;
+pub mod move_memory;
 pub mod power;
 pub mod propose;
+pub mod random_arm;
+pub mod refit;
+pub mod regime_engine;
+pub mod regime_learned;
+pub mod regime_prior;
+pub mod regime_search;
 pub mod sampler;
 pub mod search;
 pub mod simplify;
 pub mod space;
 pub mod surface;
 pub mod sweep;
+pub mod tiers;
 
 pub use calibration::{spearman, FidelityCalibration, RACING_MIN_RHO};
 pub use propose::{CombineHow, ExitMode, Move, Pending, Proposal, ProposalError, SizingMode};

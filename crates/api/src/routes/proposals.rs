@@ -257,9 +257,20 @@ async fn perform(
         );
     };
     match kind {
-        "deploy_paper" => match crate::routes::automations::arm_by_id(state, subject_id).await {
-            Ok(v) => Effect::Performed(v),
-            Err(why) => Effect::NotPerformed(why.reason()),
+        // Caller-scoped (Set E 1.4): the approver arms their own automation or
+        // nothing. `actor` is the approving human's user id; a subject owned by
+        // anyone else reads as "no such automation", the same as a missing one.
+        "deploy_paper" => match Uuid::parse_str(&actor) {
+            Ok(owner) => {
+                match crate::routes::automations::arm_owned(state, owner, subject_id).await {
+                    Ok(v) => Effect::Performed(v),
+                    Err(why) => Effect::NotPerformed(why.reason()),
+                }
+            }
+            Err(_) => Effect::NotPerformed(
+                "the approving actor is not a user id, so no automation can be armed for it"
+                    .to_string(),
+            ),
         },
         // Ring 1. `promote_strategy` still has no writer, and the reason is
         // not an oversight: a strategy's *promoted set* has no writer outside

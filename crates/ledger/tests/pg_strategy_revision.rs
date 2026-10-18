@@ -236,26 +236,22 @@ async fn the_chain_is_assigned_by_the_database_and_links_each_row_to_the_last() 
     .await
     .expect("rows");
 
-    panic!("TEMPORARY: deliberate panic to prove the rollback runs on the unwind path");
-    #[allow(unreachable_code)]
-    {
-        assert_eq!(rows.len(), 2);
-        let seq_a: i64 = rows[0].get("seq");
-        let seq_b: i64 = rows[1].get("seq");
-        assert_eq!(
-            seq_b,
-            seq_a + 1,
-            "the trigger assigns consecutive sequence numbers"
-        );
+    assert_eq!(rows.len(), 2);
+    let seq_a: i64 = rows[0].get("seq");
+    let seq_b: i64 = rows[1].get("seq");
+    assert_eq!(
+        seq_b,
+        seq_a + 1,
+        "the trigger assigns consecutive sequence numbers"
+    );
 
-        let row_a: Vec<u8> = rows[0].get("row_hash");
-        let prev_b: Vec<u8> = rows[1].get("prev_hash");
-        assert_eq!(
-            prev_b, row_a,
-            "each row's prev_hash is the previous row's row_hash"
-        );
-        assert_eq!(row_a.len(), 32, "sha256");
-    }
+    let row_a: Vec<u8> = rows[0].get("row_hash");
+    let prev_b: Vec<u8> = rows[1].get("prev_hash");
+    assert_eq!(
+        prev_b, row_a,
+        "each row's prev_hash is the previous row's row_hash"
+    );
+    assert_eq!(row_a.len(), 32, "sha256");
 }
 
 /// Re-saving an identical document is a no-op, because the content hash is the

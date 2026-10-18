@@ -133,6 +133,52 @@ def stub_trial(task: dict[str, Any], seed: int, instrument_id: str) -> common.Tr
     )
 
 
+def run_judgement(nightly: bool, out: str | None) -> int:
+    """The `judgement` suite: replay of recorded tapes (S-10.16).
+
+    Scoring is in Rust because the answer key is generated from a seed that must
+    never be written to a file or handed to this process (`eval::planted`). This
+    function only invokes the scorer and carries its scorecards. `TBOT_JUDGEMENT_CMD`
+    overrides the command (tests, and CI jobs that already built the binary).
+    """
+    import shlex
+    import subprocess
+
+    cmd = shlex.split(os.environ.get("TBOT_JUDGEMENT_CMD", "")) or [
+        "cargo", "run", "-q", "-p", "harness", "--bin", "judgement_replay", "-j", "2", "--",
+    ]
+    if nightly:
+        cmd += ["--nightly", str(ROOT / "judgement" / "tapes")]
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT.parent)
+    if proc.returncode != 0:
+        print(
+            f"error: the judgement scorer failed ({proc.returncode})",
+            proc.stderr,
+            sep="\n",
+            file=sys.stderr,
+        )
+        return proc.returncode or 1
+    cards = json.loads(proc.stdout)
+    for card in cards:
+        cells = [s for s in card["suites"] if s["suite"].startswith("judgement/")]
+        if not cells:
+            print(f"error: {card.get('profile_id')} has no judgement cell", file=sys.stderr)
+            return 1
+        for s in cells:
+            kind = "sealed" if s.get("sealed") else "open"
+            print(f"{card['tier']:<12} {s['suite']:<22} {kind:<6} {s['passed']}/{s['n']}", file=sys.stderr)
+    text = json.dumps(
+        {"suite": "judgement", "kind": "replay", "synthetic_reference_policy": True, "cards": cards},
+        indent=2,
+    )
+    if out:
+        Path(out).write_text(text, encoding="utf-8")
+        print(f"judgement scorecards written to {out}")
+    else:
+        print(text)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Run an agent eval suite")
     ap.add_argument("--suite", action="append", help="suite name; repeatable")
@@ -148,6 +194,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base-url", default="http://localhost:7080")
     ap.add_argument("--out", default=None, help="write the scorecard here")
     ap.add_argument(
+        "--replay",
+        action="store_true",
+        help="judgement only: score the recorded tapes (deterministic, no model)",
+    )
+    ap.add_argument(
+        "--nightly",
+        action="store_true",
+        help="judgement only: score the sealed set beside the open one (never on a PR)",
+    )
+    ap.add_argument(
         "--dry-run",
         action="store_true",
         help="resolve tasks, derive seeds and grade stub trials without starting a "
@@ -158,6 +214,22 @@ def main(argv: list[str] | None = None) -> int:
     suites = load_suites()
     harness_version = args.harness_version or suites.get("harness_version", "unknown")
     seeds = args.seeds or suites.get("defaults", {}).get("seeds_per_task", 3)
+
+    if args.suite and "judgement" in args.suite:
+        if len(args.suite) > 1 or args.task:
+            print("error: run `judgement` on its own; it is scored in Rust", file=sys.stderr)
+            return 2
+        if not args.dry_run and not args.replay:
+            print(
+                "error: a LIVE judgement run needs a provider credential and a real tier "
+                "(gate H-2, BLOCKED:HUMAN).\n"
+                "  fix: store the credential, then run the nightly job against that tier.\n"
+                "  note: --replay scores the recorded tapes, which are synthetic reference "
+                "policies and not a measurement of any model.",
+                file=sys.stderr,
+            )
+            return 3
+        return run_judgement(args.nightly, args.out)
 
     task_ids: list[str] = list(args.task or [])
     for suite_name in args.suite or []:

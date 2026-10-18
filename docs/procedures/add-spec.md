@@ -97,7 +97,7 @@ existing references never shift. Acceptance items cite the requirement they veri
    1.3.A ADR: [adr/NNNN-title.md](../adr/NNNN-title.md)
    1.3.B Research: [research/file.md](../research/file.md)
    1.3.C Open questions: [open-questions.md](../open-questions.md) — Q-N
-   1.3.D Plan: [plans/file.md](../plans/file.md)
+   1.3.D Plan: [plans/plan-sets/set-X/MASTER.md](../plans/plan-sets/set-X/MASTER.md)
 
 ## 2. Scope
 2.1 Goals
@@ -156,7 +156,7 @@ existing references never shift. Acceptance items cite the requirement they veri
 - Mark any open-questions entries this spec resolved or raised.
 - If the spec changes the system's shape, update `docs/architecture.md`.
 - **Re-derivation trigger:** If this is an update to an existing spec (any section changed),
-  open `plans/README.md` and find every formal plan whose **Derived From** section lists this spec.
+  open `docs/plans/README.md` (and the set MASTERs under `docs/plans/plan-sets/`) and find every formal plan whose **Derived From** section lists this spec.
   For each such plan, open the plan file and update its header field to:
   ```
   **Derivation Status:** STALE — [SPEC-ID] updated YYYY-MM-DD, re-derive before next execution

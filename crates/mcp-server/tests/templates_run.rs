@@ -82,7 +82,11 @@ fn stack_path() -> Vec<PathBuf> {
 /// re-run by hand against the exact bytes the test used.
 fn fixture_dir() -> PathBuf {
     let dir = workspace_root().join("target").join("template-fixture");
-    if dir.join("primary.parquet").is_file() && dir.join("secondary.parquet").is_file() {
+    if dir.join("primary.parquet").is_file()
+        && dir.join("secondary.parquet").is_file()
+        && dir.join("spanning.parquet").is_file()
+        && dir.join("predictions.parquet").is_file()
+    {
         return dir;
     }
     let script = workspace_root().join("apps/skill-runner/reference_dataset.py");
@@ -143,6 +147,20 @@ fn argument(tool: &str, name: &str) -> Option<Value> {
         "higher_timeframe" => json!("1h"),
         // A family fixture stands in for a real experiment id.
         "experiment_id" => json!("00000000-0000-0000-0000-000000000001"),
+        // The strategy a spanning test is run on, and the platform's one factor.
+        "run_id" => json!("run_span"),
+        "factor_instrument_id" => json!("BTC-USD"),
+        // A model version and the horizon its forward return is taken over; the
+        // predictions fixture carries a `y_h6` column built for the conformal test.
+        "model" => json!("vol@1"),
+        "horizon_bars" => json!(6),
+        // `collider_check` (Set Q Q-1.12): one filter that is a collider by structure, one that is not.
+        "filters" => json!([
+            {"name": "calm_after_entry", "depends_on": ["post_entry_vol", "signal_score"]},
+            {"name": "trend_regime", "depends_on": ["ma_slope"], "causal_role": "confounder"}
+        ]),
+        "signal_quantities" => json!(["signal_score", "ma_slope"]),
+        "forward_quantities" => json!(["post_entry_vol", "forward_return"]),
         _ => return None,
     })
 }
@@ -163,6 +181,12 @@ fn fixture_file(role: &str) -> &'static str {
         "fast" => "fast.parquet",
         "slow" => "slow.parquet",
         "family" => "family.parquet",
+        // Recorded returns of two strategies built against the primary series.
+        "returns" => "spanning.parquet",
+        // The factor is the primary instrument's own bars.
+        "factor" => "primary.parquet",
+        // A model's answers with known IC decay (half-life 12 bars).
+        "predictions" => "predictions.parquet",
         other => panic!(
             "no fixture file for the series role `{other}`. Add one to `fixture_file` and, if              the fixture does not contain suitable data yet, to reference_dataset.py."
         ),
@@ -382,6 +406,17 @@ async fn the_cost_estimators_recover_the_fixtures_known_spread() {
         .and_then(Value::as_object)
         .expect("per-estimator values");
     assert!(!per.is_empty(), "every estimator declined on the fixture");
+    // EDGE (S-3.4, OQ-15) must produce a value on a series built to contain a known
+    // spread, and a tighter one than the 60% any estimator is allowed: it is the
+    // estimator whose first implementation returned a negative variance here.
+    let edge = per
+        .get("edge")
+        .and_then(Value::as_f64)
+        .expect("EDGE declined on a fixture with a known 60 bps spread");
+    assert!(
+        (edge - TRUE_SPREAD_BPS).abs() / TRUE_SPREAD_BPS < 0.25,
+        "EDGE reports {edge:.1} bps against a true {TRUE_SPREAD_BPS}"
+    );
     for (name, value) in per {
         let bps = value.as_f64().unwrap_or(f64::NAN);
         let out = (bps - TRUE_SPREAD_BPS).abs() / TRUE_SPREAD_BPS;
@@ -622,4 +657,73 @@ async fn the_weight_cap_survives_a_family_built_to_concentrate() {
         (total - 1.0).abs() < 1e-6,
         "the capped weights sum to {total}, not one — the redistribution lost or created book"
     );
+}
+
+/// The spanning test has power in both directions: a strategy that is the market
+/// is spanned with a beta near its planted 0.9, and one with a real edge is not.
+/// A tool that called everything spanned, or nothing, fails one half.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_spanning_test_separates_a_repackaged_market_from_an_edge() {
+    let fixture = fixture_dir();
+    let Some(t) = mcp_server_lib::tools::templated::find("factor_spanning_test") else {
+        panic!("factor_spanning_test is not in the catalogue");
+    };
+    let mut results = Vec::new();
+    for run in ["run_span", "run_alpha"] {
+        let mut payload = payload_for(t, &fixture);
+        payload["run_id"] = json!(run);
+        payload["timeframe"] = json!("1h");
+        let (outcome, result) = run_once(t, &payload).await;
+        assert_eq!(outcome, Outcome::Ok, "{run}: {outcome:?}");
+        let r = result.expect("a result");
+        assert!(r.get("refused").is_none(), "{run} refused: {r}");
+        results.push(r["detail"].clone());
+    }
+    let (span, edge) = (&results[0], &results[1]);
+    let beta = span["beta"].as_f64().unwrap();
+    assert!((beta - 0.9).abs() < 0.05, "planted beta 0.9, measured {beta}");
+    assert_eq!(span["verdict"], "spanned_by_btc_beta", "{span}");
+    assert!(span["r2"].as_f64().unwrap() > 0.8, "{span}");
+    assert!(edge["alpha_t"].as_f64().unwrap() > 2.0, "{edge}");
+    assert_eq!(edge["verdict"], "alpha_beyond_btc_beta_carry_untested", "{edge}");
+    // The one-factor honesty: the missing factor is named in every answer.
+    assert_eq!(span["factors_missing"][0], "funding_rate_carry");
+}
+
+/// `signal_half_life` recovers the decay the fixture plants (a true half-life of
+/// 12 bars), and refuses to invent one when the curve does not decay.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_half_life_is_recovered_from_a_planted_decay() {
+    let fixture = fixture_dir();
+    let t = mcp_server_lib::tools::templated::find("signal_half_life")
+        .expect("signal_half_life is in the catalogue");
+    let payload = payload_for(t, &fixture);
+    let (outcome, result) = run_once(t, &payload).await;
+    assert_eq!(outcome, Outcome::Ok, "{outcome:?}");
+    let d = result.expect("a result")["detail"].clone();
+    let hl = d["half_life_bars"].as_f64().expect("a half-life");
+    assert!((7.0..=17.0).contains(&hl), "planted 12 bars, measured {hl}: {d}");
+    assert_eq!(d["verdict"], "decays", "{d}");
+    // A rebalance floor slower than the half-life is flagged.
+    let mut flagged = payload_for(t, &fixture);
+    flagged["breakeven_rebalance_bars"] = json!(100);
+    let (_, r2) = run_once(t, &flagged).await;
+    assert_eq!(r2.unwrap()["detail"]["verdict"], "rebalance_faster_than_costs_allow");
+}
+
+/// ACI holds its target through the fixture's variance doubling, reports it by
+/// block, and does not warn on a series it covered.
+#[tokio::test(flavor = "multi_thread")]
+async fn adaptive_intervals_hold_coverage_through_a_regime_change() {
+    let fixture = fixture_dir();
+    let t = mcp_server_lib::tools::templated::find("conformal_calibrate")
+        .expect("conformal_calibrate is in the catalogue");
+    let payload = payload_for(t, &fixture);
+    let (outcome, result) = run_once(t, &payload).await;
+    assert_eq!(outcome, Outcome::Ok, "{outcome:?}");
+    let d = result.expect("a result")["detail"].clone();
+    let cov = d["realized_coverage"].as_f64().unwrap();
+    assert!((cov - 0.9).abs() < 0.05, "target 0.9, realised {cov}: {d}");
+    assert_eq!(d["coverage_by_block"].as_array().unwrap().len(), 5, "{d}");
+    assert!(d["warmup_decisions_without_interval"].as_u64().unwrap() >= 50, "{d}");
 }

@@ -76,6 +76,26 @@ struct OandaTradeResponse {
     state: String,
 }
 
+/// The direction of an OANDA order from its signed `units` string. A missing,
+/// unparsable or zero value is an error: this used to default to a **buy** when
+/// `units` was absent or malformed (Set E audit #9).
+pub(crate) fn side_from_units(units: Option<&str>) -> Result<Side, BrokerError> {
+    let d = units
+        .and_then(|s| Decimal::from_str(s).ok())
+        .ok_or_else(|| {
+            BrokerError::Serialization(format!(
+                "oanda reported order units {units:?}; cannot tell buy from sell"
+            ))
+        })?;
+    match d.cmp(&Decimal::ZERO) {
+        std::cmp::Ordering::Greater => Ok(Side::Buy),
+        std::cmp::Ordering::Less => Ok(Side::Sell),
+        std::cmp::Ordering::Equal => Err(BrokerError::Serialization(
+            "oanda reported zero units; cannot tell buy from sell".to_owned(),
+        )),
+    }
+}
+
 #[async_trait]
 impl Broker for OandaBroker {
     async fn submit(&self, order: &ApprovedOrder) -> Result<String, BrokerError> {
@@ -171,7 +191,10 @@ impl Broker for OandaBroker {
             "FILLED" => BrokerOrderState::Filled,
             "CANCELLED" => BrokerOrderState::Cancelled,
             "REJECTED" => BrokerOrderState::Rejected,
-            _ => BrokerOrderState::New,
+            "PENDING" | "TRIGGERED" => BrokerOrderState::New,
+            // An unrecognised state is reported as unknown, not as "new": a
+            // reconciler treats New as a live order it may wait on.
+            other => BrokerOrderState::Unknown(other.to_owned()),
         };
         let filled_qty = order["filledUnits"]
             .as_str()
@@ -191,15 +214,7 @@ impl Broker for OandaBroker {
         Ok(BrokerOrderStatus {
             broker_order_id: broker_order_id.to_owned(),
             instrument_id: order["instrument"].as_str().unwrap_or_default().to_owned(),
-            side: if order["units"]
-                .as_str()
-                .and_then(|s| s.starts_with('-').then_some(true))
-                .unwrap_or(false)
-            {
-                Side::Sell
-            } else {
-                Side::Buy
-            },
+            side: side_from_units(order["units"].as_str())?,
             order_type: OrderType::Market,
             submitted_qty,
             filled_qty,
@@ -227,8 +242,10 @@ impl Broker for OandaBroker {
             let text = resp.text().await.unwrap_or_default();
             return Err(BrokerError::Http(text));
         }
-        // Return empty — pending order parsing is venue-specific; callers use query_order.
-        Ok(vec![])
+        // Never implemented; "none" would read as a clean book.
+        Err(BrokerError::Serialization(
+            "oanda pending-order listing is not implemented; use query_order".to_owned(),
+        ))
     }
 
     async fn query_positions(&self) -> Result<Vec<BrokerPosition>, BrokerError> {
@@ -277,4 +294,18 @@ impl Broker for OandaBroker {
 #[allow(dead_code)]
 fn _assert_oanda_fields(b: &OandaTradeResponse) -> &str {
     &b.id
+}
+
+#[cfg(test)]
+mod inbound_tests {
+    use super::*;
+
+    #[test]
+    fn oanda_direction_comes_only_from_a_readable_nonzero_units_string() {
+        assert_eq!(side_from_units(Some("100")).unwrap(), Side::Buy);
+        assert_eq!(side_from_units(Some("-100")).unwrap(), Side::Sell);
+        for bad in [None, Some(""), Some("abc"), Some("0")] {
+            assert!(side_from_units(bad).is_err(), "{bad:?} must be refused");
+        }
+    }
 }

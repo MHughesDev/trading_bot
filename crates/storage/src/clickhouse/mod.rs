@@ -1,11 +1,15 @@
 //! ClickHouse client + batched insert helpers.
+pub mod alt;
 pub mod backfill;
 pub mod canonical;
+pub mod canonical_read;
 pub mod census;
 pub mod features;
 pub mod forward;
 pub mod migrate;
 pub mod model_traces;
+pub mod qc_reports;
+pub mod retention;
 pub mod trades;
 
 use thiserror::Error;

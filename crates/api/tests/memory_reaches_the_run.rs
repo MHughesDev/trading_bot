@@ -69,9 +69,17 @@ async fn db() -> PgPool {
             .expect("pgvector installs");
     }
 
+    // The role is cluster-wide; the platform's migrations create it and a scratch
+    // cluster may not have it (0172 grants to it).
+    let _ = pool
+        .execute(
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='app_role')              THEN CREATE ROLE app_role NOLOGIN; END IF; END $$",
+        )
+        .await;
     for file in [
         "migrations/0122_semantic_memory.sql",
         "migrations/0124_memory_retrievals.sql",
+        "migrations/0172_memory_monthly_report.sql",
     ] {
         let mut sql = std::fs::read_to_string(root.join(file)).expect("the migration is readable");
         if !has_vector {
@@ -251,4 +259,181 @@ async fn one_users_memory_never_reaches_anothers_run() {
         for_b.is_empty(),
         "user b's brief would have been built from user a's preferences"
     );
+}
+
+// ── Two turns, and a question that outlives its conversation (S-4.6, S-10.12) ──
+
+fn question_entry(id: &str, subject: &str, blocking: bool) -> Entry {
+    let text = if subject == "BTC-USD" {
+        "does the funding signal survive the 2022 regime?"
+    } else {
+        "does the memecoin listing premium persist?"
+    };
+    let q = harness::memory::questions::open(
+        id,
+        subject,
+        text,
+        "decides whether the carry leg is worth a trial",
+        blocking,
+        harness::memory::questions::QuestionValue::Useful,
+        "run_opened",
+    )
+    .expect("a complete question");
+    let today = chrono::Utc::now().date_naive().to_string();
+    let mut e = Entry::finding(
+        id,
+        subject,
+        &q.question,
+        DataWindow::new(today.clone(), today),
+        Provenance::new("run_opened", "open_question", "1", "n/a"),
+    );
+    e.kind = Kind::OpenQuestion;
+    e.confidence = Confidence::Suggestive;
+    e.created_by = "user".into();
+    e.extra = q.extra();
+    e
+}
+
+fn rendered(brief: &harness::memory::Brief) -> String {
+    brief
+        .blocks()
+        .iter()
+        .map(|b| format!("{:?}", b.tagged))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// S-4.6, two turns: the answer given in turn one is in turn two's brief, in the
+/// user-preference slot (which leads), so the agent has no reason to ask again.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires live Postgres"]
+async fn an_answer_given_in_turn_one_is_in_turn_twos_brief_at_the_top() {
+    let pool = db().await;
+    let store = api::memory_store::MemoryStore::new(pool);
+    let user = Uuid::new_v4();
+    let today = chrono::Utc::now().date_naive().to_string();
+
+    // Turn 1: the agent asked "which venue?", the user answered, and the answer
+    // is recorded as a preference exactly as POST /api/memory/preferences does.
+    store
+        .put(user, &preference("pref_venue", "BTC-USD", "use Kraken, never Coinbase", user))
+        .await
+        .unwrap();
+
+    // Turn 2: a new run, a new brief.
+    let entries = store.by_kind(user, Kind::UserPreference, 200).await.unwrap();
+    let brief = harness::memory::assemble_brief(
+        &Uuid::new_v4().to_string(),
+        "research BTC-USD funding",
+        &entries,
+        4_000,
+        harness::memory::BriefDetail::Lines,
+        &today,
+        &[],
+        &[],
+    );
+    assert!(rendered(&brief).contains("Kraken"), "turn two does not carry turn one's answer");
+    let first = brief.retrievals.iter().min_by_key(|r| r.rank).expect("something retrieved");
+    assert_eq!(first.entry_id, "pref_venue", "the user's own answer ranks first");
+}
+
+/// S-10.12: a question opened in one conversation appears in the next run's brief
+/// for the same subject, blocking first; a finding citing it closes it
+/// (`how = answered`); a closed one leaves the brief; retrieval logs `cited`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires live Postgres"]
+async fn an_open_question_reaches_the_next_brief_and_a_citing_finding_closes_it() {
+    let pool = db().await;
+    let store = api::memory_store::MemoryStore::new(pool.clone());
+    let user = Uuid::new_v4();
+    let today = chrono::Utc::now().date_naive().to_string();
+
+    store.put(user, &question_entry("q_curious", "BTC-USD", false)).await.unwrap();
+    store.put(user, &question_entry("q_blocking", "BTC-USD", true)).await.unwrap();
+    store.put(user, &question_entry("q_other", "DOGE-USD", true)).await.unwrap();
+
+    let brief_for = |entries: &[Entry]| {
+        harness::memory::assemble_brief(
+            &Uuid::new_v4().to_string(),
+            "research the funding signal regime",
+            entries,
+            4_000,
+            harness::memory::BriefDetail::Lines,
+            &today,
+            &[],
+            &[],
+        )
+    };
+    let entries = store.by_kind(user, Kind::OpenQuestion, 200).await.unwrap();
+    let brief = brief_for(&entries);
+    let ids: Vec<&str> = brief.retrievals.iter().map(|r| r.entry_id.as_str()).collect();
+    assert!(ids.contains(&"q_blocking") && ids.contains(&"q_curious"), "{ids:?}");
+    assert!(!ids.contains(&"q_other"), "a question about another subject is not shown: {ids:?}");
+    let pos = |id: &str| ids.iter().position(|x| *x == id).unwrap();
+    assert!(pos("q_blocking") < pos("q_curious"), "blocking leads: {ids:?}");
+
+    // The run cites it from a finding; the sweep closes it.
+    let retrievals = api::retrieval_store::RetrievalStore::new(pool.clone());
+    retrievals.log(&brief.retrievals).await.unwrap();
+    let mut finding = Entry::finding(
+        "f_answer",
+        "BTC-USD",
+        "the funding signal survives 2022",
+        DataWindow::new(today.clone(), today.clone()),
+        Provenance::new("run_next", "record_finding", "1", "h"),
+    );
+    finding.evidence_ids.insert("question_id".into(), "q_blocking".into());
+    let closed = api::questions::close_cited(&pool, user, &finding).await.unwrap();
+    assert_eq!(closed, vec!["q_blocking".to_string()]);
+    let q = store.get(user, "q_blocking").await.unwrap().unwrap();
+    assert_eq!(q.extra["status"]["closed"]["how"], "answered");
+    assert_eq!(q.extra["status"]["closed"]["by"], "f_answer");
+
+    // Citing marks the retrieval cited.
+    let run = brief.retrievals[0].run_id.clone();
+    assert_eq!(retrievals.mark_cited(&run, &["q_blocking".into()]).await.unwrap(), 1);
+}
+
+/// S-4.16: the monthly report is an artefact. One row per (user, month), written by the
+/// sweep, never rewritten, and reachable by the platform's own role -- which the owner
+/// connection this test runs as cannot show, so it switches to `app_role` for the read.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires live Postgres"]
+async fn the_monthly_report_is_written_once_per_user_and_month_and_is_immutable() {
+    let pool = db().await;
+    let store = api::memory_store::MemoryStore::new(pool.clone());
+    let user = Uuid::new_v4();
+    store.put(user, &question_entry("q_report_1", "BTC-USD", false)).await.unwrap();
+
+    assert_eq!(store.publish_monthly_reports("2026-10-15").await.unwrap(), 1);
+    assert_eq!(
+        store.publish_monthly_reports("2026-10-28").await.unwrap(),
+        0,
+        "the month is already reported"
+    );
+    assert_eq!(store.publish_monthly_reports("2026-11-02").await.unwrap(), 1, "a new month");
+
+    let total: i64 = sqlx::query_scalar(
+        "SELECT (report->>'total')::bigint FROM agent_memory.monthly_report
+          WHERE user_id = $1 AND month = '2026-10-01'",
+    )
+    .bind(user)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(total, 1);
+
+    // As the platform's role: it can read and append, and cannot edit.
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("SET LOCAL ROLE app_role").execute(&mut *tx).await.unwrap();
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_memory.monthly_report")
+        .fetch_one(&mut *tx)
+        .await
+        .expect("app_role can read the reports");
+    assert_eq!(n, 2);
+    let e = sqlx::query("UPDATE agent_memory.monthly_report SET report = '{}'::jsonb")
+        .execute(&mut *tx)
+        .await
+        .expect_err("a report cannot be tuned after the fact");
+    assert!(e.to_string().contains("permission denied"), "{e}");
 }

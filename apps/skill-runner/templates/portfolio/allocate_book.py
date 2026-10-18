@@ -17,7 +17,13 @@
         "enum": ["risk_parity", "minimum_variance", "equal_weight"],
         "default": "risk_parity"
       },
-      "min_overlap": {"type": "integer", "minimum": 20, "maximum": 5000, "default": 60}
+      "min_overlap": {"type": "integer", "minimum": 20, "maximum": 5000, "default": 60},
+      "covariance_estimator": {
+        "type": "string",
+        "enum": ["shrunk", "sample"],
+        "default": "shrunk",
+        "description": "shrunk (Ledoit-Wolf, constant-correlation target) is the default; sample must be asked for by name and says so"
+      }
     }
   },
   "summary_template": "{n_strategies} strategies, {objective}; largest weight {max_weight} against a cap of {cap}; {n_capped} hit the cap; effective breadth {effective_n} of {n_strategies}; {verdict}",
@@ -28,6 +34,7 @@
     ["cap", ""],
     ["n_capped", ""],
     ["effective_n", ""],
+    ["covariance_estimator", ""],
     ["verdict", ""]
   ],
   "wall_seconds": 30,
@@ -122,6 +129,26 @@ def _cap_and_renormalise(weights, cap):
     return w, capped
 
 
+def _shrink(sample: np.ndarray, centred: np.ndarray, t: int):
+    """Ledoit-Wolf, constant-correlation target. Returns (shrunk covariance, intensity)."""
+    n = sample.shape[0]
+    variances = np.diag(sample).copy()
+    sd = np.sqrt(np.maximum(variances, 1e-300))
+    correlation = sample / np.outer(sd, sd)
+    off = ~np.eye(n, dtype=bool)
+    mean_correlation = float(correlation[off].mean()) if n > 1 else 0.0
+    target = np.outer(sd, sd) * mean_correlation
+    np.fill_diagonal(target, variances)
+    squared = centred**2
+    pi_matrix = (squared.T @ squared) / t - sample**2
+    pi_hat = float(pi_matrix.sum())
+    rho_hat = float(np.trace(pi_matrix))
+    gamma_hat = float(((target - sample) ** 2).sum())
+    intensity = 0.0 if gamma_hat <= 0 else (pi_hat - rho_hat) / gamma_hat / t
+    intensity = float(min(max(intensity, 0.0), 1.0))
+    return intensity * target + (1.0 - intensity) * sample, intensity
+
+
 def run(payload: dict) -> dict:
     frame = load_family(payload, "family")
     table = frame
@@ -157,8 +184,21 @@ def run(payload: dict) -> dict:
         )
 
     objective = payload.get("objective") or "risk_parity"
+    estimator = payload.get("covariance_estimator") or "shrunk"
+    if estimator not in ("shrunk", "sample"):
+        return refuse(f"`covariance_estimator` is shrunk or sample, not {estimator!r}")
     centred = x - x.mean(axis=0)
-    covariance = (centred.T @ centred) / t
+    sample = (centred.T @ centred) / t
+    shrinkage = 0.0
+    if estimator == "shrunk":
+        # Ledoit-Wolf against the constant-correlation target, the same estimator as
+        # `shrunk_covariance` (T9). It is the default because a sample covariance over a
+        # strategy family is mostly estimation noise at these sizes, and an allocator that
+        # inverts it allocates to the noise. Each variance is kept, so risk parity (which uses
+        # only the diagonal) is unchanged by it; minimum variance is what it protects.
+        covariance, shrinkage = _shrink(sample, centred, t)
+    else:
+        covariance = sample
     variances = np.diag(covariance).copy()
 
     if objective == "equal_weight":
@@ -237,6 +277,11 @@ def run(payload: dict) -> dict:
             f"is why a return target this book cannot meet produces a diversified book rather "
             f"than a concentrated one."
         )
+    if estimator == "sample":
+        warnings.append(
+            "the raw sample covariance was used because it was asked for by name. It is mostly "
+            "estimation noise at the size of a strategy family; the default is the shrunk estimate."
+        )
     if objective == "minimum_variance":
         warnings.append(
             "minimum variance is the objective most rewarded by a wrong covariance: it puts "
@@ -258,6 +303,10 @@ def run(payload: dict) -> dict:
     detail = {
         "experiment_id": payload.get("experiment_id"),
         "objective": objective,
+        "covariance_estimator": (
+            "ledoit_wolf_constant_correlation" if estimator == "shrunk" else "sample (explicitly requested)"
+        ),
+        "shrinkage_intensity": shrinkage,
         "cap": MAX_WEIGHT,
         "floor": MIN_WEIGHT,
         "n_strategies": n,

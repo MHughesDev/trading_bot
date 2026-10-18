@@ -11,6 +11,9 @@
 pub mod align;
 pub mod consistency;
 pub mod ema;
+pub mod external_features;
+pub mod external_inputs;
+pub mod families;
 pub mod feature_sets;
 pub mod leakage;
 pub mod leakage_harness;

@@ -44,6 +44,11 @@ pub struct DeployBody {
     pub target: Option<domain::strategy_graph::deployment::DeploymentTarget>,
     /// Decimal string — what the deployment's realised series is measured from.
     pub starting_capital: String,
+    /// The approved `deployment_proposal` this deployment is authorised by (Set T T-1.1).
+    /// Optional until the gate is armed; once armed the trigger refuses a deployment
+    /// that was not authorised by one.
+    #[serde(default)]
+    pub proposal_id: Option<Uuid>,
     /// Record this deployment as forward evidence for a trial (Set T T-0.4):
     /// its realised series is compared with the backtest's, bar by bar.
     #[serde(default)]
@@ -246,6 +251,8 @@ pub async fn create_deployment(
     let model_pins = model_pins(&plan);
     let deployment_id = Uuid::new_v4();
     let user = token.user_id().to_string();
+    // Captured before `body.target` is moved below (Set T T-1.1).
+    let body_proposal_id = body.proposal_id;
     let forward = body.forward;
     if let Some(DeploymentTarget::Selection {
         selection,
@@ -315,6 +322,19 @@ pub async fn create_deployment(
             target: serde_json::to_value(&target).ok(),
             parent_deployment_id: None,
         };
+        if let Some(pid) = body_proposal_id {
+            if let Err(e) = crate::deployment_gate::authorise_deployment(
+                &state.pg,
+                &token.scopes,
+                &user,
+                deployment_id,
+                pid,
+            )
+            .await
+            {
+                return crate::deployment_gate_routes::render(&e);
+            }
+        }
         if let Err(e) = storage::postgres::deployments::start(&state.pg, &record).await {
             return refuse(
                 StatusCode::CONFLICT,
@@ -387,6 +407,19 @@ pub async fn create_deployment(
     };
     // The record first: a deployment that runs without one is the defect this
     // route exists to end (FEAT-007 §1 defect 10).
+    if let Some(pid) = body_proposal_id {
+        if let Err(e) = crate::deployment_gate::authorise_deployment(
+            &state.pg,
+            &token.scopes,
+            &user,
+            deployment_id,
+            pid,
+        )
+        .await
+        {
+            return crate::deployment_gate_routes::render(&e);
+        }
+    }
     match record_and_declare(&state.pg, &record, graph).await {
         Ok(()) => {}
         Err(DeclareError::NotRecorded(e)) => {

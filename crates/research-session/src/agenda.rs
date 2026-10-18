@@ -521,6 +521,61 @@ impl DedupeScorecard {
         self
     }
 
+    /// The scorecard for a stretch of the session's log — what the digest
+    /// carries (S-11.4, 2026-10-03).
+    ///
+    /// Read from facts the driver already writes rather than measured again:
+    /// an `agenda_item_added` is an offer that inserted, an
+    /// `agenda_item_merged` is an offer layer one caught, and an
+    /// `agenda_item_superseded` / `agenda_item_expired` whose payload carries
+    /// `dedupe_layer` is a catch at that layer. An expiry or supersession with
+    /// no `dedupe_layer` (a second failure, a human's merge) is not a duplicate
+    /// and is not counted.
+    ///
+    /// Layer one and layer two are **reported** — the driver writes every
+    /// insert, every merge and every intake refusal, so a zero is a zero.
+    /// Layer three reports through `novelty` on the ranking and catches nothing
+    /// it could count: it lowers a score, it does not refuse an item. It stays
+    /// [`LayerCount::NotReported`] unless an event names it, so a sum quoted off
+    /// this card never treats the ranking's silence as a measurement.
+    #[must_use]
+    pub fn from_log<'a>(events: impl IntoIterator<Item = &'a crate::fold::SessionEvent>) -> Self {
+        use crate::fold::EventKind;
+        let mut inserted = 0;
+        let mut merged = 0;
+        let mut intake = 0;
+        let mut ledger: Option<usize> = None;
+        for e in events {
+            match e.kind {
+                EventKind::AgendaItemAdded => inserted += 1,
+                EventKind::AgendaItemMerged => merged += 1,
+                EventKind::AgendaItemSuperseded | EventKind::AgendaItemExpired => {
+                    match e
+                        .payload
+                        .get("dedupe_layer")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(DedupeLayer::parse)
+                    {
+                        Some(DedupeLayer::Intake) => intake += 1,
+                        Some(DedupeLayer::Ledger) => *ledger.get_or_insert(0) += 1,
+                        // Layer one never supersedes: it merges before an
+                        // item exists. A key word here is a writer's mistake
+                        // and is not quietly re-filed as a merge.
+                        Some(DedupeLayer::Key) | None => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        Self {
+            offers: inserted + merged,
+            inserted,
+            key: LayerCount::Caught(merged),
+            intake: LayerCount::Caught(intake),
+            ledger: ledger.map_or(LayerCount::NotReported, LayerCount::Caught),
+        }
+    }
+
     #[must_use]
     pub fn of(&self, layer: DedupeLayer) -> LayerCount {
         match layer {
@@ -866,6 +921,54 @@ mod tests {
         assert_eq!(card.offers, 2);
         assert_eq!(card.inserted, 1);
         assert_eq!(card.key, LayerCount::Caught(1));
+    }
+
+    #[test]
+    fn the_scorecard_read_off_the_log_says_which_layer_caught_each_duplicate() {
+        use crate::fold::{EventKind, SessionEvent};
+        let s = session();
+        let ev = |seq: i64, kind: EventKind, payload: serde_json::Value| {
+            SessionEvent::new(s, seq, kind, payload)
+        };
+        let log = vec![
+            ev(1, EventKind::AgendaItemAdded, serde_json::json!({})),
+            ev(2, EventKind::AgendaItemAdded, serde_json::json!({})),
+            ev(3, EventKind::AgendaItemMerged, serde_json::json!({})),
+            ev(
+                4,
+                EventKind::AgendaItemSuperseded,
+                serde_json::json!({ "dedupe_layer": "intake", "trials_charged": 0 }),
+            ),
+            // An expiry that is not a duplicate: a second failure.
+            ev(
+                5,
+                EventKind::AgendaItemExpired,
+                serde_json::json!({ "why": "two failures" }),
+            ),
+            ev(6, EventKind::RunFinished, serde_json::json!({})),
+        ];
+        let card = DedupeScorecard::from_log(&log);
+        assert_eq!(card.offers, 3);
+        assert_eq!(card.inserted, 2);
+        assert_eq!(card.key, LayerCount::Caught(1));
+        assert_eq!(
+            card.intake,
+            LayerCount::Caught(1),
+            "the expiry was not a duplicate"
+        );
+        assert_eq!(
+            card.ledger,
+            LayerCount::NotReported,
+            "the ranking refuses nothing it could count, and its silence is not a zero"
+        );
+        assert_eq!(card.caught_where_reported(), 2);
+
+        // An empty stretch reports layers one and two as zero — the driver
+        // writes every insert, merge and intake refusal — and still not three.
+        let empty = DedupeScorecard::from_log(&[]);
+        assert_eq!(empty.key, LayerCount::Caught(0));
+        assert_eq!(empty.intake, LayerCount::Caught(0));
+        assert_eq!(empty.unreported(), vec![DedupeLayer::Ledger]);
     }
 
     #[test]

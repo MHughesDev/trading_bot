@@ -164,6 +164,66 @@ pub struct ExpectedBar {
     pub signal_matched: bool,
 }
 
+/// What a shadow run of the same compiled plan, on the simulated venue over the
+/// identical bars, says should have happened in one bar.
+///
+/// The only way to build an [`ExpectedBar`] from a shadow run is
+/// [`ExpectedBar::from_shadow`], which checks the bar and refuses a non-finite
+/// number: [`ExpectedBar`] itself carries no bar, so without this an expectation
+/// computed for bar *n-1* pairs silently with the realised return of bar *n*.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShadowBar {
+    /// The bar close the shadow run computed this for.
+    pub bar: DateTime<Utc>,
+    /// The shadow equity's return over the bar, on the same chain rule as the
+    /// realised series.
+    pub expected_return: f64,
+    /// Notional the shadow run traded this bar, in the deployment's numeraire.
+    pub expected_turnover: Decimal,
+    /// Notional-weighted slippage the simulator charged the shadow fills, in bps
+    /// against the shadow's decision price.
+    pub modelled_slippage_bps: f64,
+    /// Whether the shadow run decided the same orders the live run submitted.
+    pub signal_matched: bool,
+}
+
+impl ExpectedBar {
+    /// The expectation for `bar` from a shadow run.
+    ///
+    /// # Errors
+    /// [`ForwardError::ShadowBarMismatch`] when the shadow is for another bar;
+    /// [`ForwardError::ShadowNotFinite`] for a NaN or infinite expected return.
+    pub fn from_shadow(bar: DateTime<Utc>, shadow: &ShadowBar) -> Result<Self, ForwardError> {
+        if shadow.bar != bar {
+            return Err(ForwardError::ShadowBarMismatch {
+                bar,
+                shadow: shadow.bar,
+            });
+        }
+        if !shadow.expected_return.is_finite() || !shadow.modelled_slippage_bps.is_finite() {
+            return Err(ForwardError::ShadowNotFinite(bar));
+        }
+        Ok(Self {
+            expected_return: shadow.expected_return,
+            expected_turnover: shadow.expected_turnover,
+            modelled_slippage_bps: shadow.modelled_slippage_bps,
+            signal_matched: shadow.signal_matched,
+        })
+    }
+}
+
+/// One fill of this deployment, as it is read back from the journal on a restart.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ResumeFill {
+    pub side: Side,
+    pub filled: Decimal,
+    pub fill_price: Price,
+    pub charge: Decimal,
+    /// The mark the strategy decided at — slippage is measured against it.
+    pub decision_price: Price,
+    pub filled_at: DateTime<Utc>,
+}
+
 /// Anything that stops a realised series from being comparable.
 #[derive(Clone, Debug, PartialEq, Error)]
 pub enum ForwardError {
@@ -194,6 +254,65 @@ pub enum ForwardError {
     NotOpened,
     #[error("this deployment already has an opening mark at {0}")]
     AlreadyOpened(DateTime<Utc>),
+    #[error(
+        "cannot resume: the stored returns compound to an equity of {stored} at {bar}, but the \
+         fills and mark rebuild {rebuilt} — resuming from a balance that does not match the \
+         stored chain would make the realised series non-comparable with the backtest's"
+    )]
+    ResumeInconsistent {
+        bar: DateTime<Utc>,
+        stored: f64,
+        rebuilt: f64,
+    },
+    #[error("cannot resume: a stored return at {0} is not a finite number")]
+    ResumeNonFiniteReturn(DateTime<Utc>),
+    #[error(
+        "the shadow run's expectation is for bar {shadow}, but bar {bar} is being closed — an \
+         expectation for another bar is a placeholder with a timestamp"
+    )]
+    ShadowBarMismatch {
+        bar: DateTime<Utc>,
+        shadow: DateTime<Utc>,
+    },
+    #[error("the shadow run's expected return for bar {0} is not a finite number")]
+    ShadowNotFinite(DateTime<Utc>),
+    #[error("no forward recorder is deployed for deployment {0}")]
+    UnknownDeployment(Uuid),
+    #[error(
+        "cannot verify the last segment: it was anchored at {anchor} holding {position}, so the \
+         anchor's equity needs the mark the series was re-anchored at — resume with \
+         `RealisedSeriesBuilder::resume_anchored(.., Some(anchor_mark))`"
+    )]
+    ResumeAnchorUnverifiable {
+        anchor: DateTime<Utc>,
+        position: Decimal,
+    },
+}
+
+/// Bars the realised series has no return for, because recording paused and
+/// resumed on a fresh anchor ([`RealisedSeriesBuilder::reanchor`]).
+///
+/// The missing bars are those strictly after `after` up to and including
+/// `anchor`: `anchor` itself is the new opening mark, so it has no return
+/// either. A gap is **absence**, never a zero and never one return spread over
+/// several bars.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SeriesGap {
+    /// The last bar a return was recorded at before the pause.
+    pub after: DateTime<Utc>,
+    /// The bar the series was re-anchored at.
+    pub anchor: DateTime<Utc>,
+}
+
+/// An alignment that tolerates a realised series with gaps, and says where.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GappedAlignment {
+    /// The bars both series have, element-wise comparable.
+    pub aligned: Vec<AlignedBar>,
+    /// Bars the backtest series has and the realised series does not. Always
+    /// reported: a comparison that silently skipped them would read as a
+    /// complete one.
+    pub missing: Vec<DateTime<Utc>>,
 }
 
 /// A return series that knows what it is counted in and what grid it is on.
@@ -244,6 +363,62 @@ pub enum AlignmentError {
 }
 
 impl RealisedSeries {
+    /// Place this series beside a backtest series when it has **gaps**, and say
+    /// exactly which bars are missing.
+    ///
+    /// [`Self::align`] stays strict and refuses a series of a different length,
+    /// which is the right answer for a series that should be complete. A series
+    /// that was re-anchored after a restart is *known* to be incomplete, and this
+    /// is the comparison for it: every realised bar must be one the backtest has
+    /// (anything else is a real mismatch, refused as [`AlignmentError::Bar`]),
+    /// and every backtest bar the realised series lacks is returned in
+    /// [`GappedAlignment::missing`] — never skipped quietly, never filled with a
+    /// zero, never replaced by a return spread over several bars.
+    ///
+    /// # Errors
+    /// [`AlignmentError`] on a numeraire or grid mismatch, or a realised bar the
+    /// backtest series does not have.
+    pub fn align_over_gaps(
+        &self,
+        expected: &RealisedSeries,
+    ) -> Result<GappedAlignment, AlignmentError> {
+        self.numeraire.assert_comparable(&expected.numeraire)?;
+        if self.bar_seconds != expected.bar_seconds {
+            return Err(AlignmentError::BarWidth {
+                realised: self.bar_seconds,
+                expected: expected.bar_seconds,
+            });
+        }
+        let mut aligned = Vec::new();
+        let mut missing = Vec::new();
+        let mut i = 0usize;
+        for (j, et) in expected.series.timestamps.iter().enumerate() {
+            if self.series.timestamps.get(i) == Some(et) {
+                aligned.push(AlignedBar {
+                    bar: *et,
+                    realised: self.series.returns[i],
+                    expected: expected.series.returns[j],
+                });
+                i += 1;
+            } else {
+                missing.push(*et);
+            }
+        }
+        if i < self.series.timestamps.len() {
+            return Err(AlignmentError::Bar {
+                index: i,
+                realised: self.series.timestamps[i],
+                expected: expected
+                    .series
+                    .timestamps
+                    .last()
+                    .copied()
+                    .unwrap_or(self.series.timestamps[i]),
+            });
+        }
+        Ok(GappedAlignment { aligned, missing })
+    }
+
     /// Place this series element-wise beside a backtest series.
     ///
     /// Strict on purpose. Every looser join — inner join on common bars, zip to
@@ -308,6 +483,13 @@ pub struct RealisedSeriesBuilder {
     position: Decimal,
     cash: Decimal,
     equity_points: Vec<(DateTime<Utc>, f64)>,
+    /// Returns already stored before a restart, exactly as they were computed.
+    /// Empty for a builder that has never been resumed. Kept as returns rather
+    /// than re-derived from rebuilt equity so that a resumed series is
+    /// bit-identical to one built without the restart.
+    prefix: ReturnSeries,
+    /// Pauses in recording, in order. See [`SeriesGap`].
+    gaps: Vec<SeriesGap>,
     last_bar: Option<DateTime<Utc>>,
     // ── accumulators for the bar currently open ──
     bar_turnover: Decimal,
@@ -331,11 +513,242 @@ impl RealisedSeriesBuilder {
             position: Decimal::ZERO,
             cash: opening_balance,
             equity_points: Vec::new(),
+            prefix: ReturnSeries {
+                timestamps: Vec::new(),
+                returns: Vec::new(),
+            },
+            gaps: Vec::new(),
             last_bar: None,
             bar_turnover: Decimal::ZERO,
             slippage_weighted: Decimal::ZERO,
             rejects: 0,
         })
+    }
+
+    /// Continue a deployment after a restart so that its series is identical to
+    /// one built without the restart.
+    ///
+    /// `returns` are the stored `(bar close, realised_return)` pairs of every bar
+    /// closed so far, **in order**, starting with the first bar after `open_bar`.
+    /// `fills` are every fill of this deployment, in order, with the decision
+    /// price each was submitted at. Fills at or before the last closed bar are
+    /// folded into cash and position; later ones are applied as the open bar's
+    /// accumulators (turnover, slippage). `last_mark` is the mark the last
+    /// closed bar (or the opening bar, with no returns) was taken at.
+    ///
+    /// Three refusals:
+    /// - a bar that is off the grid, or does not advance (so a duplicate is
+    ///   refused too) — the same errors [`Self::close_bar`] gives;
+    /// - a non-finite stored return;
+    /// - [`ForwardError::ResumeInconsistent`] when the equity the stored returns
+    ///   compound to disagrees with the equity the fills and mark rebuild. That
+    ///   is the guard against resuming from the *current* balance, which would
+    ///   silently put the series on a different base.
+    ///
+    /// Not recoverable from the database, by design of what is stored: model
+    /// rejects counted in the still-open bar. They restart at zero.
+    ///
+    /// # Errors
+    /// As above, plus those of [`Self::new`] and [`Self::open`].
+    pub fn resume(
+        spec: DeploymentSpec,
+        opening_balance: Decimal,
+        open_bar: DateTime<Utc>,
+        returns: impl IntoIterator<Item = (DateTime<Utc>, f64)>,
+        fills: &[ResumeFill],
+        last_mark: Price,
+    ) -> Result<Self, ForwardError> {
+        Self::resume_anchored(
+            spec,
+            opening_balance,
+            open_bar,
+            returns,
+            fills,
+            last_mark,
+            None,
+        )
+    }
+
+    /// [`Self::resume`] for a series that has been re-anchored
+    /// ([`Self::reanchor`]) at a bar where the book was **not flat**.
+    ///
+    /// The guard runs on the **last segment** only — from the last anchor to the
+    /// last stored bar — and checks that the stored returns after the anchor
+    /// compound, from the anchor's equity, to the equity the fills and
+    /// `last_mark` rebuild. The anchor's equity is inferred, not stored:
+    /// - flat at the anchor (the designed case: recording pauses until live is
+    ///   flat) → it is the cash the fills up to the anchor leave, no mark needed;
+    /// - holding at the anchor → it needs the mark the series was re-anchored
+    ///   at, which is `anchor_mark`. Without it the segment cannot be verified
+    ///   and this refuses ([`ForwardError::ResumeAnchorUnverifiable`]) rather
+    ///   than skipping the check.
+    ///
+    /// The anchor is inferred from the first stored bar after a gap
+    /// (`anchor = bar − bar_seconds`), which holds because `reanchor` is
+    /// followed by a close one bar later. Earlier segments are not re-verified:
+    /// their equity changes are not in the stored returns, and each was checked
+    /// when it was resumed.
+    ///
+    /// `anchor_mark` is ignored for a series with no gap.
+    ///
+    /// # Errors
+    /// As [`Self::resume`], plus [`ForwardError::ResumeAnchorUnverifiable`].
+    pub fn resume_anchored(
+        spec: DeploymentSpec,
+        opening_balance: Decimal,
+        open_bar: DateTime<Utc>,
+        returns: impl IntoIterator<Item = (DateTime<Utc>, f64)>,
+        fills: &[ResumeFill],
+        last_mark: Price,
+        anchor_mark: Option<Price>,
+    ) -> Result<Self, ForwardError> {
+        let mut b = Self::new(spec, opening_balance)?;
+        b.check_grid(open_bar)?;
+        let mut last = open_bar;
+        // The compounded return of the *current segment*: reset at each gap.
+        let mut implied = 1.0_f64;
+        let mut segment_len = 0usize;
+        let step = chrono::Duration::seconds(b.spec.bar_seconds);
+        for (bar, r) in returns {
+            b.check_grid(bar)?;
+            if bar <= last {
+                return Err(ForwardError::BarOutOfOrder {
+                    bar,
+                    previous: last,
+                });
+            }
+            // A stored bar that is not the next on the grid is a pause that was
+            // recorded by a re-anchor before the restart: the series has no
+            // return across it, so neither can the rebuild.
+            if bar > last + step {
+                b.gaps.push(SeriesGap {
+                    after: last,
+                    anchor: bar - step,
+                });
+                implied = 1.0;
+                segment_len = 0;
+            }
+            if !r.is_finite() {
+                return Err(ForwardError::ResumeNonFiniteReturn(bar));
+            }
+            b.prefix.timestamps.push(bar);
+            b.prefix.returns.push(r);
+            implied *= 1.0 + r;
+            segment_len += 1;
+            last = bar;
+        }
+        // Fills up to and including the last closed bar make the book that bar
+        // was marked on.
+        let split = fills.partition_point(|f| f.filled_at <= last);
+        let anchor = b.gaps.last().map(|g| g.anchor);
+        // The book as it stood at the last anchor: taken just before the first
+        // fill that came after it.
+        let mut at_anchor: Option<(Decimal, Decimal)> = None;
+        for f in &fills[..split] {
+            if let (Some(a), None) = (anchor, at_anchor) {
+                if f.filled_at > a {
+                    at_anchor = Some((b.cash, b.position));
+                }
+            }
+            b.on_fill(f.side, f.filled, f.fill_price, f.charge, f.decision_price);
+        }
+        if anchor.is_some() && at_anchor.is_none() {
+            at_anchor = Some((b.cash, b.position));
+        }
+        b.reset_bar_accumulators();
+        let rebuilt = b.mark_to(last_mark, last)?;
+        // The base the last segment compounds from: the opening balance when
+        // the series was never re-anchored, otherwise the anchor's equity.
+        let base = match (anchor, at_anchor) {
+            (Some(a), Some((anchor_cash, anchor_position))) => {
+                let anchor_equity = if anchor_position.is_zero() {
+                    anchor_cash
+                } else {
+                    match anchor_mark {
+                        Some(m) => anchor_cash + anchor_position * m.inner(),
+                        None => {
+                            return Err(ForwardError::ResumeAnchorUnverifiable {
+                                anchor: a,
+                                position: anchor_position,
+                            })
+                        }
+                    }
+                };
+                let value = anchor_equity.to_f64().unwrap_or(f64::NAN);
+                if !value.is_finite() || value <= 0.0 {
+                    return Err(ForwardError::DegenerateEquity(a));
+                }
+                value
+            }
+            _ => opening_balance.to_f64().unwrap_or(f64::NAN),
+        };
+        let stored = base * implied;
+        if (rebuilt - stored).abs() > 1e-9 * stored.abs().max(1.0) * (segment_len as f64 + 1.0)
+        {
+            return Err(ForwardError::ResumeInconsistent {
+                bar: last,
+                stored,
+                rebuilt,
+            });
+        }
+        b.equity_points.push((last, rebuilt));
+        b.last_bar = Some(last);
+        for f in &fills[split..] {
+            b.on_fill(f.side, f.filled, f.fill_price, f.charge, f.decision_price);
+        }
+        Ok(b)
+    }
+
+    /// Set a fresh equity anchor at `bar` after recording paused, keeping
+    /// everything already recorded.
+    ///
+    /// After a restart in which the deployment held a position, no bar is closed
+    /// until live is flat again. The next [`Self::close_bar`] would then compute
+    /// one return across all the missing bars and record it as one. This closes
+    /// the finished segment into the series, marks the book at `bar`, and starts
+    /// a new segment there: **no return is recorded for any bar in between, nor
+    /// for `bar` itself** (it is the new opening mark). The pause is kept as a
+    /// [`SeriesGap`] and is visible to [`RealisedSeries::align_over_gaps`].
+    ///
+    /// Position and cash are untouched; the open bar's accumulators are reset,
+    /// because turnover during a pause belongs to no bar that will be recorded.
+    ///
+    /// # Errors
+    /// [`ForwardError::NotOpened`] before [`Self::open`] (or a resume),
+    /// [`ForwardError::MisalignedBar`] off the grid,
+    /// [`ForwardError::BarOutOfOrder`] for `bar` at or before the last bar —
+    /// which refuses a duplicate anchor — and
+    /// [`ForwardError::DegenerateEquity`].
+    pub fn reanchor(&mut self, bar: DateTime<Utc>, mark: Price) -> Result<(), ForwardError> {
+        self.check_grid(bar)?;
+        let Some(prev) = self.last_bar else {
+            return Err(ForwardError::NotOpened);
+        };
+        if bar <= prev {
+            return Err(ForwardError::BarOutOfOrder {
+                bar,
+                previous: prev,
+            });
+        }
+        let value = self.mark_to(mark, bar)?;
+        let finished = ReturnSeries::from_equity(&self.equity_points);
+        self.prefix.timestamps.extend(finished.timestamps);
+        self.prefix.returns.extend(finished.returns);
+        self.equity_points.clear();
+        self.equity_points.push((bar, value));
+        self.last_bar = Some(bar);
+        self.gaps.push(SeriesGap {
+            after: prev,
+            anchor: bar,
+        });
+        self.reset_bar_accumulators();
+        Ok(())
+    }
+
+    /// Every pause in recording so far, oldest first.
+    #[must_use]
+    pub fn gaps(&self) -> &[SeriesGap] {
+        &self.gaps
     }
 
     #[must_use]
@@ -510,10 +923,14 @@ impl RealisedSeriesBuilder {
     /// rather than by two that agree today.
     #[must_use]
     pub fn realised_series(&self) -> RealisedSeries {
+        let mut series = self.prefix.clone();
+        let fresh = ReturnSeries::from_equity(&self.equity_points);
+        series.timestamps.extend(fresh.timestamps);
+        series.returns.extend(fresh.returns);
         RealisedSeries {
             numeraire: self.spec.numeraire.clone(),
             bar_seconds: self.spec.bar_seconds,
-            series: ReturnSeries::from_equity(&self.equity_points),
+            series,
         }
     }
 
@@ -669,6 +1086,524 @@ mod tests {
         b.on_fill(Side::Sell, dec("1"), px("99"), Decimal::ZERO, px("100"));
         let close = b.close_bar(at(120), px("99")).unwrap();
         assert!((close.realised_slippage_bps - 100.0).abs() < 1e-6);
+    }
+
+    // ── resume ──────────────────────────────────────────────────────────────
+
+    fn rfill(side: Side, qty: &str, price: &str, at_secs: i64) -> ResumeFill {
+        ResumeFill {
+            side,
+            filled: dec(qty),
+            fill_price: px(price),
+            charge: dec("0.25"),
+            decision_price: px(price),
+            filled_at: at(at_secs),
+        }
+    }
+
+    /// One scripted deployment: marks per bar close and fills between closes.
+    struct Script {
+        marks: Vec<(i64, &'static str)>,
+        fills: Vec<ResumeFill>,
+    }
+
+    fn script() -> Script {
+        Script {
+            marks: vec![
+                (60, "100"),
+                (120, "101.5"),
+                (180, "99.25"),
+                (240, "103"),
+                (300, "102.125"),
+                (360, "104"),
+            ],
+            fills: vec![
+                rfill(Side::Buy, "3", "100.5", 100),
+                rfill(Side::Sell, "1", "99.5", 200),
+                rfill(Side::Buy, "2", "102.5", 290),
+                rfill(Side::Sell, "4", "103.5", 330),
+            ],
+        }
+    }
+
+    /// Run the script without a restart, returning the builder and each bar close.
+    fn uninterrupted() -> (RealisedSeriesBuilder, Vec<BarClose>) {
+        let sc = script();
+        let mut b = RealisedSeriesBuilder::new(spec(Numeraire::Usd), dec("1000")).unwrap();
+        b.open(at(sc.marks[0].0), px(sc.marks[0].1)).unwrap();
+        let mut closes = Vec::new();
+        for &(t, m) in &sc.marks[1..] {
+            for f in sc.fills.iter().filter(|f| {
+                f.filled_at.timestamp() <= t && f.filled_at.timestamp() > t - 60
+            }) {
+                b.on_fill(f.side, f.filled, f.fill_price, f.charge, f.decision_price);
+            }
+            closes.push(b.close_bar(at(t), px(m)).unwrap());
+        }
+        (b, closes)
+    }
+
+    /// Restart after `k` closed bars: rebuild from what a database holds, then
+    /// carry on with the rest of the script.
+    fn restarted_after(k: usize, fills_known: usize) -> (RealisedSeriesBuilder, Vec<BarClose>) {
+        let sc = script();
+        let (_, closes) = uninterrupted();
+        let stored: Vec<(DateTime<Utc>, f64)> = closes[..k]
+            .iter()
+            .map(|c| (c.bar, c.realised_return))
+            .collect();
+        let last_mark = sc.marks[k].1;
+        let mut b = RealisedSeriesBuilder::resume(
+            spec(Numeraire::Usd),
+            dec("1000"),
+            at(sc.marks[0].0),
+            stored,
+            &sc.fills[..fills_known],
+            px(last_mark),
+        )
+        .unwrap();
+        let mut rest = Vec::new();
+        for &(t, m) in &sc.marks[k + 1..] {
+            for f in sc.fills.iter().filter(|f| {
+                f.filled_at.timestamp() <= t && f.filled_at.timestamp() > t - 60
+            }) {
+                b.on_fill(f.side, f.filled, f.fill_price, f.charge, f.decision_price);
+            }
+            rest.push(b.close_bar(at(t), px(m)).unwrap());
+        }
+        (b, rest)
+    }
+
+    #[test]
+    fn a_resumed_builder_produces_the_series_a_builder_that_never_restarted_does() {
+        let (whole, closes) = uninterrupted();
+        // Every restart point, from "nothing closed yet" to "everything closed".
+        for k in 0..=5 {
+            // The restart knows only the fills made by the last closed bar.
+            let known = script()
+                .fills
+                .iter()
+                .filter(|f| f.filled_at.timestamp() <= script().marks[k].0)
+                .count();
+            let (resumed, rest) = restarted_after(k, known);
+            assert_eq!(
+                resumed.realised_series(),
+                whole.realised_series(),
+                "restart after {k} bars changed the series"
+            );
+            assert_eq!(rest, closes[k..], "restart after {k} bars changed a later bar's close");
+            assert_eq!(resumed.position(), whole.position());
+        }
+    }
+
+    #[test]
+    fn fills_after_the_last_closed_bar_are_not_lost_in_the_restart() {
+        // Restart after the bar closing at 180, having already seen the fill at
+        // 200, which belongs to the still-open bar: its turnover and slippage
+        // must land in the bar that closes at 240, exactly as without a restart.
+        let (_, closes) = uninterrupted();
+        let sc = script();
+        let stored: Vec<_> = closes[..2].iter().map(|c| (c.bar, c.realised_return)).collect();
+        let mut b = RealisedSeriesBuilder::resume(
+            spec(Numeraire::Usd),
+            dec("1000"),
+            at(60),
+            stored,
+            &sc.fills[..2],
+            px("99.25"),
+        )
+        .unwrap();
+        let c = b.close_bar(at(240), px("103")).unwrap();
+        assert_eq!(c, closes[2]);
+        assert!(c.realised_turnover > Decimal::ZERO);
+    }
+
+    #[test]
+    fn a_duplicate_or_out_of_order_stored_bar_is_refused() {
+        let sc = script();
+        let r = |returns: Vec<(DateTime<Utc>, f64)>| {
+            RealisedSeriesBuilder::resume(
+                spec(Numeraire::Usd),
+                dec("1000"),
+                at(60),
+                returns,
+                &[],
+                px("100"),
+            )
+        };
+        assert!(matches!(
+            r(vec![(at(120), 0.0), (at(120), 0.0)]).unwrap_err(),
+            ForwardError::BarOutOfOrder { .. }
+        ));
+        assert!(matches!(
+            r(vec![(at(180), 0.0), (at(120), 0.0)]).unwrap_err(),
+            ForwardError::BarOutOfOrder { .. }
+        ));
+        assert!(matches!(
+            r(vec![(at(60), 0.0)]).unwrap_err(),
+            ForwardError::BarOutOfOrder { .. }
+        ));
+        assert!(matches!(
+            r(vec![(at(150), 0.0)]).unwrap_err(),
+            ForwardError::MisalignedBar { .. }
+        ));
+        assert!(matches!(
+            r(vec![(at(120), f64::NAN)]).unwrap_err(),
+            ForwardError::ResumeNonFiniteReturn(_)
+        ));
+        let _ = sc;
+    }
+
+    #[test]
+    fn resuming_from_the_wrong_balance_is_refused_not_silently_rebased() {
+        // The stored chain says equity 1000 → ~1000·(1+r). Rebuilding from fills
+        // that were never made (or a different mark) gives a different equity.
+        let (_, closes) = uninterrupted();
+        let sc = script();
+        let stored: Vec<_> = closes[..2].iter().map(|c| (c.bar, c.realised_return)).collect();
+        let wrong_mark = RealisedSeriesBuilder::resume(
+            spec(Numeraire::Usd),
+            dec("1000"),
+            at(60),
+            stored.clone(),
+            &sc.fills[..1],
+            px("90"),
+        );
+        assert!(matches!(
+            wrong_mark.unwrap_err(),
+            ForwardError::ResumeInconsistent { .. }
+        ));
+        let missing_fill = RealisedSeriesBuilder::resume(
+            spec(Numeraire::Usd),
+            dec("1000"),
+            at(60),
+            stored,
+            &[],
+            px("99.25"),
+        );
+        assert!(matches!(
+            missing_fill.unwrap_err(),
+            ForwardError::ResumeInconsistent { .. }
+        ));
+    }
+
+    // ── reanchor ────────────────────────────────────────────────────────────
+
+    /// The scenario: restart after the bar closing at 180, with the position
+    /// held; recording pauses and re-anchors at 240 (the fill at 200 has been
+    /// applied by then). Bars 300 and 360 are recorded after the anchor.
+    fn reanchored() -> RealisedSeriesBuilder {
+        let sc = script();
+        let (_, closes) = uninterrupted();
+        let stored: Vec<_> = closes[..2].iter().map(|c| (c.bar, c.realised_return)).collect();
+        let mut b = RealisedSeriesBuilder::resume(
+            spec(Numeraire::Usd),
+            dec("1000"),
+            at(60),
+            stored,
+            &sc.fills[..1],
+            px("99.25"),
+        )
+        .unwrap();
+        // The fill at 200 happens while recording is paused.
+        let f = &sc.fills[1];
+        b.on_fill(f.side, f.filled, f.fill_price, f.charge, f.decision_price);
+        b.reanchor(at(240), px("103")).unwrap();
+        b
+    }
+
+    #[test]
+    fn bars_after_a_reanchor_equal_an_uninterrupted_series_and_no_return_spans_the_gap() {
+        let (whole, closes) = uninterrupted();
+        let sc = script();
+        let mut b = reanchored();
+        // The fills at 290 and 330 fall in the bars that close at 300 and 360.
+        let mut after = Vec::new();
+        for &(t, m) in &sc.marks[4..] {
+            for f in sc.fills.iter().filter(|f| {
+                f.filled_at.timestamp() <= t && f.filled_at.timestamp() > t - 60 && f.filled_at.timestamp() > 240
+            }) {
+                b.on_fill(f.side, f.filled, f.fill_price, f.charge, f.decision_price);
+            }
+            after.push(b.close_bar(at(t), px(m)).unwrap());
+        }
+        // Closes for 300 and 360 are exactly the uninterrupted closes.
+        assert_eq!(after, closes[3..]);
+        let series = b.realised_series();
+        let times: Vec<i64> = series.series.timestamps.iter().map(|t| t.timestamp()).collect();
+        assert_eq!(times, vec![120, 180, 300, 360], "no bar at 240 (the anchor) and none for the pause");
+        // The recorded bars carry the uninterrupted returns, bar for bar.
+        let want: Vec<f64> = [0usize, 1, 3, 4]
+            .iter()
+            .map(|&i| whole.realised_series().series.returns[i])
+            .collect();
+        assert_eq!(series.series.returns, want);
+        series.series.validate().expect("still a valid return series");
+    }
+
+    #[test]
+    fn the_gap_is_visible_and_never_a_return() {
+        let (whole, _) = uninterrupted();
+        let mut b = reanchored();
+        b.close_bar(at(300), px("102.125")).unwrap();
+        assert_eq!(
+            b.gaps(),
+            &[SeriesGap {
+                after: at(180),
+                anchor: at(240)
+            }]
+        );
+        let realised = b.realised_series();
+        let full = whole.realised_series();
+        // Strict alignment refuses an incomplete series rather than truncating.
+        assert!(matches!(
+            realised.align(&full).unwrap_err(),
+            AlignmentError::Length { .. }
+        ));
+        // The gap-aware alignment says which bars are missing.
+        let g = realised.align_over_gaps(&full).unwrap();
+        assert_eq!(g.missing.iter().map(|t| t.timestamp()).collect::<Vec<_>>(), vec![240, 360]);
+        assert_eq!(g.aligned.len(), 3);
+        assert!(g.aligned.iter().all(|a| a.bar.timestamp() != 240));
+        // A realised bar the backtest does not have is a real mismatch.
+        let mut odd = realised.clone();
+        odd.series.timestamps.push(at(9_000));
+        odd.series.returns.push(0.0);
+        assert!(matches!(
+            odd.align_over_gaps(&full).unwrap_err(),
+            AlignmentError::Bar { .. }
+        ));
+    }
+
+    #[test]
+    fn a_reanchor_is_refused_off_grid_out_of_order_duplicate_or_before_open() {
+        let mut fresh = RealisedSeriesBuilder::new(spec(Numeraire::Usd), dec("1000")).unwrap();
+        assert!(matches!(
+            fresh.reanchor(at(120), px("100")).unwrap_err(),
+            ForwardError::NotOpened
+        ));
+        let mut b = reanchored();
+        assert!(matches!(
+            b.reanchor(at(270), px("103")).unwrap_err(),
+            ForwardError::MisalignedBar { .. }
+        ));
+        assert!(matches!(
+            b.reanchor(at(240), px("103")).unwrap_err(),
+            ForwardError::BarOutOfOrder { .. }
+        ), "a duplicate anchor");
+        assert!(matches!(
+            b.reanchor(at(180), px("103")).unwrap_err(),
+            ForwardError::BarOutOfOrder { .. }
+        ), "an earlier anchor");
+        // A refused anchor changes nothing.
+        assert_eq!(b.gaps().len(), 1);
+        assert!(b.close_bar(at(300), px("102.125")).is_ok());
+    }
+
+    #[test]
+    fn a_series_with_a_stored_gap_resumes_and_remembers_the_gap() {
+        // What the database holds after the re-anchored deployment restarts again:
+        // returns at 120, 180, 300, 360 — no row for 240.
+        let (_, closes) = uninterrupted();
+        let stored: Vec<_> = [0usize, 1, 3, 4]
+            .iter()
+            .map(|&i| (closes[i].bar, closes[i].realised_return))
+            .collect();
+        let sc = script();
+        // The anchor (240) held two units, so its equity needs the mark it was
+        // anchored at; plain `resume` refuses rather than skip the check.
+        assert!(matches!(
+            RealisedSeriesBuilder::resume(
+                spec(Numeraire::Usd),
+                dec("1000"),
+                at(60),
+                stored.clone(),
+                &sc.fills,
+                px("104"),
+            )
+            .unwrap_err(),
+            ForwardError::ResumeAnchorUnverifiable { .. }
+        ));
+        let b = RealisedSeriesBuilder::resume_anchored(
+            spec(Numeraire::Usd),
+            dec("1000"),
+            at(60),
+            stored,
+            &sc.fills,
+            px("104"),
+            Some(px("103")),
+        )
+        .unwrap();
+        assert_eq!(
+            b.gaps(),
+            &[SeriesGap {
+                after: at(180),
+                anchor: at(240)
+            }]
+        );
+        assert_eq!(b.realised_series().series.timestamps.len(), 4);
+    }
+
+    // ── second restart, with an earlier gap ─────────────────────────────────
+
+    /// A deployment that went flat before its anchor: buy and sell back to flat
+    /// by 170, re-anchor at 180 (mark 50), then trade after the anchor.
+    fn flat_script() -> (Vec<ResumeFill>, Vec<(i64, &'static str)>) {
+        (
+            vec![
+                rfill(Side::Buy, "2", "50", 100),
+                rfill(Side::Sell, "2", "51", 150),
+                rfill(Side::Buy, "3", "50.5", 200),
+                rfill(Side::Sell, "1", "52", 290),
+            ],
+            vec![(60, "50"), (120, "50"), (180, "50"), (240, "51"), (300, "52.5"), (360, "53")],
+        )
+    }
+
+    /// Run the flat script with a re-anchor at 180 and no restart.
+    fn flat_uninterrupted() -> (RealisedSeriesBuilder, Vec<BarClose>) {
+        let (fills, marks) = flat_script();
+        let mut b = RealisedSeriesBuilder::new(spec(Numeraire::Usd), dec("1000")).unwrap();
+        b.open(at(60), px("50")).unwrap();
+        let mut closes = Vec::new();
+        let mut prev = 60_i64;
+        for &(t, m) in &marks[1..] {
+            for f in fills
+                .iter()
+                .filter(|f| f.filled_at.timestamp() > prev && f.filled_at.timestamp() <= t)
+            {
+                b.on_fill(f.side, f.filled, f.fill_price, f.charge, f.decision_price);
+            }
+            prev = t;
+            if t == 180 {
+                // Recording paused over 120..180: the anchor, no return.
+                b.reanchor(at(180), px(m)).unwrap();
+            } else {
+                closes.push(b.close_bar(at(t), px(m)).unwrap());
+            }
+        }
+        (b, closes)
+    }
+
+    #[test]
+    fn a_second_restart_after_an_earlier_gap_equals_the_uninterrupted_reanchored_series() {
+        // The first uninterrupted builder produced returns at 120, 240, 300, 360
+        // and a gap at 180. Restart after bar 300 (second restart: the stored
+        // series already has the gap), then carry on to 360.
+        let (whole, closes) = flat_uninterrupted();
+        let (fills, marks) = flat_script();
+        assert_eq!(closes.len(), 4, "bars 120, 240, 300, 360");
+        let stored: Vec<_> = closes[..3].iter().map(|c| (c.bar, c.realised_return)).collect();
+        // Fills known at the restart: everything up to 300.
+        let known: Vec<ResumeFill> = fills.iter().filter(|f| f.filled_at.timestamp() <= 300).copied().collect();
+        let mut b = RealisedSeriesBuilder::resume(
+            spec(Numeraire::Usd),
+            dec("1000"),
+            at(60),
+            stored,
+            &known,
+            px(marks[4].1),
+        )
+        .expect("flat anchor: plain resume verifies the last segment");
+        assert_eq!(b.gaps(), &[SeriesGap { after: at(120), anchor: at(180) }]);
+        // Carry on: the fill at 290 was already applied (known), the bar at 360
+        // has none.
+        let c = b.close_bar(at(360), px(marks[5].1)).unwrap();
+        assert_eq!(c, closes[3]);
+        assert_eq!(b.realised_series(), whole.realised_series());
+        assert_eq!(b.position(), whole.position());
+    }
+
+    #[test]
+    fn a_corrupted_last_segment_is_refused_after_a_gap() {
+        let (_, closes) = flat_uninterrupted();
+        let (fills, marks) = flat_script();
+        let known: Vec<ResumeFill> = fills.iter().filter(|f| f.filled_at.timestamp() <= 300).copied().collect();
+        let good: Vec<_> = closes[..3].iter().map(|c| (c.bar, c.realised_return)).collect();
+        let resume = |stored: Vec<(DateTime<Utc>, f64)>, fills: &[ResumeFill], mark: &str| {
+            RealisedSeriesBuilder::resume(
+                spec(Numeraire::Usd),
+                dec("1000"),
+                at(60),
+                stored,
+                fills,
+                px(mark),
+            )
+        };
+        assert!(resume(good.clone(), &known, marks[4].1).is_ok());
+
+        // A stored return in the last segment is wrong.
+        let mut tampered = good.clone();
+        tampered[2].1 += 0.01;
+        assert!(matches!(
+            resume(tampered, &known, marks[4].1).unwrap_err(),
+            ForwardError::ResumeInconsistent { .. }
+        ));
+        // A fill after the anchor is missing.
+        assert!(matches!(
+            resume(good.clone(), &known[..3], marks[4].1).unwrap_err(),
+            ForwardError::ResumeInconsistent { .. }
+        ));
+        // The last mark is not the mark the last bar closed at.
+        assert!(matches!(
+            resume(good.clone(), &known, "60").unwrap_err(),
+            ForwardError::ResumeInconsistent { .. }
+        ));
+        // The earlier segment is NOT re-verified (its equity is not in the
+        // stored returns): tampering with bar 120 is not caught here, by design,
+        // and is documented on `resume_anchored`.
+        let mut early = good;
+        early[0].1 += 0.01;
+        assert!(resume(early, &known, marks[4].1).is_ok());
+    }
+
+    #[test]
+    fn a_non_flat_anchor_needs_its_mark_and_a_wrong_mark_is_refused() {
+        // `reanchored()` anchors at 240 holding two units (mark 103).
+        let (_, closes) = uninterrupted();
+        let sc = script();
+        let stored: Vec<_> = [0usize, 1, 3, 4]
+            .iter()
+            .map(|&i| (closes[i].bar, closes[i].realised_return))
+            .collect();
+        let go = |anchor_mark: Option<&str>| {
+            RealisedSeriesBuilder::resume_anchored(
+                spec(Numeraire::Usd),
+                dec("1000"),
+                at(60),
+                stored.clone(),
+                &sc.fills,
+                px("104"),
+                anchor_mark.map(px),
+            )
+        };
+        assert!(matches!(go(None).unwrap_err(), ForwardError::ResumeAnchorUnverifiable { .. }));
+        assert!(go(Some("103")).is_ok());
+        assert!(matches!(go(Some("90")).unwrap_err(), ForwardError::ResumeInconsistent { .. }));
+    }
+
+    #[test]
+    fn a_shadow_expectation_for_another_bar_is_refused() {
+        let s = ShadowBar {
+            bar: at(120),
+            expected_return: 0.001,
+            expected_turnover: dec("100"),
+            modelled_slippage_bps: 2.0,
+            signal_matched: true,
+        };
+        assert!(ExpectedBar::from_shadow(at(120), &s).is_ok());
+        assert!(matches!(
+            ExpectedBar::from_shadow(at(180), &s).unwrap_err(),
+            ForwardError::ShadowBarMismatch { .. }
+        ));
+        let nan = ShadowBar {
+            expected_return: f64::NAN,
+            ..s
+        };
+        assert!(matches!(
+            ExpectedBar::from_shadow(at(120), &nan).unwrap_err(),
+            ForwardError::ShadowNotFinite(_)
+        ));
     }
 
     fn two_bar_series(numeraire: Numeraire, bar_seconds: i64, returns: &[f64]) -> RealisedSeries {

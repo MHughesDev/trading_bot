@@ -262,6 +262,7 @@ fn log_returns(bars: &[FeatureRow]) -> Vec<(DateTime<Utc>, f64)> {
 ///
 /// The indicators come from `features::runtime` — the one implementation
 /// (INV-14). What lives here is the position rule.
+#[allow(clippy::type_complexity)]
 fn candidate_series(bars: &[FeatureRow], split: usize) -> Vec<(String, Vec<(DateTime<Utc>, f64)>)> {
     let mut out = Vec::new();
 

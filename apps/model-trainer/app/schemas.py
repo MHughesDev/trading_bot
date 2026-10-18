@@ -39,6 +39,13 @@ class TrainRequest(BaseModel):
     # sidecar uses these ranges to slice the Parquet; when absent it falls back
     # to the ordinal split_indices path.
     folds: Optional[list[FoldSpec]] = None
+    # A checkpoint manifest the platform's `plan_resume` approved for this run.
+    # Executed, never judged, here (ADR-C-08); see app/checkpoint.py.
+    resume: Optional[dict] = None
+    # Set N: the dataset declaration (sequence/sampling/transforms/weights/target/derived)
+    # and the model family chosen by the platform. Merged into `definition` by the worker.
+    declaration: Optional[dict] = None
+    family: Optional[dict] = None
 
 
 class TrainResponse(BaseModel):
@@ -53,6 +60,15 @@ class TrainResponse(BaseModel):
     # by `failures.classify`. `None` on success. The caller does not parse
     # `error` to work this out; see app/failures.py.
     terminal: Optional[str] = None
+    # How `terminal` was arrived at: "declared", "type_table" or "unclassified"
+    # (a fallback to the closed set's `dependency_failure`), and the exception's
+    # type. Lets the platform tell a decided reason from a defaulted one.
+    terminal_basis: Optional[str] = None
+    exception_type: Optional[str] = None
+    # Each later walk-forward fold's own model (Set U U-5.8): `index`,
+    # `artifact_uri`, `sha256`, `size_bytes`, `trained_through_ns`. See
+    # app/fold_models.py.
+    fold_artifacts: Optional[list[dict]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +90,9 @@ class EvalRequest(BaseModel):
     run_baselines: bool = True
     folds: Optional[list[FoldSpec]] = None
     progress: Optional[ProgressConfig] = None
+    # Set N: see TrainRequest.declaration / .family.
+    declaration: Optional[dict] = None
+    family: Optional[dict] = None
 
 
 class EvalResponse(BaseModel):

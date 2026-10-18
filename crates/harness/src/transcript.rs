@@ -38,13 +38,13 @@
 //! cache breakpoint invalidates everything after it — doing that once per step costs
 //! one re-read, doing it per call costs the cache entirely.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::context::{estimate_tokens, truncate_middle, CompactionReport};
 use crate::profile::Profile;
 
 /// One tool call the model asked for, as the transcript holds it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallRef {
     pub id: String,
     pub name: String,
@@ -52,13 +52,24 @@ pub struct CallRef {
 }
 
 /// One turn of the conversation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Turn {
     /// What the model said, and what it asked to call.
     Assistant {
         text: Option<String>,
         calls: Vec<CallRef>,
     },
+    /// Something the harness or the user said after the opening (S-2.9, S-2.14).
+    ///
+    /// The native transport replays the transcript rather than the loop's
+    /// rendered body, so anything the loop decides between model calls — a
+    /// correction after a rejected reply, a steer the user sent mid-run — reaches
+    /// a native model only if it is a turn here. Without this a frontier run on
+    /// the one loop could be corrected and never told.
+    ///
+    /// Never elided: these are short, and they are instructions the model is
+    /// acting on, which is the one kind of content compaction must not drop.
+    User { text: String },
     /// What one call returned.
     ToolResult {
         call_id: String,
@@ -81,6 +92,7 @@ impl Turn {
                         .sum::<u32>()
             }
             Turn::ToolResult { body, name, .. } => estimate_tokens(body) + estimate_tokens(name),
+            Turn::User { text } => estimate_tokens(text),
         }
     }
 
@@ -122,8 +134,52 @@ impl Transcript {
         }
     }
 
+    /// Append a turn exactly as given. For the driver's replay (S-2.6), which
+    /// rebuilds a native run's thread from the turns its log recorded rather than
+    /// re-deriving them.
+    pub fn push_turn(&mut self, turn: Turn) {
+        self.turns.push(turn);
+    }
+
     pub fn push_assistant(&mut self, text: Option<String>, calls: Vec<CallRef>) {
         self.turns.push(Turn::Assistant { text, calls });
+    }
+
+    /// A harness or user message between model calls. See [`Turn::User`].
+    pub fn push_user(&mut self, text: impl Into<String>) {
+        self.turns.push(Turn::User { text: text.into() });
+    }
+
+    /// The calls in the last assistant turn that no result has answered yet.
+    ///
+    /// Providers reject a request whose assistant turn asked for a call the
+    /// thread never answered, so before the next request every such call needs a
+    /// result — even when the loop did not run it (a rejected call, or a second
+    /// parallel call the loop does not take).
+    #[must_use]
+    pub fn unanswered_calls(&self) -> Vec<CallRef> {
+        let Some(last_assistant) = self
+            .turns
+            .iter()
+            .rposition(|t| matches!(t, Turn::Assistant { .. }))
+        else {
+            return Vec::new();
+        };
+        let Turn::Assistant { calls, .. } = &self.turns[last_assistant] else {
+            return Vec::new();
+        };
+        let answered: Vec<&str> = self.turns[last_assistant..]
+            .iter()
+            .filter_map(|t| match t {
+                Turn::ToolResult { call_id, .. } => Some(call_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        calls
+            .iter()
+            .filter(|c| !answered.contains(&c.id.as_str()))
+            .cloned()
+            .collect()
     }
 
     pub fn push_result(
@@ -235,6 +291,8 @@ impl Transcript {
                     *handle = Some(where_to_read);
                     report.truncated += 1;
                 }
+                // Instructions the model is acting on; never elided.
+                Turn::User { .. } => continue,
                 Turn::Assistant { text, .. } => {
                     // Prose only. The tool CALLS stay whatever happens: a transcript
                     // that dropped a call would leave its result answering nothing,
@@ -477,6 +535,37 @@ mod tests {
                 "and keeps its id, so the result matches"
             );
         }
+    }
+
+    /// A call the loop did not run still gets an answer, or the provider
+    /// rejects the next request (S-2.9).
+    #[test]
+    fn an_unanswered_call_is_found_and_an_answered_one_is_not() {
+        let mut t = Transcript::new("goal");
+        t.push_assistant(None, vec![call(0), call(1)]);
+        t.push_result("call_0", "get_bars", "{}", false, None);
+        let open = t.unanswered_calls();
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0].id, "call_1");
+        t.push_result("call_1", "get_bars", "not run", true, None);
+        assert!(t.unanswered_calls().is_empty());
+    }
+
+    /// A correction or a steer survives compaction: it is what the model is
+    /// acting on next.
+    #[test]
+    fn a_user_turn_is_never_elided() {
+        let p = tight();
+        let mut t = Transcript::new("goal");
+        t.push_user("x".repeat(4_000));
+        for i in 0..20 {
+            t.push_result(format!("c{i}"), "get_bars", "u".repeat(5_000), false, None);
+        }
+        t.compact(&p, 0);
+        let Turn::User { text } = &t.turns()[0] else {
+            unreachable!()
+        };
+        assert_eq!(text.len(), 4_000);
     }
 
     /// A transcript that already fits is not touched. Compaction that ran anyway

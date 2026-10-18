@@ -1,6 +1,6 @@
 # Phase 1 — Contracts
 
-**Completion: 85% (17 / 20 tasks), plus 4 partial (S-1.2, S-1.18’s measurement, S-1.19’s durability and per-tool migration, S-1.20’s re-plan trigger). Nothing is `NOT STARTED`.**
+**Completion: 90% (18 / 20 tasks), plus 3 partial (S-1.2, S-1.18’s measurement, S-1.19’s per-tool typed-error migration). Nothing is `NOT STARTED`. (2026-10-03: S-1.20 closed; S-1.19’s durable half closed.)**
 
 > Status 2026-09-15, track 1. The three contracts the other Set S phases wait on now exist:
 > `ToolSpec`/`ToolResult` (`crates/mcp-server/src/spec.rs`), the generated taxonomy and
@@ -87,7 +87,12 @@ deprecated tool still resolves for an old ticket and appears in no profile's exp
 
 ### S-1.2 `ToolResult`: answers, not data — M
 `PARTIAL` 2026-09-15 — the type, the renderer and the gates exist; no typed tool returns one
+
+**2026-10-05 (S-RUNTIME) - PARTIAL.** One adapter at the dispatch seam, `result_shape::attach_summary` (called in `dispatch_in_family`), renders the declared summary template over a successful typed result and ADDS `summary` (and `n`/`ids` where carried) without renaming or nesting any existing key (ADR: rejected wrapping the payload under `detail`, which breaks every consumer). Templates declared via `result_shape::declared(...)` in the falsification, market, models, research, strategy and strategy_lang namespaces plus audit/control_limits/venues; `typed_tools_declare_templates_or_are_listed_as_exempt` prints what is covered. Fixed 17 templates that wrote their declared unit twice. `cargo test -p mcp-server-lib --lib`: 385 passed, 3 failed, all three other tracks' new tools (`run_research_strategy` declares no trial, descriptors `collider_check`/`propose_skill`/`suggest_moves` over 1,200 bytes, `compare_candidates` declares a trial). **Still missing:** tools not yet templated (see the printed inventory) and the templated tier, whose summaries come from skill-runner headers (Set M/Q).
 yet.
+
+**2026-10-03 (RUNTIME track) — PARTIAL.** Not touched: migrating the typed handlers to return `ToolResult` is `crates/mcp-server/src/tools/*.rs`, outside this
+track's territory. The type, renderer and gates are unchanged; the 400-token summary bound still has nothing to measure.
 
 `ToolResult {summary, ids, n, se, detail, handle}` with `render_within(max_bytes, handle_hint)`.
 Two decisions worth carrying forward:
@@ -650,7 +655,17 @@ the calibrated factor is the p90 ratio and the `budget` suite reports an over-es
 
 ### S-1.19 The error contract, and not writing twice — M
 `PARTIAL` 2026-09-15 — the contract is closed and enforced; the durable half of idempotency is
+
+**2026-10-05 (S-RUNTIME) - PARTIAL.** `crates/mcp-server/src/tool_error.rs` is the typed door for handlers (`refuse`, `refuse_ids`, `missing_field*`), holding refusals to 400 bytes with `code`, `message`, `fix`, `retryable` under the existing `error` key; its 93 codes are now also in `spec::ERROR_CODES` so the existing closed-set scan covers them. Scans: `no_handler_returns_a_bare_string_error`, `every_refusal_in_the_handlers_uses_a_declared_code`, and `the_unscanned_handlers_are_exactly_the_ones_still_ad_hoc` names the handlers not yet migrated. **Still missing:** those unscanned handlers. The code is shared with `tool_error::TOOL_ERROR_CODES` (duplicate list kept; fold it into `ERROR_CODES`).
 not built, and the per-tool migration is not started.
+
+**2026-10-03 (RUNTIME track) — PARTIAL.** The durable half of idempotency is built: migration 0170's append-only `agent_idempotency` table holds the result of
+every successful write a run made, keyed by `idempotency::key(run_id, step, tool, args)`; `local_driver::execute_tool`
+answers a repeat from it **ahead of dispatch** and records after every successful non-read, and resume answers an
+interrupted write from it (`answer_interrupted_write`). So a post-crash resume no longer re-runs or loses a write.
+**Still missing:** the per-tool migration to typed errors (mcp-server territory), and the table has not been exercised
+against a live migrated Postgres (the migration itself was validated in a scratch DB: insert as `app_role`, update
+refused, `NOTIFY` fires).
 
 **A free-text error code fails the build.** `ERROR_CODES` is the closed set, and
 `every_error_code_this_crate_constructs_is_declared` scans the crate's own production source for
@@ -716,8 +731,17 @@ non-retryable error consumes no retry budget.
 **Traces:** AGENT-006 §2.4a, §2.4b; §10.9.
 
 ### S-1.20 Liveness: the two loops the protocol could sustain — S
-`PARTIAL` 2026-09-15 — the breaker is built and tested end to end; the re-plan bound is built
+`DONE` 2026-09-15 — the breaker is built and tested end to end; the re-plan bound is built
 and its trigger does not exist.
+
+**2026-10-03 (RUNTIME track) — DONE.** The missing half is built. `Loop::should_replan` fires at a step boundary on a planner-executor profile when a
+**redirection** cleared the plan or the plan is **exhausted on an unmet goal** (every step done, the following step
+learned nothing); it asks for a new plan with the findings and what is done in the prompt, and `on_plan` counts it
+against `max_replans_per_run`. Evidence: `an_exhausted_plan_on_an_unmet_goal_re_plans_and_the_fourth_plan_wraps_up`
+(four plans: three served, the fourth wraps up holding the working state and is not a fence),
+`a_productive_step_after_the_plan_does_not_re_plan`, `a_redirection_on_a_planner_profile_asks_for_a_new_plan`. The
+breaker still counts every failure rather than only non-retryable ones, as recorded earlier; that distinction needs typed
+errors to reach the tools (S-1.19's mcp-server half).
 
 **The breaker is done.** Three consecutive failures from one tool withdraw it from exposure for
 the rest of the run, the model is told once, and the withdrawal is recorded as a

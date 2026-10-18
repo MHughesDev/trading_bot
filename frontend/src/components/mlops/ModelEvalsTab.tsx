@@ -1,289 +1,371 @@
+// Evaluations Arena (Set H H-5.7): "is this version better than production?"
+//
+// The list route returns run snapshots with no `version`, so each succeeded
+// snapshot is read once by id for its persisted row (useEvalDetails). Evaluations
+// still running are listed as running, with no version claimed for them.
 import { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Loader2, GitCompare, CheckCircle2, XCircle } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
-import { useModelEvals } from '@/hooks/useMlOps'
+import { useQuery } from '@tanstack/react-query'
+import { Trophy } from 'lucide-react'
+import { Button } from '@/components/primitives/Button'
+import { Badge, type BadgeTone } from '@/components/primitives/Badge'
+import { Panel, PanelBody, PanelHeader } from '@/components/primitives/Panel'
+import { EmptyState, ErrorState, PanelLoading } from '@/components/primitives/States'
+import { useModelAliases, useModelEvals, useEvalDetails } from '@/hooks/useMlOps'
 import { modelsApi } from '@/api/mlops'
-import type { EvaluationRun } from '@/api/mlops'
+import {
+  backtestMetrics,
+  confusionMatrix,
+  formatMetric,
+  latestSucceededByVersion,
+  metricDeltas,
+  metricLabel,
+  parseCompare,
+  pinProduction,
+  toEvalRow,
+  trustedWinner,
+  type EvalRow,
+} from './studio.helpers'
 import { format } from 'date-fns'
 
 interface Props {
   modelId: string
 }
 
-interface CompareResult {
-  a: EvaluationRun
-  b: EvaluationRun
-  deltas: Record<string, { a: number; b: number; delta: number }>
+function verdictTone(v: string | null): BadgeTone {
+  if (v === 'regressed') return 'neg'
+  if (v === 'ok') return 'pos'
+  return 'neutral'
 }
 
-function CompareModal({
+function verdictText(v: string | null): string {
+  if (v === null) return 'no report'
+  if (v === 'no_baseline') return 'no baseline'
+  if (v === 'no_data') return 'no comparable metric'
+  return v
+}
+
+export function ConfusionGrid({ matrix }: { matrix: number[][] }) {
+  const max = Math.max(1, ...matrix.flat())
+  return (
+    <table className="tbl dense" aria-label="Confusion matrix">
+      <thead>
+        <tr>
+          <th className="l">actual \ predicted</th>
+          {matrix.map((_, j) => (
+            <th key={j}>{j}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {matrix.map((row, i) => (
+          <tr key={i}>
+            <td className="l">{i}</td>
+            {row.map((c, j) => (
+              <td
+                key={j}
+                className="n"
+                style={{
+                  background: `color-mix(in srgb, var(${i === j ? '--bg-accent' : '--fg-neg'}) ${Math.round((c / max) * 40)}%, transparent)`,
+                }}
+              >
+                {c}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function ComparePanel({
   modelId,
-  evals,
-  onClose,
+  a,
+  b,
+  rows,
 }: {
   modelId: string
-  evals: EvaluationRun[]
-  onClose: () => void
+  a: number
+  b: number
+  rows: Map<number, EvalRow>
 }) {
-  const [versionA, setVersionA] = useState<string>('')
-  const [versionB, setVersionB] = useState<string>('')
-  const [result, setResult] = useState<CompareResult | null>(null)
-  const [loading, setLoading] = useState(false)
+  const q = useQuery({
+    queryKey: ['models', modelId, 'compare', a, b],
+    queryFn: () => modelsApi.compareEvals(modelId, a, b).then((r) => parseCompare(r.data)),
+  })
 
-  const evalsByVersion = evals.reduce(
-    (acc, e) => {
-      acc[e.version] = e
-      return acc
-    },
-    {} as Record<number, EvaluationRun>,
-  )
-
-  async function handleCompare() {
-    if (!versionA || !versionB) return
-    setLoading(true)
-    try {
-      const rawRes = await modelsApi.compareEvals(modelId, parseInt(versionA), parseInt(versionB))
-      const raw = rawRes.data as Record<string, unknown>
-      const evalA = evalsByVersion[parseInt(versionA)]
-      const evalB = evalsByVersion[parseInt(versionB)]
-      if (!evalA || !evalB) return
-
-      const deltas: Record<string, { a: number; b: number; delta: number }> = {}
-      const metricsA = evalA.metrics ?? {}
-      const metricsB = evalB.metrics ?? {}
-      const allKeys = new Set([...Object.keys(metricsA), ...Object.keys(metricsB)])
-      for (const key of allKeys) {
-        const a = metricsA[key] ?? 0
-        const b = metricsB[key] ?? 0
-        deltas[key] = { a, b, delta: b - a }
-      }
-
-      // Overlay with server-provided deltas if available
-      if (raw && typeof raw === 'object') {
-        const serverDeltas = raw as Record<string, unknown>
-        for (const [k, v] of Object.entries(serverDeltas)) {
-          if (typeof v === 'number' && deltas[k]) {
-            deltas[k].delta = v
-          }
-        }
-      }
-
-      setResult({ a: evalA, b: evalB, deltas })
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false)
-    }
+  if (q.isLoading) return <PanelLoading lines={4} />
+  if (q.isError || !q.data) {
+    return (
+      <ErrorState
+        message="The comparison could not be loaded."
+        detail="Both versions need a completed evaluation."
+        onRetry={() => void q.refetch()}
+      />
+    )
   }
+  const c = q.data
+  const winner = trustedWinner(c)
+  const deltas = metricDeltas(c.a, c.b)
+  const rowB = rows.get(c.b.version)
+  const rowA = rows.get(c.a.version)
+  const matrixB = confusionMatrix(rowB?.rawMetrics)
+  const matrixA = confusionMatrix(rowA?.rawMetrics)
+  const pnlA = backtestMetrics(rowA?.rawMetrics)
+  const pnlB = backtestMetrics(rowB?.rawMetrics)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-scrim backdrop-blur-sm" onClick={onClose} />
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        className="relative z-10 w-full max-w-2xl rounded-xl border border-border bg-surface p-6 shadow-xl mx-4 max-h-[80vh] overflow-y-auto"
-      >
-        <h3 className="text-base font-semibold text-text mb-4">Compare Evaluations</h3>
-
-        <div className="flex items-center gap-3 mb-5">
-          <select
-            value={versionA}
-            onChange={(e) => setVersionA(e.target.value)}
-            className="flex-1 h-9 rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:border-accent"
-          >
-            <option value="">Select version A</option>
-            {evals.map((e) => (
-              <option key={e.eval_id} value={e.version}>
-                v{e.version} — {e.status}
-              </option>
-            ))}
-          </select>
-          <GitCompare className="h-5 w-5 text-fg-tertiary shrink-0" />
-          <select
-            value={versionB}
-            onChange={(e) => setVersionB(e.target.value)}
-            className="flex-1 h-9 rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:border-accent"
-          >
-            <option value="">Select version B</option>
-            {evals.map((e) => (
-              <option key={e.eval_id} value={e.version}>
-                v{e.version} — {e.status}
-              </option>
-            ))}
-          </select>
-          <Button onClick={handleCompare} disabled={!versionA || !versionB || loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Compare'}
-          </Button>
-        </div>
-
-        {result && (
-          <div className="rounded-xl border border-border overflow-hidden">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border bg-sunken">
-                  <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Metric</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-fg-secondary">
-                    v{result.a.version}
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-fg-secondary">
-                    v{result.b.version}
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-fg-secondary">Delta</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(result.deltas).map(([key, { a, b, delta }]) => (
-                  <tr key={key} className="border-b border-border last:border-0">
-                    <td className="px-4 py-2.5 text-sm text-fg-secondary">{key}</td>
-                    <td className="px-4 py-2.5 text-sm font-mono text-right text-text">
-                      {a.toFixed(4)}
-                    </td>
-                    <td className="px-4 py-2.5 text-sm font-mono text-right text-text">
-                      {b.toFixed(4)}
-                    </td>
-                    <td
-                      className={cn(
-                        'px-4 py-2.5 text-sm font-mono text-right font-medium',
-                        delta > 0 ? 'text-pos' : delta < 0 ? 'text-neg' : 'text-fg-secondary',
-                      )}
-                    >
-                      {delta > 0 ? '+' : ''}
-                      {delta.toFixed(4)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-4)' }}>
+      <div style={{ display: 'flex', gap: 'var(--s-3)', alignItems: 'center', flexWrap: 'wrap' }}>
+        {winner.version !== null ? (
+          <Badge tone="pos" data-testid="winner-badge">
+            <Trophy size={11} aria-hidden /> v{winner.version} wins
+          </Badge>
+        ) : (
+          <Badge tone="neutral" data-testid="winner-badge">No winner</Badge>
         )}
+        <span className="mut">{winner.reason}</span>
+      </div>
 
-        <div className="mt-4 flex justify-end">
-          <Button variant="outline" onClick={onClose}>
-            Close
-          </Button>
+      <table className="tbl" aria-label="Metric comparison">
+        <thead>
+          <tr>
+            <th className="l">Metric</th>
+            <th>v{c.a.version}</th>
+            <th>v{c.b.version}</th>
+            <th>Delta (v{c.b.version} − v{c.a.version})</th>
+          </tr>
+        </thead>
+        <tbody>
+          {c.a.scorecard && c.b.scorecard && (
+            <tr>
+              <td className="l">overall score</td>
+              <td className="n">{c.a.scorecard.overall.toFixed(2)}</td>
+              <td className="n">{c.b.scorecard.overall.toFixed(2)}</td>
+              <td className="n">{(c.b.scorecard.overall - c.a.scorecard.overall).toFixed(2)}</td>
+            </tr>
+          )}
+          {deltas.map((d) => (
+            <tr key={d.key}>
+              <td className="l">{d.key}</td>
+              <td className="n">{d.a === null ? '—' : d.a.toFixed(4)}</td>
+              <td className="n">{d.b === null ? '—' : d.b.toFixed(4)}</td>
+              <td
+                className="n"
+                style={{
+                  color: d.better === 'b' ? 'var(--fg-pos)' : d.better === 'a' ? 'var(--fg-neg)' : undefined,
+                }}
+              >
+                {d.delta === null ? 'not comparable' : `${d.delta > 0 ? '+' : ''}${d.delta.toFixed(4)}`}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {rowB && rowB.checks.length > 0 && (
+        <div>
+          <div className="lbl">
+            Regression report for v{rowB.version}
+            {rowB.baselineVersion !== null && <> against production v{rowB.baselineVersion}</>}
+          </div>
+          <table className="tbl dense" aria-label="Regression checks">
+            <tbody>
+              {rowB.checks.map((k) => (
+                <tr key={k.metric}>
+                  <td className="l">{k.metric}</td>
+                  <td className="n">{k.delta_pct != null ? `${k.delta_pct.toFixed(2)}%` : '—'}</td>
+                  <td><Badge tone={k.verdict === 'regressed' ? 'neg' : k.verdict === 'improved' ? 'pos' : 'neutral'}>{k.verdict}</Badge></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      </motion.div>
+      )}
+
+      {(matrixA || matrixB) && (
+        <div style={{ display: 'flex', gap: 'var(--s-4)', flexWrap: 'wrap' }}>
+          {matrixA && (
+            <div>
+              <div className="lbl">v{c.a.version} confusion matrix</div>
+              <ConfusionGrid matrix={matrixA} />
+            </div>
+          )}
+          {matrixB && (
+            <div>
+              <div className="lbl">v{c.b.version} confusion matrix</div>
+              <ConfusionGrid matrix={matrixB} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {(pnlA.length > 0 || pnlB.length > 0) && (
+        <div>
+          <div className="lbl">Attached backtest</div>
+          <table className="tbl dense" aria-label="Backtest metrics">
+            <tbody>
+              {[...new Set([...pnlA, ...pnlB].map(([k]) => k))].map((k) => (
+                <tr key={k}>
+                  <td className="l">{k}</td>
+                  <td className="n">{pnlA.find(([x]) => x === k)?.[1].toFixed(4) ?? '—'}</td>
+                  <td className="n">{pnlB.find(([x]) => x === k)?.[1].toFixed(4) ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {!matrixA && !matrixB && pnlA.length === 0 && pnlB.length === 0 && (
+        <p className="mut" style={{ fontSize: 'var(--t-11)' }}>
+          These evaluations did not record a confusion matrix or an attached backtest, so none is drawn.
+          Forecast-versus-actual is on the Forecast Quality tab.
+        </p>
+      )}
     </div>
   )
 }
 
 export function ModelEvalsTab({ modelId }: Props) {
-  const { data: evals, isLoading } = useModelEvals(modelId)
-  const [showCompare, setShowCompare] = useState(false)
+  const snaps = useModelEvals(modelId)
+  const aliases = useModelAliases(modelId)
+  const details = useEvalDetails(modelId, snaps.data)
+  const [pair, setPair] = useState<{ a: string; b: string }>({ a: '', b: '' })
 
-  if (isLoading) {
+  if (snaps.isLoading) return <PanelLoading lines={5} />
+  if (snaps.isError) {
     return (
-      <div className="flex items-center justify-center py-12 text-fg-tertiary">
-        <Loader2 className="h-5 w-5 animate-spin" />
-      </div>
+      <ErrorState
+        message="Evaluations could not be loaded."
+        detail="This is a failed request, not a model that was never evaluated."
+        onRetry={() => void snaps.refetch()}
+      />
+    )
+  }
+  const snapshots = snaps.data ?? []
+  if (snapshots.length === 0) {
+    return (
+      <EmptyState
+        message="No evaluations yet"
+        detail="Run an evaluation from the Versions tab. This list holds the evaluations since the server last started."
+      />
     )
   }
 
-  if (!evals || evals.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <p className="text-sm font-medium text-text">No evaluations yet</p>
-        <p className="text-xs text-fg-secondary mt-1">
-          Run an evaluation from the Versions tab.
-        </p>
-      </div>
-    )
-  }
+  const prod = typeof aliases.data?.production === 'number' ? aliases.data.production : null
+  const rows = pinProduction(
+    details.flatMap((d) => (d.data ? [toEvalRow(d.data)] : [])),
+    prod,
+  )
+  const running = snapshots.filter((s) => s.status === 'running' || s.status === 'queued')
+  const failed = snapshots.filter((s) => s.status === 'failed')
+  const byVersion = latestSucceededByVersion(rows)
+  const comparable = [...byVersion.keys()].sort((x, y) => y - x)
+  const canCompare = pair.a !== '' && pair.b !== '' && pair.a !== pair.b
 
   return (
-    <>
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-medium text-text">Evaluation runs</h3>
-        {evals.length >= 2 && (
-          <Button size="sm" variant="outline" onClick={() => setShowCompare(true)}>
-            <GitCompare className="h-3.5 w-3.5" />
-            Compare versions
-          </Button>
-        )}
-      </div>
-
-      <div className="rounded-xl border border-border bg-surface overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border bg-sunken">
-              <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Version</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Dataset</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Status</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Primary metric</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Regression</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-fg-secondary">Date</th>
-            </tr>
-          </thead>
-          <tbody>
-            {evals.map((ev) => {
-              const primaryMetric = ev.metrics
-                ? Object.entries(ev.metrics)[0]
-                : null
-
-              return (
-                <tr key={ev.eval_id} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3 text-sm font-mono font-medium text-text">
-                    v{ev.version}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-fg-secondary font-mono">
-                    {ev.dataset_id ?? '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={cn(
-                        'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
-                        ev.status === 'completed'
-                          ? 'bg-pos/10 text-pos'
-                          : ev.status === 'failed'
-                            ? 'bg-neg/10 text-neg'
-                            : 'bg-sunken text-fg-secondary',
-                      )}
-                    >
-                      {ev.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-sm font-mono text-text">
-                    {primaryMetric ? (
-                      <>
-                        <span className="text-fg-secondary text-xs">{primaryMetric[0]}: </span>
-                        {primaryMetric[1].toFixed(4)}
-                      </>
-                    ) : (
-                      <span className="text-fg-tertiary">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {ev.regression_ok === true ? (
-                      <CheckCircle2 className="h-4 w-4 text-pos" />
-                    ) : ev.regression_ok === false ? (
-                      <XCircle className="h-4 w-4 text-neg" />
-                    ) : (
-                      <span className="text-fg-tertiary text-xs">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-fg-tertiary font-mono">
-                    {format(new Date(ev.created_at), 'MMM d, HH:mm')}
-                  </td>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-4)' }}>
+      <Panel>
+        <PanelHeader title="Evaluations" />
+        <PanelBody flush>
+          <table className="tbl" aria-label="Evaluations">
+            <thead>
+              <tr>
+                <th className="l">Version</th>
+                <th>Status</th>
+                <th>Primary metric</th>
+                <th>Overall</th>
+                <th>Regression vs production</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {running.map((s) => (
+                <tr key={s.run_id}>
+                  <td className="l">evaluating…</td>
+                  <td><Badge tone="warn">{s.status}</Badge></td>
+                  <td className="n">—</td>
+                  <td className="n">{Math.round(s.progress)}% · {s.phase}</td>
+                  <td>—</td>
+                  <td className="n">{format(new Date(s.created_at), 'MMM d, HH:mm')}</td>
                 </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+              ))}
+              {rows.map((r) => (
+                <tr key={r.evalId} data-production={r.version === prod ? 'yes' : 'no'}>
+                  <td className="l num">
+                    v{r.version} {r.version === prod && <Badge tone="pos">production</Badge>}
+                  </td>
+                  <td><Badge tone={r.status === 'succeeded' ? 'pos' : 'neutral'}>{r.status}</Badge></td>
+                  <td className="n">
+                    {r.primary ? `${metricLabel(r.primary.key)} ${formatMetric(r.primary.key, r.primary.value)}` : '—'}
+                  </td>
+                  <td className="n">{r.scorecard ? r.scorecard.overall.toFixed(2) : '—'}</td>
+                  <td><Badge tone={verdictTone(r.verdict)}>{verdictText(r.verdict)}</Badge></td>
+                  <td className="n">{format(new Date(r.createdAt), 'MMM d, HH:mm')}</td>
+                </tr>
+              ))}
+              {failed.map((s) => (
+                <tr key={s.run_id}>
+                  <td className="l">—</td>
+                  <td><Badge tone="neg">failed</Badge></td>
+                  <td colSpan={3} className="l mut">{s.error ?? 'no error recorded'}</td>
+                  <td className="n">{format(new Date(s.created_at), 'MMM d, HH:mm')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {details.some((d) => d.isLoading) && <PanelLoading lines={1} />}
+          {details.some((d) => d.isError) && (
+            <p className="mut" style={{ padding: 'var(--s-3)', color: 'var(--fg-neg)' }} role="alert">
+              Some evaluations could not be read, so their rows are missing — they were not dropped.
+            </p>
+          )}
+        </PanelBody>
+      </Panel>
 
-      <AnimatePresence>
-        {showCompare && (
-          <CompareModal
-            modelId={modelId}
-            evals={evals}
-            onClose={() => setShowCompare(false)}
-          />
-        )}
-      </AnimatePresence>
-    </>
+      <Panel>
+        <PanelHeader title="Compare two versions" />
+        <PanelBody>
+          {comparable.length < 2 ? (
+            <p className="mut">
+              Comparing needs two versions with a completed evaluation; {comparable.length === 0 ? 'none has' : 'one has'} one.
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-4)' }}>
+              <div style={{ display: 'flex', gap: 'var(--s-3)', alignItems: 'center', flexWrap: 'wrap' }}>
+                <select aria-label="Version A" value={pair.a} onChange={(e) => setPair((p) => ({ ...p, a: e.target.value }))}>
+                  <option value="">Version A</option>
+                  {comparable.map((v) => (
+                    <option key={v} value={v}>v{v}{v === prod ? ' (production)' : ''}</option>
+                  ))}
+                </select>
+                <select aria-label="Version B" value={pair.b} onChange={(e) => setPair((p) => ({ ...p, b: e.target.value }))}>
+                  <option value="">Version B</option>
+                  {comparable.map((v) => (
+                    <option key={v} value={v}>v{v}{v === prod ? ' (production)' : ''}</option>
+                  ))}
+                </select>
+                {prod !== null && comparable.length > 1 && (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const other = comparable.find((v) => v !== prod)
+                      if (other !== undefined) setPair({ a: String(prod), b: String(other) })
+                    }}
+                  >
+                    Production vs latest
+                  </Button>
+                )}
+              </div>
+              {canCompare ? (
+                <ComparePanel modelId={modelId} a={Number(pair.a)} b={Number(pair.b)} rows={byVersion} />
+              ) : (
+                <p className="mut">Pick two different versions.</p>
+              )}
+            </div>
+          )}
+        </PanelBody>
+      </Panel>
+    </div>
   )
 }

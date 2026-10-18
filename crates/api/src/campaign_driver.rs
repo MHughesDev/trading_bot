@@ -16,23 +16,42 @@
 //!   created the child" reuses it instead of starting a second one. That is the
 //!   exactly-once property a workflow engine would have been adopted for.
 //!
-//! ## What is not here yet, and is not pretended to be
+//! ## The three mechanical terminal rules
 //!
-//! §10 has three mechanical terminal rules. Only one of them can be computed
-//! today:
+//! §10 has three, and all three are computed:
 //!
-//! * `BUDGET_EXHAUSTED` — implemented: the campaign's `max_trials` against the
-//!   trials the ledger has actually counted for it.
-//! * `DIMINISHING_RETURNS` and `CONVERGED` — both need the posterior from the
-//!   comparison protocol's confidence sequence (checklist 2.12), which is not
-//!   built. [`TerminationCheck`] names them as `NotComputable` rather than
-//!   approximating them, because a campaign that stops early on a made-up
-//!   posterior is worse than one that runs to its budget.
+//! * `BUDGET_EXHAUSTED` — the campaign's `max_trials` against the trials counted
+//!   for it. Counted from `mlops.trial` by [`compare_worker::campaign_trials_counted`]:
+//!   children the job store registers carry the campaign's id (they did not,
+//!   until 2026-10-03, so no campaign's budget could ever run out), and trials
+//!   the Backtest Suite registers under the campaign's experiment are matched by
+//!   that experiment's name.
+//! * `DIMINISHING_RETURNS` and `CONVERGED` — read from the comparison history
+//!   the COMPARE worker writes to `mlops.decision`, by the pure rules in
+//!   [`compare_worker::stop_check`]. They were `NotComputable` while nothing
+//!   called `ComparisonPlan::judge`; [`compare_worker::CompareWorker`] now does.
+//!   A history too short to say anything yields [`TerminationCheck::Insufficient`],
+//!   named so a reader can tell the rule abstained from the rule not running.
 //!
 //! `HALTED` is a human appending the event; the driver only observes it.
+//!
+//! The EXPERIMENT and COMPARE children are [`study_worker::StudyWorker`] and
+//! [`compare_worker::CompareWorker`], and BASELINE's is
+//! [`study_worker::BaselineWorker`]; before they were registered a campaign that
+//! reached any of those phases failed `no_worker`.
 
 use std::sync::Arc;
 use std::time::Duration;
+
+// The campaign's child workers live beside the driver that dispatches them and
+// are declared here so that this file is the one place that says which phases
+// have a worker. The files are in `src/` under their own names.
+#[path = "compare_worker.rs"]
+pub mod compare_worker;
+#[path = "funnel_worker.rs"]
+pub mod funnel_worker;
+#[path = "study_worker.rs"]
+pub mod study_worker;
 
 use jobs::store::{JobStore, Submission};
 use jobs::{JobContext, JobError, JobKind, JobOutput, JobState, Progress, Worker};
@@ -61,9 +80,62 @@ pub enum TerminationCheck {
     Continue,
     /// End, in this phase.
     End(CampaignPhase, String),
-    /// A §10 rule that needs machinery this build does not have. Named, so a
-    /// reader of the campaign can see which rules are live and which are not.
-    NotComputable(&'static str),
+    /// The comparison history is too short for the diminishing-returns rule to
+    /// say anything. Named, so a reader can tell "looked and abstained" from
+    /// "did not look".
+    Insufficient { in_window: usize, needed: usize },
+}
+
+/// The arm's budget: the declared sweep size. The agent's first EXPERIMENT samples exactly
+/// this many points (`max_runs`), so the arms are matched on it (ADR-RW-03).
+#[must_use]
+pub fn arm_budget(spec: &study_worker::EvaluationSpec) -> i32 {
+    i32::try_from(spec.max_runs).unwrap_or(i32::MAX).max(1)
+}
+
+/// The HYPOTHESIZE child that preceded position `seq`: the generation's proposer.
+#[must_use]
+pub fn hypothesize_job_before(children: &[(CampaignPhase, i64, String)], seq: i64) -> Option<&str> {
+    children
+        .iter()
+        .filter(|(phase, s, _)| *phase == CampaignPhase::Hypothesize && *s < seq)
+        .max_by_key(|(_, s, _)| *s)
+        .map(|(_, _, id)| id.as_str())
+}
+
+/// The typed move in a HYPOTHESIZE child's result, if it holds one that parses.
+#[must_use]
+pub fn proposed_move(result: &Value) -> Option<research::propose::Move> {
+    let p: research::propose::Proposal = serde_json::from_value(result.get("proposal")?.clone()).ok()?;
+    Some(p.r#move)
+}
+
+/// What a COMPARE result says the move did: promoted is an improvement, a rejection is a
+/// failure, and everything else (equivalent, undecided, no feasible candidate) counts toward
+/// neither side, so it can neither build a veto nor dilute one.
+#[must_use]
+pub fn move_outcome(compare_result: &Value) -> research::move_memory::Outcome {
+    use research::move_memory::Outcome;
+    if compare_result.get("promoted").and_then(Value::as_bool) == Some(true) {
+        Outcome::Improved
+    } else if compare_result.get("verdict").and_then(Value::as_str) == Some("reject") {
+        Outcome::Failed
+    } else {
+        Outcome::Neutral
+    }
+}
+
+/// The citation a move record carries: the campaign and the COMPARE's position.
+#[must_use]
+pub fn move_run_ref(campaign_id: Uuid, compare_seq: i64) -> String {
+    format!("campaign:{campaign_id}:{compare_seq}")
+}
+
+fn veto_text(v: &research::move_memory::Veto) -> String {
+    match v {
+        research::move_memory::Veto::Block { why, cites, .. } => format!("{why}; cited: {}.", cites.join(", ")),
+        other => format!("{other:?}"),
+    }
 }
 
 /// Drives one campaign per job.
@@ -86,17 +158,9 @@ impl CampaignWorker {
     /// failures, cache hits and gate failures, because the budget is a budget on
     /// looks the same way the exploration floor is (§4.5, §8).
     async fn trials_counted(&self, tenant: &str, campaign_id: Uuid) -> Result<i64, JobError> {
-        let mut tx = ledger::pg::tenant_tx(&self.pg, tenant)
+        compare_worker::campaign_trials_counted(&self.pg, tenant, campaign_id)
             .await
-            .map_err(|e| JobError::infrastructure(format!("tenant transaction: {e}")))?;
-        let count: (i64,) =
-            sqlx::query_as("SELECT count(*) FROM mlops.trial WHERE campaign_id = $1")
-                .bind(campaign_id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|e| JobError::infrastructure(format!("counting trials: {e}")))?;
-        let _ = tx.commit().await;
-        Ok(count.0)
+            .map_err(|e| JobError::infrastructure(format!("counting trials: {e}")))
     }
 
     /// The campaign's DEFINE facts, read back from the row they were locked in.
@@ -170,7 +234,20 @@ impl CampaignWorker {
                 format!("{counted} trials counted against a budget of {max_trials}"),
             ));
         }
-        Ok(TerminationCheck::Continue)
+        let history: Vec<compare_worker::CompareRecord> =
+            compare_worker::compare_history(&self.pg, tenant, campaign_id)
+                .await
+                .map_err(|e| JobError::infrastructure(format!("reading the comparisons: {e}")))?
+                .into_iter()
+                .map(|(record, _)| record)
+                .collect();
+        Ok(match compare_worker::stop_check(&history, counted) {
+            compare_worker::StopCheck::End(phase, why) => TerminationCheck::End(phase, why),
+            compare_worker::StopCheck::NotEnoughEvidence { in_window, needed } => {
+                TerminationCheck::Insufficient { in_window, needed }
+            }
+            compare_worker::StopCheck::Continue => TerminationCheck::Continue,
+        })
     }
 
     /// The child job kind that does this phase's work.
@@ -232,6 +309,155 @@ impl CampaignWorker {
         }
     }
 
+    /// Create the campaign's matched random arm if it has none (Set R-b RB-3.1, EV-09,
+    /// ADR-RB-03): the arm belongs to the campaign record, so it exists before the first
+    /// EXPERIMENT can run and its seed is the platform's, derived from the campaign id.
+    /// The budget is the declared sweep size (`max_runs`), which is what the agent's first
+    /// sweep samples (ADR-RW-03). Idempotent: a campaign that already has its arm keeps it.
+    ///
+    /// Returns the arm's budget when one was created by this call. A campaign with no
+    /// `evaluation` block has nothing to match and gets no arm (its first EXPERIMENT fails
+    /// `no_evaluation_spec` anyway).
+    ///
+    /// # Errors
+    /// The database.
+    pub async fn ensure_arm(&self, user: Uuid, campaign_id: Uuid) -> Result<Option<i32>, JobError> {
+        let tenant = user.to_string();
+        let (_, _, search_space) = study_worker::campaign_delta_and_profile(&self.pg, &tenant, campaign_id).await?;
+        let Ok(spec) = study_worker::EvaluationSpec::from_search_space(&search_space) else {
+            return Ok(None);
+        };
+        let budget = arm_budget(&spec);
+        match crate::knowledge_routes::ArmStore::new(self.pg.clone())
+            .create(campaign_id, user, budget)
+            .await
+        {
+            Ok(_) => Ok(Some(budget)),
+            Err(sqlx::Error::Database(d)) if d.is_unique_violation() => Ok(None),
+            Err(e) => Err(JobError::infrastructure(format!("creating the random arm: {e}"))),
+        }
+    }
+
+    /// The proposal a position's HYPOTHESIZE made, as a typed move.
+    async fn proposed_move_before(
+        &self,
+        state: &CampaignState,
+        seq: i64,
+    ) -> Result<Option<research::propose::Move>, JobError> {
+        let Some(job_id) = hypothesize_job_before(&state.children, seq) else {
+            return Ok(None);
+        };
+        let job = self
+            .store
+            .get(job_id)
+            .await
+            .map_err(|e| JobError::infrastructure(format!("reading {job_id}: {e}")))?;
+        Ok(job.result.as_ref().and_then(proposed_move))
+    }
+
+    /// Consult the move veto before a move is submitted (Set R-b RB-1.3, KM-04).
+    ///
+    /// `Ok(None)` when the generation proposed no typed move. `Ok(Some(verdict))` when it may
+    /// proceed: allowed, advised against (`warn`, cited), or blocked **and** overridden by a
+    /// person. A block nobody has overridden is an error and the EXPERIMENT is not
+    /// dispatched: nothing is appended to the campaign log, so once a person records the
+    /// override the driver resumes at this same position.
+    ///
+    /// # Errors
+    /// The database, or `move_vetoed`.
+    pub async fn consult_veto(
+        &self,
+        user: Uuid,
+        campaign_id: Uuid,
+        state: &CampaignState,
+    ) -> Result<Option<Value>, JobError> {
+        let Some(mv) = self.proposed_move_before(state, state.seq).await? else {
+            return Ok(None);
+        };
+        let store = crate::knowledge_routes::MoveStore::new(self.pg.clone());
+        let key = research::move_memory::motif(&mv);
+        let records = store
+            .history(user, &key)
+            .await
+            .map_err(|e| JobError::infrastructure(format!("reading move memory: {e}")))?;
+        let verdict = research::move_memory::veto_move(&mv, &records, &research::move_memory::VetoPolicy::default());
+        let overridden = verdict.blocks()
+            && store
+                .overridden(user, &key)
+                .await
+                .map_err(|e| JobError::infrastructure(format!("reading the veto overrides: {e}")))?;
+        if verdict.blocks() && !overridden {
+            return Err(JobError::logic(
+                ledger::TerminalReason::IntegrityRejected,
+                "move_vetoed",
+                format!(
+                    "campaign {campaign_id}: {} A person can proceed past this with `POST /api/knowledge/moves/overrides` \
+                     (motif `{key}`), after which the driver resumes at this position.",
+                    veto_text(&verdict)
+                ),
+            ));
+        }
+        Ok(Some(json!({ "motif": key, "veto": verdict, "overridden": overridden })))
+    }
+
+    /// Record what each judged generation's move did (RB-1.3): one `agent_memory.move_record`
+    /// per COMPARE child whose result is in, naming the move its HYPOTHESIZE proposed.
+    /// Idempotent on `run_ref` (`campaign:<id>:<seq of the COMPARE>`), so it can be called
+    /// after every COMPARE and again at driver start, which closes the window in which a
+    /// driver killed between a COMPARE finishing and this call would lose the record.
+    /// Returns how many records this call wrote.
+    ///
+    /// # Errors
+    /// The database.
+    pub async fn record_move_outcomes(
+        &self,
+        user: Uuid,
+        campaign_id: Uuid,
+        state: &CampaignState,
+    ) -> Result<usize, JobError> {
+        let tenant = user.to_string();
+        let (_, _, search_space) = study_worker::campaign_delta_and_profile(&self.pg, &tenant, campaign_id).await?;
+        let Ok(spec) = study_worker::EvaluationSpec::from_search_space(&search_space) else {
+            return Ok(0);
+        };
+        let store = crate::knowledge_routes::MoveStore::new(self.pg.clone());
+        let mut written = 0;
+        for (phase, seq, job_id) in &state.children {
+            if *phase != CampaignPhase::Compare {
+                continue;
+            }
+            let Some(mv) = self.proposed_move_before(state, *seq).await? else {
+                continue;
+            };
+            let compare = self
+                .store
+                .get(job_id)
+                .await
+                .map_err(|e| JobError::infrastructure(format!("reading {job_id}: {e}")))?;
+            if compare.state != JobState::Succeeded {
+                continue;
+            }
+            let run_ref = move_run_ref(campaign_id, *seq);
+            let key = research::move_memory::motif(&mv);
+            let seen = store
+                .history(user, &key)
+                .await
+                .map_err(|e| JobError::infrastructure(format!("reading move memory: {e}")))?
+                .iter()
+                .any(|r| r.run_ref == run_ref);
+            if seen {
+                continue;
+            }
+            let outcome = move_outcome(compare.result.as_ref().unwrap_or(&Value::Null));
+            store
+                .record(user, &spec.universe_ref, &mv, outcome, &run_ref)
+                .await
+                .map_err(|e| JobError::infrastructure(format!("recording the move's outcome: {e}")))?;
+            written += 1;
+        }
+        Ok(written)
+    }
+
     /// Dispatch one phase and record it, or record it alone when the phase has
     /// no compute.
     ///
@@ -263,6 +489,23 @@ impl CampaignWorker {
                 "seq": state.seq,
                 "idempotency_key": key,
             });
+
+            if phase == CampaignPhase::Gate {
+                if let Some(extra) = self.gate_manifest(tenant, campaign_id).await?.as_object() {
+                    for (k, v) in extra {
+                        manifest[k] = v.clone();
+                    }
+                }
+            }
+
+            // The move veto (RB-1.3): before an EXPERIMENT is submitted, the move that
+            // generation proposed is checked against what happened when its shape was tried
+            // before. A block nobody overrode stops here and appends nothing.
+            if phase == CampaignPhase::Experiment {
+                if let Some(v) = self.consult_veto(parent.user_id, campaign_id, state).await? {
+                    detail["move_veto"] = v;
+                }
+            }
 
             // HYPOTHESIZE is a worker sub-run, so the position in the fold is
             // claimed *before* the job is created (AGENT-010 §9; S-10.11). The
@@ -302,7 +545,7 @@ impl CampaignWorker {
                     brief.run_id,
                     tenant,
                     phase.as_str(),
-                    i64::try_from(state.seq).unwrap_or(i64::MAX),
+                    state.seq,
                     &brief,
                     crate::agent::subrun::MAX_SUBAGENT_DEPTH,
                 )
@@ -360,6 +603,17 @@ impl CampaignWorker {
             }
             if phase == CampaignPhase::Hypothesize {
                 self.log_proposal(tenant, campaign_id, &child.job_id)
+                    .await?;
+            }
+            if phase == CampaignPhase::Compare {
+                // The state the fold was read in does not yet list this COMPARE child, so
+                // re-fold; the record of what the generation's move did is written now.
+                let folded = self
+                    .ledger()
+                    .campaign_state_async(tenant, campaign_id)
+                    .await
+                    .map_err(|e| JobError::infrastructure(format!("folding the campaign: {e}")))?;
+                self.record_move_outcomes(parent.user_id, campaign_id, &folded)
                     .await?;
             }
             return Ok(());
@@ -465,6 +719,45 @@ impl CampaignWorker {
             .map_err(|e| JobError::infrastructure(format!("logging the propose decision: {e}")))?;
         Ok(())
     }
+    /// What a GATE child needs that the fold does not carry: the candidate's
+    /// evidence trial, its experiment and its dataset (checklist 2.14).
+    ///
+    /// `GateAdvance` reads every statistic from the ledger by trial id and takes
+    /// none from a manifest (ADR-P2-31), so a campaign GATE has to be pointed at
+    /// the trial the funnel recorded them under. When the funnel has already run
+    /// for this campaign's experiment, that trial is named. When it has not,
+    /// the manifest says `run_funnel: true` and **the GATE child runs it**
+    /// (`GateAdvanceWorker`, through [`funnel_worker::CampaignFunnel`]) with the
+    /// campaign's incumbent and a declared axis, then reads the trial it wrote.
+    /// This used to stop the campaign with `gate_evidence_missing`.
+    ///
+    /// # Errors
+    /// An unknown campaign, or a campaign with no evaluation block.
+    pub async fn gate_manifest(&self, tenant: &str, campaign_id: Uuid) -> Result<Value, JobError> {
+        let experiment = study_worker::experiment_name(campaign_id);
+        let found = funnel_worker::funnel_trial(&self.pg, tenant, &experiment)
+            .await
+            .map_err(|e| JobError::infrastructure(format!("finding the funnel trial: {e}")))?;
+        let (_, profile_id, search_space) =
+            study_worker::campaign_delta_and_profile(&self.pg, tenant, campaign_id).await?;
+        let instrument = study_worker::EvaluationSpec::from_search_space(&search_space)
+            .ok()
+            .map(|s| s.universe_ref);
+        let mut manifest = json!({
+            "experiment_id": experiment,
+            "profile_id": profile_id,
+            "instrument": instrument,
+        });
+        match found {
+            Some((trial_id, dataset_id)) => {
+                manifest["trial_id"] = json!(trial_id);
+                manifest["dataset_id"] = json!(dataset_id);
+            }
+            None => manifest["run_funnel"] = json!(true),
+        }
+        Ok(manifest)
+    }
+
     async fn append(
         &self,
         tenant: &str,
@@ -513,6 +806,24 @@ impl Worker for CampaignWorker {
             .await
             .map_err(|e| JobError::infrastructure(format!("reading this job: {e}")))?;
         let tenant = parent.user_id.to_string();
+
+        // EV-09: the matched random arm is created with the campaign, before any EXPERIMENT.
+        self.ensure_arm(parent.user_id, campaign_id).await?;
+        // And the record of what earlier generations' moves did is brought up to date, in
+        // case a previous driver died between a COMPARE finishing and writing it.
+        let at_start = self
+            .ledger()
+            .campaign_state_async(&tenant, campaign_id)
+            .await
+            .map_err(|e| {
+                JobError::logic(
+                    ledger::TerminalReason::IntegrityRejected,
+                    "campaign_log_unreadable",
+                    format!("folding campaign {campaign_id}: {e}"),
+                )
+            })?;
+        self.record_move_outcomes(parent.user_id, campaign_id, &at_start)
+            .await?;
 
         let mut phases_run = 0_u32;
         loop {
@@ -641,6 +952,71 @@ mod tests {
     /// its own deliberation, and the trial count — the denominator under every
     /// selection-adjusted statistic here — would stop meaning "times we looked at
     /// out-of-sample behaviour".
+    fn child(phase: CampaignPhase, seq: i64, id: &str) -> (CampaignPhase, i64, String) {
+        (phase, seq, id.to_string())
+    }
+
+    /// The generation's proposer is the HYPOTHESIZE immediately before the position, so a
+    /// later generation's proposal is never read as an earlier generation's move.
+    #[test]
+    fn a_comparison_is_attributed_to_the_hypothesize_that_preceded_it() {
+        let kids = vec![
+            child(CampaignPhase::Hypothesize, 3, "h1"),
+            child(CampaignPhase::Experiment, 4, "e1"),
+            child(CampaignPhase::Compare, 5, "c1"),
+            child(CampaignPhase::Hypothesize, 8, "h2"),
+            child(CampaignPhase::Compare, 10, "c2"),
+        ];
+        assert_eq!(hypothesize_job_before(&kids, 5), Some("h1"));
+        assert_eq!(hypothesize_job_before(&kids, 10), Some("h2"));
+        assert_eq!(hypothesize_job_before(&kids, 3), None, "nothing before the first");
+    }
+
+    #[test]
+    fn a_comparison_says_what_the_move_did_and_only_a_rejection_is_a_failure() {
+        use research::move_memory::Outcome;
+        assert_eq!(move_outcome(&json!({ "promoted": true, "verdict": "promote" })), Outcome::Improved);
+        assert_eq!(move_outcome(&json!({ "promoted": false, "verdict": "reject" })), Outcome::Failed);
+        for v in ["equivalent", "undecided", "no_candidate"] {
+            assert_eq!(move_outcome(&json!({ "promoted": false, "verdict": v })), Outcome::Neutral, "{v}");
+        }
+        assert_eq!(move_outcome(&Value::Null), Outcome::Neutral, "no result is no evidence");
+    }
+
+    #[test]
+    fn a_proposal_is_read_as_a_typed_move_or_not_at_all() {
+        let good = json!({ "proposal": { "move": "change_exit", "mode": "trail", "hypothesis": "h", "ranges": [] } });
+        assert_eq!(proposed_move(&good), Some(research::propose::Move::ChangeExit { mode: research::propose::ExitMode::Trail }));
+        assert!(proposed_move(&json!({ "proposal": { "move": "invent_a_move" } })).is_none());
+        assert!(proposed_move(&json!({ "proposal": null })).is_none());
+    }
+
+    /// The arm's budget is the declared sweep size, never zero (the table refuses it).
+    #[test]
+    fn the_arm_budget_is_the_declared_sweep_size() {
+        let spec: study_worker::EvaluationSpec = serde_json::from_value(json!({
+            "strategy_ref": "s", "strategy_type": "trend", "universe_ref": "BTC-USD",
+            "research": { "start": "2024-01-01T00:00:00Z", "end": "2024-09-01T00:00:00Z" },
+            "holdout":  { "start": "2024-09-01T00:00:00Z", "end": "2024-12-01T00:00:00Z" },
+            "objective": { "primary": "sharpe" }, "max_runs": 17
+        })).unwrap();
+        assert_eq!(arm_budget(&spec), 17);
+    }
+
+    /// The veto is consulted before EXPERIMENT is submitted and the outcome is recorded after
+    /// COMPARE; read from the source so neither call can be dropped without a test noticing.
+    #[test]
+    fn advance_consults_the_veto_before_dispatch_and_records_the_outcome_after_compare() {
+        let src = include_str!("campaign_driver.rs");
+        let advance = &src[src.find("async fn advance(").unwrap()..];
+        let veto = advance.find("self.consult_veto(").expect("the veto is consulted");
+        let submit = advance.find("Submission::new(kind").expect("the child is submitted");
+        assert!(veto < submit, "the veto must run before the child is created");
+        let record = advance.find("self.record_move_outcomes(").expect("the outcome is recorded");
+        assert!(record > advance.find("child job {} for phase").unwrap(), "recorded only after the child succeeded");
+        assert!(src.contains("self.ensure_arm("), "the arm is created with the campaign");
+    }
+
     #[test]
     fn proposing_logs_exploration_and_counts_no_trial() {
         let kind = CampaignWorker::child_kind(CampaignPhase::Hypothesize)

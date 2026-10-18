@@ -106,27 +106,25 @@ pub async fn resolve_ws_session(
 ) -> Result<WsBearerToken, WsUnauthorized> {
     let token = token.filter(|t| !t.is_empty()).ok_or(WsUnauthorized)?;
 
-    // The same predicate `BearerToken` uses. `sessions.expires_at` is
-    // `TIMESTAMPTZ NOT NULL` (migration 0013), so there is no null-expiry row
-    // for this to miss.
-    let row: Option<(Uuid, Vec<String>)> = sqlx::query_as(
-        "SELECT user_id, scopes FROM sessions WHERE token = $1 AND expires_at > now()",
-    )
-    .bind(token)
-    .fetch_optional(pg)
-    .await
-    .map_err(|e| {
-        // An unreachable database is a refusal, not an exemption.
-        warn!(error = %e, "ws: session lookup failed; refusing the upgrade");
-        WsUnauthorized
-    })?;
-
-    let (user_id, scopes) = row.ok_or(WsUnauthorized)?;
+    // The same resolver `BearerToken` uses (`crate::auth::session::resolve`):
+    // `FROM sessions WHERE token = session_token_hash($1) AND expires_at > now()`.
+    // One lookup, so the socket and the REST surface cannot disagree about
+    // whether a token is live, and a web session that keeps a socket open keeps
+    // its sliding expiry moving like any other use.
+    let session = crate::auth::session::resolve(pg, token)
+        .await
+        .map_err(|e| {
+            // An unreachable database is a refusal, not an exemption.
+            warn!(error = %e, "ws: session lookup failed; refusing the upgrade");
+            WsUnauthorized
+        })?
+        .ok_or(WsUnauthorized)?;
 
     Ok(WsBearerToken {
-        token: token.to_owned(),
-        user_id,
-        scopes,
+        // The session key (digest), never the credential — see `BearerToken::token`.
+        token: session.key,
+        user_id: session.user_id,
+        scopes: session.scopes,
     })
 }
 

@@ -229,115 +229,46 @@ impl FactKind {
     #[must_use]
     pub fn wiring(self) -> Wiring {
         match self {
-            // Found by `crates/reconciliation`, which runs inside the platform
-            // process. Today `check_divergence` calls `KillSwitch::trip_scope`
-            // and writes no row — and `LeaseWatcher::refresh` calls
-            // `replace_halted`, which *replaces* the scoped view from
-            // `monitor.kill_switch`. So that halt is not merely unrecorded: it is
-            // erased within one refresh cadence and the venue resumes trading.
+            // The receiving half is done and correct: `crates/reconciliation`'s
+            // `check_position_divergence_at_venue` and `positions::reconcile_one`
+            // raise through `MonitorStore::carry_out_mismatch`, which records a
+            // `disagreed` verdict (0165), writes the durable switch row and only
+            // then trips the mirror. What is missing is a production *caller* of
+            // those, and it is missing for a reason, not by oversight.
             Self::ReconciliationMismatch => Wiring::Unwired {
                 because: concat!(
-                    "the mismatch is detected in crates/reconciliation, which this ",
-                    "crate may not edit; it trips the in-memory KillSwitch only, and ",
-                    "KillSwitch::replace_halted erases that trip on the next refresh ",
-                    "because no monitor.kill_switch row backs it",
+                    "no production code compares our book with a venue's. Every order ",
+                    "fills in the in-app PaperTradingEngine (ADR-0048), and PaperBroker::",
+                    "query_positions returns the same engine's positions the internal book ",
+                    "is read from, so a sweep over it compares a value with itself and can ",
+                    "never fail — a reconciliation verdict nothing measured. The real ",
+                    "venue adapters are constructed only in crates/execution/tests. The ",
+                    "first venue whose positions are not ours by construction is the first ",
+                    "live adapter (roadmap gate H-4)",
                 ),
                 needs: concat!(
-                    "reconciliation::divergence::check_divergence must replace its ",
-                    "`kill_switch.trip_scope(&Scope::venue(v))` with an await on ",
-                    "monitor::store::MonitorStore::carry_out_mismatch(v, kill_switch), ",
-                    "which writes the durable row first and trips the mirror second; ",
-                    "crates/reconciliation/Cargo.toml must gain `monitor = { path = ",
-                    "\"../monitor\" }` as crates/api does (ADR-S7-01, no root manifest ",
-                    "edit), check_divergence must become async, and its callers must ",
-                    "hand it the MonitorStore they already hold",
+                    "a sweep in the platform process, on a 30s cadence, over every live ",
+                    "broker adapter: reconciliation::positions::reconcile_all(venue, internal, ",
+                    "broker, store, kill_switch), which on any disagreement calls ",
+                    "monitor::store::MonitorStore::carry_out_mismatch and records every ",
+                    "outcome with monitor::reconciled::MonitorStore::record_venue_check. Spawned ",
+                    "from apps/platform/src/main.rs once a live ExecutionEngine exists; ",
+                    "until then there is no venue whose positions could disagree",
                 ),
             },
             Self::LeaseLost => Wiring::RaisedBy("monitor::service::LeaseWatcher::refresh"),
-            // `evaluate::staleness` builds this fact correctly and nothing calls
-            // it, because nothing can: the age of the last bar lives in
-            // ClickHouse and this crate deliberately has no client for it. Its
-            // Postgres-only dependency set is what keeps it a separate failure
-            // domain, so the answer is a producer, not a second database handle.
-            //
-            // Checked against the running platform on 2026-09-21 rather than
-            // inferred, because the three candidate sources a reader would reach
-            // for all look plausible from the source and are all wrong from the
-            // database. The findings are in `because`; none of them is a table
-            // this crate could start reading tomorrow.
-            Self::HardDataStaleness => Wiring::Unwired {
-                because: concat!(
-                    "no table in Postgres records that a bar arrived. The age of an ",
-                    "instrument's last bar lives only in ClickHouse `trading.market_bar`, ",
-                    "written by the platform's live 1m persister, and crates/monitor has ",
-                    "no client for it and must not grow one — its Postgres-only ",
-                    "dependency set is what makes it a separate failure domain, and a ",
-                    "monitor that could not reach ClickHouse would be a monitor unable to ",
-                    "measure staleness at the moment staleness is most likely. Three ",
-                    "Postgres columns look like the answer and are not: (1) ",
-                    "dataplane.data_coverage_census.last_bar holds 0 rows, its only writer ",
-                    "backtest::census::take_census/persist has no caller anywhere in the ",
-                    "workspace, and migration 0097 makes it an append-only series keyed on ",
-                    "`as_of` with an immutability trigger — so `now() - last_bar` ",
-                    "over-states age by the whole interval since the snapshot, which is ",
-                    "the false-halt direction; (2) dataplane.instrument.last_seen is NULL ",
-                    "in all 10 rows and nothing in Rust writes it, though migration 0046 ",
-                    "grants UPDATE (last_seen) to app_role; (3) monitor.heartbeat already ",
-                    "carries (instance, beat_at, cadence_ms) and needs no migration, but ",
-                    "it is read by component_beats/stale_components into Family::Platform, ",
-                    "which IS suppressible by a maintenance window and scales rather than ",
-                    "halts — beating feeds into it would give one condition two verdicts ",
-                    "and let a deploy window suppress the weaker one",
-                ),
-                needs: concat!(
-                    "three things, in this order. FIRST a migration (this crate must not ",
-                    "write one) creating monitor.feed_freshness as a GAUGE, not a census: ",
-                    "PRIMARY KEY (instrument_id, venue_id), last_bar_at TIMESTAMPTZ NOT ",
-                    "NULL, timeframe_secs INT NOT NULL CHECK (timeframe_secs > 0) — the ",
-                    "CHECK is what keeps the undeclared-timeframe case out of the gauge ",
-                    "rather than a comment saying it should be — observed_at TIMESTAMPTZ ",
-                    "NOT NULL DEFAULT now(), and GRANT SELECT TO app_role plus GRANT ",
-                    "INSERT, UPDATE (last_bar_at, observed_at) TO app_role. SECOND the ",
-                    "producer: apps/platform/src/bar_persist.rs::run_bar_persist is the ",
-                    "single writer of live bars and already holds every column ",
-                    "(instrument_id, venue_id, bar.available_time, Timeframe::Minutes1) ",
-                    "per bar, so it upserts one row per bar it persists and measures the ",
-                    "age rather than inferring it — no other caller may write this table, ",
-                    "because a writer that did not observe the bar is guessing. THIRD, ",
-                    "here: monitor::service::MonitorService::collect_cadence reads the ",
-                    "gauge, passes Some(age) or None to monitor::evaluate::staleness, and ",
-                    "routes a Staleness::Hard through monitor::facts::decide and ",
-                    "monitor::store::MonitorStore::carry_out_fact. The keying half of ",
-                    "the third step is DONE and is no longer the blocker it was: ",
-                    "Fact::HardDataStaleness and DependencyMap are keyed on the (symbol, ",
-                    "venue) pair monitor::feed::FeedKey::new builds, which has no ",
-                    "constructor from a single string and whose venue half is its own ",
-                    "type so the two cannot be transposed; the re-keying was needed ",
-                    "because in the live database BTC-USD is three ",
-                    "feeds — dataplane instrument_ids 1005, 1007 and 1008 at venues ",
-                    "coinbase, kraken and binance — whose last 60s bars were 90 minutes, ",
-                    "92 seconds and 91 days old at one instant on 2026-09-21. TWO joins ",
-                    "remain, and only the second needs anybody's permission. FIRST, the ",
-                    "gauge's key is numeric and a FeedKey is not: the reader translates ",
-                    "with `SELECT s.symbol, v.name FROM dataplane.instrument_symbol s ",
-                    "JOIN dataplane.venue v USING (venue_id) WHERE s.valid_to IS NULL`, ",
-                    "which is in Postgres, is already populated for all ten instruments, ",
-                    "and is keyed (instrument_id, venue_id, valid_from, knowledge_time) ",
-                    "so the as-of read stays point-in-time; NOT through ",
-                    "instruments.instrument_key, which is NULL for BTC-USD. SECOND, the ",
-                    "dependency edge cannot yet express what the fact now says: it is ",
-                    "strategy_instances (strategy_id, instrument_id) -> instruments, ",
-                    "strategy_instances holds 0 rows, and instruments is PRIMARY KEY ",
-                    "(instrument_id) over a bare symbol with venue_id as an ordinary ",
-                    "column — so exactly one BTC-USD row can exist and it is pinned to ",
-                    "coinbase, while kraken is the venue whose feed is actually fresh. ",
-                    "Until a migration re-keys instruments on (instrument_id, venue_id), ",
-                    "or strategy_instances gains its own venue column, every edge ",
-                    "monitor::evaluate::DependencyMap::add could be given names a venue ",
-                    "the strategy was never declared to trade. Building the map from ",
-                    "instruments.venue_id today is a guess with a type around it",
-                ),
-            },
+            // Raised by the monitor's own loop from `monitor.feed_freshness`
+            // (0165), a gauge the platform writes as it observes each completed
+            // bar (`apps/platform/src/health_jobs.rs`). This crate still has no
+            // ClickHouse client: the process that saw the bar records it, and the
+            // monitor reads one Postgres table. Keyed on the (symbol, venue) pair
+            // the gauge row names — the venue the bars came from, not the
+            // deployment's `platform_paper` execution venue — and the edge to a
+            // strategy is `strategy_deployment.instrument_id`, which is the one
+            // live pipeline a v3 deployment decides on.
+            Self::HardDataStaleness => {
+                Wiring::RaisedBy("monitor::service::MonitorService::assess_feeds")
+            }
         }
     }
 }
@@ -496,16 +427,17 @@ mod tests {
     }
 
     #[test]
-    fn exactly_one_fact_is_raised_in_production_today() {
+    fn exactly_two_facts_are_raised_in_production_today() {
         // Not an aspiration — a measurement, so the number moving is visible in
-        // a diff. Two of the three are blocked on producers in crates this crate
-        // may not edit, and each names the caller that would clear it.
+        // a diff. Hard staleness joined the lease on 2026-10-03 (0165's gauge);
+        // the reconciliation mismatch is blocked on a venue whose positions are
+        // not ours by construction, and names the caller that would clear it.
         let raised: Vec<&str> = FactKind::all()
             .into_iter()
             .filter(|k| k.wiring().is_raised_in_production())
             .map(FactKind::as_str)
             .collect();
-        assert_eq!(raised, vec!["LeaseLost"]);
+        assert_eq!(raised, vec!["LeaseLost", "HardDataStaleness"]);
     }
 
     #[test]

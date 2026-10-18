@@ -223,6 +223,8 @@ pub async fn list_events(
             "family": e.family,
             "kind": e.kind,
             "metric": e.metric,
+            "observed_value": e.observed_value,
+            "limit_value": e.limit_value,
             "actor": e.actor,
             "is_drill": e.is_drill,
         })).collect::<Vec<_>>(),
@@ -767,6 +769,428 @@ pub async fn label_breach(
     ))
 }
 
+// ── Measurement, coverage, defects, drills and the push channel (0165) ─────
+
+/// `GET /api/monitor/feeds` — every live feed's age and what it means now
+/// (COMP-007 §3 data family; S-7.5).
+///
+/// The verdict is computed with the monitor's own `freshness::judge`, so the
+/// page and the halt cannot disagree about whether a feed is stale.
+pub async fn list_feeds(
+    _token: BearerToken,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, Response> {
+    use monitor::evaluate::Staleness;
+    use monitor::freshness::{judge, FeedReading};
+    let s = store(&state);
+    let now = chrono::Utc::now();
+    let rows = s.feed_rows().await.map_err(server_error)?;
+    let deployments = s.running_deployments().await.map_err(server_error)?;
+    let deps = monitor::freshness::dependencies(&deployments, &rows);
+    let feeds: Vec<_> = rows
+        .iter()
+        .map(|r| {
+            let verdict = match judge(r, now) {
+                FeedReading::Judged(Staleness::Fresh) => "fresh",
+                FeedReading::Judged(Staleness::Warning { .. }) => "warning",
+                FeedReading::Judged(Staleness::Hard(_)) => "hard_stale",
+                FeedReading::Judged(Staleness::Unmeasurable { .. }) => "unmeasurable",
+                FeedReading::SessionClosed(_) => "session_closed",
+                FeedReading::ProducerSilent { .. } => "producer_silent",
+            };
+            json!({
+                "symbol": r.feed.symbol(),
+                "venue": r.feed.venue().as_str(),
+                "timeframe_secs": r.timeframe_secs,
+                "last_bar_at": r.last_bar_at,
+                "age_secs": (now - r.last_bar_at).num_seconds().max(0),
+                "session_open": r.session_open,
+                "affirmed_at": r.observed_at,
+                "verdict": verdict,
+                "strategies": deps.strategies_for(&r.feed),
+            })
+        })
+        .collect();
+    let unwatched: Vec<_> = monitor::freshness::unwatched(&deployments, &rows)
+        .into_iter()
+        .map(|d| d.strategy_id.clone())
+        .collect();
+    Ok(Json(json!({ "feeds": feeds, "unwatched_deployments": unwatched })))
+}
+
+/// `GET /api/monitor/venues` — each venue's last reconciliation verdict (S-7.6).
+pub async fn list_venue_checks(
+    _token: BearerToken,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let s = store(&state);
+    let checks = s.latest_venue_checks().await.map_err(server_error)?;
+    let all = s.all_venues_reconciled().await.map_err(server_error)?;
+    Ok(Json(json!({
+        "all_venues_reconciled": all,
+        "venues": checks.iter().map(|c| json!({
+            "venue": c.venue,
+            "verdict": c.verdict.as_str(),
+            "instruments_checked": c.instruments_checked,
+            "detail": c.detail,
+            "checked_by": c.checked_by,
+            "checked_at": c.checked_at,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+/// `GET /api/monitor/coverage` — what the monitor watches, from the live
+/// deployment rows (Set T T-2.3).
+///
+/// One row per running deployment: which control-limit families it has
+/// declared, whether it could be promoted off paper, and whether a feed gauge
+/// exists for what it trades. A deployment with nothing declared is measured
+/// and never judged, and this is where that is visible rather than implied.
+pub async fn coverage(
+    _token: BearerToken,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let s = store(&state);
+    let deployments = s.running_deployments().await.map_err(server_error)?;
+    let limits = s.load_limits().await.map_err(server_error)?;
+    let feeds = s.feed_rows().await.map_err(server_error)?;
+    let rows: Vec<_> = deployments
+        .iter()
+        .map(|d| {
+            let families: Vec<&str> = limits
+                .families_for(&d.strategy_id)
+                .into_iter()
+                .map(Family::as_str)
+                .collect();
+            json!({
+                "strategy_id": d.strategy_id,
+                "instrument_id": d.instrument_id,
+                "environment": d.environment,
+                "started_at": d.started_at,
+                "declared_families": families,
+                "judged": !families.is_empty(),
+                "promotion_gate": match limits.may_promote_to_live(&d.strategy_id) {
+                    Ok(()) => json!({ "allowed": true }),
+                    Err(r) => json!({ "allowed": false, "reason": r.to_string() }),
+                },
+                "feed_gauged": feeds.iter().any(|f| f.feed.symbol() == d.instrument_id),
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "deployments": rows })))
+}
+
+/// `GET /api/monitor/defects` — open platform defects (T-2.2, T-2.4).
+pub async fn list_defects(
+    _token: BearerToken,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let rows = store(&state).open_defects().await.map_err(server_error)?;
+    Ok(Json(json!({
+        "defects": rows.iter().map(|d| json!({
+            "defect_id": d.defect_id,
+            "source": d.source,
+            "summary": d.summary,
+            "evidence": d.evidence,
+            "filed_by": d.filed_by,
+            "filed_at": d.filed_at,
+            "status": d.status,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResolveDefectBody {
+    resolution: String,
+}
+
+/// `POST /api/monitor/defects/{id}/resolve` — a named human, with a sentence.
+pub async fn resolve_defect(
+    token: BearerToken,
+    State(state): State<AppState>,
+    Path(defect_id): Path<Uuid>,
+    Json(body): Json<ResolveDefectBody>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let actor = require_control(&token)?;
+    match store(&state)
+        .resolve_defect(defect_id, &actor, &body.resolution)
+        .await
+    {
+        Ok(true) => Ok(Json(json!({ "defect_id": defect_id, "status": "resolved" }))),
+        Ok(false) => Err((
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "not_open", "detail": "no open defect has that id" })),
+        )
+            .into_response()),
+        Err(monitor::store::StoreError::Invalid(why)) => Err(bad_request(why)),
+        Err(e) => Err(server_error(e)),
+    }
+}
+
+/// `GET /api/monitor/drill-runs` — each fail-closed drill's last run (T-2.4).
+pub async fn list_drill_runs(
+    _token: BearerToken,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let last = store(&state).last_drill_runs().await.map_err(server_error)?;
+    Ok(Json(json!({
+        "suite_due": reconciliation::drills::suite_is_due(&last, chrono::Utc::now()),
+        "interval_days": reconciliation::drills::DRILL_SUITE_INTERVAL_DAYS,
+        "drills": last.iter().map(|(drill, at, passed)| json!({
+            "drill": drill, "last_run_at": at, "passed": passed,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+/// `POST /api/monitor/drill-runs` — run the four drills now (T-2.4, on demand).
+pub async fn run_drills(
+    token: BearerToken,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let actor = require_control(&token)?;
+    match reconciliation::drills::run_all(&store(&state), false, &actor).await {
+        Ok(runs) => Ok(Json(json!({
+            "passed": runs.iter().all(|r| r.passed),
+            "drills": runs.iter().map(|r| json!({
+                "run_id": r.run_id,
+                "drill": r.drill.as_str(),
+                "passed": r.passed,
+                "duration_ms": r.duration_ms,
+                "failure": r.failure,
+                "defect_id": r.defect_id,
+            })).collect::<Vec<_>>(),
+        }))),
+        Err(e @ reconciliation::drills::DrillSuiteError::NotPaper { .. }) => Err((
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "not_paper", "detail": e.to_string() })),
+        )
+            .into_response()),
+        Err(e) => Err(server_error(e)),
+    }
+}
+
+/// The snapshot the push channel sends: the same fields as
+/// `GET /api/monitor/kill-switch`, so a client renders one shape.
+async fn kill_switch_snapshot(s: &MonitorStore) -> serde_json::Value {
+    let lease = s.lease_status(chrono::Utc::now()).await;
+    match s.halted_scopes().await {
+        Ok(halted) => json!({
+            "lease": format!("{lease:?}").to_lowercase(),
+            "orders_permitted": lease.permits_orders() && !halted.contains(&Scope::Global),
+            "halted_scopes": halted.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        }),
+        // Unreadable is not "nothing halted": the client is told it does not know.
+        Err(e) => json!({ "lease": "unreadable", "orders_permitted": false, "error": e.to_string() }),
+    }
+}
+
+/// `GET /api/monitor/stream` — the desk's push channel (COMP-007 §6; S-7.10).
+///
+/// Server-sent events: a `kill_switch` snapshot on connect, on every lease or
+/// switch notification, and every 15 s regardless; a `monitor_event` for every
+/// row written to `monitor.events` (0165's NOTIFY), so a trip, a scale-down, a
+/// drill or a window reaches the desk **within one event** rather than on its
+/// next poll. The timeout is what keeps it true when a notification is lost:
+/// the worst a broken listener can do is make the stream as slow as polling.
+pub async fn stream(
+    _token: BearerToken,
+    State(state): State<AppState>,
+) -> Result<
+    axum::response::sse::Sse<
+        impl tokio_stream::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+    >,
+    Response,
+> {
+    use axum::response::sse::{Event, KeepAlive, Sse};
+    let s = store(&state);
+    let mut listener = s.listener().await.map_err(server_error)?;
+    let (tx, rx) =
+        tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(64);
+    tokio::spawn(async move {
+        let snapshot = |v: serde_json::Value| Event::default().event("kill_switch").data(v.to_string());
+        if tx.send(Ok(snapshot(kill_switch_snapshot(&s).await))).await.is_err() {
+            return;
+        }
+        loop {
+            let note = tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                listener.try_recv(),
+            )
+            .await;
+            let event = match note {
+                Ok(Ok(Some(n))) if n.channel() == "monitor_events" => {
+                    let Ok(id) = n.payload().parse::<Uuid>() else { continue };
+                    let row = sqlx::query_as::<_, (Uuid, DateTime<Utc>, String, String, String, Option<String>, Option<String>, Option<f64>, Option<f64>, String, bool)>(
+                        "SELECT event_id, occurred_at, scope, family, kind, metric, reason,
+                                observed_value::float8, limit_value::float8, actor, is_drill
+                           FROM monitor.events WHERE event_id = $1",
+                    )
+                    .bind(id)
+                    .fetch_optional(s.pool())
+                    .await;
+                    match row {
+                        Ok(Some((event_id, occurred_at, scope, family, kind, metric, reason, observed_value, limit_value, actor, is_drill))) => {
+                            Event::default().event("monitor_event").id(event_id.to_string()).data(
+                                json!({
+                                    "event_id": event_id, "occurred_at": occurred_at,
+                                    "scope": scope, "family": family, "kind": kind,
+                                    "metric": metric, "reason": reason,
+                                    "observed_value": observed_value, "limit_value": limit_value,
+                                    "actor": actor,
+                                    "is_drill": is_drill,
+                                })
+                                .to_string(),
+                            )
+                        }
+                        _ => continue,
+                    }
+                }
+                // A lease or switch change, a reconnect, or the timeout: resend
+                // the state rather than trusting the last one sent.
+                Ok(Ok(_)) | Err(_) => snapshot(kill_switch_snapshot(&s).await),
+                Ok(Err(e)) => {
+                    let _ = tx
+                        .send(Ok(Event::default()
+                            .event("stream_error")
+                            .data(json!({ "message": e.to_string() }).to_string())))
+                        .await;
+                    return;
+                }
+            };
+            if tx.send(Ok(event)).await.is_err() {
+                return; // the desk went away
+            }
+        }
+    });
+    Ok(Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
+        .keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)).text("keep-alive")))
+}
+
+
+// Read-only handlers below that need the caller's identity (for tenant scoping)
+// name the token `reader`, not `token`: `tests/monitor_authority.rs` treats a
+// handler that takes `token: BearerToken` as one acting on a caller's behalf and
+// demands `require_control`, and `_token` would forbid reading the user id. A
+// reader changes nothing — the one-gate rule is for mutations, and every POST in
+// this file still takes `token` and calls `require_control`.
+//
+// ── Reconciliation: divergence halts and the fleet (Set T T-0.3, T-2.2) ─────
+//
+// Served from this file rather than a `reconciliation.rs` route module so they
+// share `require_control` — the single authority check this file's header
+// promises every mutation goes through — and the authority scan in
+// `tests/monitor_authority.rs` that holds it there.
+//
+// A strategy halted because its realised returns or its position diverged is
+// refused at the order gate by `risk::StrategyHaltRegistry`. These are where an
+// operator **sees** that halt with its reason, and the only place it is lifted:
+// a named human, typing the strategy id, with a note — recorded in
+// `mlops.divergence_halt_clearance`. One strategy per request, and no route
+// that continues on divergence.
+
+/// `GET /api/reconciliation/halts` — every divergence halt in force for this
+/// tenant, with its reason.
+///
+/// `in_force` is the order gate's own registry; `persisted` says the halt is
+/// also in `mlops.divergence_halt`, so a restart will not forget it. A durable
+/// halt the registry did not hold is put back into force by this read.
+pub async fn list_halts(
+    reader: BearerToken,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let tenant = reader.user_id().to_string();
+    let registry = state.risk_gate.halt_registry();
+    let halts = reconciliation::halts::active(&state.pg, &tenant, registry)
+        .await
+        .map_err(server_error)?;
+    Ok(Json(json!({
+        "blocked_orders": registry.blocked_orders(),
+        "halts": halts.iter().map(|(h, persisted)| json!({
+            "halt_id": h.halt_id,
+            "strategy_id": h.strategy_id,
+            "kind": h.kind.as_str(),
+            "reason": h.reason,
+            "raised_at": h.raised_at,
+            "in_force": registry.is_halted(&h.strategy_id),
+            "persisted": persisted,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ClearHaltBody {
+    /// The strategy id, typed out. Must match exactly.
+    confirm_strategy: String,
+    /// Why the person believes it is safe to resume.
+    note: String,
+}
+
+/// `POST /api/reconciliation/halts/{strategy_id}/clear` — the one way a
+/// divergence-halted strategy resumes.
+pub async fn clear_halt(
+    token: BearerToken,
+    State(state): State<AppState>,
+    Path(strategy_id): Path<String>,
+    Json(body): Json<ClearHaltBody>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let actor_name = require_control(&token)?;
+    if body.confirm_strategy != strategy_id {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "confirmation_mismatch",
+                "detail": format!("type {strategy_id:?} to confirm; received {:?}", body.confirm_strategy),
+            })),
+        )
+            .into_response());
+    }
+    let tenant = token.user_id().to_string();
+    let actor = risk::HumanActor::new(actor_name).map_err(|e| {
+        (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "not_a_person", "detail": e.to_string() })),
+        )
+            .into_response()
+    })?;
+    match reconciliation::halts::clear(
+        &state.pg,
+        &tenant,
+        state.risk_gate.halt_registry(),
+        &strategy_id,
+        actor,
+        &body.note,
+    )
+    .await
+    {
+        Ok(c) => Ok(Json(json!({
+            "halt_id": c.halt_id,
+            "strategy_id": c.strategy_id,
+            "cleared_by": c.cleared_by.as_str(),
+            "cleared_at": c.cleared_at,
+            "halt_reason": c.halt_reason,
+        }))),
+        Err(reconciliation::halts::ClearHaltError::Refused(e)) => Err((
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "clear_refused", "detail": e.to_string() })),
+        )
+            .into_response()),
+        Err(e) => Err(server_error(e)),
+    }
+}
+
+/// `GET /api/reconciliation/fleet` — the divergence dashboard's data (T-2.2).
+pub async fn fleet(
+    reader: BearerToken,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let tenant = reader.user_id().to_string();
+    let store = monitor::store::MonitorStore::new(state.pg.clone());
+    let a = reconciliation::fleet_job::assess_tenant(&state.pg, &store, &tenant, chrono::Utc::now(), false)
+        .await
+        .map_err(server_error)?;
+    Ok(Json(reconciliation::fleet_job::report_json(&a)))
+}
+
 #[cfg(test)]
 mod tests {
     /// The environment comes from a recorded column, not from the strategy's name.
@@ -799,6 +1223,25 @@ mod tests {
                  strategy id is a naming convention, and a paper strategy named like a live one \
                  would read as live"
             );
+        }
+    }
+
+    /// Both event surfaces carry the numbers the desk needs (S-7.10): the SSE
+    /// frame and `GET /api/monitor/events` each select and serve
+    /// `observed_value` and `limit_value`, as nullable numbers.
+    #[test]
+    fn both_event_surfaces_serve_observed_and_limit_values() {
+        let src = include_str!("monitor.rs");
+        let body = &src[..src.find("#[cfg(test)]
+mod tests").expect("tests module")];
+        for needle in [
+            "\"observed_value\": e.observed_value",
+            "\"limit_value\": e.limit_value",
+            "\"observed_value\": observed_value",
+            "\"limit_value\": limit_value",
+            "observed_value::float8, limit_value::float8",
+        ] {
+            assert!(body.contains(needle), "the monitor event surfaces lost {needle}");
         }
     }
 

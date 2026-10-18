@@ -1,6 +1,6 @@
 # Phase 4 — Paper and live
 
-**Completion: 71% (5 / 7 tasks).** U-4.1, U-4.3–U-4.6 DONE 2026-10-02; U-4.2 PARTIAL (the record exists; Set T's readers of it do not yet); U-4.7 added (per-deployment paper accounts).
+**Completion: 100% (7 / 7 tasks).** U-4.1, U-4.3–U-4.6 DONE 2026-10-02; U-4.2 and U-4.7 DONE 2026-10-04.
 
 **Requirement IDs:** SU-LIVE-01…06.
 **Spec:** [FEAT-007](../../../specs/FEAT-007-unified-strategy-engine.md) §9.5, §11; ADR-0038, ADR-0039, ADR-0042, ADR-0047.
@@ -38,7 +38,21 @@ Per deployment: compile, warm up from `BarStore`, subscribe to the live bus for 
 **Traces:** FEAT-007 §9.5; ADR-0039; ADR-0042.
 
 ### U-4.2 Deployment record — M
-`PARTIAL` 2026-10-02 — migration 0142 `strategy_deployment` (revision, the graph itself,
+`DONE` 2026-10-04 — the two clauses left open, each checked against a reader that now exists:
+"starting capital is read by reconciliation" and "Set T's `paper_deployment` readers find rows".
+`live_deployments::tests::a_recorded_forward_deployment_is_found_by_its_readers` (fresh PostgreSQL,
+every migration): `POST /api/deployments` with forward evidence through the platform's own router
+writes the record and the `mlops.paper_deployment` row; the supervisor's resume reads the record
+back with its capital (2500); `forward_spec` finds the `paper_deployment` row through the record
+(trial, strategy id = deployment id, bar seconds, thresholds exact); reconciliation's
+`ForwardRecorders::deploy` is built from that capital (a zero capital is refused, so the value is
+consumed). Further readers of the record, from Set T: the monitor enumerates running
+`strategy_deployment` rows each cadence (`monitor/tests/measurement_reaches_the_gate.rs`, as
+`app_role`), and the deployment path's overview and proposal gate read it
+(`api/tests/deployment_path.rs`). The first clause — every running deployment has a row and every
+row a running or closed deployment — is the 2026-10-02 evidence below.
+
+Built 2026-10-02 — migration 0142 `strategy_deployment` (revision, the graph itself,
 instrument, `environment = 'paper'`, `venue = 'platform_paper'`, starting capital, model pins,
 author; fixed at start by trigger, closed once; one running row per user/instrument/strategy
 by partial unique index; `forward_deployment_id` for Set T's record to sit in front);
@@ -48,7 +62,7 @@ supervisor re-declares every running row at boot and closes the row of a deploym
 cannot start or halts. Evidence: `storage/tests/pg_strategy_deployment.rs` against a scratch
 PostgreSQL 17 with 0142–0144 applied — recorded at start, duplicate running binding refused,
 stop closes once, edits refused, capital readable.
-**Not met:** "starting capital is read by reconciliation" and "Set T's `paper_deployment`
+Until 2026-10-04 two clauses were unmet: "starting capital is read by reconciliation" and "Set T's `paper_deployment`
 readers find rows" — `deployments::starting_capital` exists, but no reconciliation code reads
 it and no Rust code reads `mlops.paper_deployment` at all (T-0.4's recorded gap). Closing
 this is Set T T-1.1/T-1.3: write `paper_deployment` alongside this row when a deployment is
@@ -122,7 +136,24 @@ not even wake stage 3. The runner checks `is_v3_declared` before every bar. Evid
 (withdrawn, the next bar ends the runner, reported as withdrawn rather than halted).
 
 ### U-4.7 A paper account per deployment — M
-`NOT STARTED`
+`DONE` 2026-10-04 — `PaperTradingEngine::open_deployment_account` gives a deployment its own
+`PaperAccount` (own cash, positions, ledger and day's realized P&L), held in slots that are filled
+once and never emptied so its lock borrows from the engine exactly as an asset-class account's does,
+with the same poison recovery. An order routes to its deployment's account when its `strategy_id`
+names one opened on that asset class (frozen on the order record at submit), else to the class's;
+`positions_for` / `snapshot_for` / `daily_loss_usd_for` read the same way, and settlement and funding
+reach every account holding the instrument. The live runner's view and position read its own
+account; `live_deployments` opens it (a selection's members keep sizing against their sleeves); the
+risk context gates a deployment's order on its own position and day's loss. Durable through
+`paper_deployment_account_state` (0188: the 0153 state shape and version; a row the binary cannot
+read refuses boot; app_role without DELETE). Evidence: engine tests — two deployments on one
+instrument each see only their own position and cash while the class account trades nothing; a
+manual order and an unopened deployment still use the class account; reduce-only reads the
+deployment's own position; settlement reaches it; export/restore round trip, never reseeded;
+`paper_deployment_accounts_durable` on scratch PostgreSQL 17 (a fresh engine restores each account's
+position and exact cash); platform `a_deployment_with_its_own_account_sizes_and_trades_in_it` (equity
+starts at its capital, fills land in its account, none in the shared one); execution 23 suites,
+platform 63, api 528. Lands with the Set E paper-persistence work it extends.
 
 Found building U-4.1. The paper engine keeps **one account per asset class**, so every
 deployment on that class shares cash, equity and — on one instrument — position with every

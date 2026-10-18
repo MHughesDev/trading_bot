@@ -5,6 +5,14 @@ import numpy as np
 from ..schemas import Forecast
 
 
+class Abstain(Exception):
+    """The model declines to answer; ``reason`` says why. Never a fallback value."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
 # --------------------------------------------------------------------------- #
 # Distribution contract validation (I-1.12, serve side)
 # --------------------------------------------------------------------------- #
@@ -110,6 +118,7 @@ def to_distribution_forecast(
     levels: list[float],
     sigma: float,
     horizon: str,
+    mu: float = 0.0,
 ) -> Forecast:
     """Build a distributional Forecast from σ-unit quantiles (I-1.11).
 
@@ -117,7 +126,7 @@ def to_distribution_forecast(
     - Derives point view (direction, magnitude, confidence) from the median
     - Returns point-only Forecast if validation fails (never crash on serve)
     """
-    q_return = q_sigma * sigma
+    q_return = q_sigma * sigma + mu
     # Median: interpolate to level 0.5
     median = float(np.interp(0.5, levels, q_return))
 

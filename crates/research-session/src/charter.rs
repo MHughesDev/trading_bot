@@ -39,6 +39,34 @@ pub const DEFAULT_BUDGET_DAYS: f64 = 30.0;
 /// The default cap on how many runs one session may start.
 pub const DEFAULT_MAX_RUNS: i32 = 60;
 
+/// The platform's default per-child trial cap (ADR-P11-03, 2026-10-03).
+///
+/// AGENT-014 §2.1 fills `trials_total` from "the tier's `max_trials_per_task` ×
+/// `max_runs`", and no tier on this platform declares a `max_trials_per_task`:
+/// `harness::Budgets` holds `max_usd_per_task`, and a run is metered in trials.
+/// Left at that, a blank form field stored `trials_total = 0`, nothing bounded
+/// a lease in trials, and `execute::lease` — correctly — refused every child:
+/// a continuous session created from the desk with the field blank could never
+/// start a run. This is the policy default the spec's sentence was reaching
+/// for, written once, pre-filled and editable like the $25/day — the same
+/// shape §14 gives the day budget. When a tier declares its own, that number
+/// replaces this one and this constant becomes the fallback for a tier that
+/// does not.
+pub const DEFAULT_TRIALS_PER_TASK: i64 = 40;
+
+/// The platform's default **day** budget in trials (ADR-P11-05, 2026-10-04).
+///
+/// AGENT-014 §2.1 prices the day in dollars and a run is metered in trials, so
+/// the day gate could never fire (`day_bound` answered `NotDenominated`) and
+/// "a day budget hit behaves identically and resets at the window" was not true
+/// in production. There is no per-run price to convert with, so the day gets its
+/// own figure in the unit the platform actually counts: three children's worth
+/// of the per-task cap, pre-filled at creation and editable exactly like the
+/// $25/day. Stored in `session_day_budget` (0161), not inside
+/// [`SessionBudget`], because `SessionBudget` is built by struct literal in
+/// another track's route.
+pub const DEFAULT_TRIALS_PER_DAY: i64 = DEFAULT_TRIALS_PER_TASK * 3;
+
 /// A session may run at most this many children at once (AGENT-014 §2.1).
 pub const MAX_CONCURRENT_RUNS: i16 = 3;
 
@@ -215,10 +243,24 @@ impl Objective {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StopWhen {
     Budget,
-    ScheduleEnd,
+    /// The session stops at `at`.
+    ///
+    /// The end date lives on the condition rather than on [`Schedule`],
+    /// because `Schedule` is weekly windows that recur forever and has no
+    /// instant a schedule could end at — which is why this condition was, until
+    /// 2026-10-03, reported *not evaluable* on every charter that listed it.
+    /// `at` is optional so `{"kind":"schedule_end"}` written before then still
+    /// reads, and a condition with no `at` stays not-evaluable and says why,
+    /// rather than quietly never firing.
+    ScheduleEnd {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<chrono::DateTime<chrono::Utc>>,
+    },
     AgendaDrained,
     Stall,
-    DeployableFound { k: u32 },
+    DeployableFound {
+        k: u32,
+    },
 }
 
 /// Where the session is allowed to look (AGENT-014 §2.2).
@@ -339,11 +381,49 @@ impl Default for SessionBudget {
         Self {
             usd_per_day: DEFAULT_USD_PER_DAY,
             usd_total: DEFAULT_USD_PER_DAY * DEFAULT_BUDGET_DAYS,
-            // Filled from the tier's `max_trials_per_task` × `max_runs` when a
-            // profile is known; this is the shape's floor, not a policy.
-            trials_total: 0,
+            // §2.1: the per-task cap × `max_runs`. No tier declares a
+            // per-task trial cap, so it is the platform's (ADR-P11-03).
+            trials_total: DEFAULT_TRIALS_PER_TASK * i64::from(DEFAULT_MAX_RUNS),
             max_runs: DEFAULT_MAX_RUNS,
         }
+    }
+}
+
+impl SessionBudget {
+    /// §2.1's defaulting of `trials_total`, applied to a budget whose total was
+    /// left blank.
+    ///
+    /// A stored `0` is what a blank `max_trials` field becomes at the charter
+    /// form (`routes::desk_charter`), and `execute::total_bound` reads it as
+    /// "nobody said". This turns "nobody said" into the policy default *at
+    /// creation*, where the user can see it, rather than leaving every lease
+    /// to discover the hole one iteration at a time. A positive total is the
+    /// user's and is never touched.
+    #[must_use]
+    pub fn with_default_trials(mut self) -> Self {
+        if self.trials_total <= 0 {
+            let runs = if self.max_runs > 0 {
+                self.max_runs
+            } else {
+                DEFAULT_MAX_RUNS
+            };
+            self.trials_total = DEFAULT_TRIALS_PER_TASK * i64::from(runs);
+        }
+        self
+    }
+
+    /// §2.1 read backwards: the per-child trial cap is `trials_total /
+    /// max_runs`, because `trials_total` *is* the per-task cap × `max_runs`.
+    ///
+    /// `None` when either side is "nobody said" (≤ 0) — the caller decides
+    /// what an absent cap means, and [`DEFAULT_TRIALS_PER_TASK`] is the
+    /// declared answer rather than a number made up at a call site. Floored and
+    /// never below one: a fractional trial is not a trial, and a cap of zero
+    /// is a child that cannot reach its report turn.
+    #[must_use]
+    pub fn trials_per_task(&self) -> Option<i64> {
+        (self.trials_total > 0 && self.max_runs > 0)
+            .then(|| (self.trials_total / i64::from(self.max_runs)).max(1))
     }
 }
 
@@ -745,11 +825,65 @@ impl AlwaysAsks {
     pub fn asks(self, _autonomy: Autonomy) -> bool {
         true
     }
+
+    /// Which of the three a proposal's kind is, or `None` for a kind that is
+    /// not one of them.
+    ///
+    /// The mapping the driver was missing (S-11.9): a harvested proposal
+    /// reached *Needs you* as a type with no decision field, which is the right
+    /// outcome, but nothing said *which* standing rule it was an instance of —
+    /// so [`AlwaysAsks::asks`] had no caller and the adversarial clause
+    /// (*under `autonomous` a `Promotion` action still suspends*) was held by a
+    /// sweep over a function nothing in the loop called.
+    ///
+    /// * `promote_strategy`, `change_limits` — a **promotion**: a strategy or a
+    ///   limit moves up a ring.
+    /// * `deploy_paper` — **spend** above the ask line: it puts capital behind a
+    ///   strategy, even paper.
+    /// * `SealedHoldout` has no proposal kind. It is a one-shot vault a run
+    ///   opens with a tool, and the refusal lives at the vault; there is nothing
+    ///   for a proposal to map to.
+    ///
+    /// `None` is **not** "no human needed". Every proposal is owed a human
+    /// decision whatever its kind (P6), and the caller keeps that: this only
+    /// names the rule when one applies.
+    #[must_use]
+    pub fn for_proposal_kind(kind: &str) -> Option<AlwaysAsks> {
+        match kind {
+            "promote_strategy" | "change_limits" => Some(AlwaysAsks::Promotion),
+            "deploy_paper" => Some(AlwaysAsks::SpendAboveAskLine),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_proposal_kind_maps_to_the_standing_rule_it_is_an_instance_of_and_every_one_asks() {
+        assert_eq!(
+            AlwaysAsks::for_proposal_kind("promote_strategy"),
+            Some(AlwaysAsks::Promotion)
+        );
+        assert_eq!(
+            AlwaysAsks::for_proposal_kind("change_limits"),
+            Some(AlwaysAsks::Promotion)
+        );
+        assert_eq!(
+            AlwaysAsks::for_proposal_kind("deploy_paper"),
+            Some(AlwaysAsks::SpendAboveAskLine)
+        );
+        assert_eq!(AlwaysAsks::for_proposal_kind("adopt_playbook"), None);
+        // Under every autonomy, for every rule a kind can map to.
+        for kind in ["promote_strategy", "change_limits", "deploy_paper"] {
+            let rule = AlwaysAsks::for_proposal_kind(kind).expect("a mapped kind");
+            for autonomy in [Autonomy::Supervised, Autonomy::Notify, Autonomy::Autonomous] {
+                assert!(rule.asks(autonomy), "{kind} under {autonomy:?}");
+            }
+        }
+    }
 
     #[test]
     fn the_floor_holds_on_every_way_in() {
@@ -1000,6 +1134,59 @@ mod tests {
         assert!((SessionBudget::default().usd_per_day - DEFAULT_USD_PER_DAY).abs() < 1e-9);
         assert!(SessionBudget::default().usd_total > 0.0);
         assert_eq!(SessionBudget::default().max_runs, DEFAULT_MAX_RUNS);
+        // §2.1's third default: trials_total = per-task × max_runs.
+        assert_eq!(
+            SessionBudget::default().trials_total,
+            DEFAULT_TRIALS_PER_TASK * i64::from(DEFAULT_MAX_RUNS)
+        );
+        assert_eq!(
+            SessionBudget::default().trials_per_task(),
+            Some(DEFAULT_TRIALS_PER_TASK)
+        );
+    }
+
+    #[test]
+    fn a_blank_trial_total_is_filled_at_creation_and_a_real_one_is_kept() {
+        let blank = SessionBudget {
+            trials_total: 0,
+            max_runs: 10,
+            ..SessionBudget::default()
+        }
+        .with_default_trials();
+        assert_eq!(blank.trials_total, DEFAULT_TRIALS_PER_TASK * 10);
+        assert_eq!(blank.trials_per_task(), Some(DEFAULT_TRIALS_PER_TASK));
+
+        let real = SessionBudget {
+            trials_total: 7,
+            max_runs: 10,
+            ..SessionBudget::default()
+        }
+        .with_default_trials();
+        assert_eq!(real.trials_total, 7, "the user's number is the user's");
+        assert_eq!(
+            real.trials_per_task(),
+            Some(1),
+            "floored, and never a cap of zero"
+        );
+
+        let unknown = SessionBudget {
+            trials_total: 0,
+            ..SessionBudget::default()
+        };
+        assert_eq!(unknown.trials_per_task(), None, "nobody said is not zero");
+    }
+
+    #[test]
+    fn a_schedule_end_written_before_it_carried_a_date_still_reads() {
+        let old: StopWhen = serde_json::from_str(r#"{"kind":"schedule_end"}"#).unwrap();
+        assert_eq!(old, StopWhen::ScheduleEnd { at: None });
+        let new: StopWhen =
+            serde_json::from_str(r#"{"kind":"schedule_end","at":"2026-11-01T00:00:00Z"}"#).unwrap();
+        assert!(matches!(new, StopWhen::ScheduleEnd { at: Some(_) }));
+        assert_eq!(
+            serde_json::to_string(&old).unwrap(),
+            r#"{"kind":"schedule_end"}"#
+        );
     }
 
     #[test]

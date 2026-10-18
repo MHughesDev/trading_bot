@@ -22,4 +22,12 @@ RUST_LOG = { value = "info", force = false }
 # E0463 "can't find crate" / E0786 "invalid metadata" cascades that look like
 # source errors. Two jobs builds the whole workspace without paging.
 [build]
-jobs = 2
+# Raised from 2 on 2026-10-04 (Ryzen 9 9900X, 24 threads, 31 GB). The old cap existed because
+# MSVC link.exe, one process per test binary at ~4 GB each, exhausted the page file. The
+# lld linker below uses a fraction of that, so four jobs build the workspace; six exhausted the page file on the api test binaries (use -j 1 there).
+jobs = 4
+
+# rust-lld ships with the toolchain: links test binaries several times faster than link.exe
+# and with far less memory. Windows MSVC only, so CI runners are unaffected.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "linker=rust-lld", "-C", "linker-flavor=lld-link"]

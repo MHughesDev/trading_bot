@@ -168,6 +168,21 @@ impl Drop for Cleanup {
                             eprintln!("CLEANUP FAILED for {scope}: {e}");
                         }
                     }
+                    // 0165: a venue this test made disagree keeps that as its
+                    // last word for ever (verdicts are append-only), and one
+                    // left disagreeing refuses every global reset on this
+                    // database. So it ends on an agreement, said to be cleanup.
+                    if let Some(v) = scope.strip_prefix("venue:") {
+                        if let Err(e) = sqlx::query(
+                            "INSERT INTO monitor.venue_reconciliation                                (venue, verdict, instruments_checked, detail, checked_by)                              SELECT $1, 'agreed', 0, 'test cleanup', 'test'                               WHERE NOT monitor.venue_reconciled($1)",
+                        )
+                        .bind(v)
+                        .execute(&pg)
+                        .await
+                        {
+                            eprintln!("CLEANUP FAILED: venue {v} left unreconciled: {e}");
+                        }
+                    }
                 }
                 if drop_lease {
                     if let Err(e) = sqlx::query("DELETE FROM monitor.lease WHERE lease_id = $1")

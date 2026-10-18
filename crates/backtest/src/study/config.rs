@@ -25,6 +25,15 @@ pub enum StudyKind {
     TradeMonteCarlo,
     RegimeConditional,
     Neighborhood,
+    /// `timing_jitter`: the same strategy with every decided order held 0..k
+    /// bars before it reaches the venue (`RunConfig::fill_delay_bars`). Answers
+    /// "does the edge survive being late?" (S-3.13 `timing_jitter_sensitivity`).
+    TimingJitter,
+    /// `ablation`: the baseline strategy and each leave-one-rule-out variant of
+    /// it, every one a *stored* strategy run over the same slice (S-3.13
+    /// `ablation_sweep`). The members differ in the strategy, so each is its own
+    /// counted look.
+    Ablation,
 }
 
 /// What dimension a Study perturbs. Each variant pairs with one or more kinds
@@ -57,6 +66,13 @@ pub enum VarySpec {
     Regimes {
         windows: Vec<(DateTime<Utc>, DateTime<Utc>, String)>,
     },
+    /// `timing_jitter`: bars of order delay per member. Must include 0 (the
+    /// platform's own timing is the baseline every other delay is read against)
+    /// and name each delay once.
+    FillDelays { bars: Vec<u32> },
+    /// `ablation`: stored strategy ids, the **baseline first**. Each variant is a
+    /// separate strategy row, so the ids are what a run's `strategy_ref` names.
+    StrategyRefs { refs: Vec<String> },
 }
 
 /// How (if at all) a single config is carried forward from a Study. The rule is
@@ -140,6 +156,10 @@ pub enum StudyConfigError {
     KindVaryMismatch { kind: StudyKind, vary: &'static str },
     #[error("cpcv requires 0 < k_test < n_groups")]
     BadCpcvGroups,
+    #[error("timing_jitter needs at least two distinct delays and must include 0 (the baseline)")]
+    BadFillDelays,
+    #[error("ablation needs a baseline and at least one variant, each a distinct stored strategy id")]
+    BadStrategyRefs,
     /// The trial ledger refused to register a member, so it was never
     /// dispatched. Surfaced rather than skipped: a study that silently drops
     /// members it could not log would under-report its own trial count.
@@ -193,6 +213,8 @@ impl StudyConfig {
                 | (StudyKind::CostSweep, VarySpec::CostLadder { .. })
                 | (StudyKind::TradeMonteCarlo, VarySpec::TradeResamples { .. })
                 | (StudyKind::RegimeConditional, VarySpec::Regimes { .. })
+                | (StudyKind::TimingJitter, VarySpec::FillDelays { .. })
+                | (StudyKind::Ablation, VarySpec::StrategyRefs { .. })
         );
         if !ok {
             return Err(StudyConfigError::KindVaryMismatch {
@@ -203,6 +225,18 @@ impl StudyConfig {
         if let VarySpec::CpcvGroups { n_groups, k_test } = &self.vary {
             if *k_test == 0 || *k_test >= *n_groups {
                 return Err(StudyConfigError::BadCpcvGroups);
+            }
+        }
+        if let VarySpec::StrategyRefs { refs } = &self.vary {
+            let mut seen = std::collections::BTreeSet::new();
+            if refs.len() < 2 || refs.iter().any(|r| r.trim().is_empty() || !seen.insert(r.as_str())) {
+                return Err(StudyConfigError::BadStrategyRefs);
+            }
+        }
+        if let VarySpec::FillDelays { bars } = &self.vary {
+            let mut seen = std::collections::BTreeSet::new();
+            if !bars.contains(&0) || bars.len() < 2 || !bars.iter().all(|b| seen.insert(*b)) {
+                return Err(StudyConfigError::BadFillDelays);
             }
         }
         Ok(())
@@ -220,6 +254,8 @@ impl VarySpec {
             VarySpec::CostLadder { .. } => "cost_ladder",
             VarySpec::TradeResamples { .. } => "trade_resamples",
             VarySpec::Regimes { .. } => "regimes",
+            VarySpec::FillDelays { .. } => "fill_delays",
+            VarySpec::StrategyRefs { .. } => "strategy_refs",
         }
     }
 }
@@ -396,5 +432,49 @@ mod tests {
         );
         let back: StudyConfig = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!(c, back);
+    }
+
+    #[test]
+    fn a_timing_jitter_study_needs_a_baseline_and_a_second_delay() {
+        let mk = |bars: Vec<u32>| StudyConfig {
+            study_id: "j".into(),
+            kind: StudyKind::TimingJitter,
+            base_config: base(),
+            vary: VarySpec::FillDelays { bars },
+            metric: MetricKind::Sharpe,
+            null_ref: None,
+            null: None,
+            budget: StudyBudget::default(),
+            question: "does the edge survive being late?".into(),
+            selection_rule: SelectionRule::None,
+        };
+        assert!(mk(vec![0, 1, 2]).validate().is_ok());
+        assert_eq!(mk(vec![1, 2]).validate(), Err(StudyConfigError::BadFillDelays), "no baseline");
+        assert_eq!(mk(vec![0]).validate(), Err(StudyConfigError::BadFillDelays), "nothing to compare");
+        assert_eq!(mk(vec![0, 1, 1]).validate(), Err(StudyConfigError::BadFillDelays), "duplicate delay");
+        // A jitter vary under another kind is refused, as for every pairing.
+        let mut c = mk(vec![0, 1]);
+        c.kind = StudyKind::CostSweep;
+        assert!(matches!(c.validate(), Err(StudyConfigError::KindVaryMismatch { .. })));
+    }
+
+    #[test]
+    fn an_ablation_study_needs_a_baseline_a_variant_and_distinct_ids() {
+        let mk = |refs: Vec<&str>| StudyConfig {
+            study_id: "a".into(),
+            kind: StudyKind::Ablation,
+            base_config: base(),
+            vary: VarySpec::StrategyRefs { refs: refs.into_iter().map(String::from).collect() },
+            metric: MetricKind::Sharpe,
+            null_ref: None,
+            null: None,
+            budget: StudyBudget::default(),
+            question: "which rules earn their place?".into(),
+            selection_rule: SelectionRule::None,
+        };
+        assert!(mk(vec!["s", "s--ablate-0"]).validate().is_ok());
+        assert_eq!(mk(vec!["s"]).validate(), Err(StudyConfigError::BadStrategyRefs));
+        assert_eq!(mk(vec!["s", "s"]).validate(), Err(StudyConfigError::BadStrategyRefs));
+        assert_eq!(mk(vec!["s", " "]).validate(), Err(StudyConfigError::BadStrategyRefs));
     }
 }

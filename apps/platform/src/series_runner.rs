@@ -31,6 +31,14 @@ impl SeriesRunner for PlatformSeriesRunner {
         let bars = backtest::store::BarStore::connect(&self.ch_url)
             .load_bars(&m.instrument, tf, m.start, m.end)
             .await?;
+        // External rows the model's inputs read (P-3.6), knowable by the window's end.
+        let asset = asset_class;
+        let plan = backtest::runner::series_plan(&m.model, &registry, &m.timeframe, asset)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        let external =
+            backtest::runner::load_external(&self.pg, &self.ch_url, &plan, m.start, m.end)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
         let handle = tokio::runtime::Handle::current();
         let cache: Arc<dyn backtest::models::PredictionCache> = Arc::new(
             backtest::models::ClickHouseCache::new(&self.ch_url, handle.clone()),
@@ -51,6 +59,7 @@ impl SeriesRunner for PlatformSeriesRunner {
                 asset_class,
                 bars,
                 manifest.start.timestamp_nanos_opt().unwrap_or(0),
+                external,
                 &mut models,
             )
         })

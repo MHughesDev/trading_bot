@@ -311,9 +311,18 @@ pub struct Lease {
     /// a lease bounded by three ceilings from one bounded by two. Empty is the
     /// good case and is **not** the case on this platform today.
     unbounded_by: Vec<CapKind>,
+    /// Whether an estimate took part in sizing. `false` is the cold start: the
+    /// lease is whatever the tightest real cap left, and the digest says so.
+    estimated: bool,
 }
 
 impl Lease {
+    /// Whether the workflow's estimate took part in sizing this lease.
+    #[must_use]
+    pub fn estimated(&self) -> bool {
+        self.estimated
+    }
+
     #[must_use]
     pub fn session(&self) -> Uuid {
         self.session
@@ -364,6 +373,7 @@ impl Lease {
             "capped_by": self.capped_by.as_str(),
             "unbounded_by": self.unbounded_by.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
             "max_trials_per_task": self.max_trials_per_task(),
+            "estimated": self.estimated,
         })
     }
 
@@ -405,7 +415,18 @@ pub struct LeaseRequest {
     /// first.
     pub unit: SpendUnit,
     /// The workflow's `estimate_cost` on this tier.
-    pub estimate: Observed<Meter>,
+    ///
+    /// Three states, not two. `Unknown` is a read that failed and refuses the
+    /// lease like any other unread quantity. `Is(None)` is a read that
+    /// succeeded and found **no estimate exists** — the cold start, when fewer
+    /// than three runs of this workflow have finished on this tier. That is not
+    /// a refusal: an estimate is a guess at what the child wants, never a
+    /// ceiling on what it may take (see [`LeaseRefusal::NothingBounds`]), so its
+    /// absence leaves the real caps to size the lease and the lease says it was
+    /// not estimated. Refusing there instead was a deadlock — no estimate
+    /// without finished runs, no runs without a lease — and every continuous
+    /// session on a fresh platform started nothing, forever (2026-10-03).
+    pub estimate: Observed<Option<Meter>>,
     /// The tier's `max_usd_per_task`, or a statement that the tier declares no
     /// per-task cap.
     pub per_task: Observed<Bound>,
@@ -416,14 +437,21 @@ pub struct LeaseRequest {
     /// The session's total budget and what it has spent against it.
     pub total: Observed<Bound>,
     pub spent_total: Observed<Meter>,
-    /// The leases of this session's children that are still running.
+    /// The sizes of the leases held by this session's children that are still
+    /// running.
     ///
     /// §12.4: *"three concurrent children cannot together exceed"* the day
     /// budget. That is this field: each child's whole lease is committed the
     /// moment it is issued, not as it is drawn down, because a fourth child
     /// sized against what the first three have *so far* spent is a fourth child
     /// that can push the session past the cap.
-    pub in_flight: Vec<Lease>,
+    ///
+    /// Sizes rather than [`Lease`]s because a lease outlives the iteration that
+    /// issued it: the driver persists [`Lease::size`] when it issues one
+    /// (`session_leases`, migration 0160) and reads the unreleased ones back
+    /// here. A `Lease` stays sealed to [`lease`]; what crosses an iteration is
+    /// only the number it committed.
+    pub in_flight: Vec<Meter>,
 }
 
 /// Size a child's lease (AGENT-014 §6.3).
@@ -434,13 +462,26 @@ pub struct LeaseRequest {
 /// that would come out at zero. See [`LeaseRefusal`].
 pub fn lease(req: &LeaseRequest) -> Result<Lease, LeaseRefusal> {
     let unit = req.unit;
-    let want =
-        check_meter(&req.estimate, "the workflow's cost estimate", unit)?.amount * LEASE_HEADROOM;
+    let estimate = match &req.estimate {
+        Observed::Is(Some(m)) => {
+            check_unit(*m, "the workflow's cost estimate", unit)?;
+            Some(m.amount * LEASE_HEADROOM)
+        }
+        Observed::Is(None) => None,
+        Observed::Unknown { why } => {
+            return Err(LeaseRefusal::NotRead {
+                what: format!("the workflow's cost estimate ({why})"),
+            })
+        }
+    };
 
     let mut unbounded = Vec::new();
     // `(kind, headroom)` pairs, in `CapKind::ALL`'s order, which is the order a
     // tie is broken in.
-    let mut candidates = vec![(CapKind::Estimate, want)];
+    let mut candidates: Vec<(CapKind, f64)> = estimate
+        .map(|want| (CapKind::Estimate, want))
+        .into_iter()
+        .collect();
 
     let committed = in_flight_total(&req.in_flight, unit)?;
 
@@ -510,11 +551,13 @@ pub fn lease(req: &LeaseRequest) -> Result<Lease, LeaseRefusal> {
         });
     }
 
+    // At least one real cap survived the check above, so the slate is never
+    // empty — with or without an estimate.
     let (capped_by, size) = candidates
         .iter()
         .copied()
         .reduce(|a, b| if b.1 < a.1 { b } else { a })
-        .expect("the estimate is always a candidate");
+        .expect("a real cap is always a candidate past the NothingBounds check");
     let size = Meter::new(size, unit).map_err(|e| LeaseRefusal::Unusable(e.to_string()))?;
     if size.amount <= 0.0 {
         return Err(LeaseRefusal::WouldBeZero {
@@ -527,6 +570,7 @@ pub fn lease(req: &LeaseRequest) -> Result<Lease, LeaseRefusal> {
         size,
         capped_by,
         unbounded_by: unbounded,
+        estimated: estimate.is_some(),
     })
 }
 
@@ -557,11 +601,11 @@ fn check_meter(
     }
 }
 
-fn in_flight_total(leases: &[Lease], unit: SpendUnit) -> Result<f64, LeaseRefusal> {
+fn in_flight_total(leases: &[Meter], unit: SpendUnit) -> Result<f64, LeaseRefusal> {
     let mut total = 0.0;
     for l in leases {
-        check_unit(l.size, "a lease held by a child still running", unit)?;
-        total += l.size.amount;
+        check_unit(*l, "a lease held by a child still running", unit)?;
+        total += l.amount;
     }
     Ok(total)
 }
@@ -585,17 +629,22 @@ fn in_flight_total(leases: &[Lease], unit: SpendUnit) -> Result<f64, LeaseRefusa
 pub fn day_bound(
     budget: &crate::charter::SessionBudget,
     unit: SpendUnit,
+    trials_per_day: Option<i64>,
 ) -> Result<Bound, MeterError> {
     match unit {
         SpendUnit::Usd => Ok(Bound::Cap(Meter::usd(budget.usd_per_day)?)),
-        // There is no trials-per-day figure anywhere in this platform.
-        // `usd_per_day` is the only per-day number and it is in dollars, which
-        // cannot cap a trial count without a per-run price — the thing
-        // `llm_usage.cost_usd` does not provide.
-        SpendUnit::Trials => Ok(Bound::NotDenominated {
-            wants: "a per-day budget in trials; `SessionBudget` has `usd_per_day` only, and \
-                    converting it needs a per-run price this platform does not hold",
-        }),
+        // The day in trials is its own number (ADR-P11-05, `session_day_budget`),
+        // because `usd_per_day` cannot cap a trial count without a per-run price
+        // — the thing `llm_usage.cost_usd` does not provide. `None` and a stored
+        // zero are both "nobody said": a session created before 0161, or a row
+        // someone cleared. That is `NotDenominated` and every lease says so,
+        // exactly as before; it is never read as a cap of none.
+        SpendUnit::Trials => match trials_per_day.filter(|n| *n > 0) {
+            Some(n) => Ok(Bound::Cap(Meter::trials(n as f64)?)),
+            None => Ok(Bound::NotDenominated {
+                wants: "`session_day_budget.trials_per_day`, which the create route fills with `DEFAULT_TRIALS_PER_DAY`; this session has no row (it predates 0161) or a stored 0, and converting `usd_per_day` needs a per-run price this platform does not hold",
+            }),
+        },
     }
 }
 
@@ -624,6 +673,40 @@ pub fn total_bound(
             wants: "`research_sessions.budget.trials_total`, which §2.1 fills from the tier's \
                     `max_trials_per_task` × `max_runs`; a stored 0 is the blank form field, not \
                     a cap of none",
+        }),
+    }
+}
+
+/// §6.3's per-task cap, as a bound on a lease metered in `unit`.
+///
+/// §6.3 caps a lease by "`max_usd_per_task` of the tier", and §2.1 defines
+/// `trials_total` as the tier's per-task trial cap × `max_runs`. No tier on
+/// this platform declares a per-task cap in trials, so in trials the cap is
+/// §2.1 read backwards — `SessionBudget::trials_per_task` — and, for a row
+/// whose total was stored blank before creation filled it, the platform's
+/// declared `DEFAULT_TRIALS_PER_TASK` (ADR-P11-03). Never `NotDenominated` in
+/// trials: that is what left every lease on this platform bounded by nothing,
+/// and refused.
+///
+/// In USD the tier's own `max_usd_per_task` is the cap and the caller holds it,
+/// so this answers for trials and says so for dollars.
+///
+/// # Errors
+///
+/// Refuses a per-task figure that is not a finite non-negative number.
+pub fn per_task_bound(
+    budget: &crate::charter::SessionBudget,
+    unit: SpendUnit,
+) -> Result<Bound, MeterError> {
+    match unit {
+        SpendUnit::Trials => Ok(Bound::Cap(Meter::trials(
+            budget
+                .trials_per_task()
+                .unwrap_or(crate::charter::DEFAULT_TRIALS_PER_TASK) as f64,
+        )?)),
+        SpendUnit::Usd => Ok(Bound::NotDenominated {
+            wants: "the tier's `max_usd_per_task`, which the profile holds and the session row \
+                    does not",
         }),
     }
 }
@@ -679,7 +762,7 @@ impl DayBudget {
 pub fn day_budget(
     cap: &Observed<Bound>,
     spent_today: &Observed<Meter>,
-    in_flight: &[Lease],
+    in_flight: &[Meter],
     unit: SpendUnit,
 ) -> DayBudget {
     let bound = match cap {
@@ -708,7 +791,7 @@ pub fn day_budget(
         Ok(m) => m,
         Err(e) => return DayBudget::Unreadable { why: e.to_string() },
     };
-    let committed: f64 = in_flight.iter().map(|l| l.size.amount).sum();
+    let committed: f64 = in_flight.iter().map(|l| l.amount).sum();
     let used = spent.amount + committed;
     let left = cap.amount - used;
     if left <= 0.0 {
@@ -814,6 +897,10 @@ pub struct Stopping {
     /// How many deployable strategies the session has found, for
     /// [`crate::charter::StopWhen::DeployableFound`].
     pub deployable_found: Observed<u32>,
+    /// The instant the question is asked, for
+    /// [`crate::charter::StopWhen::ScheduleEnd`]. Passed in rather than read,
+    /// so the rule tests without a clock.
+    pub now: DateTime<Utc>,
 }
 
 /// Is the session finished? (AGENT-014 §7 row 3.)
@@ -848,13 +935,26 @@ pub fn stop(conditions: &[crate::charter::StopWhen], s: &Stopping) -> StopVerdic
     for c in conditions {
         let met = match c {
             StopWhen::Budget => budget.clone(),
-            // `Schedule` is `{windows: [{days, start, end, tz}]}` and a window
-            // recurs weekly forever. There is no end date anywhere in the
-            // object, so this condition has nothing to compare against — it is
-            // reported rather than quietly never firing.
-            StopWhen::ScheduleEnd => Met::NotEvaluable {
-                missing: "`charter::Schedule` has weekly windows and no end date, so there is \
-                          no instant a schedule ends at"
+            // `Schedule` is weekly windows that recur forever, so the end date
+            // rides on the condition itself. One with no date has nothing to
+            // compare against and is reported rather than quietly never firing.
+            StopWhen::ScheduleEnd { at: Some(end) } => {
+                if s.now >= *end {
+                    Met::Yes {
+                        because: format!(
+                            "the charter's schedule ended at {} and it is now {}",
+                            end.to_rfc3339(),
+                            s.now.to_rfc3339()
+                        ),
+                    }
+                } else {
+                    Met::No
+                }
+            }
+            StopWhen::ScheduleEnd { at: None } => Met::NotEvaluable {
+                missing: "this `schedule_end` names no `at`, and `charter::Schedule` is weekly \
+                          windows with no end date of its own, so there is no instant it ends \
+                          at; amend the charter with an `at`"
                     .to_string(),
             },
             StopWhen::AgendaDrained => {
@@ -983,7 +1083,7 @@ pub fn stop_word(c: crate::charter::StopWhen) -> &'static str {
     use crate::charter::StopWhen;
     match c {
         StopWhen::Budget => "budget",
-        StopWhen::ScheduleEnd => "schedule_end",
+        StopWhen::ScheduleEnd { .. } => "schedule_end",
         StopWhen::AgendaDrained => "agenda_drained",
         StopWhen::Stall => "stall",
         StopWhen::DeployableFound { .. } => "n_deployable_found",
@@ -1277,6 +1377,44 @@ pub struct Brief {
     pub why_now: String,
 }
 
+impl Brief {
+    /// The child's first turn: the question, then the brief (§6.2).
+    ///
+    /// The child is a Research run started through the conversation front
+    /// door, which takes a message and not a structured brief, so the brief
+    /// travels **in** the first turn — after the question, so the first line
+    /// of the run is still the thing it was asked. Wired 2026-10-03: `brief`
+    /// was built and tested with no caller, so no child of any session was
+    /// ever told its siblings' verdicts or why it was running.
+    ///
+    /// The standing constraints are written as such and not as preferences
+    /// the child may weigh: §2.2 puts them "at top rank". Sections with
+    /// nothing in them are left out rather than rendered empty, so a first
+    /// session's first child is not told "recent verdicts: none" as though
+    /// that were news.
+    #[must_use]
+    pub fn first_turn(&self, question: &str) -> String {
+        let mut out = String::from(question.trim());
+        out.push_str(
+            "\n\n---\nSession brief (you were started by a continuous research session):\n",
+        );
+        out.push_str(&format!("Why now: {}.\n", self.why_now));
+        if !self.preferences.is_empty() {
+            out.push_str("Standing constraints (from the charter; they bind this run):\n");
+            for p in &self.preferences {
+                out.push_str(&format!("- {}\n", p.text));
+            }
+        }
+        if !self.recent.is_empty() {
+            out.push_str("What sibling runs in this session just found, newest first:\n");
+            for r in &self.recent {
+                out.push_str(&format!("- {r}\n"));
+            }
+        }
+        out
+    }
+}
+
 /// Everything [`brief`] reads.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BriefInput<'a> {
@@ -1499,7 +1637,7 @@ mod tests {
             session: session(),
             item: item_id(1),
             unit: SpendUnit::Trials,
-            estimate: Observed::Is(trials(4.0)),
+            estimate: Observed::Is(Some(trials(4.0))),
             per_task: cap(100.0),
             day: cap(60.0),
             spent_today: Observed::Is(trials(0.0)),
@@ -1580,7 +1718,7 @@ mod tests {
         let mut issued: Vec<Lease> = Vec::new();
         for n in 1..=3u128 {
             r.item = item_id(n);
-            r.in_flight = issued.clone();
+            r.in_flight = issued.iter().map(Lease::size).collect();
             let l = lease(&r).expect("three leases of six fit in eighteen trials");
             issued.push(l);
         }
@@ -1590,7 +1728,7 @@ mod tests {
 
         // And the fourth is refused rather than squeezed to nothing.
         r.item = item_id(4);
-        r.in_flight = issued;
+        r.in_flight = issued.iter().map(Lease::size).collect();
         let e = lease(&r).expect_err("eighteen trials are committed");
         assert!(
             matches!(
@@ -1693,7 +1831,7 @@ mod tests {
     fn a_usd_lease_has_no_trial_count_and_says_why() {
         let mut r = a_request();
         r.unit = SpendUnit::Usd;
-        r.estimate = Observed::Is(Meter::usd(2.0).expect("an estimate"));
+        r.estimate = Observed::Is(Some(Meter::usd(2.0).expect("an estimate")));
         r.per_task = Observed::Is(Bound::Cap(Meter::usd(10.0).expect("a cap")));
         r.day = Observed::Is(Bound::Cap(Meter::usd(25.0).expect("a cap")));
         r.spent_today = Observed::Is(Meter::usd(0.0).expect("nothing yet"));
@@ -1727,7 +1865,7 @@ mod tests {
     #[test]
     fn a_lease_that_would_buy_nothing_is_refused() {
         let mut r = a_request();
-        r.estimate = Observed::Is(trials(0.0));
+        r.estimate = Observed::Is(Some(trials(0.0)));
         let e = lease(&r).expect_err("a zero lease is not a lease");
         assert!(matches!(e, LeaseRefusal::WouldBeZero { .. }), "{e:?}");
     }
@@ -1736,10 +1874,13 @@ mod tests {
 
     #[test]
     fn a_trials_total_of_zero_is_nobody_said_and_not_a_cap_of_none() {
-        // `SessionBudget::default` stores 0 and `desk_charter::translate`
-        // stores 0 for a blank form field. Read as a cap it would exhaust the
+        // A blank form field stores 0 (`desk_charter::translate`), and so did
+        // `SessionBudget::default` until 2026-10-03. Read as a cap it would
         // session before its first child ran.
-        let b = crate::charter::SessionBudget::default();
+        let b = crate::charter::SessionBudget {
+            trials_total: 0,
+            ..crate::charter::SessionBudget::default()
+        };
         assert_eq!(b.trials_total, 0);
         assert!(matches!(
             total_bound(&b, SpendUnit::Trials).expect("a readable budget"),
@@ -1755,16 +1896,24 @@ mod tests {
     }
 
     #[test]
-    fn there_is_no_day_budget_in_trials_and_the_bound_says_which_column_is_missing() {
+    fn a_day_in_trials_is_a_cap_only_when_somebody_gave_one_and_otherwise_names_what_is_missing() {
         let b = crate::charter::SessionBudget::default();
-        match day_bound(&b, SpendUnit::Trials).expect("a readable budget") {
-            Bound::NotDenominated { wants } => {
-                assert!(wants.contains("usd_per_day"), "{wants}");
+        for nobody_said in [None, Some(0), Some(-3)] {
+            match day_bound(&b, SpendUnit::Trials, nobody_said).expect("a readable budget") {
+                Bound::NotDenominated { wants } => {
+                    assert!(wants.contains("trials_per_day"), "{wants}");
+                    assert!(wants.contains("usd_per_day"), "{wants}");
+                }
+                other => panic!("{nobody_said:?} is not a cap: {other:?}"),
             }
-            other => panic!("there is no trials-per-day figure on this platform: {other:?}"),
         }
         assert_eq!(
-            day_bound(&b, SpendUnit::Usd).expect("a readable budget"),
+            day_bound(&b, SpendUnit::Trials, Some(120)).expect("a readable budget"),
+            Bound::Cap(trials(120.0)),
+            "a stored trials-per-day is the day's cap in the unit a run is metered in"
+        );
+        assert_eq!(
+            day_bound(&b, SpendUnit::Usd, None).expect("a readable budget"),
             Bound::Cap(Meter::usd(crate::charter::DEFAULT_USD_PER_DAY).expect("a day budget"))
         );
     }
@@ -1776,7 +1925,7 @@ mod tests {
                 usd_per_day: bad,
                 ..crate::charter::SessionBudget::default()
             };
-            assert!(day_bound(&b, SpendUnit::Usd).is_err(), "{bad}");
+            assert!(day_bound(&b, SpendUnit::Usd, None).is_err(), "{bad}");
         }
     }
 
@@ -1786,14 +1935,17 @@ mod tests {
         // rather than a claim: a trials-metered lease against a real
         // `SessionBudget` is bounded by the tier's per-task cap alone, and says
         // so on the event.
-        let b = crate::charter::SessionBudget::default();
+        let b = crate::charter::SessionBudget {
+            trials_total: 0,
+            ..crate::charter::SessionBudget::default()
+        };
         let r = LeaseRequest {
             session: session(),
             item: item_id(1),
             unit: SpendUnit::Trials,
-            estimate: Observed::Is(trials(4.0)),
+            estimate: Observed::Is(Some(trials(4.0))),
             per_task: cap(20.0),
-            day: Observed::Is(day_bound(&b, SpendUnit::Trials).expect("readable")),
+            day: Observed::Is(day_bound(&b, SpendUnit::Trials, None).expect("readable")),
             spent_today: Observed::Is(trials(0.0)),
             total: Observed::Is(total_bound(&b, SpendUnit::Trials).expect("readable")),
             spent_total: Observed::Is(trials(0.0)),
@@ -1871,6 +2023,9 @@ mod tests {
             agenda_drained: false,
             stalled: false,
             deployable_found: Observed::Is(0),
+            now: DateTime::parse_from_rfc3339("2026-10-03T12:00:00Z")
+                .expect("an instant")
+                .with_timezone(&Utc),
         }
     }
 
@@ -1913,7 +2068,7 @@ mod tests {
         // condition has nothing to compare against. A charter that lists it
         // believes the session will stop, and it will not.
         use crate::charter::StopWhen;
-        let v = stop(&[StopWhen::ScheduleEnd], &a_stopping());
+        let v = stop(&[StopWhen::ScheduleEnd { at: None }], &a_stopping());
         assert!(!v.completes());
         assert_eq!(v.not_evaluable.len(), 1);
         assert_eq!(v.not_evaluable[0].word, "schedule_end");
@@ -1922,6 +2077,108 @@ mod tests {
             "{:?}",
             v.lines()
         );
+    }
+
+    #[test]
+    fn a_schedule_end_with_a_date_fires_at_that_date_and_not_before() {
+        use crate::charter::StopWhen;
+        let s = a_stopping();
+        let before = s.now - chrono::Duration::hours(1);
+        let after = s.now + chrono::Duration::hours(1);
+
+        let ended = stop(&[StopWhen::ScheduleEnd { at: Some(before) }], &s);
+        assert!(ended.completes(), "{ended:?}");
+        assert_eq!(ended.reached[0].word, "schedule_end");
+        assert!(ended.not_evaluable.is_empty());
+
+        let running = stop(&[StopWhen::ScheduleEnd { at: Some(after) }], &s);
+        assert!(!running.completes(), "{running:?}");
+        assert!(
+            running.not_evaluable.is_empty(),
+            "a dated end that has not arrived is a no, not a cannot-tell"
+        );
+
+        let exactly = stop(&[StopWhen::ScheduleEnd { at: Some(s.now) }], &s);
+        assert!(
+            exactly.completes(),
+            "the end instant itself is past the end"
+        );
+    }
+
+    // ── cold start: no estimate is not an unread estimate ───────────────────
+
+    #[test]
+    fn a_workflow_nobody_has_run_yet_is_leased_by_its_real_caps_not_refused() {
+        // The deadlock this guards: no estimate without finished runs, no runs
+        // without a lease. `Is(None)` is "read, and there is none".
+        let mut r = a_request();
+        r.estimate = Observed::Is(None);
+        r.per_task = cap(40.0);
+        r.day = cap(60.0);
+        let l = lease(&r).expect("a real cap bounds it");
+        assert_eq!(l.capped_by(), CapKind::PerTask);
+        assert!((l.size().amount() - 40.0).abs() < 1e-12, "{:?}", l.size());
+        assert!(!l.estimated());
+        assert_eq!(l.event_payload()["estimated"], false);
+
+        // And with no real cap at all it is still refused: an absent estimate
+        // never licenses an unbounded child.
+        let b = crate::charter::SessionBudget {
+            trials_total: 0,
+            ..crate::charter::SessionBudget::default()
+        };
+        let mut r = a_request();
+        r.estimate = Observed::Is(None);
+        r.per_task = Observed::Is(Bound::NotDenominated { wants: "nothing" });
+        r.day = Observed::Is(day_bound(&b, SpendUnit::Trials, None).expect("readable"));
+        r.total = Observed::Is(total_bound(&b, SpendUnit::Trials).expect("readable"));
+        let e = lease(&r).expect_err("nothing bounds it");
+        assert!(matches!(e, LeaseRefusal::NothingBounds { .. }), "{e:?}");
+    }
+
+    #[test]
+    fn a_day_in_trials_caps_a_lease_and_a_spent_day_refuses_one() {
+        // ADR-P11-05: the day budget in the unit a run is metered in. Before it,
+        // `day_bound` answered `NotDenominated` for trials and the day gate was
+        // inert in production.
+        let b = crate::charter::SessionBudget::default();
+        let mut r = a_request();
+        r.estimate = Observed::Is(Some(trials(30.0)));
+        r.per_task = cap(40.0);
+        r.day = Observed::Is(day_bound(&b, SpendUnit::Trials, Some(50)).expect("readable"));
+        r.spent_today = Observed::Is(trials(35.0));
+        let l = lease(&r).expect("fifteen trials of the day remain");
+        assert_eq!(l.capped_by(), CapKind::Day, "the day is what cut it");
+        assert!((l.size().amount() - 15.0).abs() < 1e-9, "{:?}", l.size());
+
+        r.spent_today = Observed::Is(trials(50.0));
+        assert!(lease(&r).is_err(), "a spent day buys no child");
+    }
+
+    #[test]
+    fn the_per_task_cap_is_the_session_budget_read_backwards_and_always_real_in_trials() {
+        let b = crate::charter::SessionBudget {
+            trials_total: 120,
+            max_runs: 12,
+            ..crate::charter::SessionBudget::default()
+        };
+        assert_eq!(
+            per_task_bound(&b, SpendUnit::Trials).expect("readable"),
+            Bound::Cap(trials(10.0))
+        );
+        // A row stored blank before creation filled it still has a cap.
+        let blank = crate::charter::SessionBudget {
+            trials_total: 0,
+            ..b
+        };
+        assert_eq!(
+            per_task_bound(&blank, SpendUnit::Trials).expect("readable"),
+            Bound::Cap(trials(crate::charter::DEFAULT_TRIALS_PER_TASK as f64))
+        );
+        assert!(matches!(
+            per_task_bound(&b, SpendUnit::Usd).expect("readable"),
+            Bound::NotDenominated { .. }
+        ));
     }
 
     #[test]
@@ -1969,7 +2226,7 @@ mod tests {
         use crate::charter::StopWhen;
         let all = [
             StopWhen::Budget,
-            StopWhen::ScheduleEnd,
+            StopWhen::ScheduleEnd { at: None },
             StopWhen::AgendaDrained,
             StopWhen::Stall,
             StopWhen::DeployableFound { k: 1 },
@@ -1985,8 +2242,14 @@ mod tests {
         use crate::charter::StopWhen;
         let mut s = a_stopping();
         s.total = Observed::Is(
-            total_bound(&crate::charter::SessionBudget::default(), SpendUnit::Trials)
-                .expect("readable"),
+            total_bound(
+                &crate::charter::SessionBudget {
+                    trials_total: 0,
+                    ..crate::charter::SessionBudget::default()
+                },
+                SpendUnit::Trials,
+            )
+            .expect("readable"),
         );
         let v = stop(&[StopWhen::Budget], &s);
         assert!(!v.completes());
@@ -2344,6 +2607,35 @@ mod tests {
                 text: "never trade on weekends".into()
             }]
         );
+    }
+
+    #[test]
+    fn the_first_turn_is_the_question_then_the_brief_and_omits_what_is_empty() {
+        let charter = a_charter(&["btc"], &["never trade on weekends"]);
+        let item = AgendaItem::new(session(), "does x work?", "btc", Source::CharterSeed);
+        let siblings = vec![sibling(1, "btc", "completed")];
+        let turn = brief(&BriefInput {
+            session: session(),
+            charter: &charter,
+            item: &item,
+            siblings: &siblings,
+        })
+        .first_turn(&item.question);
+        assert!(turn.starts_with("does x work?\n"), "{turn}");
+        assert!(turn.contains("never trade on weekends"), "{turn}");
+        assert!(turn.contains("question 1"), "{turn}");
+        assert!(turn.contains("Why now: you are running because"), "{turn}");
+
+        let bare = a_charter(&["btc"], &[]);
+        let first = brief(&BriefInput {
+            session: session(),
+            charter: &bare,
+            item: &item,
+            siblings: &[],
+        })
+        .first_turn(&item.question);
+        assert!(!first.contains("Standing constraints"), "{first}");
+        assert!(!first.contains("sibling runs"), "{first}");
     }
 
     #[test]

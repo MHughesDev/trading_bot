@@ -121,6 +121,9 @@ async fn forward_frame(
     my_panels: &std::collections::HashSet<String>,
     frame: &crate::live_bus::LiveFrame,
 ) -> bool {
+    // The payload was serialised once when the frame was published. Each
+    // subscription only adds its own `sub_id` around that text, so there is no
+    // per-subscriber walk or clone of a JSON tree (Set C #14/#15).
     for sub in gateway.list_for_user(user_id) {
         if !my_panels.contains(&sub.panel_id) {
             continue;
@@ -128,11 +131,12 @@ async fn forward_frame(
         if sub.lane != frame.lane || sub.instrument != frame.instrument {
             continue;
         }
-        let out = WsOutMessage::Frame {
+        let out = FrameOut {
+            kind: "frame",
             sub_id: sub.id,
-            lane: sub.lane.clone(),
-            instrument: sub.instrument.clone(),
-            payload: frame.payload.clone(),
+            lane: &sub.lane,
+            instrument: &sub.instrument,
+            payload: &frame.payload,
         };
         if let Some(m) = json_msg(&out) {
             if socket.send(m).await.is_err() {
@@ -141,6 +145,19 @@ async fn forward_frame(
         }
     }
     true
+}
+
+/// The wire shape of `WsOutMessage::Frame`, with the payload held as
+/// already-serialised text. Byte-for-byte the same JSON as the enum variant
+/// (`frame_envelope_matches_the_enum_variant` holds that).
+#[derive(serde::Serialize)]
+struct FrameOut<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    sub_id: uuid::Uuid,
+    lane: &'a str,
+    instrument: &'a str,
+    payload: &'a serde_json::value::RawValue,
 }
 
 async fn handle_client_message(
@@ -204,7 +221,7 @@ async fn handle_client_message(
 
 /// Serialize a WS message to a text frame, returning `None` on failure.
 /// Logs and drops the frame rather than sending an empty text frame.
-fn json_msg(msg: &WsOutMessage) -> Option<Message> {
+fn json_msg<T: serde::Serialize>(msg: &T) -> Option<Message> {
     match serde_json::to_vec(msg) {
         Ok(bytes) => {
             // SAFETY: serde_json always produces valid UTF-8.
@@ -220,4 +237,32 @@ fn json_msg(msg: &WsOutMessage) -> Option<Message> {
 
 fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_envelope_matches_the_enum_variant() {
+        let id = uuid::Uuid::nil();
+        let payload = serde_json::json!({"price": "1.5", "side": "buy"});
+        let via_enum = serde_json::to_string(&WsOutMessage::Frame {
+            sub_id: id,
+            lane: "market.trades".into(),
+            instrument: "BTC-USD".into(),
+            payload: payload.clone(),
+        })
+        .unwrap();
+        let raw = serde_json::value::to_raw_value(&payload).unwrap();
+        let via_raw = serde_json::to_string(&FrameOut {
+            kind: "frame",
+            sub_id: id,
+            lane: "market.trades",
+            instrument: "BTC-USD",
+            payload: &raw,
+        })
+        .unwrap();
+        assert_eq!(via_enum, via_raw);
+    }
 }

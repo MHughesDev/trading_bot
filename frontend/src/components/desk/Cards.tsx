@@ -13,6 +13,100 @@ import { ConfidencePill, EnvelopeBanner, EvidenceChip, InertText, JobProgress, P
 import { str, num, bool, yieldLine, selectionLines, selectionSummary, statLine, isIrreversibleEnvelope } from './Cards.helpers'
 import { ago } from '@/components/desk/Shared.helpers'
 
+/**
+ * The pre-registration card (AGENT-013 §3; S-10.15), readable before the run
+ * spends a trial, with **steer opens an amendment**.
+ *
+ * An amendment is the run's to make — `POST /api/lifecycle/preregistrations`
+ * with `supersedes` takes the run from the caller's session, and a human token
+ * has no run — so the person's half is a steer the run receives as an
+ * amendment request, naming the hash it supersedes. The lineage warning is
+ * shown **before** the steer is sent, because it is the part a person would
+ * not otherwise know: the sealed original is kept, the trial budget carries
+ * over from the ledger rather than resetting, and each tier caps how many
+ * amendments a run may make.
+ */
+export function PreregCard({ card, onSteer }: { card: DeskCard; onSteer?: (text: string) => void }) {
+  const d = card.detail ?? {}
+  const [amending, setAmending] = useState(false)
+  const [text, setText] = useState('')
+  const [sent, setSent] = useState(false)
+  const hash = str(d.hash)
+  return (
+    <Shell card={card} kindLabel="pre-registration">
+      <Body card={card} text={card.headline} />
+      <dl className="kv" style={{ fontSize: 'var(--t-11)' }}>
+        {(
+          [
+            ['benchmark', str(d.benchmark)],
+            ['delta_practical', str(d.delta_practical) ?? num(d.delta_practical)?.toString() ?? null],
+            ['window', str(d.window)],
+            ['embargo', str(d.embargo)],
+            ['null family', str(d.null_family)],
+            ['trial budget', num(d.trial_budget)?.toString() ?? null],
+            ['falsifier', str(d.falsifier)],
+            ['hash', hash],
+          ] as Array<[string, string | null]>
+        ).map(([k, v]) => (
+          <div key={k}>
+            <span className="lbl">{k}</span> <span className="mono">{v ?? 'not recorded'}</span>
+          </div>
+        ))}
+      </dl>
+      <p className="sub">Sealed before any trial was spent.</p>
+      {onSteer &&
+        (amending ? (
+          <div data-testid="prereg-amend">
+            <p className="sub" role="note" data-testid="prereg-lineage-warning">
+              An amendment supersedes {hash ? <span className="mono">{hash}</span> : 'this registration'}; the
+              original stays in the lineage and is what the verdict is read against, the trial budget carries
+              over rather than resetting, and this tier allows only a capped number of amendments per run.
+            </p>
+            <textarea
+              aria-label="What to amend"
+              rows={2}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="what should change, and why"
+              style={{ width: '100%' }}
+            />
+            <div className="desk-actions">
+              <Button
+                size="xs"
+                variant="primary"
+                disabled={!text.trim()}
+                onClick={() => {
+                  onSteer(
+                    `Amend the pre-registration${hash ? ` (supersedes ${hash})` : ''}: ${text.trim()}`,
+                  )
+                  setSent(true)
+                  setAmending(false)
+                  setText('')
+                }}
+              >
+                Send amendment request
+              </Button>
+              <Button size="xs" variant="ghost" onClick={() => setAmending(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="desk-actions">
+            <Button size="xs" variant="secondary" onClick={() => setAmending(true)}>
+              Steer: amend
+            </Button>
+            {sent && (
+              <span className="sub" data-testid="prereg-amend-sent">
+                sent to the run as a steer; the amendment is sealed when the run re-registers
+              </span>
+            )}
+          </div>
+        ))}
+    </Shell>
+  )
+}
+
 export interface CardActions {
   onOpenId?: (id: string) => void
   onSteer?: (text: string) => void
@@ -472,31 +566,7 @@ export function Card({
     }
 
     case 'prereg':
-      return (
-        <Shell card={card} kindLabel="pre-registration">
-          <Body card={card} text={card.headline} />
-          <dl className="kv" style={{ fontSize: 'var(--t-11)' }}>
-            {(
-              [
-                ['benchmark', str(d.benchmark)],
-                ['delta_practical', str(d.delta_practical)],
-                ['window', str(d.window)],
-                ['embargo', str(d.embargo)],
-                ['null family', str(d.null_family)],
-                ['trial budget', num(d.trial_budget)?.toString() ?? null],
-                ['falsifier', str(d.falsifier)],
-                ['hash', str(d.hash)],
-              ] as Array<[string, string | null]>
-            ).map(([k, v]) => (
-              <div key={k}>
-                <span className="lbl">{k}</span>{' '}
-                <span className="mono">{v ?? 'not recorded'}</span>
-              </div>
-            ))}
-          </dl>
-          <p className="sub">Sealed before any trial was spent.</p>
-        </Shell>
-      )
+      return <PreregCard card={card} onSteer={actions.onSteer} />
 
     case 'offer':
       return (

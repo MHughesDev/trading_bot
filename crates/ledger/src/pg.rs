@@ -331,6 +331,7 @@ impl PgTrialLedger {
         ticket: &mut TrialTicket,
         event: TrialEvent,
     ) -> Result<(), LedgerError> {
+        ticket.refuse_if_reproduction()?;
         if event.state.is_some_and(TrialState::is_terminal) {
             return Err(LedgerError::Invalid(
                 "terminal transitions go through settle()".into(),
@@ -348,6 +349,7 @@ impl PgTrialLedger {
         ticket: TrialTicket,
         event: TrialEvent,
     ) -> Result<(), LedgerError> {
+        ticket.refuse_if_reproduction()?;
         if !event.state.is_some_and(TrialState::is_terminal) {
             return Err(LedgerError::Invalid(
                 "settle() requires a terminal state".into(),
@@ -378,6 +380,71 @@ impl PgTrialLedger {
         .map_err(be)?;
         tx.commit().await.map_err(be)?;
         Ok(id)
+    }
+
+    /// A ticket authorising a re-run of the completed trial registered under
+    /// `run_id` (ADR-S10-18). Reads `mlops.trial_state` and writes nothing.
+    ///
+    /// # Errors
+    /// [`LedgerError::NothingToReproduce`] and backend failures.
+    pub async fn begin_reproduction_async(
+        &self,
+        tenant_id: &str,
+        run_id: &str,
+    ) -> Result<TrialTicket, LedgerError> {
+        let original = self
+            .prior_trial_async(tenant_id, run_id)
+            .await?
+            .ok_or_else(|| LedgerError::NothingToReproduce(run_id.to_string()))?;
+        Ok(crate::mint_reproduction(
+            original,
+            tenant_id.to_string(),
+            run_id.to_string(),
+        ))
+    }
+
+    /// Append a reproduction's finding to `mlops.reproduction`, consuming its
+    /// ticket. Touches no trial row.
+    ///
+    /// # Errors
+    /// A ticket that is not a reproduction ticket, an invalid record, and
+    /// backend failures.
+    pub async fn record_reproduction_async(
+        &self,
+        ticket: TrialTicket,
+        record: &crate::reproduction::ReproductionRecord,
+    ) -> Result<(), LedgerError> {
+        let Some(original) = ticket.reproduces() else {
+            return Err(LedgerError::Invalid(
+                "only a reproduction ticket records a reproduction".into(),
+            ));
+        };
+        record.validate().map_err(LedgerError::Invalid)?;
+        let mut tx = tenant_tx(&self.pool, ticket.tenant_id())
+            .await
+            .map_err(be)?;
+        sqlx::query(
+            "INSERT INTO mlops.reproduction
+               (tenant_id, original_trial_id, run_id, outcome, receipt_stored, receipt_rerun,
+                receipt_missing, differences, was_value, now_value, reproduced_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+        )
+        .bind(ticket.tenant_id())
+        .bind(original)
+        .bind(&record.run_id)
+        .bind(&record.outcome)
+        .bind(&record.receipt_stored)
+        .bind(&record.receipt_rerun)
+        .bind(record.receipt_missing())
+        .bind(&record.differences)
+        .bind(record.was_value)
+        .bind(record.now_value)
+        .bind(&record.reproduced_by)
+        .execute(&mut *tx)
+        .await
+        .map_err(be)?;
+        tx.commit().await.map_err(be)?;
+        Ok(())
     }
 
     ///
@@ -611,6 +678,7 @@ impl PgTrialLedger {
         ticket: &TrialTicket,
         series: &ReturnSeries,
     ) -> Result<String, LedgerError> {
+        ticket.refuse_if_reproduction()?;
         series.validate()?;
         let mut tx = tenant_tx(&self.pool, &ticket.tenant_id).await.map_err(be)?;
         sqlx::query("INSERT INTO mlops.trial_return_series (trial_id, tenant_id, ts, returns, series_digest) VALUES ($1,$2,$3,$4,$5)")
@@ -984,6 +1052,22 @@ impl TrialLedger for PgTrialLedger {
         self.block(self.prior_trial_async(tenant_id, config_hash))
             .ok()
             .flatten()
+    }
+
+    fn begin_reproduction(
+        &self,
+        tenant_id: &str,
+        run_id: &str,
+    ) -> Result<TrialTicket, LedgerError> {
+        self.block(self.begin_reproduction_async(tenant_id, run_id))
+    }
+
+    fn record_reproduction(
+        &self,
+        ticket: TrialTicket,
+        record: &crate::reproduction::ReproductionRecord,
+    ) -> Result<(), LedgerError> {
+        self.block(self.record_reproduction_async(ticket, record))
     }
 
     fn trial_count(&self, tenant_id: &str) -> usize {

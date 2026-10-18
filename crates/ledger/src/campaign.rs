@@ -806,7 +806,10 @@ mod tests {
 
         assert_eq!(def.objective, prereg.objective);
         assert_eq!(def.benchmark, prereg.benchmark);
-        assert_eq!(def.delta_practical, prereg.delta_practical);
+        assert!(
+            (def.delta_practical - prereg.delta_practical).abs() < f64::EPSILON,
+            "the practical delta is copied, not recomputed"
+        );
         assert_eq!(def.gates_profile, prereg.gate_profile);
         assert_eq!(def.hypothesis, prereg.primary_hypothesis);
         assert_eq!(
@@ -816,7 +819,7 @@ mod tests {
         );
         // And the fields a registration has no room for are the caller's.
         assert_eq!(def.slug, "momentum-4h");
-        assert_eq!(def.approval_spend_usd, 5.0);
+        assert!((def.approval_spend_usd - 5.0).abs() < f64::EPSILON);
         def.validate()
             .expect("a definition derived from a sealed registration is valid");
     }

@@ -15,11 +15,27 @@ use jobs::{Cost, JobContext, JobError, JobKind, JobOutput, Progress, Worker};
 /// bars and stale runs are the failures that silently produce beautiful backtests.
 pub struct DataQcWorker {
     clickhouse_url: String,
+    /// When present, the job also runs the eight-check battery
+    /// (`dataplane::qc`) and persists a `data_qc_reports` row (Set P P-2.2).
+    pg: Option<sqlx::PgPool>,
 }
 
 impl DataQcWorker {
     pub fn new(clickhouse_url: String) -> Self {
-        Self { clickhouse_url }
+        Self {
+            clickhouse_url,
+            pg: None,
+        }
+    }
+
+    /// Give the worker the database the battery's reports are written to.
+    ///
+    /// Without it the worker can only run the four-threshold summary below, whose
+    /// letters are not the ones the admission gate will read; `main.rs` passes it.
+    #[must_use]
+    pub fn with_pool(mut self, pg: sqlx::PgPool) -> Self {
+        self.pg = Some(pg);
+        self
     }
 }
 
@@ -137,7 +153,61 @@ impl Worker for DataQcWorker {
         // but a large number means the same range is being re-collected.
         let repeat_rows = rows.saturating_sub(distinct_bars);
 
-        let assessment = grade(coverage_pct, gap_pct, flat_pct);
+        let legacy_assessment = grade(coverage_pct, gap_pct, flat_pct);
+
+        // The battery (Set P P-2.2): the grade a manifest carries and an
+        // Experiment is admitted on. Needs a `venue` in the manifest because
+        // a persisted report is per series, and a pool to persist it to.
+        // `expected_bars` is the continuous count over the window, so a series
+        // missing its ends is graded as missing them; a session venue's closed
+        // hours would read as gaps, which is why the manifest may narrow
+        // the window with `from` / `to`.
+        let battery = match (&self.pg, manifest.get("venue").and_then(Value::as_str)) {
+            (Some(pg), Some(venue)) => {
+                let secs = |k: &str| manifest.get(k).and_then(Value::as_i64);
+                let from = chrono::DateTime::from_timestamp(secs("from").unwrap_or(first_s), 0);
+                let to = chrono::DateTime::from_timestamp(
+                    secs("to").unwrap_or(last_s + period_s),
+                    0,
+                );
+                let (Some(from), Some(to)) = (from, to) else {
+                    return Err(JobError::logic(
+                        ledger::TerminalReason::IntegrityRejected,
+                        "invalid_manifest",
+                        "data_qc `from` / `to` are not valid instants",
+                    ));
+                };
+                let expected = u64::try_from(((to - from).num_seconds() / period_s).max(0))
+                    .unwrap_or(0);
+                let (id, report) = storage::clickhouse::qc_reports::grade_and_persist(
+                    pg,
+                    &self.clickhouse_url,
+                    instrument,
+                    venue,
+                    timeframe,
+                    u32::try_from(period_s).unwrap_or(0),
+                    from,
+                    to,
+                    expected,
+                    &dataplane::qc::QcConfig::default(),
+                )
+                .await
+                .map_err(|e| JobError {
+                    code: "qc_report_failed".into(),
+                    terminal: ledger::TerminalReason::DependencyFailure,
+                    field: None,
+                    rule: None,
+                    fix: Some(format!("{e}")),
+                    detail_ref: None,
+                    retryable: true,
+                })?;
+                Some((id, report))
+            }
+            _ => None,
+        };
+        let assessment = battery
+            .as_ref()
+            .map_or(legacy_assessment, |(_, r)| r.graded.grade.as_str());
 
         // ASCII in the summary: a model reads it, and so do developer terminals,
         // some of which are cp1252 and raise on an em dash.
@@ -152,6 +222,9 @@ impl Worker for DataQcWorker {
                 "instrument_id": instrument,
                 "timeframe": timeframe,
                 "grade": assessment,
+                "legacy_grade": legacy_assessment,
+                "report_id": battery.as_ref().map(|(id, _)| id.to_string()),
+                "grade_source": if battery.is_some() { "battery" } else { "legacy_thresholds" },
                 "backfilled_knowledge_bars": backfilled,
                 "quality_flagged_bars": flagged,
                 "bars": distinct_bars,

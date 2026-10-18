@@ -265,7 +265,11 @@ export function mergeCards(existing: DeskCard[], incoming: DeskCard[]): DeskCard
 // reported no exposure over a stream carrying one per step. Neither surface was
 // broken in a way anybody could see, which is why both survived.
 
-/** The prompt broken into the layers §3.5 asks for. Nothing emits this yet. */
+/**
+ * The prompt broken into the layers §3.5 asks for. The local driver writes it on
+ * every `usage` note and `decision` row (estimated with the harness's own
+ * bytes-per-token arithmetic; `output` is the reply cap, not what was generated).
+ */
 export interface CallLayers {
   charter: number
   schemas: number
@@ -335,8 +339,9 @@ export function costCalls(events: WireEvent[]): CallCost[] {
     const cacheRead = num(c.cache_read_tokens)
     out.push({
       step: num(c.step) ?? 0,
-      // Never `{0,0,0,0}`: the note has no layer split at all.
-      layers: null,
+      // Never `{0,0,0,0}`: a note without a split is `null`. Read only when the
+      // emitter wrote all four, so a half-split is not drawn as a whole one.
+      layers: readLayers(c.layers),
       // Deliberately `providerPrompt`, not `prompt`. `input_tokens` is the
       // prompt *minus* the cached part, so dividing the cache read by it
       // overstates the hit — 200/800 reads as 25% where the provider's own
@@ -351,8 +356,9 @@ export function costCalls(events: WireEvent[]): CallCost[] {
       output_tokens: num(c.output_tokens),
       cache_read_tokens: cacheRead,
       latency_ms: num(c.latency_ms),
-      // No price table anywhere in the platform. Priced by nobody, not free.
-      usd_tenth_cents: null,
+      // Priced only when the note says so (the call's own rate row, config/prices.yaml).
+      // An absent figure is unpriced, not free.
+      usd_tenth_cents: num(c.usd_tenth_cents),
     })
   }
   return out
@@ -490,4 +496,12 @@ export function latestExposure(events: WireEvent[]): ExposureNote | null {
     }
   }
   return null
+}
+
+export function readLayers(v: unknown): CallLayers | null {
+  if (!v || typeof v !== 'object') return null
+  const o = v as Record<string, unknown>
+  const [charter, schemas, body, output] = [o.charter, o.schemas, o.body, o.output].map(num)
+  if (charter === null || schemas === null || body === null || output === null) return null
+  return { charter, schemas, body, output }
 }

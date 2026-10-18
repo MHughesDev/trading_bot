@@ -1,5 +1,7 @@
 # Deferred roadmap (FB-N1, FB-N3)
 
+> **2026-10-03:** the steps below name Python modules (`execution/adapters/`, `risk_engine/`) that were deleted in the Rust rewrite. The current-stack forms are the rewritten rows **FB-N1-S2** (Kraken spot live adapter behind the `Venue` port, per-venue risk caps, gated by ROADMAP H-4) and the new **FB-N3-S2** (optimiser objectives on `strategy_engine::allocation::rebalance`) in [`../QUEUE_STACK.csv`](../QUEUE_STACK.csv); see [`../QUEUE.MD`](../QUEUE.MD) section 2.
+
 **Queue system:** [`QUEUE_SCHEMA.md`](QUEUE_SCHEMA.md) · [`QUEUE_STACK.csv`](QUEUE_STACK.csv) · [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD)
 
 **Queue:** Parent rows **FB-N1** / **FB-N3** in [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) are **Done** (**closed for now**, 2026-04-17); sub-slices **FB-N1-S1** / **FB-N3-S1** remain the delivered first steps. This file still describes **future** work if you **reopen** or add new backlog items.

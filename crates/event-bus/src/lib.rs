@@ -6,6 +6,7 @@
 pub mod backpressure;
 pub mod lanes;
 pub mod nats;
+pub mod observe;
 pub mod publish;
 pub mod quarantine;
 pub mod subjects;

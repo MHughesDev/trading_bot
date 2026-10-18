@@ -13,7 +13,7 @@ Note: Canonical executable plans live in docs/plans/. This copy is the traceable
 >
 > **➤ New here / about to start implementing? Jump to [§3.1 START HERE](#31-start-here--execution-entry-point-read-this-before-doing-anything).**
 > It tells you which file to execute, in what order, and how to track progress. The first thing you
-> will execute is [`phase-A-documentation.md`](./phase-A-documentation.md).
+> will execute is [`phase-A-documentation.md`](../plan-sets/set-A/phase-A-documentation.md).
 
 ---
 
@@ -26,14 +26,14 @@ system.
 
 We are doing **two things at once**:
 
-1. **Rewriting the entire backend in Rust**, following the architecture in [`../specs/`](../specs/).
+1. **Rewriting the entire backend in Rust**, following the architecture in [`../specs/`](../../specs/).
 2. **Restructuring** into a clean, procedural Cargo workspace defined in
-   [`../architecture.md`](../architecture.md).
+   [`../architecture.md`](../../architecture.md).
 
 The React frontend (`frontend/`) is **kept** and re-pointed at the new Rust API/WS contracts.
 
 The end state is the file/folder structure enumerated in
-[`../architecture.md`](../architecture.md). That document is the **structural contract**; this
+[`../architecture.md`](../../architecture.md). That document is the **structural contract**; this
 plan and the phase files are the **execution contract** for getting there.
 
 ---
@@ -97,18 +97,18 @@ system code is added.
 
 | Phase | File | Theme | Gate to start |
 |-------|------|-------|----------------|
-| **A** | [`phase-A-documentation.md`](./phase-A-documentation.md) | **Initialize documentation workspace — the first thing we do.** Scaffold the `docs/` template workspace; populate it with design-time content (artifact, open-questions, ADRs, specs as `Draft`, research, architecture, plans). No code written. Specs have unfilled `Verified by: [—]` — closing those is Phase 7's job | none |
-| **B** | [`phase-B-bootstrap.md`](./phase-B-bootstrap.md) | Workspace scaffold, infra, CI, quarantine Python | Phase A done |
-| **0** | [`phase-0-foundations.md`](./phase-0-foundations.md) | The irreversible core: `domain`, instrument metadata, strategy format freeze, raw archive design | Phase B done |
-| **1** | [`phase-1-spine.md`](./phase-1-spine.md) | API + bus + one collector + storage writers + bar builder | Phase 0 done |
-| **2** | [`phase-2-money-safety.md`](./phase-2-money-safety.md) | Risk gate + kill switch + paper execution + manual orders + reconciliation | Phase 1 done |
-| **3** | [`phase-3-ui-streaming.md`](./phase-3-ui-streaming.md) | UI gateway + React panels + demand manager | Phase 2 done |
-| **4** | [`phase-4-strategies.md`](./phase-4-strategies.md) | Feature engine + strategy runtime + backtest + multi-asset | Phase 2 done (UI helps but not required) |
-| **5** | [`phase-5-front-doors.md`](./phase-5-front-doors.md) | JSON strategy API + visual builder + MCP server | Phase 4 done; strategy format frozen (Phase 0) |
-| **6** | [`phase-6-second-asset.md`](./phase-6-second-asset.md) | Equity collector + equity broker adapter — proves the abstraction | Phase 4 done |
-| **7** | [`phase-7-cutover.md`](./phase-7-cutover.md) | Parity verification, decommission `legacy_python/`, **finalize documentation workspace** (advance specs to `Implemented`, fill evidence, operational procedures from reality, full traceability verify), release | All prior phases done |
+| **A** | [`phase-A-documentation.md`](../plan-sets/set-A/phase-A-documentation.md) | **Initialize documentation workspace — the first thing we do.** Scaffold the `docs/` template workspace; populate it with design-time content (artifact, open-questions, ADRs, specs as `Draft`, research, architecture, plans). No code written. Specs have unfilled `Verified by: [—]` — closing those is Phase 7's job | none |
+| **B** | [`phase-B-bootstrap.md`](../plan-sets/set-A/phase-B-bootstrap.md) | Workspace scaffold, infra, CI, quarantine Python | Phase A done |
+| **0** | [`phase-0-foundations.md`](../plan-sets/set-A/phase-0-foundations.md) | The irreversible core: `domain`, instrument metadata, strategy format freeze, raw archive design | Phase B done |
+| **1** | [`phase-1-spine.md`](../plan-sets/set-A/phase-1-spine.md) | API + bus + one collector + storage writers + bar builder | Phase 0 done |
+| **2** | [`phase-2-money-safety.md`](../plan-sets/set-A/phase-2-money-safety.md) | Risk gate + kill switch + paper execution + manual orders + reconciliation | Phase 1 done |
+| **3** | [`phase-3-ui-streaming.md`](../plan-sets/set-A/phase-3-ui-streaming.md) | UI gateway + React panels + demand manager | Phase 2 done |
+| **4** | [`phase-4-strategies.md`](../plan-sets/set-A/phase-4-strategies.md) | Feature engine + strategy runtime + backtest + multi-asset | Phase 2 done (UI helps but not required) |
+| **5** | [`phase-5-front-doors.md`](../plan-sets/set-A/phase-5-front-doors.md) | JSON strategy API + visual builder + MCP server | Phase 4 done; strategy format frozen (Phase 0) |
+| **6** | [`phase-6-second-asset.md`](../plan-sets/set-A/phase-6-second-asset.md) | Equity collector + equity broker adapter — proves the abstraction | Phase 4 done |
+| **7** | [`phase-7-cutover.md`](../plan-sets/set-A/phase-7-cutover.md) | Parity verification, decommission `legacy_python/`, **finalize documentation workspace** (advance specs to `Implemented`, fill evidence, operational procedures from reality, full traceability verify), release | All prior phases done |
 
-**Decision gates that block code (from [`../open-questions.md`](../open-questions.md)).**
+**Decision gates that block code (from [`../open-questions.md`](../../open-questions.md)).**
 These must be answered before the phase that depends on them; each phase file restates its gate:
 - **Q1 real-vs-paper** — gates Phase 2 execution. **Resolved: Alpaca paper account for all paper trading (all assets, all domains).** Build the Alpaca adapter in Phase 2; Coinbase live adapter is post-Phase-6 scope.
 - **Q2 broker/venue choice** — gates Phase 1 collector and Phase 6 equity adapter. **Resolved:** Three parallel systems, all assets/domains:

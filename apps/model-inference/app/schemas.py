@@ -5,6 +5,9 @@ from pydantic import BaseModel
 class Instance(BaseModel):
     instrument_id: str
     features: dict  # feature_name -> float
+    # Named numeric series, oldest first (N-4.2): a GARCH model is served from the recent
+    # returns the caller supplies as ``series["recent_returns"]``.
+    series: dict = {}
 
 
 class PredictRequest(BaseModel):

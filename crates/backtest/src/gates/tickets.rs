@@ -132,9 +132,10 @@ pub const REQUIREMENTS: &[Requirement] = &[
         // significance one, and the gate that asks about significance has no
         // business refusing a result for being small.
         accept: &["full_paper", "reduced_size_paper"],
-        // Owed the timing-jitter step, which needs an execution-delay dimension
-        // in the simulator before it can be a `run_study` kind at all.
-        enforced: false,
+        // Runnable since the timing-jitter step landed (`Workflow::is_runnable`), so the gate
+        // demands it: `a_requirement_is_enforced_exactly_when_its_battery_can_run` holds
+        // the two equal.
+        enforced: true,
         fix: "run `precapital_battery` over this experiment and pass the family id it returns",
     },
     Requirement {
@@ -471,7 +472,9 @@ mod tests {
         assert_eq!(
             enforced,
             // Declaration order: `leakage_audit` is gate 2's first requirement.
-            vec!["leakage_audit", "selection_bias_verdict"],
+            // `precapital_battery` joined on 2026-10-04, when its timing-jitter step became a
+            // `run_study` call and the battery became runnable (S-8.5, ADR-S8-10).
+            vec!["leakage_audit", "selection_bias_verdict", "precapital_battery"],
             "the enforced set changed; `crates/invariants` holds it equal to which batteries \
              are runnable, and phase-8-integration.md records why"
         );

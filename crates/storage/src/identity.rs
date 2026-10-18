@@ -176,6 +176,15 @@ impl PgIdentityService {
             .await
             .map_err(|e| IdentityError::Ch(e.to_string()))?;
         let n = symbols.len();
+        // The keys Postgres vouches for. Rows outside this set are pruned after the
+        // insert below: the dimension is a projection of Postgres, and a row nothing
+        // backs (test residue written by `MemoryIdentity`) aliases one symbol onto
+        // another instrument's bars.
+        let truth: Vec<String> = symbols
+            .iter()
+            .filter(|s| s.4.is_none())
+            .map(|(i, v, sym, ..)| format!("('{}',{v},{i})", sym.replace('\'', "''")))
+            .collect();
         let mut ins = ch
             .insert("instrument_symbol_dim")
             .map_err(|e| IdentityError::Ch(e.to_string()))?;
@@ -194,9 +203,21 @@ impl PgIdentityService {
         ins.end()
             .await
             .map_err(|e| IdentityError::Ch(e.to_string()))?;
+        if !truth.is_empty() {
+            ch.query(&format!(
+                "ALTER TABLE instrument_symbol_dim DELETE WHERE (symbol, venue_id, instrument_id) NOT IN ({}) AND valid_to IS NULL SETTINGS mutations_sync = 1",
+                truth.join(",")
+            ))
+            .execute()
+            .await
+            .map_err(|e| IdentityError::Ch(e.to_string()))?;
+        }
         Ok(n)
     }
 }
+
+/// Where `MemoryIdentity` starts numbering: far above any id Postgres assigns.
+pub const MEMORY_IDENTITY_BASE: i64 = 900_000_000;
 
 #[async_trait::async_trait]
 impl IdentityResolver for PgIdentityService {
@@ -300,7 +321,10 @@ impl MemoryIdentity {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            next: std::sync::atomic::AtomicI64::new(1000),
+            // Far above any id Postgres assigns. Tests sync these ids into
+            // ClickHouse; starting at 1000 aliased real instruments (BTC-USD read
+            // ETH bars on 2026-10-05) whenever a test URL pointed at a live database.
+            next: std::sync::atomic::AtomicI64::new(MEMORY_IDENTITY_BASE),
             ..Self::default()
         }
     }

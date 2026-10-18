@@ -241,10 +241,13 @@ export function BudgetMeter({ budget, caps }: { budget: BudgetView; caps?: Parti
 export function DayBudgetBar({
   usdPerDay,
   spentUsd,
+  basis,
 }: {
   usdPerDay: number | null
   /** Dollars spent today. `null` — the only value anything can pass today. */
   spentUsd?: number | null
+  /** Where the figure came from, when it is not a live meter: `digests` is a floor. */
+  basis?: 'digests'
 }) {
   if (usdPerDay === null || !Number.isFinite(usdPerDay)) {
     return (
@@ -279,6 +282,7 @@ export function DayBudgetBar({
       </span>
       <span className="val">
         ${spentUsd.toFixed(2)} / {budget}
+        {basis === 'digests' && ' · from digests'}
       </span>
     </span>
   )

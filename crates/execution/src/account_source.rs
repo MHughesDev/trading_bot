@@ -2,7 +2,8 @@
 //! abstraction (C-017 / C-092).
 //!
 //! Fires on-demand when the user navigates to the Dashboard — no polling loop.
-//! Concrete REST adapters for each venue land in Phase 4.
+//! Every venue has a concrete REST adapter in `account/`; the `NotImplemented`
+//! sentinel that tracked the missing ones was retired with the last two (Set E 3.6).
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -75,13 +76,11 @@ pub enum AccountSourceError {
     /// Legacy string parse error — kept for any callers that still use it.
     #[error("parse error: {0}")]
     Parse(String),
-    #[error("not implemented — full REST adapter deferred to Phase 4")]
-    NotImplemented,
 }
 
 /// On-demand per-venue account data fetcher.
 ///
-/// Implementations are per-venue (Coinbase, Alpaca, etc.) and land in Phase 4.
+/// Implementations are per-venue (Coinbase, Alpaca, etc.) and are in `account/` (Set E 3.1/3.2 completed the set).
 /// `VenueCredentials` are decrypted by the credential service before being
 /// passed here — the adapter never decrypts credentials itself.
 #[async_trait]

@@ -36,6 +36,7 @@ impl QuarantinePublisher {
             .await
             .map_err(|e| BusError::Publish(e.to_string()))?;
 
+        observability::Metrics::new().increment_quarantined(source);
         Ok(())
     }
 }

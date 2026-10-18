@@ -63,12 +63,104 @@ pub const LEAKAGE_CHECKS: &[&str] = &[
 /// Evaluates the sixteen gates for one subject and records the verdicts.
 pub struct GateAdvanceWorker {
     pg: PgPool,
+    /// Runs the evidence funnel for a campaign's candidate when the GATE child
+    /// is told to (`run_funnel` in its manifest). Absent in tests that judge
+    /// evidence the ledger already holds.
+    funnel: Option<std::sync::Arc<dyn crate::campaign_driver::funnel_worker::CampaignFunnel>>,
 }
 
 impl GateAdvanceWorker {
     #[must_use]
     pub fn new(pg: PgPool) -> Self {
-        Self { pg }
+        Self { pg, funnel: None }
+    }
+
+    /// Give the worker the funnel a campaign GATE runs before it judges.
+    #[must_use]
+    pub fn with_funnel(
+        mut self,
+        funnel: std::sync::Arc<dyn crate::campaign_driver::funnel_worker::CampaignFunnel>,
+    ) -> Self {
+        self.funnel = Some(funnel);
+        self
+    }
+
+    /// A campaign GATE with no funnel evidence yet: run the funnel on the
+    /// campaign's incumbent, then point the judgement at the trial it wrote.
+    ///
+    /// The funnel is what records gates 3-8, 10 and 12's inputs, and nothing in a
+    /// campaign ran it, so those gates read inconclusive for every campaign
+    /// candidate. The incumbent is the one the COMPARE worker promoted (or the
+    /// declared start), so the evidence is about the configuration the campaign
+    /// would deploy and not about the strategy's defaults.
+    async fn run_campaign_funnel(
+        &self,
+        ctx: &JobContext,
+        manifest: &Value,
+    ) -> Result<Value, JobError> {
+        use crate::campaign_driver::{compare_worker, funnel_worker, study_worker};
+        let logic = |code: &'static str, why: String| {
+            JobError::logic(ledger::TerminalReason::IntegrityRejected, code, why)
+        };
+        let Some(funnel) = &self.funnel else {
+            return Err(logic(
+                "no_funnel_runner",
+                "this GATE needs the evidence funnel run and this worker was built without one"
+                    .into(),
+            ));
+        };
+        let tenant = ctx
+            .trial
+            .as_ref()
+            .map(|t| t.tenant_id().to_string())
+            .ok_or_else(|| logic("unregistered_trial", "gate_advance needs a registered trial".into()))?;
+        let user: Uuid = tenant
+            .parse()
+            .map_err(|_| logic("tenant_is_not_a_user", format!("tenant `{tenant}` is not a user id")))?;
+        let campaign_id: Uuid = manifest
+            .get("campaign_id")
+            .and_then(Value::as_str)
+            .and_then(|s| s.parse().ok())
+            .ok_or_else(|| logic("invalid_manifest", "run_funnel needs a campaign_id".into()))?;
+        let (delta, _profile, search_space) =
+            study_worker::campaign_delta_and_profile(&self.pg, &tenant, campaign_id).await?;
+        let spec = study_worker::evaluation_spec(&search_space)?;
+        let incumbent = compare_worker::standing_incumbent(&self.pg, &tenant, campaign_id, &spec)
+            .await
+            .map_err(|e| JobError::infrastructure(format!("reading the incumbent: {e}")))?;
+
+        ctx.progress(Progress {
+            pct: Some(0.05),
+            stage: Some("funnel".into()),
+            message: Some("running the evidence funnel on the incumbent".into()),
+        })
+        .await;
+        let ran = funnel
+            .run(user, campaign_id, &spec, delta, &incumbent)
+            .await
+            .map_err(|e| JobError::infrastructure(format!("the funnel: {e}")))?;
+
+        let experiment = study_worker::experiment_name(campaign_id);
+        let (trial_id, dataset_id) = funnel_worker::funnel_trial(&self.pg, &tenant, &experiment)
+            .await
+            .map_err(|e| JobError::infrastructure(format!("finding the funnel trial: {e}")))?
+            .ok_or_else(|| {
+                logic(
+                    "funnel_recorded_nothing",
+                    format!(
+                        "the funnel finished on `{experiment}` but no trial carries a                          `deflated_sharpe`; the evidence was not recorded (axis `{}`)",
+                        ran.axis.param
+                    ),
+                )
+            })?;
+        let mut resolved = manifest.clone();
+        resolved["trial_id"] = json!(trial_id);
+        resolved["dataset_id"] = json!(dataset_id);
+        resolved["sweep_axis"] = json!({
+            "param": ran.axis.param, "center": ran.axis.center, "step": ran.axis.step
+        });
+        resolved["run_funnel"] = json!(false);
+        Ok(resolved)
     }
 
     fn ledger(&self) -> ledger::pg::PgTrialLedger {
@@ -172,6 +264,65 @@ impl GateAdvanceWorker {
     }
 }
 
+impl GateAdvanceWorker {
+    /// Gate 15's inputs, built from the forward record of the paper deployment
+    /// that traded this trial.
+    ///
+    /// `Ok(None)` is an answer, not a gap in this function: the trial has no
+    /// deployment, or the deployment has no observed-knowledge rows yet (backfilled
+    /// rows are not forward evidence, D-T1). The gate then says so in its own
+    /// words. The kill criteria are a fact about the *deployment*, written before
+    /// the first fill, so they come from its row and not from the observations.
+    async fn paper_inputs(
+        &self,
+        tenant: &str,
+        trial_id: Uuid,
+    ) -> Result<Option<backtest::gates::evaluators::PaperInputs>, sqlx::Error> {
+        let mut tx = ledger::pg::tenant_tx(&self.pg, tenant)
+            .await
+            .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+        let deployment: Option<(Uuid, String)> = sqlx::query_as(
+            "SELECT deployment_id, kill_criteria FROM mlops.paper_deployment
+              WHERE tenant_id = $1 AND trial_id = $2
+              ORDER BY deployed_at DESC LIMIT 1",
+        )
+        .bind(tenant)
+        .bind(trial_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        let Some((deployment_id, kill_criteria)) = deployment else {
+            return Ok(None);
+        };
+        let rows = reconciliation::store::load_observations(
+            &self.pg,
+            tenant,
+            deployment_id,
+            chrono::DateTime::<chrono::Utc>::MIN_UTC,
+            chrono::Utc::now(),
+        )
+        .await?;
+        Ok(paper_from_rows(&rows, &kill_criteria))
+    }
+}
+
+/// Gate 15's inputs from a deployment's observations, without a database.
+///
+/// `None` for a window with no observed-knowledge row and for one whose rows are
+/// not in a single numeraire — both are "no evidence", and the gate's own
+/// inconclusive message is the right thing to say about each.
+#[must_use]
+pub fn paper_from_rows(
+    rows: &[domain::forward::ForwardObservation],
+    kill_criteria: &str,
+) -> Option<backtest::gates::evaluators::PaperInputs> {
+    let evidence = domain::forward::Gate15Evidence::from_observations(rows).ok()?;
+    Some(backtest::gates::evaluators::PaperInputs::from_forward_evidence(
+        &evidence,
+        !kill_criteria.trim().is_empty(),
+    ))
+}
+
 /// How far before a series' first observation the labeller's history is read.
 use crate::knowledge::LABEL_LOOKBEHIND_DAYS;
 
@@ -210,6 +361,9 @@ struct Request {
     /// is not supplying a statistic: the worker then reads the campaign's own
     /// immutable DEFINE hash from the ledger, which is Gate 1's evidence.
     campaign_id: Option<Uuid>,
+    /// The model versions the candidate binds, each with what it is used for (Set N N-3.6).
+    /// A binding whose usage rules fail refuses the job before any evidence is gathered.
+    model_bindings: Vec<backtest::gates::model_binding::ModelBinding>,
 }
 
 fn parse(manifest: &Value) -> Result<Request, JobError> {
@@ -250,6 +404,16 @@ fn parse(manifest: &Value) -> Result<Request, JobError> {
             .get("campaign_id")
             .and_then(Value::as_str)
             .and_then(|s| s.parse().ok()),
+        model_bindings: match manifest.get("model_bindings") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(v) => serde_json::from_value(v.clone()).map_err(|e| {
+                JobError::logic(
+                    ledger::TerminalReason::IntegrityRejected,
+                    "invalid_manifest",
+                    format!("model_bindings must be [{{model_id, version, uses}}]: {e}"),
+                )
+            })?,
+        },
     })
 }
 
@@ -330,6 +494,13 @@ impl Worker for GateAdvanceWorker {
     }
 
     async fn run(&self, ctx: &JobContext, manifest: &Value) -> Result<JobOutput, JobError> {
+        let resolved;
+        let manifest = if manifest.get("run_funnel").and_then(Value::as_bool) == Some(true) {
+            resolved = self.run_campaign_funnel(ctx, manifest).await?;
+            &resolved
+        } else {
+            manifest
+        };
         let req = parse(manifest)?;
         let profile = profile_for(&req.profile_id)?;
         let led = self.ledger();
@@ -353,6 +524,18 @@ impl Worker for GateAdvanceWorker {
         // Without this the profile arrives with none and Gate 10 reports the
         // asset class as undeclared, whatever evidence exists.
         let profile = load_asset_classes(&self.pg, &tenant, profile).await?;
+
+        // Set N N-3.6: a bound model that fails its usage rules (or has none measured) may not
+        // size a position, so the candidate does not enter the stack.
+        if let Err(why) =
+            crate::models_usage_policy::check_bindings(&self.pg, &req.model_bindings).await
+        {
+            return Err(JobError::logic(
+                ledger::TerminalReason::GateFailed,
+                "model_binding_refused",
+                why,
+            ));
+        }
 
         ctx.progress(Progress {
             pct: Some(0.1),
@@ -600,6 +783,19 @@ impl Worker for GateAdvanceWorker {
         })
         .await;
 
+        // Gate 15's forward evidence, from the deployment's own observations.
+        //
+        // This was `paper: None` for every candidate, so Gate 15 reported "this
+        // candidate has not been run in paper" about candidates that had been,
+        // while `reconciliation` recorded their observations into a table
+        // nothing here read (OPEN-TASKS C1.6). Read like every other input: from
+        // the ledger's own tables, never from the manifest, and absent when
+        // absent.
+        let paper = self
+            .paper_inputs(&tenant, req.trial_id)
+            .await
+            .map_err(|e| JobError::infrastructure(format!("reading the forward record: {e}")))?;
+
         let evidence = StackEvidence {
             // Gate 1 is structural: the claim was hash-locked before anything ran
             // or it was not. The hash comes from the campaign's own immutable
@@ -639,7 +835,7 @@ impl Worker for GateAdvanceWorker {
             family: &family,
             candidate_index,
             bootstrap_seed,
-            paper: None,
+            paper,
             capital_fraction: ledger::AllowedFraction::default(),
             n_eff,
             trial_count,
@@ -650,6 +846,18 @@ impl Worker for GateAdvanceWorker {
         };
 
         let verdict = evaluate_stack(&profile, &evidence, chrono::Utc::now());
+        // EV-09 / RB-3.3: a campaign candidate cannot pass Gate 3 or anything after it unless
+        // the campaign's matched random arm has completed. The rule is
+        // `research::random_arm::gate_check` (through `arm_gate`); the gate stack only applies
+        // the answer, because `backtest` cannot depend on the crates that own the arm.
+        let arm_requirement = match req.campaign_id {
+            Some(campaign) => Some(match crate::knowledge_routes::arm_gate(&self.pg, campaign).await {
+                Ok(()) => backtest::gates::random_arm_gate::ArmRequirement::met(campaign.to_string()),
+                Err(why) => backtest::gates::random_arm_gate::ArmRequirement::refused(campaign.to_string(), why),
+            }),
+            None => None,
+        };
+        let verdict = backtest::gates::random_arm_gate::apply_to_stack(verdict, arm_requirement.as_ref());
         let ids = record_stack(&led, &tenant, &profile, &evidence, &verdict)
             .map_err(|e| JobError::infrastructure(format!("recording the gate stack: {e}")))?;
 
@@ -849,6 +1057,23 @@ mod tests {
         assert_eq!(ok.profile_id, "strict_v1");
     }
 
+    /// Set N N-3.6: the manifest carries the bound models, and a malformed list is refused
+    /// rather than read as "no bindings".
+    #[test]
+    fn model_bindings_are_parsed_and_a_malformed_list_is_refused() {
+        let base = |extra: Value| {
+            let mut m = json!({"experiment_id": "e", "trial_id": Uuid::nil().to_string(), "dataset_id": "ds"});
+            m["model_bindings"] = extra;
+            m
+        };
+        assert!(parse(&base(Value::Null)).unwrap().model_bindings.is_empty());
+        let ok = parse(&base(json!([{"model_id": "vol", "version": 2, "uses": ["vol", "tail_risk"]}]))).unwrap();
+        assert_eq!(ok.model_bindings[0].label(), "vol@2");
+        assert_eq!(ok.model_bindings[0].uses.len(), 2);
+        assert!(parse(&base(json!([{"model_id": "vol", "version": 2, "uses": ["magic"]}]))).is_err());
+        assert!(parse(&base(json!("vol@2"))).is_err());
+    }
+
     /// A cost ladder recorded by the sweep is the measurement; the scalar is
     /// only its summary, so the rungs win.
     #[test]
@@ -1006,5 +1231,53 @@ mod derivation_tests {
             .collect();
         let l = length_inputs(&ts, &rs, 10.0).expect("measurable");
         assert_eq!(l.independent_events, 10, "only the moves count");
+    }
+
+    fn observation(
+        source: domain::forward::ObservationSource,
+        matched: bool,
+    ) -> domain::forward::ForwardObservation {
+        domain::forward::ForwardObservation {
+            deployment_id: Uuid::new_v4(),
+            strategy_id: "s".into(),
+            bar: chrono::Utc::now(),
+            realised_return: 0.001,
+            expected_return: 0.001,
+            numeraire: domain::numeraire::Numeraire::Usd,
+            source,
+            signal_matched: matched,
+            realised_slippage_bps: 2.0,
+            modelled_slippage_bps: 2.0,
+            realised_turnover: 1.0,
+            expected_turnover: 1.0,
+            model_attributable_rejects: 0,
+            observed_at: chrono::Utc::now(),
+        }
+    }
+
+    /// Gate 15 used to be `paper: None` for every candidate. A deployment with
+    /// observed rows now yields inputs, with the kill criteria taken from the
+    /// deployment.
+    #[test]
+    fn observed_rows_become_gate_15_inputs() {
+        use domain::forward::ObservationSource::Observed;
+        let rows: Vec<_> = (0..5).map(|i| observation(Observed, i != 0)).collect();
+        let p = paper_from_rows(&rows, "stop at 2x backtest max drawdown").expect("evidence");
+        assert!((p.signal_match - 0.8).abs() < 1e-9);
+        assert_eq!(p.observations, 5);
+        assert!(p.kill_criteria_registered);
+        // Blank criteria are not criteria: the gate then refuses to judge.
+        let blank = paper_from_rows(&rows, "   ").unwrap();
+        assert!(!blank.kill_criteria_registered);
+    }
+
+    /// Backfilled rows are not forward evidence (D-T1), and a window with no
+    /// rows is no evidence at all: both leave Gate 15 inconclusive.
+    #[test]
+    fn backfilled_or_absent_rows_give_the_gate_nothing_to_judge() {
+        use domain::forward::ObservationSource::Backfill;
+        let rows: Vec<_> = (0..5).map(|_| observation(Backfill, true)).collect();
+        assert!(paper_from_rows(&rows, "k").is_none());
+        assert!(paper_from_rows(&[], "k").is_none());
     }
 }

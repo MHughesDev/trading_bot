@@ -61,7 +61,12 @@ impl StrategyDraft {
 }
 
 fn draft_not_found(draft_id: &str) -> Value {
-    json!({ "error": "draft_not_found", "draft_id": draft_id })
+    crate::tool_error::refuse_ids(
+        "draft_not_found",
+        format!("no draft `{draft_id}` in this session."),
+        "call new_strategy_draft and use the draft_id it returns",
+        &[("draft_id", draft_id)],
+    )
 }
 
 /// `new_strategy_draft` — create a fresh empty draft, return its UUID.
@@ -178,7 +183,12 @@ pub fn add_condition_node(ctx: &McpContext, params: &Value) -> Value {
         .unwrap_or("")
         .to_owned();
     if draft.nodes.iter().any(|n| n.id == node_id) {
-        return json!({ "error": "duplicate_node_id", "node_id": node_id });
+        return crate::tool_error::refuse_ids(
+            "duplicate_node_id",
+            format!("the draft already has a node `{node_id}`."),
+            "choose a node_id that no existing node in the draft uses",
+            &[("node_id", &node_id)],
+        );
     }
     let expr = params
         .get("expr")
@@ -211,7 +221,12 @@ pub fn add_signal_node(ctx: &McpContext, params: &Value) -> Value {
         .unwrap_or("")
         .to_owned();
     if draft.nodes.iter().any(|n| n.id == node_id) {
-        return json!({ "error": "duplicate_node_id", "node_id": node_id });
+        return crate::tool_error::refuse_ids(
+            "duplicate_node_id",
+            format!("the draft already has a node `{node_id}`."),
+            "choose a node_id that no existing node in the draft uses",
+            &[("node_id", &node_id)],
+        );
     }
     let when = params
         .get("when")
@@ -252,7 +267,14 @@ pub fn add_strategy_action(ctx: &McpContext, params: &Value) -> Value {
     let side =
         match serde_json::from_value::<domain::order::Side>(Value::String(side_str.to_owned())) {
             Ok(s) => s,
-            Err(_) => return json!({ "error": "invalid_side", "valid_values": ["buy", "sell"] }),
+            Err(_) => {
+                return crate::tool_error::refuse_extra(
+                    "invalid_side",
+                    format!("side `{side_str}` is not a side."),
+                    "set side to \"buy\" or \"sell\"",
+                    json!({ "valid_values": ["buy", "sell"] }),
+                )
+            }
         };
     let size_mode_str = params
         .get("size_mode")
@@ -263,7 +285,12 @@ pub fn add_strategy_action(ctx: &McpContext, params: &Value) -> Value {
         "percent_of_balance" => SizeMode::PercentOfBalance,
         "risk_unit" => SizeMode::RiskUnit,
         _ => {
-            return json!({ "error": "invalid_size_mode", "valid_values": ["fixed", "percent_of_balance", "risk_unit"] })
+            return crate::tool_error::refuse_extra(
+                "invalid_size_mode",
+                format!("size_mode `{size_mode_str}` is not a size mode."),
+                "set size_mode to \"fixed\", \"percent_of_balance\" or \"risk_unit\"",
+                json!({ "valid_values": ["fixed", "percent_of_balance", "risk_unit"] }),
+            )
         }
     };
     let size = params
@@ -300,7 +327,14 @@ pub fn set_risk_overrides(ctx: &McpContext, params: &Value) -> Value {
     if let Some(v) = params.get("max_position").and_then(|v| v.as_str()) {
         match v.parse::<rust_decimal::Decimal>() {
             Ok(d) => draft.risk_overrides.max_position = Some(d),
-            Err(_) => return json!({ "error": "invalid_decimal", "field": "max_position" }),
+            Err(_) => {
+                return crate::tool_error::refuse_ids(
+                    "invalid_decimal",
+                    format!("max_position `{v}` is not a decimal number."),
+                    "send max_position as a decimal string such as \"0.5\"",
+                    &[("field", "max_position")],
+                )
+            }
         }
     }
     if let Some(v) = params
@@ -335,7 +369,13 @@ pub fn get_draft_summary(ctx: &McpContext, params: &Value) -> Value {
     let def = draft_to_definition(draft);
     match def {
         Ok(d) => {
-            serde_json::to_value(&d).unwrap_or_else(|_| json!({"error": "serialization_error"}))
+            serde_json::to_value(&d).unwrap_or_else(|_| {
+                crate::tool_error::refuse(
+                    "serialization_error",
+                    "the finished draft could not be serialised.",
+                    "call get_draft_summary and fix the node it reports as incomplete",
+                )
+            })
         }
         Err(msg) => json!({ "draft_id": draft_id.to_string(), "incomplete": true, "reason": msg }),
     }

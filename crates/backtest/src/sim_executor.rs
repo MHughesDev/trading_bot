@@ -36,7 +36,7 @@ use crate::requirements::derive_requirements;
 use crate::run::executor::map_detailed_result;
 use crate::run::{ComputeCost, EvalResolution, RunConfig, RunExecutor, RunResult};
 use crate::sim::{
-    run_simulation_detailed, DetailedOutcome, InstrumentPrecisions, SimulationInputs,
+    run_simulation_detailed_scaled, DetailedOutcome, InstrumentPrecisions, SimulationInputs,
 };
 use crate::store::BarStore;
 use crate::types::TimeframeExt;
@@ -62,6 +62,38 @@ pub struct SimRunExecutor {
     pg: PgPool,
     ch_url: String,
     initial_balance: Decimal,
+    /// What each executed run actually read, by `run_id`: the content of its
+    /// bars, the definition it resolved and the venue it was priced at. Only the
+    /// executor sees these, so only the executor can answer
+    /// [`RunExecutor::receipt`] (S-10.8).
+    observed: std::sync::Mutex<std::collections::HashMap<String, Observed>>,
+}
+
+/// What one execution read, by content.
+#[derive(Clone, Debug)]
+struct Observed {
+    dataset_hash: String,
+    strategy_hash: String,
+    venue_id: String,
+    asset_class: String,
+}
+
+/// A content digest of the bars a run read. Order matters and every field of every
+/// bar is in it: two snapshots that name the same range but differ in one close
+/// must not share a hash, which is the whole difference between a dataset hash and
+/// a dataset id.
+fn bars_digest<T: std::fmt::Debug>(bars: &[T]) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    let mut h = Sha256::new();
+    let mut line = String::new();
+    for b in bars {
+        line.clear();
+        let _ = write!(line, "{b:?}");
+        h.update(line.as_bytes());
+        h.update(b"\x1e");
+    }
+    format!("sha256:{}", hex::encode(h.finalize()))
 }
 
 /// Pass the loaded bars through a null generator.
@@ -202,6 +234,7 @@ impl SimRunExecutor {
             pg,
             ch_url: ch_url.into(),
             initial_balance: Decimal::from(10_000),
+            observed: std::sync::Mutex::default(),
         }
     }
 
@@ -261,6 +294,15 @@ impl SimRunExecutor {
         let definition = params::materialize(&definition, &cfg.params)
             .map_err(|e| anyhow!("parameters: {e}"))
             .because(TerminalReason::IntegrityRejected)?;
+        let strategy_hash = {
+            use sha2::{Digest, Sha256};
+            format!(
+                "sha256:{}",
+                hex::encode(Sha256::digest(
+                    serde_json::to_vec(&definition).unwrap_or_default()
+                ))
+            )
+        };
 
         let requested = timeframe_for(cfg.data_slice.eval_resolution)
             .because(TerminalReason::IntegrityRejected)?;
@@ -297,6 +339,19 @@ impl SimRunExecutor {
             ));
         }
 
+        // What the run read, for the receipt. Taken before any null generator touches
+        // the bars: the receipt describes the data, and a null world's draw is in
+        // the config's own hash.
+        self.observed.lock().expect("observed lock poisoned").insert(
+            cfg.run_id.as_str().to_string(),
+            Observed {
+                dataset_hash: bars_digest(&bars),
+                strategy_hash,
+                venue_id: venue_id.clone(),
+                asset_class: asset_class.clone(),
+            },
+        );
+
         // A null-world Run sees generated bars, not the stored ones (spec §2.1).
         // The transformation happens here, at the single point where a Run's data
         // is assembled, so no execution path can accidentally run a null-world
@@ -320,11 +375,43 @@ impl SimRunExecutor {
             features: requirements.features,
         };
         let control: Arc<SimulationControl> = SimulationControl::new();
-        run_simulation_detailed(inputs, &control).because(TerminalReason::DependencyFailure)
+        // The cost axis of a cost-perturbation replicate (`cost_scale_bp`, zero = as
+        // modelled) is applied where the schedule is built, so entry and exit legs
+        // and the engine's own fee model all see the same scaled cost.
+        run_simulation_detailed_scaled(inputs, &control, cfg.cost_scale_bp)
+            .because(TerminalReason::DependencyFailure)
     }
 }
 
 impl RunExecutor for SimRunExecutor {
+    fn receipt(&self, cfg: &RunConfig) -> Option<crate::receipt::ReproSpec> {
+        use sha2::{Digest, Sha256};
+        let observed = self
+            .observed
+            .lock()
+            .expect("observed lock poisoned")
+            .get(cfg.run_id.as_str())
+            .cloned()?;
+        let fees = crate::costs::FeeBook::platform_default()
+            .resolve(Some(&observed.venue_id.to_lowercase()), None);
+        Some(crate::receipt::ReproSpec {
+            dataset_hash: observed.dataset_hash,
+            feature_registry_version: format!("features@{}", features::REGISTRY_VERSION),
+            calendar_version: crate::receipt::calendar_version(&observed.asset_class),
+            engine_version: format!("{EXECUTOR_TAG}/{}", crate::run::ENGINE_VERSION),
+            strategy_version_hash: observed.strategy_hash,
+            cost_model_version: format!(
+                "fees:{}:{}:{}:scale{}bp",
+                fees.venue, fees.tier, fees.effective_from, cfg.cost_scale_bp
+            ),
+            seed_digest: format!(
+                "sha256:{}",
+                hex::encode(Sha256::digest(cfg.seed.to_be_bytes()))
+            ),
+            harness_version: concat!("backtest-", env!("CARGO_PKG_VERSION")).to_string(),
+        })
+    }
+
     fn execute(&self, cfg: &RunConfig, ticket: &ledger::TrialTicket) -> RunResult {
         let started = Instant::now();
         tracing::debug!(
@@ -332,6 +419,23 @@ impl RunExecutor for SimRunExecutor {
             run_id = cfg.run_id.as_str(),
             "dispatching registered trial"
         );
+        // This simulator submits every order the bar it is decided and has no
+        // delay path (`fill_delay_bars` is the v3 runner's). Running the config
+        // anyway would return the undelayed result under a run id that claims a
+        // delay, and a timing-jitter study over it would read as perfectly
+        // insensitive: the most reassuring wrong answer available.
+        if cfg.fill_delay_bars > 0 {
+            return RunResult::failed(
+                cfg,
+                TerminalReason::IntegrityRejected,
+                format!(
+                    "fill_delay_bars = {} was requested, but a v1 strategy runs on market_simulator, \
+                     which cannot hold an order back; timing-jitter is available for v3 strategies",
+                    cfg.fill_delay_bars
+                ),
+                EXECUTOR_TAG,
+            );
+        }
         let outcome = tokio::task::block_in_place(|| self.handle.block_on(self.execute_async(cfg)));
         let cost = ComputeCost {
             wall_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),

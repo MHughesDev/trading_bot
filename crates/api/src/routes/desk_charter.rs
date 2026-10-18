@@ -345,12 +345,8 @@ mod tests {
     #[test]
     fn two_blocks_in_one_day_are_two_windows() {
         let mut g = vec![vec![false; 24]; 7];
-        for h in 9..12 {
-            g[2][h] = true;
-        }
-        for h in 14..18 {
-            g[2][h] = true;
-        }
+        g[2][9..12].fill(true);
+        g[2][14..18].fill(true);
         let w = windows_from_grid(&g, "UTC").expect("a valid grid");
         assert_eq!(w.len(), 2);
         assert_eq!((w[0].start.as_str(), w[0].end.as_str()), ("09:00", "12:00"));

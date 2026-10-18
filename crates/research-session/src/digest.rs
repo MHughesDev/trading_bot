@@ -533,6 +533,20 @@ pub struct DigestInput {
     /// shown.
     pub upcoming: Vec<Upcoming>,
     pub pauses: Vec<Pause>,
+    /// P3's scorecard over the period: which of the three layers caught each
+    /// duplicate. `None` when the caller did not read one — never a scorecard
+    /// of zeros standing in for "not asked".
+    #[serde(default)]
+    pub dedupe: Option<crate::agenda::DedupeScorecard>,
+    /// Contradiction pairs the platform found in the period
+    /// (`session_contradictions.found_at`), whichever run's reading surfaced
+    /// them. A pair belongs to the memory and not to a run, so it is carried
+    /// here and not on a [`RunRecord`]; both render under the same heading.
+    #[serde(default)]
+    pub contradictions_found: Vec<Entry>,
+    /// Pairs that stopped being true in the period.
+    #[serde(default)]
+    pub contradictions_resolved: Vec<Entry>,
 }
 
 /// The digest itself.
@@ -543,6 +557,11 @@ pub struct Digest {
     pub budget: BudgetSummary,
     /// Only the sections with something in them, in [`Heading::ALL`]'s order.
     pub sections: Vec<Section>,
+    /// Carried through from [`DigestInput::dedupe`], as a structure rather
+    /// than lines: a [`Line`] must resolve to a thing it names, and a count
+    /// of duplicates caught at a layer names no single thing to open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dedupe: Option<crate::agenda::DedupeScorecard>,
 }
 
 impl Digest {
@@ -660,6 +679,18 @@ pub fn write_in(input: &DigestInput, spend_unit: SpendUnit) -> Digest {
         }
     }
 
+    for c in &input.contradictions_found {
+        contradictions.push(Line::new(
+            Ref::record(RefKind::Contradiction, &c.id),
+            format!("found: {}", c.label),
+        ));
+    }
+    for c in &input.contradictions_resolved {
+        contradictions.push(Line::new(
+            Ref::record(RefKind::Contradiction, &c.id),
+            format!("resolved: {}", c.label),
+        ));
+    }
     push(&mut sections, Heading::RunsFinished, runs);
     push(&mut sections, Heading::Findings, findings);
     push(&mut sections, Heading::Negatives, negatives);
@@ -724,6 +755,7 @@ pub fn write_in(input: &DigestInput, spend_unit: SpendUnit) -> Digest {
         period: input.period,
         budget,
         sections,
+        dedupe: input.dedupe,
     }
 }
 
@@ -866,6 +898,9 @@ mod tests {
                 when(12),
                 "the schedule window closed at 18:00",
             )],
+            dedupe: None,
+            contradictions_found: vec![],
+            contradictions_resolved: vec![],
         }
     }
 
@@ -1100,6 +1135,33 @@ mod tests {
     }
 
     #[test]
+    fn the_dedupe_scorecard_rides_on_the_stored_digest() {
+        let mut input = a_busy_week();
+        input.dedupe = Some(crate::agenda::DedupeScorecard::over(&[]).with_intake(2));
+        let d = write(&input);
+        let card = d.dedupe.expect("carried through");
+        assert_eq!(card.intake, crate::agenda::LayerCount::Caught(2));
+        let json = serde_json::to_value(write(&input)).expect("serialises");
+        assert!(json.get("dedupe").is_some(), "{json}");
+        // And a digest written without one says nothing rather than zeros.
+        let none = serde_json::to_value(write(&a_busy_week())).expect("serialises");
+        assert!(none.get("dedupe").is_none(), "{none}");
+    }
+
+    #[test]
+    fn a_pair_found_in_the_period_is_a_line_that_resolves_to_the_pair_and_not_to_a_run() {
+        let mut input = a_busy_week();
+        input.contradictions_found = vec![Entry::new("pair-1", "A momentum pays, B it does not")];
+        input.contradictions_resolved = vec![Entry::new("pair-0", "f_03 superseded f_02")];
+        let d = write(&input);
+        let section = d.section(Heading::Contradictions).expect("a contradictions section");
+        let texts: Vec<&str> = section.lines.iter().map(|l| l.text.as_str()).collect();
+        assert!(texts.iter().any(|t| t.starts_with("found: A momentum")), "{texts:?}");
+        assert!(texts.iter().any(|t| t.starts_with("resolved: f_03")), "{texts:?}");
+        assert!(d.unresolvable().is_empty(), "every id resolves");
+    }
+
+    #[test]
     fn a_quiet_period_is_still_a_digest_and_it_is_only_the_budget() {
         let d = write(&DigestInput {
             session: Uuid::from_u128(999),
@@ -1107,6 +1169,9 @@ mod tests {
             runs: vec![],
             upcoming: vec![],
             pauses: vec![],
+            dedupe: None,
+            contradictions_found: vec![],
+            contradictions_resolved: vec![],
         });
         assert_eq!(d.line_count(), 1, "the budget line, and nothing else");
         assert_eq!(d.budget.runs_finished, 0);

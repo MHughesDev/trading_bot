@@ -51,6 +51,10 @@ pub enum Event {
     Timer {
         at_ns: i64,
     },
+    /// The environment's macro and fundamentals rows for the plan's external
+    /// indicators (P-3.6), replacing any delivered before. Read point-in-time
+    /// by each bar's close; never decides on its own.
+    External(crate::external::ExternalData),
 }
 
 /// What the engine needs next.
@@ -193,6 +197,10 @@ impl Engine {
                         Planned::default(),
                     );
                 }
+                Ok(Step::Idle)
+            }
+            Event::External(data) => {
+                self.inst.external = Arc::new(data);
                 Ok(Step::Idle)
             }
             Event::Timer { at_ns } => {

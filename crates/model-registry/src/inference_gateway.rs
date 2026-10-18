@@ -24,6 +24,10 @@ const CIRCUIT_BREAK_THRESHOLD: u32 = 5;
 
 #[derive(Clone, Debug)]
 pub struct ForecastResult {
+    /// The calibrated band width of the latest calibration wrapper of this version
+    /// (`calibration.spread_90`, return units), when one exists. Sizing reads this in
+    /// preference to the raw `q95 - q05` (N-4.1).
+    pub calibrated_spread_90: Option<f64>,
     pub direction: String,
     pub confidence: f64,
     pub latency_ms: u64,
@@ -47,6 +51,10 @@ pub struct InferenceGateway {
     pred_cache: RwLock<HashMap<(String, i32, u64), (ForecastResult, Instant)>>,
     /// Per-model consecutive failure counts for circuit breaking.
     fail_counts: RwLock<HashMap<String, u32>>,
+    /// Recent bars for models served from a window of returns (GARCH, N-4.2).
+    recent: crate::recent_bars::RecentBars,
+    /// Per-model inference rate limit (N-4.5, H-4.7).
+    limiter: crate::rate_limit::SlidingWindow,
 }
 
 impl InferenceGateway {
@@ -57,7 +65,33 @@ impl InferenceGateway {
             alias_cache: RwLock::new(HashMap::new()),
             pred_cache: RwLock::new(HashMap::new()),
             fail_counts: RwLock::new(HashMap::new()),
+            recent: crate::recent_bars::RecentBars::from_env(),
+            limiter: crate::rate_limit::SlidingWindow::from_env(),
         })
+    }
+
+    /// A gateway with an explicit rate limit (tests, or a deployment that sets one).
+    pub fn with_rate_limit(
+        pg: PgPool,
+        sidecar: Arc<SidecarClient>,
+        max: usize,
+        window: Duration,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            pg,
+            sidecar,
+            alias_cache: RwLock::new(HashMap::new()),
+            pred_cache: RwLock::new(HashMap::new()),
+            fail_counts: RwLock::new(HashMap::new()),
+            recent: crate::recent_bars::RecentBars::from_env(),
+            limiter: crate::rate_limit::SlidingWindow::new(max, window),
+        })
+    }
+
+    /// Whether one more inference for `model_id` is within its rate limit. Only calls that
+    /// reach the sidecar are counted (a prediction-cache hit costs nothing).
+    pub fn admit(&self, model_id: &str) -> bool {
+        self.limiter.admit(model_id)
     }
 
     /// Resolve alias → version from cache (TTL 30s) or Postgres.
@@ -170,6 +204,14 @@ impl InferenceGateway {
             }
         }
 
+        // Cache miss: this call will cost an inference, so it is the one the limit counts.
+        if !self.admit(&model_id) {
+            warn!("inference rate limit reached for {model_id}");
+            self.write_trace(&model_id, version, instrument_id, 0, "rate_limited")
+                .await;
+            return None;
+        }
+
         // Cache miss — look up artifact info and model kind.
         let artifact_row: Option<(String, String, String)> = sqlx::query_as(
             "SELECT ma.storage_uri, ma.sha256, am.model_kind \
@@ -183,6 +225,23 @@ impl InferenceGateway {
         .await
         .ok()
         .flatten();
+        // What the version was trained for, from its config (framework, label horizon, bar
+        // timeframe). Absent on versions trained before the config carried them.
+        let (framework, horizon_bars, timeframe): (Option<String>, Option<i32>, Option<String>) =
+            sqlx::query_as(
+                "SELECT config_json->>'framework', \
+                        CASE WHEN config_json->>'horizon_bars' ~ '^[0-9]+$' \
+                             THEN (config_json->>'horizon_bars')::int END, \
+                        config_json->>'timeframe' \
+                   FROM model_versions WHERE model_id = $1 AND version = $2",
+            )
+            .bind(&model_id)
+            .bind(version)
+            .fetch_optional(&self.pg)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or((None, None, None));
 
         let (artifact_uri, artifact_hash, model_kind) = if let Some(row) = artifact_row {
             row
@@ -192,6 +251,20 @@ impl InferenceGateway {
                 .await;
             return None;
         };
+
+        // A conditional-volatility model is served from the recent returns; with none to send
+        // the sidecar abstains with its reason (N-4.2). There is no unconditional fallback.
+        let mut series = HashMap::new();
+        if framework.as_deref() == Some("garch") {
+            let tf = timeframe.as_deref().unwrap_or("1m");
+            if let Some(r) = self
+                .recent
+                .recent_returns(instrument_id, tf, chrono::Utc::now())
+                .await
+            {
+                series.insert("recent_returns".to_string(), r);
+            }
+        }
 
         let start = Instant::now();
         let predict_req = PredictRequest {
@@ -203,6 +276,7 @@ impl InferenceGateway {
             instances: vec![PredictInstance {
                 instrument_id: instrument_id.to_string(),
                 features: features.clone(),
+                series,
             }],
         };
         let predict_result = self.sidecar.predict(predict_req).await;
@@ -222,7 +296,13 @@ impl InferenceGateway {
                 // Reconstruct distribution from sidecar response and validate (I-1.12).
                 let distribution = Self::build_distribution(&prediction);
 
+                let calibrated_spread_90 = if distribution.is_some() {
+                    self.calibrated_spread(&model_id, version).await
+                } else {
+                    None
+                };
                 let result = ForecastResult {
+                    calibrated_spread_90,
                     direction: prediction.direction.clone(),
                     confidence: prediction.confidence,
                     latency_ms,
@@ -238,7 +318,27 @@ impl InferenceGateway {
 
                 self.write_trace(&model_id, version, instrument_id, latency_ms, "hit")
                     .await;
+                if let Some(d) = &result.distribution {
+                    self.log_forecast(
+                        &model_id,
+                        version,
+                        instrument_id,
+                        d,
+                        horizon_bars,
+                        timeframe.as_deref(),
+                    )
+                    .await;
+                }
                 Some(result)
+            }
+            Err(e) if e.to_string().contains("abstain:") => {
+                // The model declined (no recent bars, too few, a legacy bundle): an abstain, not
+                // a failure, so no circuit-breaker count and no fallback alias that would answer
+                // the question the model refused (N-4.2).
+                debug!("{model_id} v{version} abstained: {e}");
+                self.write_trace(&model_id, version, instrument_id, latency_ms, "abstain")
+                    .await;
+                None
             }
             Err(e) => {
                 warn!("sidecar predict failed for {model_id}: {e}");
@@ -276,12 +376,14 @@ impl InferenceGateway {
                                 instances: vec![PredictInstance {
                                     instrument_id: instrument_id.to_string(),
                                     features: features.clone(),
+                                    series: HashMap::new(),
                                 }],
                             };
                             if let Ok(fb_resp) = self.sidecar.predict(fb_req).await {
                                 if let Some(fb_pred) = fb_resp.predictions.into_iter().next() {
                                     let distribution = Self::build_distribution(&fb_pred);
                                     let result = ForecastResult {
+                                        calibrated_spread_90: None,
                                         direction: fb_pred.direction.clone(),
                                         confidence: fb_pred.confidence,
                                         latency_ms,
@@ -370,7 +472,9 @@ impl InferenceGateway {
             out.var_99 = Some(risk.var_99.var);
             out.es_95 = Some(risk.var_95.es);
             out.skew = Some(risk.skew);
-            out.spread_90 = Some(risk.spread_90);
+            // The calibrated band width wins over the raw q95 - q05 when a calibration wrapper
+            // exists for this version (N-4.1): sizing consumes what was checked against outcomes.
+            out.spread_90 = Some(f.calibrated_spread_90.unwrap_or(risk.spread_90));
         }
         out
     }
@@ -505,6 +609,68 @@ impl InferenceGateway {
         }
     }
 
+    /// Record a served distribution in `model_forecasts` (migration 0222), so the quality
+    /// monitor has something to score once the realised value is filled in (N-4.1).
+    /// A failed write is logged, not swallowed: a monitor with no forecasts is otherwise
+    /// indistinguishable from a model with nothing to monitor.
+    async fn log_forecast(
+        &self,
+        model_id: &str,
+        version: i32,
+        instrument_id: &str,
+        d: &ForecastDistribution,
+        horizon_bars: Option<i32>,
+        timeframe: Option<&str>,
+    ) {
+        let at = |level: f64| -> Option<f64> {
+            d.quantile_levels
+                .iter()
+                .position(|l| (l - level).abs() < 1e-9)
+                .and_then(|i| d.quantiles_return.get(i).copied())
+        };
+        let res = sqlx::query(
+            "INSERT INTO model_forecasts              (model_id, version, instrument_id, predicted_q05, predicted_q10, predicted_q25,               predicted_q50, predicted_q75, predicted_q90, predicted_q95, horizon_bars, timeframe)              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        )
+        .bind(model_id)
+        .bind(version)
+        .bind(instrument_id)
+        .bind(at(0.05))
+        .bind(at(0.10))
+        .bind(at(0.25))
+        .bind(at(0.50).or(Some(d.median_return)))
+        .bind(at(0.75))
+        .bind(at(0.90))
+        .bind(at(0.95))
+        .bind(horizon_bars)
+        .bind(timeframe)
+        .execute(&self.pg)
+        .await;
+        if let Err(e) = res {
+            warn!("could not record the forecast for {model_id}: {e}");
+        }
+    }
+
+    /// The latest finite `calibration.spread_90` of the newest calibration wrapper of
+    /// `model_id@version` (the wrapper row is `family = 'calibration'` with
+    /// `config_json.wraps.version`). `None` when the version has no wrapper or its band was
+    /// never produced.
+    pub async fn calibrated_spread(&self, model_id: &str, version: i32) -> Option<f64> {
+        let spread: Option<serde_json::Value> = sqlx::query_scalar(
+            "SELECT config_json->'calibration'->'spread_90' FROM model_versions \
+              WHERE model_id = $1 AND family = 'calibration' \
+                AND (config_json->'wraps'->>'version')::int = $2 \
+              ORDER BY version DESC LIMIT 1",
+        )
+        .bind(model_id)
+        .bind(version)
+        .fetch_optional(&self.pg)
+        .await
+        .ok()
+        .flatten()
+        .flatten();
+        latest_spread(&spread?)
+    }
+
     /// Write a trace record to `model_events` table.
     async fn write_trace(
         &self,
@@ -562,6 +728,33 @@ impl InferenceGateway {
         }
     }
 
+    /// Inference count and latency by outcome over the last 7 days (H-4.6). Outcomes include
+    /// `hit`, `miss`, `abstain`, `error` and `rate_limited`.
+    ///
+    /// # Errors
+    /// A Postgres failure.
+    pub async fn trace_rollup(&self, model_id: &str) -> anyhow::Result<Vec<serde_json::Value>> {
+        let rows: Vec<(String, i64, Option<f64>, Option<f64>)> = sqlx::query_as(
+            "SELECT payload->>'result' AS result, count(*), \
+                    percentile_cont(0.5) WITHIN GROUP (ORDER BY (payload->>'latency_ms')::float8), \
+                    percentile_cont(0.95) WITHIN GROUP (ORDER BY (payload->>'latency_ms')::float8) \
+               FROM model_events \
+              WHERE model_id = $1 AND kind = 'inference_trace' AND created_at > now() - interval '7 days' \
+              GROUP BY 1 ORDER BY 2 DESC",
+        )
+        .bind(model_id)
+        .fetch_all(&self.pg)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(res, n, p50, p95)| {
+                serde_json::json!({
+                    "result": res, "count": n, "latency_ms_p50": p50, "latency_ms_p95": p95,
+                })
+            })
+            .collect())
+    }
+
     /// Return recent inference traces from `model_events`.
     pub async fn get_traces(
         &self,
@@ -588,12 +781,41 @@ impl InferenceGateway {
     }
 }
 
+/// The latest finite value of a calibration `spread_90` series (one band width per observation,
+/// `null` where no band existed yet). The newest band is the one in force.
+fn latest_spread(v: &serde_json::Value) -> Option<f64> {
+    v.as_array()?
+        .iter()
+        .rev()
+        .find_map(|x| x.as_f64().filter(|f| f.is_finite() && *f > 0.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn the_latest_finite_positive_band_width_is_the_one_in_force() {
+        let v = serde_json::json!([null, 0.02, 0.03, null]);
+        assert_eq!(latest_spread(&v), Some(0.03));
+        assert_eq!(latest_spread(&serde_json::json!([null, null])), None);
+        assert_eq!(latest_spread(&serde_json::json!("x")), None);
+        assert_eq!(latest_spread(&serde_json::json!([0.0, -1.0])), None);
+    }
+
+    #[test]
+    fn serving_consumes_the_calibrated_spread_over_the_raw_quantile_width() {
+        let mut f = result_with_dist();
+        let raw = InferenceGateway::forecast_to_output(&f).spread_90.unwrap();
+        f.calibrated_spread_90 = Some(raw * 3.0 + 0.5);
+        let out = InferenceGateway::forecast_to_output(&f);
+        assert!((out.spread_90.unwrap() - (raw * 3.0 + 0.5)).abs() < 1e-12);
+        assert!(raw > 0.0, "the raw width exists, so the override is observable");
+    }
+
     fn result_with_dist() -> ForecastResult {
         ForecastResult {
+            calibrated_spread_90: None,
             direction: "up".into(),
             confidence: 0.8,
             latency_ms: 1,
@@ -654,6 +876,7 @@ mod tests {
     #[test]
     fn forecast_to_output_point_model_has_no_dist_fields() {
         let f = ForecastResult {
+            calibrated_spread_90: None,
             direction: "down".into(),
             confidence: 0.6,
             latency_ms: 1,

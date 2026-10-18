@@ -321,8 +321,10 @@ pub async fn list_models(
     base_url: &str,
     api_key: &str,
 ) -> Result<Vec<ModelInfo>, LlmError> {
+    // The default page is 20 models, which already hides older ones from the
+    // picker; 1000 is the documented maximum and one page holds every model.
     let resp = http
-        .get(format!("{base_url}/v1/models"))
+        .get(format!("{base_url}/v1/models?limit=1000"))
         .header("x-api-key", api_key)
         .header("anthropic-version", ANTHROPIC_VERSION)
         .header("anthropic-beta", EXTENDED_CACHE_BETA)

@@ -211,6 +211,22 @@ fn expand_members(study: &StudyConfig) -> Vec<RunConfig> {
                 cfg.rehashed()
             })
             .collect(),
+        VarySpec::StrategyRefs { refs } => refs
+            .iter()
+            .map(|r| {
+                let mut cfg = base.clone();
+                cfg.strategy_ref.clone_from(r);
+                cfg.rehashed()
+            })
+            .collect(),
+        VarySpec::FillDelays { bars } => bars
+            .iter()
+            .map(|b| {
+                let mut cfg = base.clone();
+                cfg.fill_delay_bars = *b;
+                cfg.rehashed()
+            })
+            .collect(),
         VarySpec::Regimes { windows } => windows
             .iter()
             .map(|(start, end, _label)| {
@@ -794,5 +810,72 @@ mod tests {
         assert_eq!(res.distribution.dist.len(), 500);
         // The worst-case ordering must be at least as bad as the median.
         assert!(res.distribution.worst_5pct <= res.distribution.median);
+    }
+
+    /// A timing-jitter study runs the same config once per delay, in delay order,
+    /// each under its own run id (the delay is part of the config hash), and the
+    /// executor sees the delay it was given.
+    #[test]
+    fn timing_jitter_runs_one_member_per_delay_and_the_executor_sees_each() {
+        // The edge is eaten by lateness: 2% on time, 1% one bar late, -1% beyond.
+        let exec = ClosureExecutor(|cfg: &RunConfig| {
+            let level = match cfg.fill_delay_bars {
+                0 => 0.02,
+                1 => 0.01,
+                _ => -0.01,
+            };
+            let curve = daily_curve(&[100.0, 100.0 * (1.0 + level)]);
+            map_sim_result(cfg, curve, vec![], vec![], ComputeCost::default(), ENGINE_VERSION)
+        });
+        let bt = Backtest::new(InMemoryRunStore::new(), exec, InMemoryLedger::new());
+        let study = StudyConfig {
+            study_id: "jitter".into(),
+            kind: StudyKind::TimingJitter,
+            base_config: base(),
+            vary: VarySpec::FillDelays { bars: vec![0, 1, 3] },
+            metric: MetricKind::TotalReturn,
+            null_ref: None,
+            null: None,
+            budget: StudyBudget::default(),
+            question: "does the edge survive being late?".into(),
+            selection_rule: SelectionRule::None,
+        };
+        let res = StudyEngine::run(&study, &bt, &ctx()).unwrap();
+        assert_eq!(res.members().len(), 3);
+        assert_eq!(res.trial_delta, 3, "each delay is a counted look");
+        let d = &res.distribution.dist;
+        assert!(d[0] > d[1] && d[1] > 0.0 && d[2] < 0.0, "{d:?}");
+    }
+
+    /// An ablation study runs the same slice once per stored strategy, baseline
+    /// first, each under its own run id, and the executor sees the strategy it
+    /// was given.
+    #[test]
+    fn ablation_runs_one_member_per_strategy_in_the_order_given() {
+        let exec = ClosureExecutor(|cfg: &RunConfig| {
+            let level = if cfg.strategy_ref.ends_with("--ablate-0") { 0.0 } else { 0.02 };
+            let curve = daily_curve(&[100.0, 100.0 * (1.0 + level)]);
+            map_sim_result(cfg, curve, vec![], vec![], ComputeCost::default(), ENGINE_VERSION)
+        });
+        let bt = Backtest::new(InMemoryRunStore::new(), exec, InMemoryLedger::new());
+        let study = StudyConfig {
+            study_id: "ablate".into(),
+            kind: StudyKind::Ablation,
+            base_config: base(),
+            vary: VarySpec::StrategyRefs {
+                refs: vec!["s".into(), "s--ablate-0".into()],
+            },
+            metric: MetricKind::TotalReturn,
+            null_ref: None,
+            null: None,
+            budget: StudyBudget::default(),
+            question: "which rules earn their place?".into(),
+            selection_rule: SelectionRule::None,
+        };
+        let res = StudyEngine::run(&study, &bt, &ctx()).unwrap();
+        assert_eq!(res.members().len(), 2);
+        assert_eq!(res.trial_delta, 2, "each strategy is a counted look");
+        let d = &res.distribution.dist;
+        assert!(d[0] > d[1], "baseline first, then the variant: {d:?}");
     }
 }

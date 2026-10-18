@@ -53,14 +53,22 @@
 //! back is a [`suggest::Fragment`], which is one line, and no SLv2 document is
 //! one line.
 //!
+//! # The tools, the guide and the measurements
+//!
+//! [`guide`] is the language's own reference, served a section at a time and
+//! checked against the registries. [`intent`] reads the comments an author wrote
+//! back off the syntax tree. [`block::probes`] is how the blocking profile is
+//! measured without a second evaluator: it builds the previews to run, and
+//! [`block::blocking_profile`] reads their answers.
+//!
 //! # What is not here
 //!
-//! `apply_move` and the tools that serve all of it (S-5.8) are separate tasks.
-//! The comment machinery is parsed and kept on the tree ([`ast::Comments`]) and
-//! stops there: the canonical `StrategyDefinition` has no field to carry a
-//! comment, so the *first* half of S-5.15, "intent survives the round trip",
-//! needs a schema change in `domain` and not a change here. The second half —
-//! the preview naming the blocking clause — is [`block`].
+//! The comment machinery is parsed, kept on the tree ([`ast::Comments`]) and
+//! readable ([`intent::notes`]), and it stops there on purpose: the canonical
+//! `StrategyDefinition` has no field to carry a comment and the domain has
+//! reasons not to grow one (see [`intent`]). The first half of S-5.15, "intent
+//! survives the round trip", therefore holds from text to `explain_strategy` and
+//! not through the stored form.
 
 #![allow(clippy::module_name_repetitions)]
 // A `Diagnostic` is large because it teaches: a code, a span, a message, what
@@ -79,6 +87,8 @@ pub mod decompile;
 pub mod diagnostic;
 pub mod diff;
 pub mod form;
+pub mod guide;
+pub mod intent;
 pub mod lex;
 pub mod parse;
 pub mod skeleton;
@@ -86,7 +96,10 @@ pub mod suggest;
 pub mod v3;
 
 pub use apply::{apply_move, apply_move_with, Applied, ClausePath, Edit, EntryPath};
-pub use block::{blocking_profile, entry_clauses, BlockingProfile, EntryCounts, Verdict};
+pub use block::{
+    blocking_profile, entry_clauses, probes, BlockingProfile, EntryCounts, Measures, Probe,
+    ProbeSet, Verdict,
+};
 pub use catalogue::Catalogue;
 pub use compile::{compile, compile_with};
 pub use decompile::{decompile, decompile_with};

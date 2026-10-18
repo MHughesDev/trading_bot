@@ -17,6 +17,11 @@ ledger = { workspace = true }
 monitor = { path = "../monitor" }
 tracing = { workspace = true }
 thiserror = { workspace = true }
+# Set E E-5.1: the divergence counter.
+observability = { workspace = true }
+# T-2.4 / T-2.2: drill measurements and fleet findings are recorded as JSON
+# evidence on monitor.drill_run and monitor.platform_defect.
+serde_json = { workspace = true }
 tokio = { workspace = true }
 chrono = { workspace = true }
 chrono-tz = { workspace = true }

@@ -1,0 +1,15 @@
+# SEC EDGAR collector configuration (Set P P-3.2).
+#
+# The SEC's fair-access rules require every automated request to carry a
+# User-Agent that identifies WHO is asking and how to reach them
+# (https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data).
+# That string is the operator's and nobody else can supply it, so it is an explicit
+# field here and the value below is a clearly marked PLACEHOLDER, not a real contact.
+#
+# `edgar-collector` refuses to run against the SEC while the value still contains
+# "PLACEHOLDER" unless EDGAR_ALLOW_PLACEHOLDER=1 is set for a one-off smoke run,
+# which is how the first rows were fetched; a standing collector needs the real one.
+# EDGAR_USER_AGENT in the environment overrides this field.
+#
+# Replace with:  "<Your Name or Org> <your-contact-address@your-domain>"
+user_agent = "tbot-research-PLACEHOLDER operator-contact@placeholder.invalid"

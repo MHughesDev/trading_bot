@@ -221,6 +221,19 @@ pub struct Scorecard {
     pub memory_recall: Option<f64>,
     #[serde(default)]
     pub hitl_precision: Option<f64>,
+    /// AGENT-005 section 19 (S-9.10): used / rendered tokens over this profile's
+    /// recorded trajectories, per tier. `None` until a corpus has been
+    /// attributed; never `0.0` for "not measured" (a selector that was never
+    /// measured is not a selector that renders nothing useful).
+    #[serde(default)]
+    pub utility_rate: Option<f64>,
+    /// AGENT-009 section 5 (S-4.12): the share of this model's sampled runs for which
+    /// the calibrated token estimate still **over**-estimated the prompt. `None` until
+    /// the model has a calibration row (ten runs with provider-counted prompt tokens);
+    /// never `1.0` for "not measured". An estimate that under-estimates lets a prompt
+    /// overrun its window, so below [`MIN_OVER_ESTIMATE_RATE`] the gate blocks.
+    #[serde(default)]
+    pub over_estimate_rate: Option<f64>,
     /// How many times the gate has been evaluated for this harness version. The
     /// platform's own multiple-testing exposure, recorded rather than ignored.
     #[serde(default)]
@@ -470,6 +483,10 @@ fn p_value_of(lower: f64, upper: f64) -> f64 {
 /// AGENT-009 §4's false-discovery rate for the gate.
 pub const GATE_Q: f64 = 0.10;
 
+/// The share of runs the calibrated token estimate must still over-estimate
+/// (AGENT-009 section 5).
+pub const MIN_OVER_ESTIMATE_RATE: f64 = 0.95;
+
 /// Evaluate the gate for a set of profiles (P4).
 ///
 /// `baselines` and `candidates` are keyed by profile id. A profile in
@@ -489,6 +506,20 @@ pub fn gate(baselines: &[Scorecard], candidates: &[Scorecard]) -> GateVerdict {
     let mut live: Vec<(String, f64, f64, f64, &SuiteScore)> = Vec::new();
 
     for cand in candidates {
+        // The budget's own number (S-4.12), checked before any baseline exists: an
+        // estimator that under-estimates is wrong by itself, not relative to a
+        // previous version. `None` is unmeasured and blocks nothing.
+        if let Some(rate) = cand.over_estimate_rate {
+            if rate < MIN_OVER_ESTIMATE_RATE {
+                blocked = true;
+                reasons.push(format!(
+                    "{}: the token estimate over-estimated only {:.1}% of sampled runs (needs {:.0}%): prompts can overrun the window it budgets",
+                    cand.profile_id,
+                    rate * 100.0,
+                    MIN_OVER_ESTIMATE_RATE * 100.0
+                ));
+            }
+        }
         let base = baselines.iter().find(|b| b.profile_id == cand.profile_id);
         if !cand.is_measured() {
             unmeasured.push(cand.profile_id.clone());
@@ -766,6 +797,8 @@ mod tests {
             cache_hit_rate: None,
             memory_recall: None,
             hitl_precision: None,
+            utility_rate: None,
+            over_estimate_rate: None,
             evaluations: 0,
             barren: vec![],
         }
@@ -998,5 +1031,34 @@ mod tests {
         let mut ok = replay("routing", 10, 10, &[]);
         ok.flakiness = 0.0;
         assert!(card("p", "t", vec![ok]).is_measured());
+    }
+
+    /// S-4.12: an estimator that under-estimates blocks on its own number, a good one
+    /// does not, and an unmeasured one is not a failure.
+    #[test]
+    fn a_token_estimate_that_under_estimates_blocks_and_an_unmeasured_one_does_not() {
+        let suites = || vec![SuiteScore {
+            suite: "routing".into(),
+            kind: SuiteKind::Replay,
+            passed: 2,
+            n: 2,
+            flakiness: 0.0,
+            attribution: BTreeMap::new(),
+            failed_cases: vec![],
+            sealed: false,
+        }];
+        let base = card("qwen", "degraded", suites());
+        let with = |rate: Option<f64>| {
+            let mut c = card("qwen", "degraded", suites());
+            c.over_estimate_rate = rate;
+            c
+        };
+        let bad = gate(std::slice::from_ref(&base), &[with(Some(0.90))]);
+        assert!(bad.blocked, "{}", bad.summary());
+        assert!(bad.summary().contains("over-estimated only 90.0%"), "{}", bad.summary());
+        assert!(!gate(std::slice::from_ref(&base), &[with(Some(0.97))]).blocked);
+        assert!(!gate(&[base], &[with(None)]).blocked, "unmeasured is not a failure");
+        // And with no baseline at all the number still stands on its own.
+        assert!(gate(&[], &[with(Some(0.5))]).blocked);
     }
 }

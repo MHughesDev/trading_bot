@@ -1,0 +1,294 @@
+[
+  {
+    "harness_version": "0.1.0",
+    "profile_id": "reference-policy/degraded",
+    "tier": "degraded",
+    "hardware": "replay: synthetic reference policy, not a model",
+    "suites": [
+      {
+        "suite": "judgement/compare",
+        "kind": "replay",
+        "passed": 0,
+        "n": 4,
+        "flakiness": 0.0,
+        "attribution": {
+          "chose_the_workflow": 4
+        },
+        "failed_cases": [
+          "judgement/0e9dcebbef1e",
+          "judgement/553cb7ca6977",
+          "judgement/88a20e53ccd0",
+          "judgement/be4bfd19ffad"
+        ],
+        "sealed": false
+      },
+      {
+        "suite": "judgement/falsify",
+        "kind": "replay",
+        "passed": 0,
+        "n": 3,
+        "flakiness": 0.0,
+        "attribution": {
+          "chose_the_workflow": 3,
+          "rejected_when_it_should": 3
+        },
+        "failed_cases": [
+          "judgement/55ea60f11c04",
+          "judgement/ae0d26ef3478",
+          "judgement/d0285424a6f9"
+        ],
+        "sealed": false
+      },
+      {
+        "suite": "judgement/investigate",
+        "kind": "replay",
+        "passed": 23,
+        "n": 30,
+        "flakiness": 0.0,
+        "attribution": {
+          "avoided_the_duplicate": 6,
+          "rejected_when_it_should": 1
+        },
+        "failed_cases": [
+          "judgement/74d95c284fcc",
+          "judgement/dead_01",
+          "judgement/dead_02",
+          "judgement/dead_03",
+          "judgement/dead_04",
+          "judgement/dead_05",
+          "judgement/dead_06"
+        ],
+        "sealed": false
+      }
+    ],
+    "cost_usd": 0.0,
+    "cost_tokens": 0,
+    "median_steps": 0.0,
+    "cache_hit_rate": null,
+    "memory_recall": null,
+    "hitl_precision": null,
+    "utility_rate": null,
+    "over_estimate_rate": null,
+    "evaluations": 1,
+    "barren": []
+  },
+  {
+    "harness_version": "0.1.0",
+    "profile_id": "reference-policy/local_small",
+    "tier": "local_small",
+    "hardware": "replay: synthetic reference policy, not a model",
+    "suites": [
+      {
+        "suite": "judgement/compare",
+        "kind": "replay",
+        "passed": 0,
+        "n": 4,
+        "flakiness": 0.0,
+        "attribution": {
+          "chose_the_workflow": 4
+        },
+        "failed_cases": [
+          "judgement/0e9dcebbef1e",
+          "judgement/553cb7ca6977",
+          "judgement/88a20e53ccd0",
+          "judgement/be4bfd19ffad"
+        ],
+        "sealed": false
+      },
+      {
+        "suite": "judgement/falsify",
+        "kind": "replay",
+        "passed": 0,
+        "n": 3,
+        "flakiness": 0.0,
+        "attribution": {
+          "chose_the_workflow": 3,
+          "rejected_when_it_should": 3
+        },
+        "failed_cases": [
+          "judgement/55ea60f11c04",
+          "judgement/ae0d26ef3478",
+          "judgement/d0285424a6f9"
+        ],
+        "sealed": false
+      },
+      {
+        "suite": "judgement/investigate",
+        "kind": "replay",
+        "passed": 26,
+        "n": 30,
+        "flakiness": 0.0,
+        "attribution": {
+          "avoided_the_duplicate": 3,
+          "rejected_when_it_should": 1
+        },
+        "failed_cases": [
+          "judgement/dac08cda5ad2",
+          "judgement/dead_02",
+          "judgement/dead_04",
+          "judgement/dead_06"
+        ],
+        "sealed": false
+      }
+    ],
+    "cost_usd": 0.0,
+    "cost_tokens": 0,
+    "median_steps": 0.0,
+    "cache_hit_rate": null,
+    "memory_recall": null,
+    "hitl_precision": null,
+    "utility_rate": null,
+    "over_estimate_rate": null,
+    "evaluations": 1,
+    "barren": []
+  },
+  {
+    "harness_version": "0.1.0",
+    "profile_id": "reference-policy/local_mid",
+    "tier": "local_mid",
+    "hardware": "replay: synthetic reference policy, not a model",
+    "suites": [
+      {
+        "suite": "judgement/compare",
+        "kind": "replay",
+        "passed": 4,
+        "n": 4,
+        "flakiness": 0.0,
+        "attribution": {},
+        "failed_cases": [],
+        "sealed": false
+      },
+      {
+        "suite": "judgement/falsify",
+        "kind": "replay",
+        "passed": 3,
+        "n": 3,
+        "flakiness": 0.0,
+        "attribution": {},
+        "failed_cases": [],
+        "sealed": false
+      },
+      {
+        "suite": "judgement/investigate",
+        "kind": "replay",
+        "passed": 28,
+        "n": 30,
+        "flakiness": 0.0,
+        "attribution": {
+          "avoided_the_duplicate": 2
+        },
+        "failed_cases": [
+          "judgement/dead_03",
+          "judgement/dead_06"
+        ],
+        "sealed": false
+      }
+    ],
+    "cost_usd": 0.0,
+    "cost_tokens": 0,
+    "median_steps": 0.0,
+    "cache_hit_rate": null,
+    "memory_recall": null,
+    "hitl_precision": null,
+    "utility_rate": null,
+    "over_estimate_rate": null,
+    "evaluations": 1,
+    "barren": []
+  },
+  {
+    "harness_version": "0.1.0",
+    "profile_id": "reference-policy/local_high",
+    "tier": "local_high",
+    "hardware": "replay: synthetic reference policy, not a model",
+    "suites": [
+      {
+        "suite": "judgement/compare",
+        "kind": "replay",
+        "passed": 4,
+        "n": 4,
+        "flakiness": 0.0,
+        "attribution": {},
+        "failed_cases": [],
+        "sealed": false
+      },
+      {
+        "suite": "judgement/falsify",
+        "kind": "replay",
+        "passed": 3,
+        "n": 3,
+        "flakiness": 0.0,
+        "attribution": {},
+        "failed_cases": [],
+        "sealed": false
+      },
+      {
+        "suite": "judgement/investigate",
+        "kind": "replay",
+        "passed": 30,
+        "n": 30,
+        "flakiness": 0.0,
+        "attribution": {},
+        "failed_cases": [],
+        "sealed": false
+      }
+    ],
+    "cost_usd": 0.0,
+    "cost_tokens": 0,
+    "median_steps": 0.0,
+    "cache_hit_rate": null,
+    "memory_recall": null,
+    "hitl_precision": null,
+    "utility_rate": null,
+    "over_estimate_rate": null,
+    "evaluations": 1,
+    "barren": []
+  },
+  {
+    "harness_version": "0.1.0",
+    "profile_id": "reference-policy/frontier",
+    "tier": "frontier",
+    "hardware": "replay: synthetic reference policy, not a model",
+    "suites": [
+      {
+        "suite": "judgement/compare",
+        "kind": "replay",
+        "passed": 4,
+        "n": 4,
+        "flakiness": 0.0,
+        "attribution": {},
+        "failed_cases": [],
+        "sealed": false
+      },
+      {
+        "suite": "judgement/falsify",
+        "kind": "replay",
+        "passed": 3,
+        "n": 3,
+        "flakiness": 0.0,
+        "attribution": {},
+        "failed_cases": [],
+        "sealed": false
+      },
+      {
+        "suite": "judgement/investigate",
+        "kind": "replay",
+        "passed": 30,
+        "n": 30,
+        "flakiness": 0.0,
+        "attribution": {},
+        "failed_cases": [],
+        "sealed": false
+      }
+    ],
+    "cost_usd": 0.0,
+    "cost_tokens": 0,
+    "median_steps": 0.0,
+    "cache_hit_rate": null,
+    "memory_recall": null,
+    "hitl_precision": null,
+    "utility_rate": null,
+    "over_estimate_rate": null,
+    "evaluations": 1,
+    "barren": []
+  }
+]

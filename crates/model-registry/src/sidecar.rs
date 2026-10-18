@@ -61,6 +61,20 @@ pub struct TrainDispatchRequest {
     /// `None`, the sidecar falls back to ordinal `split_indices` (back-compat).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folds: Option<Vec<FoldSpec>>,
+    /// A checkpoint manifest `jobs::checkpoint::plan_resume` has approved for this
+    /// run. The trainer restores from it and never judges it itself (ADR-C-08).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resume: Option<serde_json::Value>,
+
+    /// The dataset declaration this run was lowered from (Set N N-1.1): sequence window,
+    /// sampling, transforms, weights, target and the derived purge/embargo. The
+    /// `ModelDefinition` has no free slot, so it travels beside it; the trainer merges
+    /// it into `definition["declaration"]`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub declaration: Option<serde_json::Value>,
+    /// The `(family, variant)` the run trains as (N-2.1), `{"family": .., "variant": ..}`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub family: Option<serde_json::Value>,
 }
 
 /// Resolved data-selection passed to the trainer sidecar.  Unlike the API-facing
@@ -101,12 +115,30 @@ pub struct TrainResult {
     /// `dependency_failure`: a dependency raised and did not say why.
     #[serde(default)]
     pub terminal: Option<String>,
+    /// Each later walk-forward fold's own model (Set U U-5.8,
+    /// `app/fold_models.py`). Empty from a sidecar that does not send them.
+    #[serde(default)]
+    pub fold_artifacts: Vec<FoldArtifactResult>,
+}
+
+/// One fold's model as the trainer stored it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FoldArtifactResult {
+    pub index: i32,
+    pub artifact_uri: String,
+    pub sha256: String,
+    pub size_bytes: i64,
+    pub trained_through_ns: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PredictInstance {
     pub instrument_id: String,
     pub features: std::collections::HashMap<String, f64>,
+    /// Named series the model reads whole (a GARCH model's `recent_returns`, N-4.2), oldest
+    /// first. Empty for every model that reads scalar features.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub series: std::collections::HashMap<String, Vec<f64>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -162,6 +194,11 @@ pub struct EvalDispatchRequest {
     pub progress: ProgressConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folds: Option<Vec<FoldSpec>>,
+    /// As on [`TrainDispatchRequest`]: the declaration and family the version was trained as.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub declaration: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub family: Option<serde_json::Value>,
 }
 
 /// Full eval result from the scoring sidecar.
@@ -343,6 +380,25 @@ impl SidecarClient {
         }
     }
 
+    /// Which code and image the trainer is running: the two things a checkpoint
+    /// must match for `plan_resume` to approve it. `None` when the trainer does
+    /// not say (older build, or unreachable), in which case nothing is resumed.
+    pub async fn identity(&self) -> Option<(String, String)> {
+        let body: serde_json::Value = self
+            .http
+            .get(format!("{}/capabilities", self.trainer_url))
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()?;
+        Some((
+            body.get("code_hash")?.as_str()?.to_string(),
+            body.get("image_digest")?.as_str()?.to_string(),
+        ))
+    }
+
     pub async fn dispatch_train(&self, req: TrainDispatchRequest) -> anyhow::Result<TrainResult> {
         use std::sync::atomic::Ordering;
         // Basic circuit-break: if 5+ consecutive failures, fail fast.
@@ -387,7 +443,11 @@ impl SidecarClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            self.infer_failures.fetch_add(1, Ordering::Relaxed);
+            // A 422 `abstain:` is the model declining, not the service failing: it must not
+            // open the circuit breaker (N-4.2).
+            if !(status.as_u16() == 422 && body.contains("abstain:")) {
+                self.infer_failures.fetch_add(1, Ordering::Relaxed);
+            }
             anyhow::bail!("inference returned {status}: {body}");
         }
         self.infer_failures.store(0, Ordering::Relaxed);
@@ -455,6 +515,28 @@ impl SidecarClient {
         }
         self.train_failures.store(0, Ordering::Relaxed);
         Ok(resp.json::<EvalResult>().await?)
+    }
+
+    /// Adaptive conformal calibration (Set N N-4.1): the trainer's `/calibrate` runs ACI
+    /// (optionally with CUSUM resets) over a stream of scores and realised values and
+    /// returns calibrated bands, the rolling coverage and the reset indices.
+    ///
+    /// # Errors
+    /// The trainer unreachable or refusing the request.
+    pub async fn calibrate(&self, body: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
+        let resp = self
+            .http
+            .post(format!("{}/calibrate", self.trainer_url))
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("trainer calibrate unreachable: {e}"))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("trainer calibrate returned {status}: {text}");
+        }
+        Ok(resp.json::<serde_json::Value>().await?)
     }
 
     /// Serving protocol v2 (Set U U-5.2).

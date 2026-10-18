@@ -342,7 +342,7 @@ impl ResearchManager {
     /// Returns an empty vec for every reason a scope cannot be resolved or a
     /// label cannot be found. The caller turns that into `Unmeasured`, which is
     /// the truthful answer in all of them.
-    async fn regime_windows(
+    pub(crate) async fn regime_windows(
         &self,
         user_id: Uuid,
         run_id: &str,

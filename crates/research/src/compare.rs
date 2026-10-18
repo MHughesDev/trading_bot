@@ -214,15 +214,6 @@ mod tests {
     /// 29 paired replicates, which is what §11.5 asks for.
     const K: usize = 29;
 
-    /// The replicate grid, from a **platform-held** base seed.
-    ///
-    /// Generated once and shared by every candidate, because `judge` refuses an
-    /// unpaired comparison — and because comparing candidates over different
-    /// nuisance draws is the mistake the pairing exists to prevent.
-    fn grid() -> Vec<backtest::stats::compare::Replicate> {
-        backtest::stats::compare::replicate_grid(K, 0x5eed_0000_0000_0001)
-    }
-
     fn candidate(name: &str, values: impl Fn(usize) -> f64) -> Candidate {
         candidate_at(name, K, values)
     }

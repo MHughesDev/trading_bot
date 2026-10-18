@@ -112,19 +112,37 @@ stack_order,priority,phase,batch,id,kind,status,summary,summary_one_line,agent_t
 
 **Category:** **FR**, **PF**, **UI**, **DS**, **MS**, **XX** (roadmap); **EX**, **MD**, **DP**, **RT**, **CP**, **OB**, **OP**, **CI**, **CFG** (fixes).
 
-**Status:** Open / In progress / Done.
+**Status:** Open / In progress / Done / Superseded. A **Superseded** row (added 2026-10-03) targets code that no longer exists; its `agent_task` names the successor and keeps the original text for the record.
 
 ---
 
 ## 2. Open queue status
 
-**Snapshot (2026-06-08):** All prior epics (UX, auth, canonical replacement FB-CAN-001…078, audit/setup/doc) are **Done**. Streamlit UI replaced with React SPA (June 2026). **Open stack (pull order):** **FB-FCST-001** (forecaster training + live wiring) → **FB-FCST-002** (backtest quantile vs. baseline) → **FB-RX-001** (monitoring page) → **FB-RX-002** (SSE live chart) → **FB-RX-003** (execution quality UI) → **FB-RX-004** (governance page) → **FB-RX-005** (alert inbox) → **FB-EXEC-001** (Alpaca limit orders) → **FB-EXEC-002** (Coinbase limit orders) → **FB-N1-S2** (Kraken execution adapter).
+**Snapshot (2026-10-03).** The Python tree this queue was written against (`control_plane/`, `execution/adapters/`, `forecaster_model/`, `backtesting/`) was deleted in the Rust rewrite. The 2026-06-08 open stack has been triaged against the current Rust/React stack:
+
+| ID | Status | Successor / current form |
+|----|--------|--------------------------|
+| FB-FCST-001 | **Superseded** | Set I (probabilistic forecasting suite) + Set U Phase 5 (typed model contracts) |
+| FB-FCST-002 | **Superseded** | Set J/K backtest suite, run through Set U Phase 3 with Set U Phase 5 model inputs |
+| FB-RX-001 | **Superseded** | COMP-007 live monitor (`crates/monitor`, `/api/monitor/*`), Set S Phase 7 / Set T |
+| FB-EXEC-001 | **Superseded** | ADR-0048: paper runs in the app; the in-app paper engine already fills limit/stop (`crates/execution/src/paper/clob.rs`) |
+| FB-EXEC-002 | **Superseded** | The live Coinbase adapter (`crates/execution/src/coinbase.rs`, a stub), gated by ROADMAP H-4; see FB-N1-S2 |
+| FB-RX-002 | Open, **rewritten** | Live bars on the chart over the existing `/ws/live` WebSocket |
+| FB-RX-003 | Open, **rewritten** | Execution-quality view from COMP-007 slippage stats + venue health |
+| FB-RX-004 | Open, **rewritten** | Governance view over gates, platform timeline, model-alias rollback, deployments |
+| FB-RX-005 | Open, **rewritten** | Alert inbox over `/api/monitor/events` + `/api/alerts`, ack persisted server-side |
+| FB-N1-S2 | Open, **rewritten** (carries FB-N1) | Kraken spot live adapter behind the `Venue` port + per-venue risk caps; H-4 gated |
+| FB-N3-S2 | Open, **new** (carries FB-N3) | Optimiser objectives on `strategy_engine::allocation::rebalance` |
+
+Full rewritten task text is in [`QUEUE_STACK.csv`](QUEUE_STACK.csv) rows 121–128. These rows are a holding pen: the programme is tracked in [`plans/PLAN.md`](plans/PLAN.md), and a track that takes one of them should move it into a plan set.
 
 | Priority | Open count | IDs |
 |----------|------------|-----|
-| **HIGH** | **3** | FB-FCST-001, FB-RX-001, FB-RX-002 |
-| **MEDIUM** | **5** | FB-FCST-002, FB-RX-003, FB-RX-004, FB-EXEC-001, FB-EXEC-002 |
-| **LOW** | **2** | FB-RX-005, FB-N1-S2 |
+| **HIGH** | **1** | FB-RX-002 |
+| **MEDIUM** | **2** | FB-RX-003, FB-RX-004 |
+| **LOW** | **3** | FB-RX-005, FB-N1-S2, FB-N3-S2 |
+
+*Superseded on 2026-10-03:* FB-FCST-001, FB-FCST-002, FB-RX-001, FB-EXEC-001, FB-EXEC-002. *The original 2026-06-08 snapshot read:* open stack FB-FCST-001 → FB-FCST-002 → FB-RX-001 → FB-RX-002 → FB-RX-003 → FB-RX-004 → FB-RX-005 → FB-EXEC-001 → FB-EXEC-002 → FB-N1-S2.
 
 **Full row text and completed history:** [`QUEUE_ARCHIVE.MD`](QUEUE_ARCHIVE.MD) (§2 open tables, §3 fixes, §4 gates, §5 archive).
 

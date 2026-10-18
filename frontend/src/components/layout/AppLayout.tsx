@@ -15,6 +15,7 @@ import { fetchInstruments } from '@/api/portfolio'
 import { toSpecAssetClass } from '@/lib/assetClass'
 import { KillSwitchBanner } from '@/components/desk/KillSwitchBanner'
 import { LiveRegion } from '@/components/LiveRegion'
+import { MonitorNotifier } from '@/components/desk/MonitorNotifier'
 
 /* Routes that own their own scroll and must fill the viewport exactly. */
 const FULL_HEIGHT_ROUTES = ['/trading', '/terminal', '/dashboard', '/desk', '/strategy']
@@ -136,6 +137,9 @@ export function AppLayout() {
       {/* Global and undismissable while tripped (AGENT-012 §19.6). Here rather
           than in each page so "every route" is structural. */}
       <KillSwitchBanner />
+      {/* The one subscriber to /api/monitor/stream (S-7.10): announces trips and
+          breaches on every route and feeds the Monitor page. Renders nothing. */}
+      <MonitorNotifier />
       <main
         id="main"
         className={fullHeight ? 'flex-1 overflow-hidden' : 'flex-1 overflow-y-auto'}

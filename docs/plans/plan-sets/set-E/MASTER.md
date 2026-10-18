@@ -1,7 +1,49 @@
 # Production-Readiness — Stub, Placeholder & Tech-Debt Master Plan — Set E
 
-**Completion: 23% (7 / 30 fully done · 6 partial · 16 open; 1 deferred-by-design)
-— re-verified against the code 2026-09-15, then updated for track 16 (2.3, 5.4)**
+**Completion: 73% (22 / 30 fully done · 4 partial · 1 blocked-human · 2 superseded by Set U · 1 open; 4.5 deferred-by-design, not counted)
+— re-verified 2026-09-15, track 16 (2.3, 5.4), then track PROD 2026-10-03 waves 1–2.
+DONE: 0.1–0.5, 1.1–1.6, 2.1–2.3, 3.1, 3.2, 3.3, 3.6, 4.1, 5.3, 5.4, 5.5.
+PARTIAL: 1.7 (human security review), 3.5 (live submit blocked), 5.1, 5.2 (each
+names the one missing line). BLOCKED:HUMAN: 3.4. SUPERSEDED BY SET U: 4.2, 4.4.
+OPEN: 4.3. Future-scope items are not counted.**
+
+> **Untracked findings, status 2026-10-03 (track PROD):**
+> **#3 order audit trail — DONE.** `OrderJournal::record_audit` (required, no
+> default) writes every `AuditEntry` from inside `ExecutionEngine::submit` and
+> `sync_order` to `order_audit` (migration 0152: append-only by trigger for every
+> role, `app_role` SELECT+INSERT only). The first entry is written fail-closed
+> before the order is recorded. Tests: `order_audit_trail` (3 + 1 PG, incl.
+> UPDATE/DELETE refused and an `app_role` insert); mutation-checked (dropping the
+> post-submit write fails `a_filled_order_leaves_its_whole_trail_in_the_journal`).
+> **#4 kill switch persists — DONE (verified).** `routes/trading.rs` writes
+> `monitor.kill_switch` and `global_risk_config.trading_enabled` before tripping
+> in memory; `monitor/tests/fail_closed_drill.rs::a_trip_survives_a_restart_and_the_boot_path_agrees`.
+> **#5 durable paper engine — PARTIAL.** `execution::paper::persist`
+> (`restore`, `save_dirty`, `spawn_saver`) + migration 0153 `paper_account_state`;
+> per-account dirty flags set under the lock, a write only when state changed,
+> an unknown `state_version` refuses boot rather than reseeding. Tests:
+> `paper_state_durable` (2 PG: cash, positions, realized P&L, fees, ledger and the
+> gate's daily-loss input identical across a simulated restart) + 3 engine unit
+> tests. **Remaining:** two lines in `apps/platform/src/main.rs` (track report).
+> Resting paper orders are not restored (documented in 0153).
+> **#8 mutex-poison panics — PARTIAL.** Every `.lock().expect(...)` in
+> `paper/engine.rs` (17 account sites, 3 FIFO sites) replaced: reads recover the
+> guard, new orders on a poisoned account are refused with
+> `PaperTradeError::AccountUnavailable`, `reset_account` clears the poison.
+> Test: `a_poisoned_account_refuses_orders_and_still_answers_reads`. `risk/gate.rs`
+> was already fixed. **Remaining:** `routes/strategies.rs:198,524`
+> (`strategy_store.lock().expect`) are Set U territory and untouched.
+> **#9 inbound side fails open — DONE (wave 2: all five venues).** `alpaca.rs`
+> `domain_side`/`domain_order_type` return `Result`; unknown text is a
+> `BrokerError`, never `Sell`/`Market`. Wave 2 fixed the same shape in
+> `venues/tradier.rs` (`side.contains("buy")`, type fell through to `Limit`),
+> `kalshi.rs` (`== "yes"` else Sell), `oanda.rs` (a missing/garbled `units`
+> defaulted to **Buy**; an unknown state reported `New`) and `tradovate.rs`
+> (`== "Buy"` else Sell, type to `Limit`), each with a pure parser and tests
+> (`inbound_tests` in each file). Also: the three `query_open_orders` that
+> returned `Ok(vec![])` — "no open orders" to a reconciler — now return an error
+> naming that listing is unimplemented, and Coinbase's strict parser (3.5) was
+> built the same way. **#10 (0x `submit` fabricating an id) — fixed:** it refuses.
 
 > Future-scope items (TigerGraph, Milvus) live in [future-scope.md](future-scope.md)
 > and are **not** counted in the primary total.
@@ -190,11 +232,11 @@ Two findings the log under-rated are promoted here to **safety/correctness**:
 | Phase | File | Label | Tasks | Completion | Goal |
 |-------|------|-------|-------|------------|------|
 | 0 | [phase-0.md](phase-0.md) | Correctness & safety quick wins | 5 | **100% (5/5)** | fix the live-trading hazards that are cheap to fix now |
-| 1 | [phase-1.md](phase-1.md) | Authentication & multi-user | 7 | **0% fully — 5 PARTIAL** | real session auth; unlock network binding. **4 of 7 block unattended paper** |
-| 2 | [phase-2.md](phase-2.md) | Live P&L, manual orders & shared data | 3 | **0% fully — 2 PARTIAL** | real $ rollup + paper manual orders. **2 of 3 block unattended paper** |
-| 3 | [phase-3.md](phase-3.md) | Execution venue adapters | 6 | **0%** | untouched. **None blocks unattended PAPER** — only `PaperBroker` is constructed |
-| 4 | [phase-4.md](phase-4.md) | Strategy surface & sizing | 4 | **0%** | untouched. **4.2 and 4.4 block unattended paper** — both fail silently |
-| 5 | [phase-5.md](phase-5.md) | Data pipeline & observability | 5 | **20% (1/5)** | 5.5 shipped, never ticked. **5.1 and 5.4 are the worst blockers in the set** |
+| 1 | [phase-1.md](phase-1.md) | Authentication & multi-user | 7 | **86% (6/7) — 1.7 awaits human security review** (2026-10-03) | real session auth; unlock network binding. **4 of 7 block unattended paper** |
+| 2 | [phase-2.md](phase-2.md) | Live P&L, manual orders & shared data | 3 | **100% (3/3)** (2026-10-03) | real $ rollup + paper manual orders. **2 of 3 block unattended paper** |
+| 3 | [phase-3.md](phase-3.md) | Execution venue adapters | 6 | **67% (4/6)** | 3.1/3.2/3.3/3.6 done; 3.5 partial; 3.4 BLOCKED:HUMAN. **None blocks unattended PAPER** |
+| 4 | [phase-4.md](phase-4.md) | Strategy surface & sizing | 4 | **25% (1/4)** | 4.1 done; 4.2/4.4 superseded by Set U (v3 engine); 4.3 open |
+| 5 | [phase-5.md](phase-5.md) | Data pipeline & observability | 5 | **60% (3/5) — 2 PARTIAL** (2026-10-03) | 5.5 shipped, never ticked. **5.1 and 5.4 are the worst blockers in the set** |
 | FS | [future-scope.md](future-scope.md) | Future scope (not counted) | — | — | TigerGraph / Milvus — keep code, gate infra |
 
 **Recommended sequencing:** 0 → 1 → 2 makes the platform safe-to-run and
@@ -280,4 +322,5 @@ Update this table and the per-phase completion headers as tasks land.
 | 2026-06-13 | — | decisions | All 12 design decisions locked. **3.4 (0x full on-chain submit/poll) and 3.5 (Coinbase live) promoted from deferred into scope** per decisions 7 & 8 — both real-money paths, gated by a key-handling security review. Decision 12 set to a real `PipelineFactory` in the demand-manager (arc-swap internally). |
 | 2026-09-15 | 2,4,5 | 2.3, 4.2, 5.4 (+4.4 partial) | **Track 16 — the execution path to a fill.** An audit found there was no way to get a fill out of the platform at all: hot-path stage 3 was `Option::None`, `armed_automations` had no caller, `PercentOfBalance` returned `None`, exits were dropped on save, and nothing anywhere wrote an order or a fill. **5.4** wires stage 3 to one live-strategy registry (**ADR-0038**: automations declare, the hot path evaluates — no second evaluator) and replaces stage 4's eight-constant `GateContext`. **2.3** and stage 4 now share one `RiskContextProvider`; the rate counters live inside the gate, so the rate and daily-loss limits can fire at all for the first time. **4.2** PoB sizes live (replay call site is track 15's `sim.rs`). **4.4** partial: exits are now *refused on save* instead of silently dropped; the v1.5 bump is still open. Migration **0121** makes orders and fills durable and idempotent at the database (SC-7). Proven by 11 tests in `apps/platform/src/hot_path.rs`. |
 | 2026-06-13 | 0 | all 5 tasks | **Phase 0 complete.** 0.1: freshness.rs now converts UTC→venue local time via `chrono-tz` before comparing to session windows; 6 new timezone-correct tests. 0.2: zerox.rs `query_order` returns `Unknown` (not `Filled`); token scaling uses per-symbol decimal map (USDC/USDT=6). 0.3: `list_lanes`/`list_instruments` use `domain::lanes::ALL_LANES` and `domain::instrument::ALL_ASSET_CLASSES`; `list_instruments` now queries the live Postgres `instruments` table (async MCP server, `DATABASE_URL`-driven). 0.4: `json_msg` returns `Option<Message>`; serialize failures are logged and frame is dropped. 0.5: TigerGraph/Milvus/etcd/minio behind `profiles: ["vector-graph"]`; embedder `MILVUS_HTTP_PORT` default corrected to 19530. |
+| 2026-10-03 | 1,2,5 + audit | 1.1–1.7, 2.1, 2.2, 5.1–5.3, #3–#5, #8, #9 | **Track PROD.** Sessions store SHA-256 digests (0150, DB-side hashing trigger), sliding web expiry, lazy sweep; `/auth/touch` + venue credentials built (mount pending); WS verified on the shared resolver; automations owner-scoped and nil rows deleted (0151); `dev-local` verified gone; network-bind predicate built; live rollup from the caller's ledger with surfaced mark coverage (0154); metrics registry + exporter; crash-safe parquet compaction; L2 `OrderBookBuilder`; append-only order audit (0152); durable paper accounts (0153); poison-tolerant paper engine; Alpaca inbound side/type refused when unknown. Shared-file edits (routes, `main.rs`, three cleartext-token readers) listed in the track report. |
 | 2026-09-15 | all | audit | **Re-verified all 30 items against the code** (plan-hygiene track, ROADMAP Stage 3). True count **6 / 30** (was 5): 6 DONE, 7 PARTIAL, 17 OPEN, 0 obsolete. 5.5 had shipped and was never ticked; 1.3 was built without being claimed. Phases 3, 4 and 5.1–5.4 untouched since the sweep. **Ten items marked as blocking unattended paper trading**, plus ten untracked code defects recorded in the audit header — five of which (no order/fill persistence, no durable idempotency, no order audit trail, a kill switch that does not survive restart, a non-durable paper engine) are prerequisites Stage 3's exit criteria assume already exist. |

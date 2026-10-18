@@ -188,7 +188,9 @@ fn read(p: &Path) -> String {
 /// loop never asks about is a pause that only exists in the response body.
 #[test]
 fn every_driver_asks_the_control_at_its_step_boundary() {
-    for driver in ["agent/driver.rs", "agent/local_driver.rs"] {
+    // One driver since S-2.10: the hosted `agent/driver.rs` is deleted.
+    #[allow(clippy::single_element_loop)] // a list on purpose: a second driver is added here
+    for driver in ["agent/local_driver.rs"] {
         let src = read(&crate_src().join(driver));
         assert!(
             src.contains("hold_at_boundary"),
@@ -333,12 +335,7 @@ fn an_expired_pause_says_so_on_the_run_row_in_both_drivers() {
         "the two stops must land on the same status word; the distinction is the error"
     );
 
-    let frontier = read(&crate_src().join("agent/driver.rs"));
-    assert!(
-        frontier.contains("reason.error_text()"),
-        "agent/driver.rs drops the stop reason, so an expired pause writes a bare \
-         `cancelled` and the operator cannot tell they lost the run to the deadline"
-    );
+    // One driver since S-2.10; the hosted driver this used to read is deleted.
     let local = read(&crate_src().join("agent/local_driver.rs"));
     assert!(
         local.contains("rec.stop_reason = Some(reason)") && local.contains("self.stop_reason"),
@@ -419,16 +416,6 @@ fn the_terminal_list_holds_every_status_the_drivers_write() {
         );
     }
 
-    // The frontier driver's terminal words, which it writes as literals.
-    let frontier = read(&crate_src().join("agent/driver.rs"));
-    for status in ["failed", "cancelled", "completed"] {
-        if frontier.contains(&format!("ctx.finish(\"{status}\"")) {
-            assert!(
-                TERMINAL_RUN_STATES.contains(&status),
-                "agent/driver.rs ends a run `{status}` and nothing calls that terminal"
-            );
-        }
-    }
     // And the one the pause writes, through the type rather than a literal.
     assert!(
         TERMINAL_RUN_STATES.contains(&StopReason::PauseExpired.terminal_status()),

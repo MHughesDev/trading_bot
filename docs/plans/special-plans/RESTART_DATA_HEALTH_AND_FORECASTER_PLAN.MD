@@ -1,5 +1,27 @@
 # Implementation Plan — Restart Data-Health + Real Forecaster Signal
 
+> **SUPERSEDED (marked 2026-10-03). Do not execute.** This plan was written on 2026-06-02
+> against the Python tree (`forecaster_model/`, `app/runtime/live_service.py`,
+> `pipeline.step`). That tree was deleted in the Rust rewrite, so every file link below is
+> dead and every phase targets code that no longer exists. Its two problems are now owned
+> elsewhere:
+>
+> - **Restart data health** (cold-start rollers, no warm-up from persisted history) is
+>   handled by Set U Phase 4. U-4.1 has each `LiveRunner` deployment warm up from
+>   `BarStore` for every declared input before it subscribes to the live bus. U-4.4
+>   (checkpoint and restore, migration 0143) restores planner state and rebuilds operators by
+>   replaying stored bars. See
+>   [`set-U/phase-4-paper-and-live.md`](../plan-sets/set-U/phase-4-paper-and-live.md).
+>   Bar gaps and backfill belong to the continuous 1m aggregation pipeline and to Set P's
+>   resumable backfill (P-1).
+> - **A real forecaster signal** (a model fed a real OHLC window instead of a fabricated flat
+>   series) is handled by Set I, the probabilistic forecasting suite. Its models train on real
+>   ClickHouse bars and are served through the trainer↔inference bundle contract. Set U Phase 5
+>   adds typed model contracts and point-in-time model answers for strategies. See
+>   [`set-I/MASTER.md`](../plan-sets/set-I/MASTER.md).
+>
+> The text below is kept unchanged as a historical record.
+
 > **Status:** proposed · **Authored:** 2026-06-02 · **Branch context:** `claude/sleepy-lamport-QXLNP`
 > **Scope:** synthesizes the full session investigation — pipeline mapping, the forecaster-wiring
 > discovery (FB-SPEC-02), the heuristic-vs-learned philosophy decision, and the restart data-health

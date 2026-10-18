@@ -90,9 +90,13 @@ impl RiskContextProvider for PaperRiskContextProvider {
 
         let meta = self.meta.get(instrument_id);
 
+        // The account this order trades in: its deployment's when the strategy
+        // opened one (Set U U-4.7), so a deployment is gated on its own position
+        // and its own day's loss, never on another's.
+        let strategy = intent.strategy_id.as_deref();
         let current_position = self
             .paper_engine
-            .positions(asset_class)
+            .positions_for(asset_class, strategy)
             .into_iter()
             .find(|p| p.instrument_id == instrument_id)
             .map(|p| p.quantity)
@@ -109,7 +113,8 @@ impl RiskContextProvider for PaperRiskContextProvider {
         };
 
         // Today's realized P&L net of fees plus open unrealized P&L, as a loss.
-        let daily_loss_usd = Measured::Yes(self.paper_engine.daily_loss_usd(asset_class));
+        let daily_loss_usd =
+            Measured::Yes(self.paper_engine.daily_loss_usd_for(asset_class, strategy));
 
         let (instrument_active, is_in_session, halt_policy, venue_trust) = match &meta {
             Some(m) => (

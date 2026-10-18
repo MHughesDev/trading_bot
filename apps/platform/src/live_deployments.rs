@@ -145,21 +145,40 @@ pub async fn run_one(
         }
     };
     info!(deployment = %id, instruments = ?runner.instruments(), "v3 deployment running on paper");
-    if let Some(reason) = drive(runner, &mut bars, &registry).await {
+    let refresh = ExternalRefresh {
+        pg: pg.clone(),
+        ch_url: ch_url.clone(),
+    };
+    if let Some(reason) = drive(runner, &mut bars, &registry, Some(refresh)).await {
         let _ = storage::postgres::deployments::stop(&pg, id, &reason).await;
         registry.deregister_v3(id);
     }
 }
 
+/// Where a runner's external rows are re-read from (P-3.6).
+pub struct ExternalRefresh {
+    pub pg: sqlx::PgPool,
+    pub ch_url: String,
+}
+
+/// How often a deployment that reads macro or fundamentals series re-reads
+/// them. Their sources publish at most daily; an hour bounds how late a new
+/// vintage reaches a decision.
+const EXTERNAL_REFRESH: Duration = Duration::from_secs(3_600);
+
 /// Feed minute bars to a runner until it is withdrawn (`None`) or halts
-/// (`Some(reason)`).
+/// (`Some(reason)`), re-reading its external rows every
+/// [`EXTERNAL_REFRESH`] when it reads any.
 pub async fn drive(
     mut runner: LiveRunner,
     bars: &mut tokio::sync::broadcast::Receiver<MinuteBar>,
     registry: &LiveStrategyRegistry,
+    external: Option<ExternalRefresh>,
 ) -> Option<String> {
     let id = runner.deployment_id();
     let wanted = runner.instruments();
+    let reads_external = !runner.plan().external_indicators().is_empty();
+    let mut refreshed = std::time::Instant::now();
     loop {
         let m = match bars.recv().await {
             Ok(m) => m,
@@ -185,6 +204,33 @@ pub async fn drive(
         let Some(bar) = minute_bar(&m.bar) else {
             continue;
         };
+        if let (true, Some(src)) = (reads_external, &external) {
+            if refreshed.elapsed() >= EXTERNAL_REFRESH {
+                refreshed = std::time::Instant::now();
+                let now = chrono::Utc::now();
+                let from = now - chrono::Duration::days(1);
+                match backtest::runner::load_external(
+                    &src.pg,
+                    &src.ch_url,
+                    runner.plan(),
+                    from,
+                    now,
+                )
+                .await
+                {
+                    Ok(data) => {
+                        if let Err(e) = runner.refresh_external(data).await {
+                            error!(deployment = %id, error = %e, "external rows not handed over");
+                        }
+                    }
+                    // The rows already held stay point-in-time correct; only a
+                    // vintage published since is late.
+                    Err(e) => {
+                        warn!(deployment = %id, error = %e, "external rows not re-read; keeping the last")
+                    }
+                }
+            }
+        }
         if let Err(e) = runner.on_minute_bar(&m.instrument_id, bar).await {
             error!(deployment = %id, error = %e, "live runner error");
         }
@@ -302,7 +348,26 @@ async fn build(
                 .collect(),
         );
     }
+    // External rows its macro and fundamentals indicators read (P-3.6), as
+    // they stand now, reaching back past the earliest warm-up bar.
+    let first = history
+        .iter()
+        .flatten()
+        .map(|b: &strategy_engine::Bar| b.close_ns)
+        .min()
+        .map_or(now, chrono::DateTime::from_timestamp_nanos);
+    let external = backtest::runner::load_external(pg, ch_url, &plan, first, now).await?;
+    deps.external = (!external.is_empty()).then_some(external);
     let gate = Arc::clone(&deps.gate);
+    // A deployment trades in its own paper account (Set U U-4.7): its own cash,
+    // positions and day's loss, seeded with its starting capital — or the one
+    // restored at boot, which is never reseeded. A selection's members size
+    // against their sleeves and trade in the asset class's account.
+    if d.sleeve.is_none() {
+        deps.paper
+            .open_deployment_account(d.deployment_id, asset_class, d.starting_capital)
+            .map_err(|e| format!("paper account: {e}"))?;
+    }
     let mut runner = LiveRunner::start(
         Arc::clone(d),
         Arc::new(plan),
@@ -357,13 +422,125 @@ async fn build(
             .map_err(|e| format!("forward fills: {e}"))?
             .last()
             .map_or(0, |f| f.seq);
-        let recorder = recorders
-            .deploy(spec, d.starting_capital, Arc::clone(gate.halt_registry()))
-            .map_err(|e| format!("forward recorder: {e}"))?;
-        runner.attach_forward(recorder, forward_id, fill_seq, d.user_id.clone(), limits)?;
+        let halts = Arc::clone(gate.halt_registry());
+        let (recorder, resumed) =
+            match resume_forward(pg, d, &spec, recorders.as_ref(), &halts).await {
+                Some(r) => (r, true),
+                None => (
+                    recorders
+                        .deploy(spec, d.starting_capital, halts)
+                        .map_err(|e| format!("forward recorder: {e}"))?,
+                    false,
+                ),
+            };
+        runner.attach_forward(
+            recorder,
+            forward_id,
+            fill_seq,
+            d.user_id.clone(),
+            limits,
+            resumed,
+        )?;
         info!(deployment = %d.deployment_id, "forward evidence recording attached");
     }
     Ok(runner)
+}
+
+/// What a forward recorder stored before a restart.
+pub(crate) struct StoredForward {
+    pub marks: Vec<storage::postgres::decision_journal::ForwardMark>,
+    pub fills: Vec<storage::postgres::decision_journal::ForwardFill>,
+    pub observations: Vec<domain::forward::ForwardObservation>,
+}
+
+/// Read what [`resume_from`] needs.
+async fn resume_forward(
+    pg: &sqlx::PgPool,
+    d: &V3Deployment,
+    spec: &reconciliation::DeploymentSpec,
+    recorders: &reconciliation::ForwardRecorders,
+    halts: &Arc<risk::StrategyHaltRegistry>,
+) -> Option<Arc<reconciliation::ForwardRecorder>> {
+    use storage::postgres::decision_journal as journal;
+    let id = spec.deployment_id;
+    let stored = StoredForward {
+        marks: journal::forward_marks(pg, id).await.ok()?,
+        fills: journal::forward_fills(pg, id).await.ok()?,
+        observations: reconciliation::store::load_observations(
+            pg,
+            &d.user_id,
+            id,
+            chrono::DateTime::<chrono::Utc>::MIN_UTC,
+            chrono::DateTime::<chrono::Utc>::MAX_UTC,
+        )
+        .await
+        .ok()?,
+    };
+    resume_from(&stored, d, spec, recorders, halts)
+}
+
+/// Rebuild a forward recorder from what it stored (Set T T-0.4 item 3): the
+/// series since its latest opening, every fill it saw since, and the last mark.
+/// `None` — and a fresh series — when there is nothing to resume, or when a
+/// resume would have to guess: a fee the venue never reported, or a series the
+/// recorder refuses to rebuild. A fresh series is weaker evidence; a guessed one
+/// is wrong evidence.
+pub(crate) fn resume_from(
+    stored: &StoredForward,
+    d: &V3Deployment,
+    spec: &reconciliation::DeploymentSpec,
+    recorders: &reconciliation::ForwardRecorders,
+    halts: &Arc<risk::StrategyHaltRegistry>,
+) -> Option<Arc<reconciliation::ForwardRecorder>> {
+    let open = stored.marks.iter().rposition(|m| m.kind == "open")?;
+    let open_bar = stored.marks[open].bar;
+    let last_mark = stored.marks.last()?.mark;
+    let observations: Vec<domain::forward::ForwardObservation> = stored
+        .observations
+        .iter()
+        .filter(|o| o.bar > open_bar)
+        .cloned()
+        .collect();
+    let mut fills = Vec::new();
+    for f in &stored.fills {
+        if f.filled_at <= open_bar {
+            continue;
+        }
+        let Some(charge) = f.charge else {
+            warn!(deployment = %d.deployment_id, seq = f.seq, "a forward fill has no reported fee — not resuming; the series restarts");
+            return None;
+        };
+        fills.push(reconciliation::ResumeFill {
+            side: if f.side == "buy" {
+                domain::order::Side::Buy
+            } else {
+                domain::order::Side::Sell
+            },
+            filled: f.filled,
+            fill_price: domain::money::Price::from_decimal(f.fill_price),
+            charge,
+            decision_price: domain::money::Price::from_decimal(f.decision_price),
+            filled_at: f.filled_at,
+        });
+    }
+    match recorders.resume_deploy(
+        spec.clone(),
+        d.starting_capital,
+        open_bar,
+        &observations,
+        &fills,
+        domain::money::Price::from_decimal(last_mark),
+        Arc::clone(halts),
+    ) {
+        Ok(r) => {
+            info!(deployment = %d.deployment_id, bars = observations.len(), fills = fills.len(), "forward recorder resumed");
+            Some(r)
+        }
+        Err(e) => {
+            warn!(deployment = %d.deployment_id, error = %e, "forward recorder could not resume — the series restarts");
+            None
+        }
+    }
 }
 
 /// The forward-evidence declaration a deployment's record names, if any
@@ -410,4 +587,227 @@ async fn forward_spec(
             min_signal_match: r.try_get("min_signal_match").map_err(get)?,
         },
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    //! Set U U-4.2 against PostgreSQL: a deployment recorded over HTTP with
+    //! forward evidence is found by its readers — the supervisor's resume reads
+    //! the record and its starting capital, `forward_spec` finds the
+    //! `mlops.paper_deployment` row the route wrote, and reconciliation's
+    //! recorder is built from that capital.
+    //!
+    //! ```text
+    //! DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/postgres \
+    //!   cargo test -j 2 -p platform live_deployments -- --ignored --nocapture
+    //! ```
+    use std::str::FromStr;
+    use std::sync::Arc;
+
+    use rust_decimal::Decimal;
+    use sqlx::{Connection, Executor, PgConnection, PgPool};
+    use strategy_runtime::live::LiveStrategyRegistry;
+    use uuid::Uuid;
+
+    fn with_db(url: &str, db: &str) -> String {
+        let cut = url.rfind('/').expect("url has a path");
+        format!("{}/{db}", &url[..cut])
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "needs a Postgres that can create databases"]
+    async fn a_recorded_forward_deployment_is_found_by_its_readers() {
+        let base = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+        let name = format!("u42_{}", Uuid::new_v4().simple());
+        let mut admin = PgConnection::connect(&with_db(&base, "postgres"))
+            .await
+            .unwrap();
+        admin
+            .execute(format!("CREATE DATABASE {name}").as_str())
+            .await
+            .unwrap();
+        let pg = PgPool::connect(&with_db(&base, &name)).await.unwrap();
+        for mig in sqlx::migrate!("../../migrations").iter() {
+            if mig.migration_type.is_down_migration() {
+                continue;
+            }
+            let mut tx = pg.begin().await.unwrap();
+            match tx.execute(&*mig.sql).await {
+                Ok(_) => tx.commit().await.unwrap(),
+                Err(_) => {
+                    tx.rollback().await.ok();
+                }
+            }
+        }
+
+        // Someone signed in, an instrument, and the trial the forward series
+        // will be compared with.
+        let (user,): (Uuid,) =
+            sqlx::query_as("INSERT INTO users (email) VALUES ('u42@t.test') RETURNING user_id")
+                .fetch_one(&pg)
+                .await
+                .unwrap();
+        let token = format!("tok_{}", Uuid::new_v4().simple());
+        sqlx::query("INSERT INTO sessions (token, user_id) VALUES ($1, $2)")
+            .bind(&token)
+            .bind(user)
+            .execute(&pg)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO instruments (instrument_id, asset_class, venue_id, base_precision, \
+               quote_precision, tick_size, lot_size, trading_hours_json, halt_policy, trust_tier) \
+             VALUES ('BTC-USD', 'crypto_spot_cex', 'coinbase', 8, 2, 0.01, 0.0001, '{}', \
+               'non_haltable', 'centralized_exchange') ON CONFLICT (instrument_id) DO NOTHING",
+        )
+        .execute(&pg)
+        .await
+        .unwrap();
+        let tenant = user.to_string();
+        let mut tx = ledger::pg::tenant_tx(&pg, &tenant).await.unwrap();
+        let trial: Uuid = sqlx::query_scalar(
+            "INSERT INTO mlops.trial (
+                 seq, prev_hash, row_hash, tenant_id, experiment_id, config_hash, config,
+                 dataset_id, code_hash, image_digest, seed_set, actor_kind, actor_id,
+                 policy_id, policy_version, propensity, exploration_flag, prereg_hash,
+                 delta_practical
+             ) VALUES (0,'\\x'::bytea,'\\x'::bytea,$1,'e','c','{}'::jsonb,'d','c','i',
+                       ARRAY[1]::bigint[],'human','u','p',1,0.5,false,'p',0.1)
+             RETURNING trial_id",
+        )
+        .bind(&tenant)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        // The writer: POST /api/deployments with forward evidence, through
+        // the platform's own router.
+        let app = api::routes::router(test_state(pg.clone()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let graph = serde_json::json!({
+          "format": "tbot.strategy/3", "kind": "trading", "name": "u42_ema",
+          "asset_class": "crypto_spot_cex", "timeframe": "1h",
+          "nodes": [
+            {"id":"f","op":"ema","args":{"x":"close","n":5}},
+            {"id":"s","op":"ema","args":{"x":"close","n":20}},
+            {"id":"up","op":"crossed_above","args":{"a":"f","b":"s"}}
+          ],
+          "decide": {"rules": [{"when":"up","then":{"kind":"target","size":{"mode":"units","x":0.01}}}]}
+        });
+        let resp = reqwest::Client::new()
+            .post(format!("http://{addr}/api/deployments"))
+            .bearer_auth(&token)
+            .json(&serde_json::json!({
+                "graph": graph,
+                "instrument_id": "BTC-USD",
+                "starting_capital": "2500",
+                "forward": {
+                    "trial_id": trial,
+                    "numeraire": "usd",
+                    "max_abs_return_divergence": 0.02,
+                    "max_cum_return_divergence": 0.05,
+                    "max_position_divergence": "0.5",
+                    "min_signal_match": 0.9,
+                    "kill_criteria": "halt on any divergence breach"
+                }
+            }))
+            .send()
+            .await
+            .unwrap();
+        let status = resp.status();
+        let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        assert_eq!(status, 201, "{body}");
+        let deployment_id: Uuid = serde_json::from_value(body["deployment_id"].clone()).unwrap();
+
+        // Reader 1: the supervisor's resume reads the record and its capital.
+        let registry = LiveStrategyRegistry::new();
+        super::resume_recorded(&registry, &pg).await;
+        let d = registry
+            .v3_snapshot()
+            .into_iter()
+            .find(|d| d.deployment_id == deployment_id)
+            .expect("the running record is declared again");
+        assert_eq!(d.starting_capital, Decimal::from(2500));
+
+        // Reader 2: Set T's forward-evidence row, found through the record.
+        let spec = super::forward_spec(&pg, &d)
+            .await
+            .unwrap()
+            .expect("the paper_deployment row the route wrote");
+        assert_eq!(spec.trial_id, trial);
+        assert_eq!(spec.strategy_id, deployment_id.to_string());
+        assert_eq!(spec.bar_seconds, 3600);
+        assert_eq!(
+            spec.thresholds.max_position_divergence,
+            Decimal::from_str("0.5").unwrap()
+        );
+
+        // Reader 3: reconciliation's recorder is built from that capital. A
+        // capital it cannot use is refused, so the value is consumed, not
+        // carried past.
+        let recorders = reconciliation::ForwardRecorders::install();
+        let halts = Arc::new(risk::StrategyHaltRegistry::default());
+        assert!(recorders
+            .deploy(spec.clone(), Decimal::ZERO, Arc::clone(&halts))
+            .is_err());
+        let forward_id = spec.deployment_id;
+        let recorder = recorders
+            .deploy(spec, d.starting_capital, halts)
+            .expect("built from the recorded capital");
+        assert_eq!(recorder.position(), Decimal::ZERO);
+        assert!(recorders.recorder(forward_id).is_some());
+
+        pg.close().await;
+        admin
+            .execute(format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)").as_str())
+            .await
+            .unwrap();
+    }
+
+    /// The platform's API state, built as `main.rs` builds it, nothing spawned.
+    fn test_state(pg: PgPool) -> api::AppState {
+        let kill_switch = Arc::new(risk::KillSwitch::new(false));
+        let risk_gate = Arc::new(risk::RiskGate::new(
+            risk::GlobalRiskLimits::default(),
+            Arc::clone(&kill_switch),
+        ));
+        let paper_engine = Arc::new(execution::paper::PaperTradingEngine::realistic());
+        let execution_engine = Arc::new(execution::ExecutionEngine::new(Arc::new(
+            paper_engine.multi_asset_broker(),
+        )));
+        let gateway = Arc::new(ui_gateway::SubscriptionRegistry::new(Arc::new(
+            demand_manager::DemandRegistry::new(Arc::new(demand_manager::NoopPipelineFactory)),
+        )));
+        let ch = "http://127.0.0.1:9/none".to_string();
+        let backtest = backtest::BacktestManager::new(ch.clone(), pg.clone());
+        let models = model_registry::ModelManager::from_env(pg.clone());
+        let inference = model_registry::InferenceGateway::new(
+            pg.clone(),
+            Arc::new(model_registry::sidecar::SidecarClient::from_env()),
+        );
+        let agent = Arc::new(api::agent::AgentManager::new(
+            pg.clone(),
+            "http://127.0.0.1:9".into(),
+            cfg::model::AgentConfig::default(),
+        ));
+        api::AppState::new(
+            pg,
+            risk_gate,
+            kill_switch,
+            execution_engine,
+            paper_engine,
+            gateway,
+            backtest,
+            models,
+            inference,
+            cfg::model::EmailConfig::default(),
+            ch,
+            None,
+            agent,
+            None,
+        )
+    }
 }

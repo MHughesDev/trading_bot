@@ -90,7 +90,7 @@ pub async fn check_control_limits(api: &ApiClient, params: &Value) -> Value {
         .map(str::trim)
         .filter(|s| !s.is_empty())
     else {
-        return json!({ "error": "missing_field", "field": "strategy_id" });
+        return crate::tool_error::missing_field("strategy_id");
     };
 
     let switch = match api.get("/api/monitor/kill-switch").await {
@@ -118,12 +118,12 @@ pub async fn check_control_limits(api: &ApiClient, params: &Value) -> Value {
         None => None,
         Some(w) if matches!(w, "30d" | "60d" | "90d") => Some(w),
         Some(other) => {
-            return json!({
-                "error": "unknown_window",
-                "field": "window",
-                "value": other,
-                "known": ["30d", "60d", "90d"],
-            })
+            return crate::tool_error::refuse_extra(
+                "unknown_window",
+                format!("window `{other}` is not one the monitor keeps."),
+                "set window to \"30d\", \"60d\" or \"90d\", or omit it",
+                json!({ "field": "window", "value": other, "known": ["30d", "60d", "90d"] }),
+            )
         }
     };
     // Scoped at the route, not filtered here. Scanning a global page for one
@@ -993,7 +993,7 @@ mod tests {
         let api = ApiClient::new("http://127.0.0.1:1", "t");
         for args in [json!({}), json!({ "strategy_id": "   " })] {
             let out = check_control_limits(&api, &args).await;
-            assert_eq!(out["error"], "missing_field", "{args}");
+            assert_eq!(out["error"]["code"], "missing_field", "{args}");
             assert_eq!(out["field"], "strategy_id");
         }
     }

@@ -154,7 +154,7 @@ impl ResearchRunWorker {
             }
             None => (None, None),
         };
-        Ok(LlmClient::new(p, api_key, base_url))
+        Ok(crate::model_policy::client(p, api_key, base_url))
     }
 
     /// The campaign's log, most recent first.
@@ -303,8 +303,27 @@ impl ResearchRunWorker {
         let generation = self.last_diagnosis(tenant, campaign_id).await?;
         let mut correction: Option<String> = None;
         let mut last_error = String::new();
+        // What this generation was leased out of its parent's budget (AGENT-010
+        // §9; S-10.11). Read from the sub-run's own row, because the claim was
+        // made by the driver in another job. Enforced here, at the one place a
+        // model is called: past the lease the worker stops with a typed reason
+        // instead of spending the parent's allowance on a retry.
+        let lease = subrun::lease_of(&self.pg, sub_run_id)
+            .await
+            .map_err(|e| JobError::infrastructure(format!("reading the sub-run's lease: {e}")))?;
+        let mut tokens_spent: u64 = 0;
+        let mut calls_made: u32 = 0;
 
         for attempt in 1..=PROPOSE_ATTEMPTS {
+            if let Err(why) = lease.admits(calls_made, tokens_spent) {
+                return Err(logic(
+                    "lease_exhausted",
+                    format!(
+                        "this worker sub-run's budget lease is spent ({why}); last refusal: {}",
+                        if last_error.is_empty() { "none" } else { &last_error }
+                    ),
+                ));
+            }
             ctx.progress(Progress {
                 pct: None,
                 stage: Some("hypothesize".into()),
@@ -312,15 +331,29 @@ impl ResearchRunWorker {
             })
             .await;
 
+            // The worker's own effect log (S-2.12): the decision before the act.
+            let prompt = user_message(&brief.brief, &generation, correction.as_deref());
+            subrun::log_effect(
+                &self.pg,
+                sub_run_id,
+                "effect",
+                "CallModel",
+                &json!({ "attempt": attempt, "prompt_bytes": prompt.len(),
+                         "brief_digest": brief.digest, "model": profile.model_id,
+                         "temperature": 0.0, "corrected": correction.is_some() }),
+            )
+            .await;
             let reply = client
                 .chat(&ChatRequest {
-                    model: profile.model_id.clone(),
+                    // Held to the enabled models (`model_policy`): a profile that
+                    // names another model runs on the provider's baseline.
+                    model: crate::model_policy::or_baseline(&provider, profile.model_id.clone()),
                     system: Some(subrun::WORKER_CHARTER.to_string()),
                     messages: vec![Message::User {
-                        content: user_message(&brief.brief, &generation, correction.as_deref()),
+                        content: prompt,
                     }],
                     tools: vec![],
-                    max_tokens: profile.context.reserve_for_output,
+                    max_tokens: lease.max_output(profile.context.reserve_for_output, tokens_spent),
                     // Pinned, not read from the profile: the propensity below is
                     // only 1.0 because this is zero.
                     temperature: Some(0.0),
@@ -332,7 +365,22 @@ impl ResearchRunWorker {
                 .await
                 .map_err(|e| JobError::infrastructure(format!("the proposer failed: {e}")))?;
 
+            calls_made += 1;
+            tokens_spent = tokens_spent
+                .saturating_add(reply.usage.prompt_tokens())
+                .saturating_add(reply.usage.output_tokens);
             let content = reply.content.unwrap_or_default();
+            subrun::log_effect(
+                &self.pg,
+                sub_run_id,
+                "input",
+                "ModelReply",
+                &json!({ "attempt": attempt, "raw": content,
+                         "tokens": { "prompt": reply.usage.prompt_tokens(),
+                                     "output": reply.usage.output_tokens },
+                         "spent_tokens": tokens_spent, "calls": calls_made }),
+            )
+            .await;
             match parse(&content) {
                 Ok((proposal, unchecked)) => {
                     let outcome = json!({
@@ -340,7 +388,12 @@ impl ResearchRunWorker {
                         "unchecked": unchecked.pending,
                         "attempts": attempt,
                         "brief_digest": brief.digest,
+                        // What the lease allowed and what the worker used of it;
+                        // null on an axis the claim recorded no lease for.
+                        "lease": { "tokens": lease.tokens, "steps": lease.steps },
+                        "spent": { "tokens": tokens_spent, "calls": calls_made },
                     });
+                    subrun::log_effect(&self.pg, sub_run_id, "state", "Settled", &outcome).await;
                     subrun::settle(&self.pg, sub_run_id, &outcome)
                         .await
                         .map_err(|e| {

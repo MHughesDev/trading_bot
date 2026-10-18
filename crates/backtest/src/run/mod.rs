@@ -140,6 +140,19 @@ pub struct Backtest<S: RunStore, E: RunExecutor, L: TrialLedger> {
     store: S,
     executor: E,
     ledger: L,
+    /// The config each executed result came from, and the receipt the executor
+    /// gave for it. A `RunResult` does not carry its own config, so without these
+    /// a stored result cannot be re-run (S-10.8). In memory like the store they
+    /// sit beside: a result that has not survived a restart has no config to
+    /// lose.
+    provenance: std::sync::Mutex<std::collections::HashMap<RunId, Provenance>>,
+}
+
+/// What a reproduction needs to re-run a stored result.
+#[derive(Clone)]
+struct Provenance {
+    cfg: RunConfig,
+    receipt: Option<crate::receipt::ReproSpec>,
 }
 
 /// Whether a [`Backtest::run`] call executed or served a cached result.
@@ -156,6 +169,7 @@ impl<S: RunStore, E: RunExecutor, L: TrialLedger> Backtest<S, E, L> {
             store,
             executor,
             ledger,
+            provenance: std::sync::Mutex::default(),
         }
     }
 
@@ -214,7 +228,19 @@ impl<S: RunStore, E: RunExecutor, L: TrialLedger> Backtest<S, E, L> {
             .transition(&mut ticket, TrialEvent::to(TrialState::Running))?;
         let result = self.executor.execute(cfg, &ticket);
         debug_assert_eq!(result.run_id, cfg.run_id, "executor must echo run_id");
-        self.store.put(result.clone());
+        if self.store.put(result.clone()) == PutOutcome::Stored {
+            // First time this run id was executed: keep what a reproduction needs.
+            self.provenance
+                .lock()
+                .expect("provenance lock poisoned")
+                .insert(
+                    cfg.run_id.clone(),
+                    Provenance {
+                        cfg: cfg.clone(),
+                        receipt: self.executor.receipt(cfg),
+                    },
+                );
+        }
         // INV-18: the return series is on record before the completion that reports on it.
         let mut event = terminal_event(&result);
         if event.state == Some(TrialState::Completed) {
@@ -240,6 +266,211 @@ impl<S: RunStore, E: RunExecutor, L: TrialLedger> Backtest<S, E, L> {
     /// A refused registration.
     pub fn run(&self, d: &RunDispatch<'_>) -> Result<RunResult, LedgerError> {
         Ok(self.run_traced(d)?.0)
+    }
+
+    /// Re-run a stored result under its own config and report whether the platform
+    /// still computes the same thing (AGENT-013 §6.9, §8.4; S-10.8).
+    ///
+    /// **A reproduction is not a look.** It runs under a reproduction ticket the
+    /// ledger mints for the completed trial that produced the result
+    /// ([`TrialLedger::begin_reproduction`], ADR-S10-18): no trial is registered, no
+    /// counter moves, nothing enters the hash chain. It bypasses the artifact cache
+    /// on purpose — a cache hit would return the stored result and prove nothing —
+    /// and it never stores the re-run: the stored result is the thing under test.
+    ///
+    /// The finding is appended to `mlops.reproduction` through the same ticket.
+    ///
+    /// # Errors
+    /// [`ReproduceError`].
+    pub fn reproduce(
+        &self,
+        tenant_id: &str,
+        run_id: &RunId,
+        reproduced_by: &str,
+    ) -> Result<ReproduceReport, ReproduceError> {
+        let stored = self
+            .store
+            .get(run_id)
+            .ok_or_else(|| ReproduceError::UnknownRun(run_id.as_str().to_string()))?;
+        let prov = self
+            .provenance
+            .lock()
+            .expect("provenance lock poisoned")
+            .get(run_id)
+            .cloned()
+            .ok_or_else(|| ReproduceError::ConfigNotRetained(run_id.as_str().to_string()))?;
+        if stored.status != RunStatus::Ok {
+            return Err(ReproduceError::NotCompleted(run_id.as_str().to_string()));
+        }
+        let ticket = self.ledger.begin_reproduction(tenant_id, run_id.as_str())?;
+        let rerun = self.executor.execute(&prov.cfg, &ticket);
+        let report = compare_rerun(&stored, &rerun, prov.receipt.as_ref(), self.executor.receipt(&prov.cfg));
+        let record = report.record(run_id.as_str(), reproduced_by);
+        self.ledger.record_reproduction(ticket, &record)?;
+        Ok(report)
+    }
+
+    /// Every stored run id that has a config on record, i.e. every run this
+    /// process executed. The nightly sample draws from this.
+    #[must_use]
+    pub fn reproducible_runs(&self) -> Vec<RunId> {
+        let mut ids: Vec<RunId> = self
+            .provenance
+            .lock()
+            .expect("provenance lock poisoned")
+            .keys()
+            .cloned()
+            .collect();
+        ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        ids
+    }
+}
+
+/// Why a reproduction could not be made.
+#[derive(Debug, thiserror::Error)]
+pub enum ReproduceError {
+    #[error("no stored result for run `{0}`")]
+    UnknownRun(String),
+    #[error(
+        "run `{0}` has no config on record in this process (it predates the last restart); a \
+         result that cannot name the config it came from cannot be re-run"
+    )]
+    ConfigNotRetained(String),
+    #[error("run `{0}` did not complete, so there is no number to reproduce")]
+    NotCompleted(String),
+    #[error(transparent)]
+    Ledger(#[from] LedgerError),
+}
+
+/// What a reproduction found.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReproduceReport {
+    pub reproduction: crate::receipt::Reproduction,
+    /// The original carried no receipt, so the outcome rests on the number alone.
+    pub receipt_missing: bool,
+    pub receipt_stored: Option<crate::receipt::ReproSpec>,
+    pub receipt_rerun: Option<crate::receipt::ReproSpec>,
+    pub was: f64,
+    pub now: f64,
+}
+
+impl ReproduceReport {
+    /// The row `mlops.reproduction` appends.
+    #[must_use]
+    pub fn record(&self, run_id: &str, reproduced_by: &str) -> ledger::reproduction::ReproductionRecord {
+        use crate::receipt::Reproduction as R;
+        let (differences, was, now) = match &self.reproduction {
+            R::BitIdentical => (serde_json::json!([]), None, None),
+            R::DriftedUnderTheSameReceipt { was, now } => {
+                (serde_json::json!([]), Some(*was), Some(*now))
+            }
+            R::ReceiptChanged { differences } => (
+                serde_json::to_value(differences).unwrap_or_default(),
+                None,
+                None,
+            ),
+        };
+        ledger::reproduction::ReproductionRecord {
+            run_id: run_id.to_string(),
+            outcome: self.reproduction.as_str().to_string(),
+            receipt_stored: self
+                .receipt_stored
+                .as_ref()
+                .and_then(|r| serde_json::to_value(r).ok()),
+            receipt_rerun: self
+                .receipt_rerun
+                .as_ref()
+                .and_then(|r| serde_json::to_value(r).ok())
+                .unwrap_or(serde_json::Value::Null),
+            differences,
+            was_value: was,
+            now_value: now,
+            reproduced_by: reproduced_by.to_string(),
+        }
+    }
+}
+
+/// A bit-level fingerprint of everything a result reports: the metrics, the
+/// equity curve and the trades. Excludes `produced_at` and `compute_cost`, which
+/// legitimately differ between two executions of the same computation.
+#[must_use]
+pub fn result_fingerprint(r: &RunResult) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    let mut feed = |tag: &str, v: &dyn erased_json::Json| {
+        h.update(tag.as_bytes());
+        h.update(b"=");
+        h.update(v.json().as_bytes());
+        h.update(b"\x1f");
+    };
+    feed("metrics", &r.metrics);
+    feed("equity", &r.equity_curve);
+    feed("exposure", &r.net_exposure);
+    feed("trades", &r.trades);
+    feed("flags", &r.integrity_flags);
+    format!("sha256:{}", hex::encode(h.finalize()))
+}
+
+mod erased_json {
+    pub trait Json {
+        fn json(&self) -> String;
+    }
+    impl<T: serde::Serialize> Json for T {
+        fn json(&self) -> String {
+            serde_json::to_string(self).unwrap_or_default()
+        }
+    }
+}
+
+/// Decide what a re-run found. Receipts first — a moved receipt explains a moved
+/// number and is not a defect — then the bits of the result. There is no
+/// tolerance (`receipt::reproduce`'s argument), and a result whose fingerprint
+/// moved while its headline Sharpe did not is still drift.
+#[must_use]
+pub fn compare_rerun(
+    stored: &RunResult,
+    rerun: &RunResult,
+    stored_receipt: Option<&crate::receipt::ReproSpec>,
+    rerun_receipt: Option<crate::receipt::ReproSpec>,
+) -> ReproduceReport {
+    use crate::receipt::{reproduce, Reproduction};
+    let was = stored.metrics.sharpe;
+    let now = rerun.metrics.sharpe;
+    // With no receipt on one side the two cannot be compared, so the outcome rests
+    // on the number alone and says so: both sides are then given the same
+    // placeholder receipt, which can only agree.
+    let receipt_missing = stored_receipt.is_none() || rerun_receipt.is_none();
+    let placeholder = crate::receipt::ReproSpec {
+        dataset_hash: "unrecorded".into(),
+        feature_registry_version: "unrecorded".into(),
+        calendar_version: "unrecorded".into(),
+        engine_version: stored.produced_by.clone(),
+        strategy_version_hash: "unrecorded".into(),
+        cost_model_version: "unrecorded".into(),
+        seed_digest: "unrecorded".into(),
+        harness_version: "unrecorded".into(),
+    };
+    let (a, b) = if receipt_missing {
+        (placeholder.clone(), placeholder)
+    } else {
+        (
+            stored_receipt.cloned().expect("checked"),
+            rerun_receipt.clone().expect("checked"),
+        )
+    };
+    let mut verdict = reproduce(&a, &b, was, now);
+    if matches!(verdict, Reproduction::BitIdentical)
+        && result_fingerprint(stored) != result_fingerprint(rerun)
+    {
+        verdict = Reproduction::DriftedUnderTheSameReceipt { was, now };
+    }
+    ReproduceReport {
+        reproduction: verdict,
+        receipt_missing,
+        receipt_stored: stored_receipt.cloned(),
+        receipt_rerun: rerun_receipt,
+        was,
+        now,
     }
 }
 

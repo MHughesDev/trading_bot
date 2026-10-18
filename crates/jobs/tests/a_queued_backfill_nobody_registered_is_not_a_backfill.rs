@@ -177,7 +177,7 @@ impl BackfillStateStore for MemState {
         self.edit(key, |r| {
             r.cursor = Some(cursor.min(r.key.window_end));
             r.pages_fetched += 1;
-            r.rows_written = rows_written;
+            r.rows_written += rows_written;
         });
         Ok(())
     }

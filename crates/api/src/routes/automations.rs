@@ -22,18 +22,19 @@ use strategy_runtime::automation::plan::AutomationSpec;
 
 use crate::{auth::BearerToken, state::AppState};
 
-/// Placeholder user until Phase 2 session auth lands (M-17): all automations
-/// belong to the single local operator.
-const DEV_USER: Uuid = Uuid::nil();
+// Every automation belongs to the user whose session created it, and every
+// route below is scoped to the caller (Set E 1.4). There is no shared operator
+// identity: `Uuid::nil()` was one, and it let any authenticated caller list,
+// arm, disarm or delete every user's automations.
 
 // ── List ──────────────────────────────────────────────────────────────────────
 
-/// GET /api/automations — every automation, paper and live, newest first.
+/// GET /api/automations — the caller's automations, paper and live, newest first.
 pub async fn list_automations(
     State(state): State<AppState>,
-    _token: BearerToken,
+    token: BearerToken,
 ) -> impl IntoResponse {
-    match automation::list_automations(&state.pg).await {
+    match automation::list_automations_for(&state.pg, token.user_id()).await {
         Ok(rows) => {
             let automations: Vec<serde_json::Value> = rows
                 .iter()
@@ -74,7 +75,7 @@ pub struct CreateAutomationRequest {
 /// POST /api/automations — validate and persist a new automation plan.
 pub async fn create_automation(
     State(state): State<AppState>,
-    _token: BearerToken,
+    token: BearerToken,
     Json(req): Json<CreateAutomationRequest>,
 ) -> impl IntoResponse {
     if !matches!(req.kind.as_str(), "single_instrument" | "pipeline") {
@@ -99,7 +100,7 @@ pub async fn create_automation(
 
     let row = AutomationRow {
         id: Uuid::new_v4(),
-        user_id: DEV_USER,
+        user_id: token.user_id(),
         kind: req.kind,
         account_mode: req.account_mode,
         spec: req.spec,
@@ -159,20 +160,28 @@ pub async fn disarm_automation(
 /// accepted and ignored.
 async fn set_armed(
     State(state): State<AppState>,
-    _token: BearerToken,
+    token: BearerToken,
     Path(id): Path<Uuid>,
     armed: bool,
 ) -> axum::response::Response {
+    // Ownership first, for both directions: a stranger's id is a 404, exactly
+    // like a missing one, and nothing is deregistered on its behalf.
+    match automation::get_automation_owned(&state.pg, token.user_id(), id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return not_found(id),
+        Err(e) => return db_error(e),
+    }
     if !armed {
-        let removed = strategy_runtime::live::global().deregister_automation(&id.to_string());
-        let stopped = super::deployments::stop_started_by(
-            &state.pg,
-            &format!("automation:{id}"),
-            "automation disarmed",
-        )
-        .await;
-        return match automation::set_automation_armed(&state.pg, id, false).await {
+        return match automation::disarm_automation_owned(&state.pg, token.user_id(), id).await {
             Ok(true) => {
+                let removed =
+                    strategy_runtime::live::global().deregister_automation(&id.to_string());
+                let stopped = super::deployments::stop_started_by(
+                    &state.pg,
+                    &format!("automation:{id}"),
+                    "automation disarmed",
+                )
+                .await;
                 Json(json!({ "id": id, "armed": false, "deregistered": removed + stopped }))
                     .into_response()
             }
@@ -258,6 +267,10 @@ impl IntoResponse for ArmError {
 }
 
 /// Arm one automation. **The only arming path.**
+///
+/// Not owner-scoped itself: the HTTP route checks ownership before it calls
+/// this (Set E 1.4), and the proposal-approval caller acts on a proposal's own
+/// subject. Use [`arm_owned`] from anything that acts for a caller.
 ///
 /// Arming is registration in the one live registry, not a second evaluator
 /// (ADR-0038). `armed_automations` — the query meant to resume armed plans at
@@ -571,21 +584,28 @@ pub async fn resume_armed(
     Ok(resumed)
 }
 
-/// DELETE /api/automations/:id
+/// DELETE /api/automations/:id — the caller's own automation only.
+///
+/// An armed automation is deregistered from the live registry as it is
+/// deleted. Before, deleting an armed row left its strategy evaluating with no
+/// row anyone could see or disarm.
 pub async fn delete_automation(
     State(state): State<AppState>,
-    _token: BearerToken,
+    token: BearerToken,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
-    match automation::delete_automation(&state.pg, id).await {
+    match automation::delete_automation_owned(&state.pg, token.user_id(), id).await {
         Ok(true) => {
-            super::deployments::stop_started_by(
+            let deregistered =
+                strategy_runtime::live::global().deregister_automation(&id.to_string());
+            let stopped = super::deployments::stop_started_by(
                 &state.pg,
                 &format!("automation:{id}"),
                 "automation deleted",
             )
             .await;
-            Json(json!({ "id": id, "deleted": true })).into_response()
+            Json(json!({ "id": id, "deleted": true, "deregistered": deregistered + stopped }))
+                .into_response()
         }
         Ok(false) => not_found(id),
         Err(e) => db_error(e),
@@ -613,4 +633,22 @@ fn db_error(e: sqlx::Error) -> axum::response::Response {
         Json(json!({ "error": "database error" })),
     )
         .into_response()
+}
+
+/// [`arm_by_id`] for one user's own automation: `NotFound` when `id` is missing
+/// **or** belongs to someone else, so a caller cannot arm (and so cannot learn
+/// the existence of) another user's automation.
+///
+/// # Errors
+/// [`ArmError`].
+pub async fn arm_owned(
+    state: &AppState,
+    owner: Uuid,
+    id: Uuid,
+) -> Result<serde_json::Value, ArmError> {
+    match automation::get_automation_owned(&state.pg, owner, id).await {
+        Ok(Some(_)) => arm_by_id(state, id).await,
+        Ok(None) => Err(ArmError::NotFound),
+        Err(e) => Err(ArmError::Storage(e.to_string())),
+    }
 }

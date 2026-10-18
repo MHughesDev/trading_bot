@@ -438,12 +438,41 @@ fn precapital(b: &Battery) -> Verdict {
              the parameters it was found at and not around them",
         );
     }
+    // Timing. A collapse at one bar of delay is not a wobble: an edge that is gone the
+    // moment an order arrives a bar late is not an edge a venue will let anyone have, and
+    // it is also what a lookahead looks like (AGENT-006 §5.5). Read by name, so a step
+    // that could not be measured is not read as one that passed.
+    let timing = b
+        .step("timing jitter")
+        .and_then(|s| s.field("verdict"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    if matches!(timing.as_deref(), Some("timing_fragile" | "no_edge_to_delay")) {
+        return because(
+            "reject",
+            if timing.as_deref() == Some("timing_fragile") {
+                "the edge is gone within one bar of order delay: a result that needs its fills \
+                 on time is not one a venue will deliver, and it is also what a lookahead looks \
+                 like"
+            } else {
+                "there is no on-time edge for lateness to take away: the timing study's own \
+                 baseline is not positive"
+            },
+        );
+    }
     let soft = ["trade reshuffle", "regime conditioning"];
-    let wobbled: Vec<&str> = soft
+    let mut wobbled: Vec<&str> = soft
         .iter()
         .copied()
         .filter(|l| survived(l) != Some(true))
         .collect();
+    // `timing_tolerant` is the only reading that lets a battery reach `full_paper`. A
+    // v1 strategy cannot be delayed at all (its simulator has no order-hold path), so it
+    // reads `unmeasured` and is held at reduced size: timing was not shown, and not
+    // showing a check is not passing it.
+    if timing.as_deref() != Some("timing_tolerant") {
+        wobbled.push("timing jitter");
+    }
     if !wobbled.is_empty() || !synthetic_counts {
         let mut why = Vec::new();
         if !wobbled.is_empty() {
@@ -464,8 +493,8 @@ fn precapital(b: &Battery) -> Verdict {
     }
     because(
         "full_paper",
-        "the result survives ablation, fragility, cost shock, reshuffling, regime conditioning \
-         and synthetic paths from a generator whose output can license capital",
+        "the result survives ablation, fragility, cost shock, reshuffling, order delay, regime \
+         conditioning and synthetic paths from a generator whose output can license capital",
     )
 }
 
@@ -816,10 +845,7 @@ pub static ALL: &[Workflow] = &[
     Workflow {
         name: "precapital_battery",
         namespace: "audit",
-        description: "One call: everything that has to survive before a strategy is worth \
-                      paper money — ablation, fragility, cost shock, trade reshuffle, timing \
-                      jitter, regime conditioning, synthetic stress and a red-team pass. \
-                      Answers reject, reduced_size_paper or full_paper.",
+        description: "One call: what must survive before a strategy earns paper money: ablation, fragility, cost shock, reshuffle, timing jitter, regimes, synthetic stress, red-team. Answers reject, reduced_size_paper or full_paper.",
         arguments: &[
             ("experiment_id", "the experiment under test", true),
             (
@@ -870,15 +896,21 @@ pub static ALL: &[Workflow] = &[
                 "trade_resamples",
                 "how much of this is the order the trades happened to arrive in?"
             ),
-            Stage::Owed {
+            // **Built (S-3.13).** `StudyKind::TimingJitter` runs the strategy with every
+            // decided order held 0..k bars (`RunConfig::fill_delay_bars`), and
+            // `timing_jitter_sensitivity` reads the curve. It is its own tool rather than a
+            // `run_study` stage because the verdict is about the *shape* of the curve (where the
+            // edge goes), not a median and a worst-5% over delays that are not draws.
+            // No `metric` is forwarded: the tool reads an edge metric and refuses the ones
+            // (drawdown, profit factor) whose sign does not mean "an edge to lose".
+            Stage::Call(Step {
+                tool: "timing_jitter_sensitivity",
                 label: "timing jitter",
-                needs: "a `timing_jitter_sensitivity` tool, and an execution-delay dimension \
-                        in the simulator for it to vary",
-                why: "a strategy whose edge disappears under a one-bar fill delay has no edge \
-                      that survives a real venue. `VarySpec` has no jitter dimension, so this \
-                      cannot be a `run_study` kind — the simulator has to gain the knob first",
+                forward: &["experiment_id"],
+                rename: &[],
+                pinned: &[],
                 when: When::Always,
-            },
+            }),
             study!(
                 "regime conditioning",
                 "regime_conditional",
@@ -1509,10 +1541,49 @@ mod tests {
             study("parameter fragility", true, true, Some(true)),
             study("cost shock", true, true, None),
             study("trade reshuffle", true, true, None),
+            step("timing jitter", json!({ "verdict": "timing_tolerant" })),
             study("regime conditioning", true, true, None),
             synthetic,
             step("red-team falsify", json!({ "cost_model_is_sane": true })),
         ]
+    }
+
+    fn with_timing(verdict: &str) -> Vec<Ran> {
+        clean_precapital()
+            .into_iter()
+            .map(|s| {
+                if s.label == "timing jitter" {
+                    step("timing jitter", json!({ "verdict": verdict }))
+                } else {
+                    s
+                }
+            })
+            .collect()
+    }
+
+    /// S-3.13 / S-8.3: a collapse at one bar of delay rejects; a curve that bends but holds
+    /// is not enough for full size; a strategy that could not be delayed at all is never
+    /// waved through as having passed a check it did not take.
+    #[test]
+    fn timing_decides_between_reject_reduced_and_full() {
+        for bad in ["timing_fragile", "no_edge_to_delay"] {
+            let v = precapital(&battery("precapital_battery", with_timing(bad)));
+            assert_eq!(v.value, "reject", "{bad}: {}", v.because);
+        }
+        for unproven in ["timing_sensitive", "unmeasured"] {
+            let v = precapital(&battery("precapital_battery", with_timing(unproven)));
+            assert_eq!(v.value, "reduced_size_paper", "{unproven}: {}", v.because);
+            assert!(v.because.contains("timing jitter"), "{}", v.because);
+        }
+        // And a battery with no timing step at all is the same as an unmeasured one.
+        let without: Vec<Ran> = clean_precapital()
+            .into_iter()
+            .filter(|s| s.label != "timing jitter")
+            .collect();
+        assert_eq!(
+            precapital(&battery("precapital_battery", without)).value,
+            "reduced_size_paper"
+        );
     }
 
     fn with_generator(steps: &mut [Ran], generator: Option<&str>) {
@@ -1774,13 +1845,12 @@ mod tests {
             by_workflow,
             vec![
                 ("leakage_audit", 2),
-                ("precapital_battery", 1),
                 ("signal_identity", 6),
                 ("go_live_readiness", 3),
             ],
             "the owed list changed; update phase-8-integration.md and COMPLACENCY_LOG.md"
         );
-        assert_eq!(owed.len(), 12);
+        assert_eq!(owed.len(), 11);
         // Two runnable, not one. `leakage_audit` joined when its bar-boundary
         // step turned out to be **built** — `bar_boundary_check` has been a
         // templated tool since S-3.11 — and its other two owed stages turned out
@@ -1791,9 +1861,12 @@ mod tests {
         // one that applies to inputs this call does not have.
         assert_eq!(
             ALL.iter().filter(|w| w.is_runnable()).count(),
-            3,
+            4,
             "the runnable count changed"
         );
+        // `precapital_battery` joined when its last owed stage, timing jitter, was built
+        // (S-3.13, S-8.3).
+        assert!(wf("precapital_battery").is_runnable());
         assert!(wf("selection_bias_verdict").is_runnable());
         assert!(wf("leakage_audit").is_runnable());
         // `hypothesis_precheck` joined when its two owed steps turned out to be

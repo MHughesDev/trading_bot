@@ -748,6 +748,129 @@ fn db_error(table: &str, e: &sqlx::Error) -> axum::response::Response {
         .into_response()
 }
 
+// ── The kill switch, pushed (AGENT-012 §11, §19.6; Set S task S-6.21) ───────
+
+/// The channel `monitor.kill_switch`'s trigger publishes on (migration 0075).
+/// Read from the monitor crate's own list, so a renamed channel cannot leave
+/// this stream listening to nothing.
+const KILL_SWITCH_CHANNEL: &str = "monitor_kill_switch";
+
+/// One frame: the halted scopes, read from `monitor.kill_switch` itself.
+///
+/// Shaped like every other desk stream frame (`seq`, `kind`, `content`,
+/// `created_at`) so the browser reads it with the same client. The state is
+/// **read**, not inferred from the notification: the trigger's payload is only
+/// the scope that changed, and a frame that said "something happened to global"
+/// would leave the banner to guess which way.
+async fn kill_switch_frame(
+    store: &monitor::store::MonitorStore,
+    seq: i64,
+    cause: &str,
+) -> axum::response::sse::Event {
+    let content = match store.halted_scopes().await {
+        Ok(halted) => json!({
+            "readable": true,
+            "global_halted": halted.contains(&risk::Scope::Global),
+            "halted_scopes": halted.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            "cause": cause,
+        }),
+        // Unreadable is its own frame. The banner treats it as "go and ask",
+        // never as armed.
+        Err(e) => json!({ "readable": false, "message": e.to_string(), "cause": cause }),
+    };
+    axum::response::sse::Event::default()
+        .id(seq.to_string())
+        .event("kill_switch")
+        .data(
+            json!({
+                "seq": seq,
+                "kind": "kill_switch",
+                "content": content,
+                "created_at": Utc::now(),
+            })
+            .to_string(),
+        )
+}
+
+/// `GET /api/desk/kill-switch/events` — a frame on connect and one on every
+/// change to `monitor.kill_switch`.
+///
+/// §19.6 asks for the banner on every route **within one event** of a trip. The
+/// banner polled every three seconds because nothing pushed kill-switch state
+/// to a browser; the trigger on `monitor.kill_switch` has published on
+/// `monitor_kill_switch` since 0075 and its only listener was the order gate's
+/// mirror. This is the second listener — one `LISTEN` per open desk, on a
+/// connection of its own, which is the property the monitor's own listener
+/// relies on: a notification waiting for a pool permit would arrive no sooner
+/// than the poll it exists to beat.
+///
+/// If the `LISTEN` cannot be issued, the stream sends one `kill_switch_degraded`
+/// frame and ends. The banner keeps its three-second poll underneath, so a dead
+/// push degrades to the old guarantee rather than to none.
+pub async fn kill_switch_events(
+    State(state): State<AppState>,
+    _token: BearerToken,
+) -> axum::response::sse::Sse<
+    impl tokio_stream::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+> {
+    use axum::response::sse::{Event, KeepAlive, Sse};
+
+    let store = monitor::store::MonitorStore::new(state.pg.clone());
+    let (tx, rx) =
+        tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(16);
+    tokio::spawn(async move {
+        let mut seq: i64 = 1;
+        // Listen first, then read: a trip that lands between the two is then
+        // both in the first frame and in a notification, never in neither.
+        let listener = store.listener().await;
+        if tx
+            .send(Ok(kill_switch_frame(&store, seq, "connected").await))
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let mut listener = match listener {
+            Ok(l) => l,
+            Err(e) => {
+                let _ = tx
+                    .send(Ok(Event::default()
+                        .event("kill_switch_degraded")
+                        .data(json!({ "message": e.to_string() }).to_string())))
+                    .await;
+                return;
+            }
+        };
+        loop {
+            tokio::select! {
+                () = tx.closed() => return,
+                n = listener.recv() => match n {
+                    Ok(n) if n.channel() == KILL_SWITCH_CHANNEL => {
+                        seq += 1;
+                        let frame = kill_switch_frame(&store, seq, n.payload()).await;
+                        if tx.send(Ok(frame)).await.is_err() {
+                            return;
+                        }
+                    }
+                    // The lease channel shares the listener; it is not this
+                    // stream's business.
+                    Ok(_) => {}
+                    Err(e) => {
+                        let _ = tx
+                            .send(Ok(Event::default()
+                                .event("kill_switch_degraded")
+                                .data(json!({ "message": e.to_string() }).to_string())))
+                            .await;
+                        return;
+                    }
+                },
+            }
+        }
+    });
+    Sse::new(tokio_stream::wrappers::ReceiverStream::new(rx))
+        .keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -890,5 +1013,18 @@ mod tests {
                  as \"this did not happen\" when it means \"I cannot see it\""
             );
         }
+    }
+    #[test]
+    fn the_kill_switch_stream_listens_on_the_channel_the_monitor_publishes() {
+        // The trigger in 0075 publishes here, and the monitor crate's list is
+        // the one its own listener issues. A stream on any other name is a
+        // `LISTEN` that never hears a trip.
+        assert!(monitor::store::NOTIFY_CHANNELS.contains(&KILL_SWITCH_CHANNEL));
+        let migration = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../migrations/0075_kill_switch.sql"),
+        )
+        .expect("0075 is readable");
+        assert!(migration.contains(&format!("pg_notify('{KILL_SWITCH_CHANNEL}'")));
     }
 }

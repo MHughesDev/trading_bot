@@ -352,3 +352,12 @@ how two call sites end up disagreeing.
   removal task.
 - Both dropped columns and added columns change the `SELECT *` shape, so the backfill
   in L-0.3 must name its columns explicitly.
+
+---
+
+## Phase 0 tail (track LEGACY, 2026-10-03)
+
+| Item | Status | Evidence / what remains |
+|---|---|---|
+| Remove the dead `crates/storage/src/clickhouse/bars.rs` | `DONE` | The file is gone (it was deleted when `check-bars-v1-frozen` first failed on it, see L-0.7) and `crates/storage/src/clickhouse/mod.rs` declares no `bars` module. Nothing references it. |
+| Drop v1 `market_bars` | `BLOCKED:HUMAN` | **Not unreferenced, and not reversible.** (1) `apps/platform/src/main.rs:153-156` runs `backfill_market_bars_v2(&url, &bars_source)` on **every boot** with `BARS_V2_BACKFILL_SOURCE` defaulting to `market_bars`; `crates/storage/tests/clickhouse_migrate.rs` and `examples/backfill_bars_v2.rs` read it too. (2) A `DROP TABLE` is a permanent deletion of the last copy of the pre-cutover bars, which the rescue snapshot protects only if the snapshot is itself intact and verified. Neither is a call an agent makes. **Exact remaining steps for the owner:** confirm the v1-to-v2 verification is final (`verify_market_bars_v2` reports 0 missing against the live table), take and verify a snapshot of `market_bars`, remove the boot-time backfill block `apps/platform/src/main.rs:148-166` (orchestrator-owned), delete `crates/storage/src/clickhouse/backfill.rs` and its two test users, run `DROP TABLE market_bars`, then retire `check-bars-v1-frozen` and `clickhouse/02_bars.sql`. `cargo xtask check-bars-v1-frozen` keeps holding in the meantime: nothing writes v1. |

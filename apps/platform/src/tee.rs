@@ -17,13 +17,46 @@ use crate::hot_path::RawTick;
 /// live decisions.  A future improvement (set-C issue #35) can bound this.
 pub async fn run_tee(
     publisher: Arc<event_bus::Publisher>,
+    tee_rx: tokio::sync::mpsc::UnboundedReceiver<RawTick>,
+) {
+    run_tee_archived(publisher, tee_rx, None).await;
+}
+
+/// [`run_tee`] that also hands every tick to the raw-event archive
+/// (`storage::StorageWriter`, Set E 5.2). The archive is where Parquet
+/// partitions come from, and so what the nightly compaction has to compact;
+/// before this the writer had no caller and the archive was always empty.
+///
+/// The archive submit is non-blocking (`try_send`); a full channel drops the
+/// archive copy and counts it, never stalls the tee.
+pub async fn run_tee_archived(
+    publisher: Arc<event_bus::Publisher>,
     mut tee_rx: tokio::sync::mpsc::UnboundedReceiver<RawTick>,
+    archive: Option<Arc<storage::StorageWriter>>,
 ) {
     info!("tee task starting");
     while let Some(tick) = tee_rx.recv().await {
         let instrument_name =
             domain::instrument_name(tick.instrument_id).unwrap_or_else(|| String::from("unknown"));
         publisher.publish_fire_and_forget(&tick, &instrument_name, domain::lanes::MARKET_TRADES);
+        if let Some(archive) = &archive {
+            match storage::writer::RawEvent::from_envelope(domain::lanes::MARKET_TRADES, &tick) {
+                Some(ev) => {
+                    if !archive.submit(ev).await {
+                        observability::metrics::inc(
+                            "archive_dropped_total",
+                            "Archive rows dropped, by reason.",
+                            &[("reason", "backpressure")],
+                        );
+                    }
+                }
+                None => observability::metrics::inc(
+                    "archive_dropped_total",
+                    "Archive rows dropped, by reason.",
+                    &[("reason", "unnameable")],
+                ),
+            }
+        }
     }
     warn!("tee task channel closed — no more events will be persisted to JetStream");
 }

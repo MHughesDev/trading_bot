@@ -81,14 +81,21 @@ pub async fn insert_automation(pool: &PgPool, row: &AutomationRow) -> Result<(),
     Ok(())
 }
 
-/// All automation rows, newest first.  Paper and live automations are both
-/// returned — they coexist server-side regardless of which mode a UI session
-/// is displaying.
-pub async fn list_automations(pool: &PgPool) -> Result<Vec<AutomationRow>, sqlx::Error> {
+/// One user's automation rows, newest first (Set E 1.4).
+///
+/// There is deliberately no unscoped listing: before this, `GET
+/// /api/automations` returned every user's rows to any authenticated caller.
+/// Paper and live rows are both returned — they coexist server-side regardless
+/// of which mode a UI session is displaying.
+pub async fn list_automations_for(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<Vec<AutomationRow>, sqlx::Error> {
     let rows = sqlx::query(
         "SELECT id, user_id, kind, account_mode, spec, armed, created_at \
-         FROM automations ORDER BY created_at DESC",
+         FROM automations WHERE user_id = $1 ORDER BY created_at DESC",
     )
+    .bind(user_id)
     .fetch_all(pool)
     .await?;
     Ok(rows.iter().map(row_to_automation).collect())
@@ -119,11 +126,31 @@ pub async fn set_automation_armed(
     Ok(result.rows_affected() > 0)
 }
 
-/// Delete one automation (stage membership cascades).  Returns `true` when a
-/// row was deleted.
-pub async fn delete_automation(pool: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query("DELETE FROM automations WHERE id = $1")
+/// Disarm one of `user_id`'s automations. `false` when no row with that id
+/// belongs to that user — a stranger's id and a missing id are the same answer.
+pub async fn disarm_automation_owned(
+    pool: &PgPool,
+    user_id: Uuid,
+    id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("UPDATE automations SET armed = false WHERE id = $1 AND user_id = $2")
         .bind(id)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Delete one of `user_id`'s automations (stage membership cascades). `false`
+/// when no row with that id belongs to that user.
+pub async fn delete_automation_owned(
+    pool: &PgPool,
+    user_id: Uuid,
+    id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM automations WHERE id = $1 AND user_id = $2")
+        .bind(id)
+        .bind(user_id)
         .execute(pool)
         .await?;
     Ok(result.rows_affected() > 0)
@@ -146,6 +173,24 @@ pub async fn get_automation(pool: &PgPool, id: Uuid) -> Result<Option<Automation
          FROM automations WHERE id = $1",
     )
     .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.as_ref().map(row_to_automation))
+}
+
+/// Fetch one of `user_id`'s automations. `None` for a missing id **and** for a
+/// row that belongs to someone else.
+pub async fn get_automation_owned(
+    pool: &PgPool,
+    user_id: Uuid,
+    id: Uuid,
+) -> Result<Option<AutomationRow>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT id, user_id, kind, account_mode, spec, armed, created_at \
+         FROM automations WHERE id = $1 AND user_id = $2",
+    )
+    .bind(id)
+    .bind(user_id)
     .fetch_optional(pool)
     .await?;
     Ok(row.as_ref().map(row_to_automation))

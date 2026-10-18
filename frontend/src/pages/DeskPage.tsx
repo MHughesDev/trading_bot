@@ -130,6 +130,11 @@ function Rail({ onNew, hidden }: { onNew: () => void; hidden?: boolean }) {
           ['/desk/catalogue', 'Catalogue'],
           ['/desk/models', 'Models'],
           ['/desk/monitor', 'Monitor'],
+          // Where the data and the books are checked against the world: both
+          // live outside /desk (they are not a conversation's business) and are
+          // listed here so the desk is a way to reach them (P-0.2, T-0.3).
+          ['/data/coverage', 'Data coverage'],
+          ['/reconciliation', 'Reconciliation'],
           ['/desk/usage', 'Usage'],
           ['/desk/strategy', 'Strategy editor'],
         ].map(([path, label]) => (
@@ -169,6 +174,18 @@ function RunRoute() {
   const navigate = useNavigate()
   if (!runId) return <Navigate to="/desk" replace />
   return <RunDetail runId={runId} onBack={() => navigate(`/desk/c/${conversationId}`)} />
+}
+
+/**
+ * A run opened by id alone — what the away digest's `concluded` lines link to
+ * (`/desk/runs/{id}`). It fell to the `*` route and bounced to desk home, so
+ * every "opens the thing it names" link in the digest opened the home page.
+ */
+function BareRunRoute() {
+  const { runId } = useParams()
+  const navigate = useNavigate()
+  if (!runId) return <Navigate to="/desk" replace />
+  return <RunDetail runId={runId} onBack={() => navigate('/desk')} />
 }
 
 function DossierRoute() {
@@ -229,6 +246,17 @@ export function DeskPage() {
               </div>
             }
           />
+          {/* The digest links one approval by id (`/desk/approvals/{id}`); the
+              inbox is where it is answered, so the id lands there. */}
+          <Route
+            path="approvals/:approvalId"
+            element={
+              <div className="desk-scroll">
+                <ApprovalsInbox />
+              </div>
+            }
+          />
+          <Route path="runs/:runId" element={<BareRunRoute />} />
           <Route path="proposals" element={<ProposalsQueue />} />
           <Route path="memory" element={<MemoryBrowser onOpenConversation={startFrom} />} />
           <Route path="catalogue" element={<Catalogue />} />
